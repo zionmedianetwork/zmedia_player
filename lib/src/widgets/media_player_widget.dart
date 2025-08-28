@@ -73,32 +73,85 @@ class MediaPlayerWidget extends StatefulWidget {
   State<MediaPlayerWidget> createState() => _MediaPlayerWidgetState();
 }
 
-class _MediaPlayerWidgetState extends State<MediaPlayerWidget> {
+class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
+    with WidgetsBindingObserver {
+  /// Whether we have a native view
+  bool _hasNativeView = false;
+
+  /// The native view widget
+  Widget? _nativeView;
+
+  /// Flag to track if native view has changed and needs rebuild
+  bool _nativeViewChanged = false;
   @override
   void initState() {
     super.initState();
-    _initializePlayer();
+
+    // Listen to app lifecycle changes
+    WidgetsBinding.instance.addObserver(this);
+
+    // Initialize player after the first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initializePlayer();
+    });
+
+    // Listen for media loading events
+    widget.controller.addListener(_onControllerChanged);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.controller.removeListener(_onControllerChanged);
     super.dispose();
   }
 
+  void _onControllerChanged() {
+    // Check if media is loaded and we need to create a native view
+    if (widget.controller.currentItem != null && !_hasNativeView) {
+      print('Media loaded, creating native view...');
+      _createNativeView();
+    }
+
+    // Only rebuild when necessary - not on every controller change
+    // setState(() {}); // ❌ This was causing infinite rebuilds
+  }
+
+  void _refreshVideoSurface() {
+    print('Refreshing video surface...');
+    setState(() {
+      // Reset native view state to force recreation
+      _hasNativeView = false;
+      _nativeView = null;
+    });
+
+    // Recreate the native view
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _createNativeView();
+    });
+  }
+
   Future<void> _initializePlayer() async {
-    if (!widget.controller.player.isInitialized) {
-      await widget.controller.initialize();
+    try {
+      if (!widget.controller.player.isInitialized) {
+        await widget.controller.initialize();
+      }
+
+      // Don't create native view yet - wait for media to be loaded
+      print('Player initialized, waiting for media to be loaded...');
+    } catch (e) {
+      print('Error initializing player: $e');
+      setState(() {
+        _hasNativeView = false;
+        _nativeView = null;
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.controller,
-      builder: (context, child) {
-        return _buildPlayerContent();
-      },
-    );
+    // Only rebuild when necessary - not on every controller change
+    return _buildPlayerContent();
   }
 
   Widget _buildPlayerContent() {
@@ -155,11 +208,11 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget> {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Video content
+          // Video content - ensure it fills the available space
           Positioned.fill(child: content),
 
-          // Controls overlay
-          if (widget.showControls)
+          // Controls overlay - only show when needed
+          if (widget.showControls && widget.controller.controlsVisible)
             Positioned.fill(child: _buildControlsOverlay()),
         ],
       ),
@@ -167,52 +220,137 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget> {
   }
 
   Widget _buildVideoSurface() {
-    return FutureBuilder<Widget>(
-      future: _createNativeView(),
-      builder: (context, snapshot) {
-        if (snapshot.hasData) {
-          return snapshot.data!;
-        } else {
-          return _buildBuffering();
-        }
-      },
+    print(
+        'Building video surface: _hasNativeView=$_hasNativeView, _nativeView=${_nativeView != null}, playerState=${widget.controller.state.state}');
+
+    // Check if we have media loaded
+    if (widget.controller.currentItem == null) {
+      print('No media loaded, showing placeholder...');
+      return _buildPlaceholder();
+    }
+
+    // Check player state to determine what to show
+    final playerState = widget.controller.state.state;
+
+    if (playerState == PlayerState.buffering) {
+      print('Player is buffering, showing buffering...');
+      return _buildBuffering();
+    }
+
+    if (playerState == PlayerState.error) {
+      print('Player has error, showing error...');
+      return _buildError();
+    }
+
+    // Only show loading if we don't have a native view yet
+    if (!_hasNativeView || _nativeView == null) {
+      print('No native view available, showing buffering...');
+      return _buildBuffering();
+    }
+
+    print('Returning native view with type: ${_nativeView.runtimeType}');
+    // If we have a native view, return it with proper sizing
+    return SizedBox.expand(
+      child: _nativeView!,
     );
   }
 
-  Future<Widget> _createNativeView() async {
-    // Ensure player is initialized before creating native view
-    if (!widget.controller.player.isInitialized) {
-      await widget.controller.initialize();
-    }
+  Future<void> _createNativeView() async {
+    try {
+      print('Creating native view...');
 
-    // Create platform-specific video surface
-    final viewType = 'flutter_media_player_view';
-    final creationParams = {
-      'playerId': widget.controller.player.playerId,
-      'boxFit':
-          _boxFitToString(widget.boxFit ?? widget.controller.config.boxFit),
-    };
+      // Ensure player is initialized before creating native view
+      if (!widget.controller.player.isInitialized) {
+        print('Player not initialized, initializing...');
+        await widget.controller.initialize();
+        print('Player initialized successfully');
+      }
 
-    if (Theme.of(context).platform == TargetPlatform.android) {
-      return AndroidView(
-        viewType: viewType,
-        creationParams: creationParams,
-        creationParamsCodec: const StandardMessageCodec(),
-        onPlatformViewCreated: _onPlatformViewCreated,
-      );
-    } else if (Theme.of(context).platform == TargetPlatform.iOS) {
-      return UiKitView(
-        viewType: viewType,
-        creationParams: creationParams,
-        creationParamsCodec: const StandardMessageCodec(),
-        onPlatformViewCreated: _onPlatformViewCreated,
-      );
-    } else {
-      return _buildPlaceholder();
+      // Check if we have a current media item
+      if (widget.controller.currentItem == null) {
+        print('No current media item, cannot create native view');
+        setState(() {
+          _hasNativeView = false;
+          _nativeView = null;
+        });
+        return;
+      }
+
+      print(
+          'Creating platform view for media: ${widget.controller.currentItem?.title}');
+
+      // Create platform-specific video surface
+      final viewType = 'flutter_media_player_view';
+      final creationParams = {
+        'playerId': widget.controller.player.playerId,
+        'boxFit':
+            _boxFitToString(widget.boxFit ?? widget.controller.config.boxFit),
+      };
+
+      print('View type: $viewType, params: $creationParams');
+
+      Widget nativeView;
+      if (Theme.of(context).platform == TargetPlatform.android) {
+        print('Creating Android view...');
+        nativeView = SizedBox.expand(
+          child: AndroidView(
+            viewType: viewType,
+            creationParams: creationParams,
+            creationParamsCodec: const StandardMessageCodec(),
+            onPlatformViewCreated: _onPlatformViewCreated,
+          ),
+        );
+      } else if (Theme.of(context).platform == TargetPlatform.iOS) {
+        print('Creating iOS view...');
+        nativeView = SizedBox.expand(
+          child: UiKitView(
+            viewType: viewType,
+            creationParams: creationParams,
+            creationParamsCodec: const StandardMessageCodec(),
+            onPlatformViewCreated: _onPlatformViewCreated,
+          ),
+        );
+      } else {
+        print('Unsupported platform: ${Theme.of(context).platform}');
+        setState(() {
+          _hasNativeView = false;
+          _nativeView = null;
+        });
+        return;
+      }
+
+      print('Native view created successfully, setting state...');
+
+      // Set the native view
+      setState(() {
+        _hasNativeView = true;
+        _nativeView = nativeView;
+        _nativeViewChanged = true; // Mark that native view has changed
+      });
+
+      print(
+          'Native view state set: _hasNativeView=$_hasNativeView, _nativeView=${_nativeView != null}');
+
+      // Force a rebuild to ensure the video surface updates with the new native view
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_nativeViewChanged) {
+          setState(() {
+            _nativeViewChanged = false; // Reset the flag
+          });
+        }
+      });
+    } catch (e) {
+      print('Error creating native view: $e');
+      // Set error state if platform view creation fails
+      setState(() {
+        _hasNativeView = false;
+        _nativeView = null;
+      });
     }
   }
 
   void _onPlatformViewCreated(int viewId) {
+    print('Platform view created with ID: $viewId');
     // Platform view created, can perform additional setup if needed
   }
 
@@ -352,6 +490,25 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget> {
 
   void _handleDoubleTap() {
     widget.controller.togglePlayPause();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    switch (state) {
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+        // Hide controls when app goes to background
+        widget.controller.forceHideControls();
+        break;
+      case AppLifecycleState.resumed:
+        // Refresh video surface when app comes back to foreground
+        _refreshVideoSurface();
+        break;
+      default:
+        break;
+    }
   }
 
   double _getVideoAspectRatio() {

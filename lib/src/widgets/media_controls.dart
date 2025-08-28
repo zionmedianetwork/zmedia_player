@@ -272,9 +272,13 @@ class _MediaControlsState extends State<MediaControls> {
             padding: const EdgeInsets.all(16),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Progress bar
-                _buildProgressBar(theme),
+                // Progress bar - Full width
+                SizedBox(
+                  width: double.infinity,
+                  child: _buildProgressBar(theme),
+                ),
 
                 const SizedBox(height: 8),
 
@@ -324,28 +328,25 @@ class _MediaControlsState extends State<MediaControls> {
   }
 
   Widget _buildProgressBar(MediaControlsTheme theme) {
-    return Container(
-      width: double.infinity,
-      child: SliderTheme(
-        data: SliderTheme.of(context).copyWith(
-          trackHeight: 2,
-          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-          overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-          activeTrackColor: theme.progressColor,
-          inactiveTrackColor: theme.progressBackgroundColor,
-          thumbColor: theme.progressColor,
-          overlayColor: theme.progressColor.withOpacity(0.2),
-        ),
-        child: Slider(
-          value: widget.controller.progress,
-          onChanged: (value) {
-            final position = widget.controller.duration * value;
-            widget.controller.seekTo(position);
-          },
-          onChangeStart: (value) {
-            widget.controller.showControlsTemporarily();
-          },
-        ),
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+        trackHeight: 2,
+        thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+        overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+        activeTrackColor: theme.progressColor,
+        inactiveTrackColor: theme.progressBackgroundColor,
+        thumbColor: theme.progressColor,
+        overlayColor: theme.progressColor.withOpacity(0.2),
+      ),
+      child: Slider(
+        value: widget.controller.progress,
+        onChanged: (value) {
+          final position = widget.controller.duration * value;
+          widget.controller.seekTo(position);
+        },
+        onChangeStart: (value) {
+          widget.controller.showControlsTemporarily();
+        },
       ),
     );
   }
@@ -626,6 +627,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute> {
                 controller: widget.controller,
                 showControls: true,
                 expandToFill: true,
+                backgroundColor: Colors.black,
                 onTap: () {
                   widget.controller.toggleControls();
                 },

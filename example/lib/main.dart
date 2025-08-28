@@ -86,7 +86,7 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
     _controller = MediaController.create(
       config: const MediaConfig(
         autoPlay: false,
-        showControls: true,
+        showControls: false,
         volume: 1.0,
         speed: 1.0,
         boxFit: BoxFit.contain,
@@ -115,7 +115,8 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
             color: Colors.black,
             child: MediaPlayerWidget(
               controller: _controller,
-              showControls: true,
+              showControls:
+                  false, // Disable built-in controls to avoid double overlay
               placeholder: const Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -132,10 +133,10 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
             ),
           ),
 
-          // Control Buttons
+          // Video Selection Buttons (not duplicate controls)
           Container(
             padding: const EdgeInsets.all(16),
-            child: _buildControlButtons(),
+            child: _buildVideoSelectionButtons(),
           ),
 
           // Bottom Navigation
@@ -154,108 +155,87 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
     );
   }
 
-  Widget _buildControlButtons() {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, child) {
-        return Column(
+  Widget _buildVideoSelectionButtons() {
+    return Column(
+      children: [
+        // Video Selection Buttons
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
-            // Playback Controls
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ElevatedButton(
+                  onPressed: () => _playVideo(_sampleVideos[0]),
+                  child: const Text('Video 1'),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ElevatedButton(
+                  onPressed: () => _playVideo(_sampleVideos[1]),
+                  child: const Text('Video 2'),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ElevatedButton(
+                  onPressed: _createPlaylist,
+                  child: const Text('Playlist'),
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 16),
+
+        // Configuration Controls (not duplicate playback controls)
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            // Volume Control
+            Column(
               children: [
                 IconButton(
-                  onPressed: _controller.hasPrevious
-                      ? _controller.skipToPrevious
-                      : null,
-                  icon: const Icon(Icons.skip_previous),
-                ),
-                IconButton(
-                  onPressed: () =>
-                      _controller.seekBackward(const Duration(seconds: 10)),
-                  icon: const Icon(Icons.replay_10),
-                ),
-                IconButton(
-                  onPressed: _controller.togglePlayPause,
+                  onPressed: _controller.toggleMute,
                   icon: Icon(
-                    _controller.isPlaying ? Icons.pause : Icons.play_arrow,
+                    _controller.isMuted ? Icons.volume_off : Icons.volume_up,
                   ),
                 ),
-                IconButton(
-                  onPressed: () =>
-                      _controller.seekForward(const Duration(seconds: 10)),
-                  icon: const Icon(Icons.forward_10),
-                ),
-                IconButton(
-                  onPressed:
-                      _controller.hasNext ? _controller.skipToNext : null,
-                  icon: const Icon(Icons.skip_next),
-                ),
+                const Text('Volume', style: TextStyle(fontSize: 12)),
               ],
             ),
 
-            const SizedBox(height: 16),
-
-            // Additional Controls
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            // Speed Control
+            Column(
               children: [
-                // Volume Control
-                Column(
-                  children: [
-                    IconButton(
-                      onPressed: _controller.toggleMute,
-                      icon: Icon(
-                        _controller.isMuted
-                            ? Icons.volume_off
-                            : Icons.volume_up,
-                      ),
-                    ),
-                    const Text('Volume', style: TextStyle(fontSize: 12)),
-                  ],
+                IconButton(
+                  onPressed: _controller.cycleSpeed,
+                  icon: const Icon(Icons.speed),
                 ),
-
-                // Speed Control
-                Column(
-                  children: [
-                    IconButton(
-                      onPressed: _controller.cycleSpeed,
-                      icon: const Icon(Icons.speed),
-                    ),
-                    Text('${_controller.speed}x',
-                        style: const TextStyle(fontSize: 12)),
-                  ],
-                ),
-
-                // BoxFit Control
-                Column(
-                  children: [
-                    IconButton(
-                      onPressed: _cycleBoxFit,
-                      icon: const Icon(Icons.aspect_ratio),
-                    ),
-                    Text(_getBoxFitName(),
-                        style: const TextStyle(fontSize: 12)),
-                  ],
-                ),
+                Text('${_controller.speed}x',
+                    style: const TextStyle(fontSize: 12)),
               ],
             ),
 
-            // Progress Info
-            if (_controller.duration > Duration.zero) ...[
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(_controller.formattedPosition),
-                  Text('${(_controller.progress * 100).toInt()}%'),
-                  Text(_controller.formattedDuration),
-                ],
-              ),
-            ],
+            // BoxFit Control
+            Column(
+              children: [
+                IconButton(
+                  onPressed: _cycleBoxFit,
+                  icon: const Icon(Icons.aspect_ratio),
+                ),
+                Text(_getBoxFitName(), style: const TextStyle(fontSize: 12)),
+              ],
+            ),
           ],
-        );
-      },
+        ),
+      ],
     );
   }
 
@@ -525,7 +505,17 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
   }
 
   void _playVideo(MediaItem video) async {
-    await _controller.load(video);
+    print('Loading video: ${video.title}');
+    try {
+      await _controller.load(video);
+      print('Video loaded successfully');
+
+      // Auto-play the video after loading
+      await _controller.play();
+      print('Video started playing');
+    } catch (e) {
+      print('Error loading video: $e');
+    }
   }
 
   void _createPlaylist() async {

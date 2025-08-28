@@ -321,12 +321,22 @@ class MediaController extends ChangeNotifier {
       notifyListeners();
     });
 
-    _positionSubscription = _player.positionStream.listen((_) {
-      notifyListeners();
+    // Position updates - only notify for significant changes to prevent flickering
+    _positionSubscription = _player.positionStream.listen((position) {
+      final oldPosition = _currentState.position;
+
+      // Only update position if it's significantly different to prevent excessive updates
+      if ((position - oldPosition).abs().inSeconds >= 1) {
+        _currentState = _currentState.copyWith(position: position);
+        notifyListeners();
+      }
     });
 
-    _durationSubscription = _player.durationStream.listen((_) {
-      notifyListeners();
+    _durationSubscription = _player.durationStream.listen((duration) {
+      if (_currentState.duration != duration) {
+        _currentState = _currentState.copyWith(duration: duration);
+        notifyListeners();
+      }
     });
 
     _subtitleTracksSubscription = _player.subtitleTracksStream.listen((_) {
@@ -361,10 +371,9 @@ class MediaController extends ChangeNotifier {
       notifyListeners();
     }
 
+    // Always set timer to auto-hide controls
     _controlsTimer = Timer(config.controlsTimeout, () {
-      if (isPlaying) {
-        _hideControls();
-      }
+      _hideControls();
     });
   }
 
