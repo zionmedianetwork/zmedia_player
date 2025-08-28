@@ -6,10 +6,17 @@ import Flutter
 class MediaPlayerView: NSObject, FlutterPlatformView {
     private let playerLayer: AVPlayerLayer
     private let containerView: UIView
+    private var isObserving = false
+    private var player: AVPlayer? {
+        didSet {
+            playerLayer.player = player
+        }
+    }
     
     init(player: AVPlayer?) {
         containerView = UIView()
         playerLayer = AVPlayerLayer(player: player)
+        self.player = player
         
         super.init()
         
@@ -17,6 +24,9 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
     }
     
     private func setupPlayerLayer() {
+        // Ensure we're on the main thread for UI operations
+        assert(Thread.isMainThread, "setupPlayerLayer must be called on main thread")
+        
         containerView.backgroundColor = UIColor.black
         containerView.layer.addSublayer(playerLayer)
         playerLayer.videoGravity = .resizeAspect
@@ -24,8 +34,35 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         // Set initial frame
         playerLayer.frame = containerView.bounds
         
-        // Ensure proper layout
-        containerView.addObserver(self, forKeyPath: "bounds", options: [.new], context: nil)
+        // Add KVO observer safely
+        addBoundsObserver()
+    }
+    
+    private func addBoundsObserver() {
+        guard !isObserving else { return }
+        
+        do {
+            containerView.addObserver(
+                self,
+                forKeyPath: "bounds",
+                options: [.new],
+                context: nil
+            )
+            isObserving = true
+        } catch {
+            print("MediaPlayerView: Failed to add bounds observer: \(error)")
+        }
+    }
+    
+    private func removeBoundsObserver() {
+        guard isObserving else { return }
+        
+        do {
+            containerView.removeObserver(self, forKeyPath: "bounds")
+            isObserving = false
+        } catch {
+            print("MediaPlayerView: Failed to remove bounds observer: \(error)")
+        }
     }
     
     func view() -> UIView {
@@ -37,54 +74,103 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
     }
     
     func setVideoGravity(boxFit: String) {
-        DispatchQueue.main.async { [weak self] in
-            switch boxFit {
-            case "contain":
-                self?.playerLayer.videoGravity = .resizeAspect
-            case "cover":
-                self?.playerLayer.videoGravity = .resizeAspectFill
-            case "fill":
-                self?.playerLayer.videoGravity = .resize
-            case "fitWidth":
-                self?.playerLayer.videoGravity = .resizeAspect
-            case "fitHeight":
-                self?.playerLayer.videoGravity = .resizeAspect
-            case "none":
-                self?.playerLayer.videoGravity = .resizeAspect
-            case "scaleDown":
-                self?.playerLayer.videoGravity = .resizeAspect
-            default:
-                self?.playerLayer.videoGravity = .resizeAspect
+        // Ensure we're on the main thread for UI operations
+        let gravity = videoGravity(from: boxFit)
+        
+        if Thread.isMainThread {
+            playerLayer.videoGravity = gravity
+        } else {
+            DispatchQueue.main.async { [weak self] in
+                self?.playerLayer.videoGravity = gravity
             }
         }
     }
     
-    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-        if keyPath == "bounds" {
-            DispatchQueue.main.async { [weak self] in
-                self?.updatePlayerLayerFrame()
-            }
+    private func videoGravity(from boxFit: String) -> AVLayerVideoGravity {
+        switch boxFit.lowercased() {
+        case "cover":
+            return .resizeAspectFill
+        case "fill":
+            return .resize
+        case "contain", "fitwidth", "fitheight", "none", "scaledown", "":
+            return .resizeAspect
+        default:
+            print("MediaPlayerView: Unknown boxFit value '\(boxFit)', using default")
+            return .resizeAspect
+        }
+    }
+    
+    override func observeValue(
+        forKeyPath keyPath: String?,
+        of object: Any?,
+        change: [NSKeyValueChangeKey : Any]?,
+        context: UnsafeMutableRawPointer?
+    ) {
+        guard keyPath == "bounds" else {
+            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
+            return
+        }
+        
+        DispatchQueue.main.async { [weak self] in
+            self?.updatePlayerLayerFrame()
         }
     }
     
     private func updatePlayerLayerFrame() {
+        guard Thread.isMainThread else {
+            DispatchQueue.main.async { [weak self] in
+                self?.updatePlayerLayerFrame()
+            }
+            return
+        }
+        
+        // Use CATransaction to prevent implicit animations
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         playerLayer.frame = containerView.bounds
         CATransaction.commit()
     }
     
-    func updatePlayer(_ player: AVPlayer?) {
-        playerLayer.player = player
+    func updatePlayer(_ newPlayer: AVPlayer?) {
+        print("MediaPlayerView: updatePlayer called with player: \(newPlayer != nil)")
+        
+        // Update on main thread to ensure UI consistency
         DispatchQueue.main.async { [weak self] in
-            self?.updatePlayerLayerFrame()
+            guard let self = self else { return }
+            
+            // Store reference and update layer
+            self.player = newPlayer
+            
+            if let player = newPlayer {
+                print("MediaPlayerView: Setting player and configuring layer")
+                
+                // Ensure the player layer is visible and properly configured
+                self.playerLayer.isHidden = false
+                self.playerLayer.opacity = 1.0
+                
+                // Force a redraw of the layer
+                self.playerLayer.setNeedsDisplay()
+                
+                // Ensure proper frame
+                self.updatePlayerLayerFrame()
+            } else {
+                print("MediaPlayerView: Player set to nil")
+                self.playerLayer.isHidden = true
+            }
         }
     }
     
     deinit {
-        containerView.removeObserver(self, forKeyPath: "bounds")
+        print("MediaPlayerView: Deallocating")
+        removeBoundsObserver()
+        
+        // Clean up player reference
+        playerLayer.player = nil
+        player = nil
     }
 }
+
+// MARK: - Factory
 
 class MediaPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
     private let playerManager: MediaPlayerManager
@@ -94,13 +180,26 @@ class MediaPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
         super.init()
     }
     
-    func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
-        guard let creationParams = args as? [String: Any],
-              let playerId = creationParams["playerId"] as? String,
-              let playerView = playerManager.getPlayerView(playerId: playerId) else {
-            fatalError("Player not found or invalid parameters")
+    func create(
+        withFrame frame: CGRect,
+        viewIdentifier viewId: Int64,
+        arguments args: Any?
+    ) -> FlutterPlatformView {
+        
+        // Validate arguments
+        guard let creationParams = args as? [String: Any] else {
+            fatalError("MediaPlayerViewFactory: Invalid arguments - expected dictionary")
         }
         
+        guard let playerId = creationParams["playerId"] as? String, !playerId.isEmpty else {
+            fatalError("MediaPlayerViewFactory: Missing or invalid playerId")
+        }
+        
+        guard let playerView = playerManager.getPlayerView(playerId: playerId) else {
+            fatalError("MediaPlayerViewFactory: Player not found for id: \(playerId)")
+        }
+        
+        print("MediaPlayerViewFactory: Created view for player \(playerId)")
         return playerView
     }
     

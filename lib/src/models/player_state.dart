@@ -51,6 +51,8 @@ class PlaybackState {
   /// Error message if state is error
   final String? errorMessage;
 
+  final Duration bufferedPosition;
+
   const PlaybackState({
     required this.state,
     this.position = Duration.zero,
@@ -60,6 +62,7 @@ class PlaybackState {
     this.isMuted = false,
     this.isBuffering = false,
     this.bufferPercentage = 0.0,
+    this.bufferedPosition = Duration.zero,
     this.errorMessage,
   });
 

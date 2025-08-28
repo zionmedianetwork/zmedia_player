@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../models/media_item.dart';
 import '../models/player_state.dart';
@@ -15,11 +16,7 @@ class MediaController extends ChangeNotifier {
   final MediaPlayer _player;
 
   /// Stream subscriptions for player events
-  late final StreamSubscription<PlaybackState> _stateSubscription;
-  late final StreamSubscription<Duration> _positionSubscription;
-  late final StreamSubscription<Duration> _durationSubscription;
-  late final StreamSubscription<List<SubtitleTrack>>
-      _subtitleTracksSubscription;
+  final List<StreamSubscription> _subscriptions = [];
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
@@ -29,6 +26,18 @@ class MediaController extends ChangeNotifier {
 
   /// Timer for auto-hiding controls
   Timer? _controlsTimer;
+
+  /// Whether the controller is disposed
+  bool _isDisposed = false;
+
+  /// Whether an operation is in progress (for preventing race conditions)
+  bool _operationInProgress = false;
+
+  /// Last position update time to prevent excessive notifications
+  DateTime _lastPositionUpdate = DateTime.now();
+
+  /// Minimum interval between position updates (in milliseconds)
+  static const int _positionUpdateInterval = 500;
 
   /// Create a media controller with the given player instance
   MediaController(this._player) {
@@ -68,6 +77,10 @@ class MediaController extends ChangeNotifier {
   /// Player configuration
   MediaConfig get config => _player.config;
 
+  /// Whether the controller is disposed
+  bool get isDisposed => _isDisposed;
+
+  // Computed properties for common states
   /// Whether the player is currently playing
   bool get isPlaying => _currentState.state == PlayerState.playing;
 
@@ -104,57 +117,129 @@ class MediaController extends ChangeNotifier {
   /// Whether there's a previous track available
   bool get hasPrevious => _player.currentPlaylist?.hasPrevious ?? false;
 
+  /// Whether the player is ready to play
+  bool get isReady =>
+      _currentState.state == PlayerState.ready ||
+      _currentState.state == PlayerState.playing ||
+      _currentState.state == PlayerState.paused;
+
   /// Initialize the controller and underlying player
   Future<void> initialize() async {
-    await _player.initialize();
+    if (_isDisposed) {
+      throw StateError('Cannot initialize disposed MediaController');
+    }
+
+    try {
+      await _executeOperation(() => _player.initialize());
+    } catch (e) {
+      debugPrint('MediaController: Error initializing player: $e');
+      rethrow;
+    }
   }
 
   /// Load a single media item
   Future<void> load(MediaItem item) async {
-    await _player.load(item);
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.load(item));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error loading media item: $e');
+      rethrow;
+    }
   }
 
   /// Set and load a playlist
   Future<void> setPlaylist(Playlist playlist, {int? startIndex}) async {
-    await _player.setPlaylist(playlist, startIndex: startIndex);
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(
+          () => _player.setPlaylist(playlist, startIndex: startIndex));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error setting playlist: $e');
+      rethrow;
+    }
   }
 
   /// Toggle play/pause
   Future<void> togglePlayPause() async {
-    if (isPlaying) {
-      await pause();
-    } else {
-      await play();
+    if (_isDisposed) return;
+
+    try {
+      if (isPlaying) {
+        await pause();
+      } else {
+        await play();
+      }
+    } catch (e) {
+      debugPrint('MediaController: Error toggling play/pause: $e');
+      rethrow;
     }
   }
 
   /// Start or resume playback
   Future<void> play() async {
-    await _player.play();
-    _showControlsTemporarily();
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.play());
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error starting playback: $e');
+      rethrow;
+    }
   }
 
   /// Pause playback
   Future<void> pause() async {
-    await _player.pause();
-    _showControls();
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.pause());
+      _showControls();
+    } catch (e) {
+      debugPrint('MediaController: Error pausing playback: $e');
+      rethrow;
+    }
   }
 
   /// Stop playback
   Future<void> stop() async {
-    await _player.stop();
-    _showControls();
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.stop());
+      _showControls();
+    } catch (e) {
+      debugPrint('MediaController: Error stopping playback: $e');
+      rethrow;
+    }
   }
 
   /// Seek to a specific position
   Future<void> seekTo(Duration position) async {
-    await _player.seekTo(position);
-    _showControlsTemporarily();
+    if (_isDisposed) return;
+
+    // Clamp position to valid range
+    final clampedPosition = clampDuration(position, Duration.zero, duration);
+
+    try {
+      await _executeOperation(() => _player.seekTo(clampedPosition));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error seeking to position: $e');
+      rethrow;
+    }
   }
 
   /// Seek forward by a specific duration
   Future<void> seekForward(
       [Duration duration = const Duration(seconds: 10)]) async {
+    if (_isDisposed) return;
+
     final newPosition = position + duration;
     final clampedPosition =
         newPosition > this.duration ? this.duration : newPosition;
@@ -164,6 +249,8 @@ class MediaController extends ChangeNotifier {
   /// Seek backward by a specific duration
   Future<void> seekBackward(
       [Duration duration = const Duration(seconds: 10)]) async {
+    if (_isDisposed) return;
+
     final newPosition = position - duration;
     final clampedPosition =
         newPosition < Duration.zero ? Duration.zero : newPosition;
@@ -172,64 +259,131 @@ class MediaController extends ChangeNotifier {
 
   /// Set volume (0.0 to 1.0)
   Future<void> setVolume(double volume) async {
-    await _player.setVolume(volume);
-    _showControlsTemporarily();
+    if (_isDisposed) return;
+
+    // Clamp volume to valid range
+    final clampedVolume = volume.clamp(0.0, 1.0);
+
+    try {
+      await _executeOperation(() => _player.setVolume(clampedVolume));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error setting volume: $e');
+      rethrow;
+    }
   }
 
   /// Increase volume by a specific amount
   Future<void> increaseVolume([double amount = 0.1]) async {
+    if (_isDisposed) return;
+
     final newVolume = (volume + amount).clamp(0.0, 1.0);
     await setVolume(newVolume);
   }
 
   /// Decrease volume by a specific amount
   Future<void> decreaseVolume([double amount = 0.1]) async {
+    if (_isDisposed) return;
+
     final newVolume = (volume - amount).clamp(0.0, 1.0);
     await setVolume(newVolume);
   }
 
   /// Toggle mute/unmute
   Future<void> toggleMute() async {
-    await _player.setMuted(!isMuted);
-    _showControlsTemporarily();
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.setMuted(!isMuted));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error toggling mute: $e');
+      rethrow;
+    }
   }
 
   /// Set playback speed
   Future<void> setSpeed(double speed) async {
-    await _player.setSpeed(speed);
-    _showControlsTemporarily();
+    if (_isDisposed) return;
+
+    // Clamp speed to reasonable range
+    final clampedSpeed = speed.clamp(0.1, 4.0);
+
+    try {
+      await _executeOperation(() => _player.setSpeed(clampedSpeed));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error setting speed: $e');
+      rethrow;
+    }
   }
 
   /// Cycle through common playback speeds
   Future<void> cycleSpeed() async {
+    if (_isDisposed) return;
+
     const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
     final currentIndex = speeds.indexOf(speed);
-    final nextIndex = (currentIndex + 1) % speeds.length;
+    final nextIndex =
+        currentIndex == -1 ? 0 : (currentIndex + 1) % speeds.length;
     await setSpeed(speeds[nextIndex]);
   }
 
   /// Skip to next track
   Future<void> skipToNext() async {
-    await _player.skipToNext();
-    _showControlsTemporarily();
+    if (_isDisposed || !hasNext) return;
+
+    try {
+      await _executeOperation(() => _player.skipToNext());
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error skipping to next: $e');
+      rethrow;
+    }
   }
 
   /// Skip to previous track
   Future<void> skipToPrevious() async {
-    await _player.skipToPrevious();
-    _showControlsTemporarily();
+    if (_isDisposed || !hasPrevious) return;
+
+    try {
+      await _executeOperation(() => _player.skipToPrevious());
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error skipping to previous: $e');
+      rethrow;
+    }
   }
 
   /// Skip to specific index in playlist
   Future<void> skipToIndex(int index) async {
-    await _player.skipToIndex(index);
-    _showControlsTemporarily();
+    if (_isDisposed) return;
+
+    final playlist = currentPlaylist;
+    if (playlist == null || index < 0 || index >= playlist.items.length) {
+      throw ArgumentError('Invalid playlist index: $index');
+    }
+
+    try {
+      await _executeOperation(() => _player.skipToIndex(index));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error skipping to index: $e');
+      rethrow;
+    }
   }
 
   /// Set subtitle track
   Future<void> setSubtitleTrack(SubtitleTrack? track) async {
-    await _player.setSubtitleTrack(track);
-    _showControlsTemporarily();
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.setSubtitleTrack(track));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error setting subtitle track: $e');
+      rethrow;
+    }
   }
 
   /// Disable subtitles
@@ -239,34 +393,45 @@ class MediaController extends ChangeNotifier {
 
   /// Cycle through available subtitle tracks
   Future<void> cycleSubtitleTrack() async {
-    if (subtitleTracks.isEmpty) return;
+    if (_isDisposed || subtitleTracks.isEmpty) return;
 
-    int currentIndex = -1;
-    if (selectedSubtitleTrack != null) {
-      currentIndex = subtitleTracks
-          .indexWhere((track) => track.id == selectedSubtitleTrack!.id);
-    }
+    try {
+      int currentIndex = -1;
+      if (selectedSubtitleTrack != null) {
+        currentIndex = subtitleTracks.indexWhere(
+          (track) => track.id == selectedSubtitleTrack!.id,
+        );
+      }
 
-    final nextIndex = (currentIndex + 1) % (subtitleTracks.length + 1);
-    if (nextIndex == subtitleTracks.length) {
-      await disableSubtitles();
-    } else {
-      await setSubtitleTrack(subtitleTracks[nextIndex]);
+      final nextIndex = (currentIndex + 1) % (subtitleTracks.length + 1);
+      if (nextIndex == subtitleTracks.length) {
+        await disableSubtitles();
+      } else {
+        await setSubtitleTrack(subtitleTracks[nextIndex]);
+      }
+    } catch (e) {
+      debugPrint('MediaController: Error cycling subtitle track: $e');
+      rethrow;
     }
   }
 
+  // Control visibility methods
   /// Show controls
   void showControls() {
+    if (_isDisposed) return;
     _showControls();
   }
 
   /// Hide controls
   void hideControls() {
+    if (_isDisposed) return;
     _hideControls();
   }
 
   /// Toggle controls visibility
   void toggleControls() {
+    if (_isDisposed) return;
+
     if (_controlsVisible) {
       hideControls();
     } else {
@@ -276,19 +441,29 @@ class MediaController extends ChangeNotifier {
 
   /// Show controls temporarily (auto-hide after timeout)
   void showControlsTemporarily() {
+    if (_isDisposed) return;
     _showControlsTemporarily();
   }
 
   /// Force hide controls
   void forceHideControls() {
+    if (_isDisposed) return;
     _hideControls();
   }
 
   /// Update player configuration
   Future<void> updateConfig(MediaConfig config) async {
-    await _player.updateConfig(config);
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.updateConfig(config));
+    } catch (e) {
+      debugPrint('MediaController: Error updating config: $e');
+      rethrow;
+    }
   }
 
+  // Utility methods
   /// Get formatted time string
   String formatDuration(Duration duration) {
     final hours = duration.inHours;
@@ -314,77 +489,204 @@ class MediaController extends ChangeNotifier {
   /// Get remaining time as formatted string
   String get formattedRemainingTime => formatDuration(duration - position);
 
-  /// Setup stream subscriptions
+  /// Get buffered percentage (0.0 to 1.0)
+  double get bufferedProgress {
+    try {
+      return _currentState.bufferedPosition.inMilliseconds /
+          duration.inMilliseconds.clamp(1, double.maxFinite.toInt());
+    } catch (e) {
+      return 0.0;
+    }
+  }
+
+  // Private methods
+
+  /// Execute an operation with race condition protection
+  Future<T> _executeOperation<T>(Future<T> Function() operation) async {
+    if (_operationInProgress) {
+      throw StateError('Another operation is already in progress');
+    }
+
+    _operationInProgress = true;
+    try {
+      return await operation();
+    } finally {
+      _operationInProgress = false;
+    }
+  }
+
+  /// Setup stream subscriptions with proper error handling
   void _setupSubscriptions() {
-    _stateSubscription = _player.stateStream.listen((state) {
-      _currentState = state;
-      notifyListeners();
-    });
+    try {
+      // State stream subscription
+      _subscriptions.add(
+        _player.stateStream.listen(
+          (state) {
+            if (!_isDisposed) {
+              _currentState = state;
+              _notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('MediaController: State stream error: $error');
+          },
+        ),
+      );
 
-    // Position updates - only notify for significant changes to prevent flickering
-    _positionSubscription = _player.positionStream.listen((position) {
-      final oldPosition = _currentState.position;
+      // Position stream subscription with throttling
+      _subscriptions.add(
+        _player.positionStream.listen(
+          (position) {
+            if (!_isDisposed && _shouldUpdatePosition(position)) {
+              _currentState = _currentState.copyWith(position: position);
+              _notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('MediaController: Position stream error: $error');
+          },
+        ),
+      );
 
-      // Only update position if it's significantly different to prevent excessive updates
-      if ((position - oldPosition).abs().inSeconds >= 1) {
-        _currentState = _currentState.copyWith(position: position);
+      // Duration stream subscription
+      _subscriptions.add(
+        _player.durationStream.listen(
+          (duration) {
+            if (!_isDisposed && _currentState.duration != duration) {
+              _currentState = _currentState.copyWith(duration: duration);
+              _notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('MediaController: Duration stream error: $error');
+          },
+        ),
+      );
+
+      // Subtitle tracks stream subscription
+      _subscriptions.add(
+        _player.subtitleTracksStream.listen(
+          (_) {
+            if (!_isDisposed) {
+              _notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('MediaController: Subtitle tracks stream error: $error');
+          },
+        ),
+      );
+    } catch (e) {
+      debugPrint('MediaController: Error setting up subscriptions: $e');
+      rethrow;
+    }
+  }
+
+  /// Check if position should be updated based on throttling
+  bool _shouldUpdatePosition(Duration newPosition) {
+    final now = DateTime.now();
+    final timeDiff = now.difference(_lastPositionUpdate).inMilliseconds;
+    final positionDiff =
+        (newPosition - _currentState.position).abs().inMilliseconds;
+
+    // Update if enough time has passed or if there's a significant position change
+    if (timeDiff >= _positionUpdateInterval || positionDiff >= 1000) {
+      _lastPositionUpdate = now;
+      return true;
+    }
+
+    return false;
+  }
+
+  /// Notify listeners with error handling
+  void _notifyListeners() {
+    try {
+      if (!_isDisposed) {
         notifyListeners();
       }
-    });
-
-    _durationSubscription = _player.durationStream.listen((duration) {
-      if (_currentState.duration != duration) {
-        _currentState = _currentState.copyWith(duration: duration);
-        notifyListeners();
-      }
-    });
-
-    _subtitleTracksSubscription = _player.subtitleTracksStream.listen((_) {
-      notifyListeners();
-    });
+    } catch (e) {
+      debugPrint('MediaController: Error notifying listeners: $e');
+    }
   }
 
   /// Show controls permanently
   void _showControls() {
-    _controlsTimer?.cancel();
+    _cancelControlsTimer();
     if (!_controlsVisible) {
       _controlsVisible = true;
-      notifyListeners();
+      _notifyListeners();
     }
   }
 
   /// Hide controls
   void _hideControls() {
-    _controlsTimer?.cancel();
+    _cancelControlsTimer();
     if (_controlsVisible) {
       _controlsVisible = false;
-      notifyListeners();
+      _notifyListeners();
     }
   }
 
   /// Show controls temporarily with auto-hide
   void _showControlsTemporarily() {
-    _controlsTimer?.cancel();
+    _cancelControlsTimer();
 
     if (!_controlsVisible) {
       _controlsVisible = true;
-      notifyListeners();
+      _notifyListeners();
     }
 
-    // Always set timer to auto-hide controls
+    // Set timer to auto-hide controls
     _controlsTimer = Timer(config.controlsTimeout, () {
-      _hideControls();
+      if (!_isDisposed) {
+        _hideControls();
+      }
     });
+  }
+
+  /// Cancel controls timer safely
+  void _cancelControlsTimer() {
+    _controlsTimer?.cancel();
+    _controlsTimer = null;
+  }
+
+  /// Clean up all subscriptions
+  void _cleanupSubscriptions() {
+    for (final subscription in _subscriptions) {
+      subscription.cancel();
+    }
+    _subscriptions.clear();
   }
 
   @override
   void dispose() {
-    _controlsTimer?.cancel();
-    _stateSubscription.cancel();
-    _positionSubscription.cancel();
-    _durationSubscription.cancel();
-    _subtitleTracksSubscription.cancel();
-    _player.dispose();
+    if (_isDisposed) return;
+
+    _isDisposed = true;
+
+    // Cancel timers
+    _cancelControlsTimer();
+
+    // Cancel all subscriptions
+    _cleanupSubscriptions();
+
+    // Dispose player
+    try {
+      _player.dispose();
+    } catch (e) {
+      debugPrint('MediaController: Error disposing player: $e');
+    }
+
     super.dispose();
   }
+}
+
+Duration clampDuration(Duration duration, Duration min, Duration max) {
+  if (duration.compareTo(min) < 0) {
+    return min;
+  }
+  if (duration.compareTo(max) > 0) {
+    return max;
+  }
+  return duration;
 }

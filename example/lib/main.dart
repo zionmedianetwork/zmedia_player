@@ -86,7 +86,7 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
     _controller = MediaController.create(
       config: const MediaConfig(
         autoPlay: false,
-        showControls: false,
+        showControls: true,
         volume: 1.0,
         speed: 1.0,
         boxFit: BoxFit.contain,

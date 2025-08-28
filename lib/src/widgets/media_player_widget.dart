@@ -74,15 +74,29 @@ class MediaPlayerWidget extends StatefulWidget {
 }
 
 class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
-    with WidgetsBindingObserver {
+    with WidgetsBindingObserver, AutomaticKeepAliveClientMixin {
   /// Whether we have a native view
   bool _hasNativeView = false;
 
   /// The native view widget
   Widget? _nativeView;
 
-  /// Flag to track if native view has changed and needs rebuild
-  bool _nativeViewChanged = false;
+  /// Platform view ID for cleanup
+  int? _platformViewId;
+
+  /// Whether the widget is disposed
+  bool _isDisposed = false;
+
+  /// Whether we're currently creating a native view
+  bool _isCreatingNativeView = false;
+
+  /// Current media item ID to track changes
+  String? _currentMediaId;
+
+  /// Keep alive for performance
+  @override
+  bool get wantKeepAlive => true;
+
   @override
   void initState() {
     super.initState();
@@ -92,7 +106,9 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
     // Initialize player after the first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _initializePlayer();
+      if (!_isDisposed) {
+        _initializePlayer();
+      }
     });
 
     // Listen for media loading events
@@ -100,57 +116,106 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   @override
+  void didUpdateWidget(MediaPlayerWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // Handle controller changes
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      widget.controller.addListener(_onControllerChanged);
+      _refreshVideoSurface();
+    }
+  }
+
+  @override
   void dispose() {
+    _isDisposed = true;
+
+    // Clean up observers and listeners
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_onControllerChanged);
+
+    // Clean up native view
+    _cleanupNativeView();
+
     super.dispose();
   }
 
   void _onControllerChanged() {
-    // Check if media is loaded and we need to create a native view
-    if (widget.controller.currentItem != null && !_hasNativeView) {
-      print('Media loaded, creating native view...');
-      _createNativeView();
+    if (_isDisposed) return;
+
+    final currentItem = widget.controller.currentItem;
+    final currentMediaId = currentItem?.id ?? currentItem?.title;
+
+    // Only recreate native view if media changed or we don't have one
+    if (currentMediaId != _currentMediaId) {
+      _currentMediaId = currentMediaId;
+
+      if (currentItem != null && !_hasNativeView && !_isCreatingNativeView) {
+        debugPrint(
+            'Media changed, creating native view for: ${currentItem.title}');
+        _createNativeView();
+      } else if (currentItem == null) {
+        debugPrint('No media item, cleaning up native view');
+        _cleanupNativeView();
+      }
     }
 
-    // Only rebuild when necessary - not on every controller change
-    // setState(() {}); // ❌ This was causing infinite rebuilds
+    // Update UI state if mounted
+    if (mounted && !_isDisposed) {
+      setState(() {
+        // State updated
+      });
+    }
   }
 
   void _refreshVideoSurface() {
-    print('Refreshing video surface...');
-    setState(() {
-      // Reset native view state to force recreation
-      _hasNativeView = false;
-      _nativeView = null;
-    });
+    if (_isDisposed) return;
 
-    // Recreate the native view
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _createNativeView();
-    });
+    debugPrint('Refreshing video surface...');
+
+    // Clean up existing view
+    _cleanupNativeView();
+
+    // Recreate the native view if we have media
+    if (widget.controller.currentItem != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_isDisposed) {
+          _createNativeView();
+        }
+      });
+    }
   }
 
   Future<void> _initializePlayer() async {
+    if (_isDisposed) return;
+
     try {
       if (!widget.controller.player.isInitialized) {
         await widget.controller.initialize();
       }
 
-      // Don't create native view yet - wait for media to be loaded
-      print('Player initialized, waiting for media to be loaded...');
+      debugPrint(
+          'Player initialized, current item: ${widget.controller.currentItem?.title}');
+
+      // Create native view if we have media
+      if (widget.controller.currentItem != null && !_hasNativeView) {
+        await _createNativeView();
+      }
     } catch (e) {
-      print('Error initializing player: $e');
-      setState(() {
-        _hasNativeView = false;
-        _nativeView = null;
-      });
+      debugPrint('Error initializing player: $e');
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _hasNativeView = false;
+          _nativeView = null;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // Only rebuild when necessary - not on every controller change
+    super.build(context); // Required for AutomaticKeepAliveClientMixin
     return _buildPlayerContent();
   }
 
@@ -220,35 +285,32 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   Widget _buildVideoSurface() {
-    print(
-        'Building video surface: _hasNativeView=$_hasNativeView, _nativeView=${_nativeView != null}, playerState=${widget.controller.state.state}');
-
     // Check if we have media loaded
     if (widget.controller.currentItem == null) {
-      print('No media loaded, showing placeholder...');
+      debugPrint('No media loaded, showing placeholder...');
       return _buildPlaceholder();
     }
 
-    // Check player state to determine what to show
     final playerState = widget.controller.state.state;
 
-    if (playerState == PlayerState.buffering) {
-      print('Player is buffering, showing buffering...');
+    if (playerState == PlayerState.buffering && !_hasNativeView) {
+      debugPrint(
+          'Player is buffering and no native view, showing buffering...');
       return _buildBuffering();
     }
 
     if (playerState == PlayerState.error) {
-      print('Player has error, showing error...');
+      debugPrint('Player has error, showing error...');
       return _buildError();
     }
 
     // Only show loading if we don't have a native view yet
     if (!_hasNativeView || _nativeView == null) {
-      print('No native view available, showing buffering...');
+      debugPrint('No native view available, showing buffering...');
       return _buildBuffering();
     }
 
-    print('Returning native view with type: ${_nativeView.runtimeType}');
+    debugPrint('Returning native view with type: ${_nativeView.runtimeType}');
     // If we have a native view, return it with proper sizing
     return SizedBox.expand(
       child: _nativeView!,
@@ -256,102 +318,119 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   Future<void> _createNativeView() async {
+    if (_isDisposed || _isCreatingNativeView) return;
+
+    _isCreatingNativeView = true;
+
     try {
-      print('Creating native view...');
+      debugPrint('Creating native view...');
 
       // Ensure player is initialized before creating native view
       if (!widget.controller.player.isInitialized) {
-        print('Player not initialized, initializing...');
+        debugPrint('Player not initialized, initializing...');
         await widget.controller.initialize();
-        print('Player initialized successfully');
+        if (_isDisposed) return;
+        debugPrint('Player initialized successfully');
       }
 
       // Check if we have a current media item
-      if (widget.controller.currentItem == null) {
-        print('No current media item, cannot create native view');
-        setState(() {
-          _hasNativeView = false;
-          _nativeView = null;
-        });
+      final currentItem = widget.controller.currentItem;
+      if (currentItem == null) {
+        debugPrint('No current media item, cannot create native view');
+        if (mounted && !_isDisposed) {
+          setState(() {
+            _hasNativeView = false;
+            _nativeView = null;
+          });
+        }
         return;
       }
 
-      print(
-          'Creating platform view for media: ${widget.controller.currentItem?.title}');
+      debugPrint('Creating platform view for media: ${currentItem.title}');
 
       // Create platform-specific video surface
-      final viewType = 'flutter_media_player_view';
+      const viewType = 'flutter_media_player_view';
       final creationParams = {
         'playerId': widget.controller.player.playerId,
         'boxFit':
             _boxFitToString(widget.boxFit ?? widget.controller.config.boxFit),
       };
 
-      print('View type: $viewType, params: $creationParams');
+      debugPrint('View type: $viewType, params: $creationParams');
 
       Widget nativeView;
-      if (Theme.of(context).platform == TargetPlatform.android) {
-        print('Creating Android view...');
-        nativeView = SizedBox.expand(
-          child: AndroidView(
-            viewType: viewType,
-            creationParams: creationParams,
-            creationParamsCodec: const StandardMessageCodec(),
-            onPlatformViewCreated: _onPlatformViewCreated,
-          ),
+      final platform = Theme.of(context).platform;
+
+      if (platform == TargetPlatform.android) {
+        debugPrint('Creating Android view...');
+        nativeView = AndroidView(
+          viewType: viewType,
+          creationParams: creationParams,
+          creationParamsCodec: const StandardMessageCodec(),
+          onPlatformViewCreated: _onPlatformViewCreated,
         );
-      } else if (Theme.of(context).platform == TargetPlatform.iOS) {
-        print('Creating iOS view...');
-        nativeView = SizedBox.expand(
-          child: UiKitView(
-            viewType: viewType,
-            creationParams: creationParams,
-            creationParamsCodec: const StandardMessageCodec(),
-            onPlatformViewCreated: _onPlatformViewCreated,
-          ),
+      } else if (platform == TargetPlatform.iOS) {
+        debugPrint('Creating iOS view...');
+        nativeView = UiKitView(
+          viewType: viewType,
+          creationParams: creationParams,
+          creationParamsCodec: const StandardMessageCodec(),
+          onPlatformViewCreated: _onPlatformViewCreated,
         );
       } else {
-        print('Unsupported platform: ${Theme.of(context).platform}');
+        debugPrint('Unsupported platform: $platform');
+        return;
+      }
+
+      debugPrint('Native view created successfully, setting state...');
+
+      // Set the native view
+      if (mounted && !_isDisposed) {
+        setState(() {
+          _hasNativeView = true;
+          _nativeView = SizedBox.expand(child: nativeView);
+        });
+      }
+
+      debugPrint('Native view state set: _hasNativeView=$_hasNativeView');
+    } catch (e) {
+      debugPrint('Error creating native view: $e');
+      // Set error state if platform view creation fails
+      if (mounted && !_isDisposed) {
         setState(() {
           _hasNativeView = false;
           _nativeView = null;
         });
-        return;
       }
+    } finally {
+      _isCreatingNativeView = false;
+    }
+  }
 
-      print('Native view created successfully, setting state...');
+  void _cleanupNativeView() {
+    debugPrint('Cleaning up native view...');
 
-      // Set the native view
-      setState(() {
-        _hasNativeView = true;
-        _nativeView = nativeView;
-        _nativeViewChanged = true; // Mark that native view has changed
-      });
-
-      print(
-          'Native view state set: _hasNativeView=$_hasNativeView, _nativeView=${_nativeView != null}');
-
-      // Force a rebuild to ensure the video surface updates with the new native view
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_nativeViewChanged) {
-          setState(() {
-            _nativeViewChanged = false; // Reset the flag
-          });
-        }
-      });
-    } catch (e) {
-      print('Error creating native view: $e');
-      // Set error state if platform view creation fails
+    if (mounted && !_isDisposed) {
       setState(() {
         _hasNativeView = false;
         _nativeView = null;
+        _platformViewId = null;
       });
+    } else {
+      _hasNativeView = false;
+      _nativeView = null;
+      _platformViewId = null;
     }
   }
 
   void _onPlatformViewCreated(int viewId) {
-    print('Platform view created with ID: $viewId');
-    // Platform view created, can perform additional setup if needed
+    if (_isDisposed) return;
+
+    _platformViewId = viewId;
+    debugPrint('Platform view created with ID: $viewId');
+
+    // Platform view is ready - any additional setup can be done here
+    // The MediaController will handle platform communication through method channels
   }
 
   Widget _buildControlsOverlay() {
@@ -362,11 +441,8 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     return AnimatedOpacity(
       opacity: widget.controller.controlsVisible ? 1.0 : 0.0,
       duration: const Duration(milliseconds: 300),
-      child: GestureDetector(
-        onTap: () {
-          // Toggle controls visibility on tap
-          widget.controller.toggleControls();
-        },
+      child: IgnorePointer(
+        ignoring: !widget.controller.controlsVisible,
         child: MediaControls(
           controller: widget.controller,
           allowFullscreen: widget.allowFullscreen,
@@ -418,6 +494,7 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
           children: [
             CircularProgressIndicator(
               color: Colors.white,
+              strokeWidth: 2,
             ),
             SizedBox(height: 16),
             Text(
@@ -459,24 +536,25 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
               ),
             ),
             const SizedBox(height: 8),
-            Text(
-              widget.controller.state.errorMessage ?? 'Unknown error occurred',
-              style: const TextStyle(
-                color: Colors.white70,
-                fontSize: 14,
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                widget.controller.state.errorMessage ??
+                    'Unknown error occurred',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
               ),
-              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () {
-                // Retry loading current item
-                final currentItem = widget.controller.currentItem;
-                if (currentItem != null) {
-                  widget.controller.load(currentItem);
-                }
-              },
-              child: const Text('Retry'),
+            ElevatedButton.icon(
+              onPressed: _handleRetry,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Retry'),
             ),
           ],
         ),
@@ -485,16 +563,31 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   void _handleTap() {
-    widget.controller.toggleControls();
+    if (!_isDisposed) {
+      widget.controller.toggleControls();
+    }
   }
 
   void _handleDoubleTap() {
-    widget.controller.togglePlayPause();
+    if (!_isDisposed) {
+      widget.controller.togglePlayPause();
+    }
+  }
+
+  void _handleRetry() {
+    final currentItem = widget.controller.currentItem;
+    if (currentItem != null && !_isDisposed) {
+      // Clean up current view before retry
+      _cleanupNativeView();
+      // Reload the media
+      widget.controller.load(currentItem);
+    }
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
+    if (_isDisposed) return;
 
     switch (state) {
       case AppLifecycleState.paused:
@@ -504,7 +597,15 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
         break;
       case AppLifecycleState.resumed:
         // Refresh video surface when app comes back to foreground
-        _refreshVideoSurface();
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_isDisposed) {
+            _refreshVideoSurface();
+          }
+        });
+        break;
+      case AppLifecycleState.detached:
+        // Clean up when app is detached
+        _cleanupNativeView();
         break;
       default:
         break;
@@ -512,8 +613,28 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   double _getVideoAspectRatio() {
-    // In a real implementation, this would get the actual video aspect ratio
-    // For now, return 16:9 as default
+    // Try to get actual video aspect ratio from controller state
+    try {
+      final state = widget.controller.state;
+      // Check if we have video dimensions in the state
+      // Note: This would need to be added to PlaybackState if video dimensions are needed
+      // For now, we'll use a reasonable default based on the media type or duration
+
+      // If we have a current media item, we could potentially get aspect ratio from metadata
+      final currentItem = widget.controller.currentItem;
+      if (currentItem != null) {
+        // Check if the media item has aspect ratio metadata
+        // This would depend on how MediaItem is structured
+        // For now, assume standard video aspect ratios based on common formats
+
+        // You could potentially add aspectRatio as a property to MediaItem
+        // and return currentItem.aspectRatio ?? (16 / 9);
+      }
+    } catch (e) {
+      debugPrint('Error getting video aspect ratio: $e');
+    }
+
+    // Return 16:9 as default (most common video aspect ratio)
     return 16 / 9;
   }
 
@@ -545,64 +666,119 @@ class FullscreenMediaPlayer extends StatefulWidget {
   /// Custom controls widget
   final Widget? customControls;
 
+  /// Background color
+  final Color backgroundColor;
+
   const FullscreenMediaPlayer({
     super.key,
     required this.controller,
     this.customControls,
+    this.backgroundColor = Colors.black,
   });
 
   @override
   State<FullscreenMediaPlayer> createState() => _FullscreenMediaPlayerState();
 }
 
-class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer> {
+class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
+    with WidgetsBindingObserver {
+  List<DeviceOrientation>? _previousOrientations;
+  SystemUiMode? _previousSystemUiMode;
+  bool _isDisposed = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     // Set fullscreen orientation and hide system UI
-    _enterFullscreen();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_isDisposed) {
+        _enterFullscreen();
+      }
+    });
   }
 
   @override
   void dispose() {
+    _isDisposed = true;
+    WidgetsBinding.instance.removeObserver(this);
+
     // Restore system UI and orientation
     _exitFullscreen();
     super.dispose();
   }
 
-  void _enterFullscreen() {
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+  Future<void> _enterFullscreen() async {
+    if (_isDisposed) return;
+
+    try {
+      // Store previous settings for restoration
+      _previousSystemUiMode = null; // Cannot retrieve current mode
+
+      // Set fullscreen mode
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+      // Set landscape orientation
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } catch (e) {
+      debugPrint('Error entering fullscreen: $e');
+    }
   }
 
-  void _exitFullscreen() {
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+  Future<void> _exitFullscreen() async {
+    if (_isDisposed) return;
+
+    try {
+      // Restore system UI
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+      // Restore all orientations
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } catch (e) {
+      debugPrint('Error exiting fullscreen: $e');
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+
+    if (state == AppLifecycleState.resumed && !_isDisposed) {
+      // Re-enter fullscreen mode when app resumes
+      _enterFullscreen();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: MediaPlayerWidget(
-        controller: widget.controller,
-        showControls: true,
-        customControls: widget.customControls,
-        expandToFill: true,
-        onTap: () {
-          widget.controller.toggleControls();
-        },
-        onDoubleTap: () {
-          widget.controller.togglePlayPause();
-        },
+    return PopScope(
+      onPopInvoked: (didPop) {
+        if (didPop && !_isDisposed) {
+          _exitFullscreen();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: widget.backgroundColor,
+        body: SafeArea(
+          child: MediaPlayerWidget(
+            controller: widget.controller,
+            showControls: true,
+            customControls: widget.customControls,
+            expandToFill: true,
+            backgroundColor: widget.backgroundColor,
+            onTap: () => widget.controller.toggleControls(),
+            onDoubleTap: () => widget.controller.togglePlayPause(),
+          ),
+        ),
       ),
     );
   }
