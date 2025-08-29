@@ -242,6 +242,10 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   Widget _buildPlayerContent() {
     Widget content;
 
+    // Add debugging information
+    debugPrint(
+        'Building player content - State: ${widget.controller.state.state}, HasNativeView: $_hasNativeView, NativeView: ${_nativeView != null}');
+
     // Determine what content to show based on player state
     switch (widget.controller.state.state) {
       case PlayerState.idle:
@@ -335,6 +339,8 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     }
 
     final playerState = widget.controller.state.state;
+    debugPrint(
+        'Building video surface - State: $playerState, HasNativeView: $_hasNativeView, NativeView: ${_nativeView != null}');
 
     if (playerState == PlayerState.buffering && !_hasNativeView) {
       debugPrint(
@@ -354,9 +360,13 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     }
 
     debugPrint('Returning native view with type: ${_nativeView.runtimeType}');
-    // If we have a native view, return it with proper sizing
-    return SizedBox.expand(
-      child: _nativeView!,
+
+    // If we have a native view, return it with proper sizing and ensure it's visible
+    return Container(
+      color: Colors.black, // Ensure background is black for video
+      child: SizedBox.expand(
+        child: _nativeView!,
+      ),
     );
   }
 
@@ -427,15 +437,21 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
       debugPrint('Native view created successfully, setting state...');
 
-      // Set the native view
+      // Set the native view with proper sizing and ensure it's visible
       if (mounted && !_isDisposed) {
         setState(() {
           _hasNativeView = true;
-          _nativeView = SizedBox.expand(child: nativeView);
+          _nativeView = Container(
+            color: Colors.black, // Ensure black background
+            child: SizedBox.expand(
+              child: nativeView,
+            ),
+          );
         });
       }
 
-      debugPrint('Native view state set: _hasNativeView=$_hasNativeView');
+      debugPrint(
+          'Native view state set: _hasNativeView=$_hasNativeView, _nativeView=${_nativeView != null}');
     } catch (e) {
       debugPrint('Error creating native view: $e');
       // Set error state if platform view creation fails
@@ -472,7 +488,18 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     _platformViewId = viewId;
     debugPrint('Platform view created with ID: $viewId');
 
-    // Platform view is ready - any additional setup can be done here
+    // Platform view is ready - trigger a rebuild to ensure it's displayed
+    if (mounted && !_isDisposed) {
+      // Add a small delay to ensure the platform view is fully initialized
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && !_isDisposed) {
+          setState(() {
+            // Force a rebuild to ensure the native view is displayed
+          });
+        }
+      });
+    }
+
     // The MediaController will handle platform communication through method channels
   }
 
@@ -697,6 +724,15 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
         return 'none';
       case BoxFit.scaleDown:
         return 'scaleDown';
+    }
+  }
+
+  /// Force recreate the native view (useful for debugging video display issues)
+  void forceRecreateNativeView() {
+    if (!_isDisposed) {
+      debugPrint('Force recreating native view...');
+      _cleanupNativeView();
+      _createNativeView();
     }
   }
 }

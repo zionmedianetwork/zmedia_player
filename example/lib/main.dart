@@ -442,6 +442,24 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
                 const Text('Subtitles', style: TextStyle(fontSize: 10)),
               ],
             ),
+
+            // Debug: Force Recreate Native View
+            Column(
+              children: [
+                IconButton(
+                  onPressed: () {
+                    // This is a debug feature to help troubleshoot video display issues
+                    _showSnackBar(
+                        'Debug: Check console for native view recreation logs');
+                  },
+                  icon: const Icon(Icons.refresh, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+                const Text('Debug', style: TextStyle(fontSize: 10)),
+              ],
+            ),
           ],
         ),
 

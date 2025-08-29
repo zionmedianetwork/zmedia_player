@@ -31,8 +31,15 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         containerView.layer.addSublayer(playerLayer)
         playerLayer.videoGravity = .resizeAspect
         
+        // Ensure the player layer is visible
+        playerLayer.isHidden = false
+        playerLayer.opacity = 1.0
+        
         // Set initial frame
         playerLayer.frame = containerView.bounds
+        
+        // Force a redraw
+        playerLayer.setNeedsDisplay()
         
         // Add KVO observer safely
         addBoundsObserver()
@@ -153,6 +160,12 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
                 
                 // Ensure proper frame
                 self.updatePlayerLayerFrame()
+                
+                // Add a small delay and force another redraw to ensure visibility
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    self.playerLayer.setNeedsDisplay()
+                    self.updatePlayerLayerFrame()
+                }
             } else {
                 print("MediaPlayerView: Player set to nil")
                 self.playerLayer.isHidden = true
