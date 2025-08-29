@@ -423,6 +423,25 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
                 const Text('Quality', style: TextStyle(fontSize: 10)),
               ],
             ),
+
+            // Subtitle Toggle
+            Column(
+              children: [
+                IconButton(
+                  onPressed: _toggleSubtitles,
+                  icon: Icon(
+                    _controller.config?.enableSubtitles == true
+                        ? Icons.subtitles
+                        : Icons.subtitles_off,
+                    size: 20,
+                  ),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+                const Text('Subtitles', style: TextStyle(fontSize: 10)),
+              ],
+            ),
           ],
         ),
 
@@ -708,6 +727,16 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
           const SizedBox(height: 8),
           _buildStreamingPerformanceInfo(),
         ],
+
+        const SizedBox(height: 16),
+
+        // Subtitle Settings
+        const Text(
+          'Subtitle Settings',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        _buildSubtitleSettings(),
       ],
     );
   }
@@ -842,6 +871,23 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
     }
   }
 
+  /// Toggle subtitle visibility
+  void _toggleSubtitles() {
+    final currentConfig = _controller.config;
+    if (currentConfig != null) {
+      final newConfig = currentConfig.copyWith(
+        enableSubtitles: !currentConfig.enableSubtitles,
+      );
+      _controller.updateConfig(newConfig);
+      setState(() {});
+
+      // Show feedback
+      _showSnackBar(newConfig.enableSubtitles
+          ? 'Subtitles enabled'
+          : 'Subtitles disabled');
+    }
+  }
+
   /// Build streaming status indicator
   Widget _buildStreamingStatus() {
     final currentItem = _controller.currentItem;
@@ -943,6 +989,74 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Build subtitle settings
+  Widget _buildSubtitleSettings() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Subtitle toggle
+            Row(
+              children: [
+                Switch(
+                  value: _controller.config?.enableSubtitles ?? false,
+                  onChanged: (value) {
+                    final currentConfig = _controller.config;
+                    if (currentConfig != null) {
+                      final newConfig = currentConfig.copyWith(
+                        enableSubtitles: value,
+                      );
+                      _controller.updateConfig(newConfig);
+                      setState(() {});
+                    }
+                  },
+                ),
+                const SizedBox(width: 8),
+                const Text('Enable Subtitles'),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            // Subtitle track selection
+            if (_controller.config?.enableSubtitles == true) ...[
+              const Text('Available Tracks:',
+                  style: TextStyle(fontWeight: FontWeight.w500)),
+              const SizedBox(height: 8),
+              _buildSubtitleTrackList(),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Build subtitle track list
+  Widget _buildSubtitleTrackList() {
+    // Sample subtitle tracks for demonstration
+    final tracks = [
+      {'id': 'en', 'title': 'English', 'language': 'en'},
+      {'id': 'es', 'title': 'Spanish', 'language': 'es'},
+      {'id': 'fr', 'title': 'French', 'language': 'fr'},
+    ];
+
+    return Column(
+      children: tracks.map((track) {
+        return ListTile(
+          leading: const Icon(Icons.subtitles, size: 20),
+          title: Text(track['title'] as String),
+          subtitle: Text('Language: ${track['language']}'),
+          trailing: const Icon(Icons.radio_button_unchecked, size: 20),
+          onTap: () {
+            _showSnackBar('Selected subtitle track: ${track['title']}');
+          },
+        );
+      }).toList(),
     );
   }
 }

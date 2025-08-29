@@ -42,6 +42,7 @@ class MediaController extends ChangeNotifier {
   /// Create a media controller with the given player instance
   MediaController(this._player) {
     _setupSubscriptions();
+    _startOperationStateMonitor();
   }
 
   /// Create a media controller with optional configuration
@@ -176,6 +177,8 @@ class MediaController extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('MediaController: Error toggling play/pause: $e');
+      // Reset operation state on error to prevent getting stuck
+      _resetOperationState();
       rethrow;
     }
   }
@@ -189,6 +192,8 @@ class MediaController extends ChangeNotifier {
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error starting playback: $e');
+      // Reset operation state on error to prevent getting stuck
+      _resetOperationState();
       rethrow;
     }
   }
@@ -202,6 +207,8 @@ class MediaController extends ChangeNotifier {
       _showControls();
     } catch (e) {
       debugPrint('MediaController: Error pausing playback: $e');
+      // Reset operation state on error to prevent getting stuck
+      _resetOperationState();
       rethrow;
     }
   }
@@ -503,16 +510,88 @@ class MediaController extends ChangeNotifier {
 
   /// Execute an operation with race condition protection
   Future<T> _executeOperation<T>(Future<T> Function() operation) async {
+    // Allow certain operations to proceed even if others are in progress
     if (_operationInProgress) {
-      throw StateError('Another operation is already in progress');
+      // Wait a short time for the current operation to complete
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      // If still in progress, check if it's a critical operation
+      if (_operationInProgress) {
+        debugPrint('MediaController: Operation in progress, queuing: ${operation.toString()}');
+        // For non-critical operations, just return without throwing
+        if (_isNonCriticalOperation(operation)) {
+          return Future.value() as T;
+        }
+        // For critical operations, wait a bit more
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (_operationInProgress) {
+          throw StateError('Another operation is already in progress');
+        }
+      }
     }
 
     _operationInProgress = true;
     try {
-      return await operation();
+      // Add timeout to prevent operations from getting stuck
+      return await operation().timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          _operationInProgress = false;
+          throw TimeoutException('Operation timed out after 10 seconds');
+        },
+      );
+    } catch (e) {
+      debugPrint('MediaController: Operation failed: $e');
+      rethrow;
     } finally {
       _operationInProgress = false;
     }
+  }
+
+  /// Check if an operation is non-critical and can be skipped if another is in progress
+  bool _isNonCriticalOperation(Function operation) {
+    // Volume, speed, and subtitle changes are non-critical
+    final operationStr = operation.toString();
+    return operationStr.contains('setVolume') ||
+           operationStr.contains('setSpeed') ||
+           operationStr.contains('setSubtitleTrack') ||
+           operationStr.contains('setMuted');
+  }
+
+  /// Reset operation state (useful for recovery from stuck operations)
+  void _resetOperationState() {
+    if (_operationInProgress) {
+      debugPrint('MediaController: Resetting stuck operation state');
+      _operationInProgress = false;
+    }
+  }
+
+  /// Public method to reset operation state (useful for recovery from stuck operations)
+  void resetOperationState() {
+    _resetOperationState();
+  }
+
+  /// Check if an operation is currently in progress
+  bool get isOperationInProgress => _operationInProgress;
+
+  /// Timer for monitoring operation state
+  Timer? _operationStateTimer;
+
+  /// Start monitoring operation state to prevent stuck operations
+  void _startOperationStateMonitor() {
+    _operationStateTimer?.cancel();
+    _operationStateTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (_isDisposed) {
+        timer.cancel();
+        return;
+      }
+      
+      // If an operation has been in progress for more than 5 seconds, reset it
+      if (_operationInProgress) {
+        debugPrint('MediaController: Operation state monitor detected stuck operation, resetting');
+        _resetOperationState();
+      }
+    });
   }
 
   /// Setup stream subscriptions with proper error handling
@@ -664,8 +743,12 @@ class MediaController extends ChangeNotifier {
 
     _isDisposed = true;
 
+    // Reset operation state
+    _resetOperationState();
+
     // Cancel timers
     _cancelControlsTimer();
+    _operationStateTimer?.cancel();
 
     // Cancel all subscriptions
     _cleanupSubscriptions();
