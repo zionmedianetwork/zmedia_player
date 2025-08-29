@@ -86,7 +86,7 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
     _controller = MediaController.create(
       config: const MediaConfig(
         autoPlay: false,
-        showControls: true,
+        showControls: false,
         volume: 1.0,
         speed: 1.0,
         boxFit: BoxFit.contain,
@@ -116,7 +116,7 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
             child: MediaPlayerWidget(
               controller: _controller,
               showControls:
-                  false, // Disable built-in controls to avoid double overlay
+                  true, // Disable built-in controls to avoid double overlay
               placeholder: const Center(
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
