@@ -11,6 +11,7 @@ import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
+import com.google.android.exoplayer2.upstream.DataSource
 import com.google.android.exoplayer2.ui.AspectRatioFrameLayout
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.ConcurrentHashMap
@@ -59,7 +60,7 @@ class MediaPlayerManager(
         }
     }
 
-    fun seekTo(playerId: String, position: Long) {
+    fun seekTo(playerId: String, position: Int) {
         mainHandler.post {
             players[playerId]?.seekTo(position)
         }
@@ -138,6 +139,9 @@ class MediaPlayerInstance(
     private var currentMediaSource: MediaSource? = null
     private var currentPlaylist: List<Map<String, Any>>? = null
     private var currentIndex = 0
+    private var positionUpdateHandler: Handler? = null
+    private var positionUpdateRunnable: Runnable? = null
+    private var originalVolume: Float = 1f
     
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -169,6 +173,7 @@ class MediaPlayerInstance(
     init {
         // Initialize data source factory with custom headers support
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent("Flutter Media Player")
         dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
         
         initializeExoPlayer()
@@ -191,20 +196,24 @@ class MediaPlayerInstance(
         val url = mediaItem["url"] as? String ?: return
         val httpHeaders = mediaItem["httpHeaders"] as? Map<String, String>
         
-        // Update data source factory with custom headers
-        if (httpHeaders != null) {
-            val httpDataSourceFactory = DefaultHttpDataSource.Factory()
+        val uri = Uri.parse(url)
+        val mediaSource: MediaSource
+        
+        // Create media source with custom headers if provided
+        if (httpHeaders != null && httpHeaders.isNotEmpty()) {
+            val customHttpDataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent("Flutter Media Player")
             
+            // Set custom headers
             httpHeaders.forEach { (key, value) ->
-                httpDataSourceFactory.setDefaultRequestProperty(key, value)
+                customHttpDataSourceFactory.setDefaultRequestProperties(mapOf(key to value))
             }
             
-            dataSourceFactory.setBaseDataSourceFactory(httpDataSourceFactory)
+            val customDataSourceFactory = DefaultDataSource.Factory(context, customHttpDataSourceFactory)
+            mediaSource = createMediaSource(uri, customDataSourceFactory)
+        } else {
+            mediaSource = createMediaSource(uri, dataSourceFactory)
         }
-        
-        val uri = Uri.parse(url)
-        val mediaSource = createMediaSource(uri)
         
         exoPlayer?.apply {
             setMediaSource(mediaSource)
@@ -243,12 +252,14 @@ class MediaPlayerInstance(
         }
     }
 
-    fun seekTo(position: Long) {
-        exoPlayer?.seekTo(position)
+    fun seekTo(position: Int) {
+        exoPlayer?.seekTo(position.toLong())
     }
 
     fun setVolume(volume: Float) {
-        exoPlayer?.volume = volume.coerceIn(0f, 1f)
+        val clampedVolume = volume.coerceIn(0f, 1f)
+        originalVolume = clampedVolume
+        exoPlayer?.volume = clampedVolume
     }
 
     fun setPlaybackSpeed(speed: Float) {
@@ -256,7 +267,7 @@ class MediaPlayerInstance(
     }
 
     fun setMuted(muted: Boolean) {
-        exoPlayer?.volume = if (muted) 0f else (config?.get("volume") as? Double)?.toFloat() ?: 1f
+        exoPlayer?.volume = if (muted) 0f else originalVolume
     }
 
     fun setBoxFit(boxFit: String) {
@@ -299,6 +310,9 @@ class MediaPlayerInstance(
     }
 
     fun dispose() {
+        // Stop position updates
+        stopPositionUpdates()
+        
         exoPlayer?.apply {
             removeListener(playerListener)
             release()
@@ -307,7 +321,7 @@ class MediaPlayerInstance(
         playerView = null
     }
 
-    private fun createMediaSource(uri: Uri): MediaSource {
+    private fun createMediaSource(uri: Uri, dataSourceFactory: DataSource.Factory = this.dataSourceFactory): MediaSource {
         return when {
             uri.toString().contains(".m3u8") -> {
                 HlsMediaSource.Factory(dataSourceFactory)
@@ -327,7 +341,11 @@ class MediaPlayerInstance(
     private fun applyConfig(config: Map<String, Any>) {
         exoPlayer?.apply {
             // Apply volume
-            (config["volume"] as? Double)?.let { volume = it.toFloat() }
+            (config["volume"] as? Double)?.let { 
+                val vol = it.toFloat()
+                originalVolume = vol
+                volume = vol
+            }
             
             // Apply playback speed
             (config["speed"] as? Double)?.let { setPlaybackSpeed(it.toFloat()) }
@@ -348,53 +366,81 @@ class MediaPlayerInstance(
     }
 
     private fun startPositionUpdates() {
-        val updateRunnable = object : Runnable {
+        stopPositionUpdates() // Ensure we don't have multiple runnables
+        
+        positionUpdateHandler = Handler(Looper.getMainLooper())
+        positionUpdateRunnable = object : Runnable {
             override fun run() {
                 exoPlayer?.let { player ->
                     if (player.isPlaying) {
                         notifyPositionChanged(player.currentPosition)
                     }
                 }
-                Handler(Looper.getMainLooper()).postDelayed(this, 500)
+                positionUpdateHandler?.postDelayed(this, 500)
             }
         }
-        Handler(Looper.getMainLooper()).post(updateRunnable)
+        positionUpdateHandler?.post(positionUpdateRunnable!!)
+    }
+    
+    private fun stopPositionUpdates() {
+        positionUpdateRunnable?.let { runnable ->
+            positionUpdateHandler?.removeCallbacks(runnable)
+        }
+        positionUpdateRunnable = null
+        positionUpdateHandler = null
     }
 
     private fun notifyStateChanged(state: String, isBuffering: Boolean) {
-        val arguments = mapOf(
-            "playerId" to playerId,
-            "state" to state,
-            "isBuffering" to isBuffering,
-            "bufferPercentage" to (exoPlayer?.bufferedPercentage ?: 0)
-        )
-        methodChannel.invokeMethod("onStateChanged", arguments)
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "state" to state,
+                "isBuffering" to isBuffering,
+                "bufferPercentage" to (exoPlayer?.bufferedPercentage ?: 0)
+            )
+            methodChannel.invokeMethod("onStateChanged", arguments)
+        } catch (e: Exception) {
+            // Handle potential exceptions when invoking method channel
+            e.printStackTrace()
+        }
     }
 
     private fun notifyPositionChanged(position: Long) {
-        val arguments = mapOf(
-            "playerId" to playerId,
-            "position" to position.toInt()
-        )
-        methodChannel.invokeMethod("onPositionChanged", arguments)
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "position" to position.toInt()
+            )
+            methodChannel.invokeMethod("onPositionChanged", arguments)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun notifyDurationChanged() {
-        val duration = exoPlayer?.duration ?: 0L
-        if (duration > 0) {
-            val arguments = mapOf(
-                "playerId" to playerId,
-                "duration" to duration.toInt()
-            )
-            methodChannel.invokeMethod("onDurationChanged", arguments)
+        try {
+            val duration = exoPlayer?.duration ?: 0L
+            if (duration > 0) {
+                val arguments = mapOf(
+                    "playerId" to playerId,
+                    "duration" to duration.toInt()
+                )
+                methodChannel.invokeMethod("onDurationChanged", arguments)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
     private fun notifyError(error: String) {
-        val arguments = mapOf(
-            "playerId" to playerId,
-            "error" to error
-        )
-        methodChannel.invokeMethod("onError", arguments)
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "error" to error
+            )
+            methodChannel.invokeMethod("onError", arguments)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }

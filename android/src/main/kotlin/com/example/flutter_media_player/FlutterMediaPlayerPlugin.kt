@@ -149,7 +149,7 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
     private fun handleSeekTo(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            val position = call.argument<Long>("position")
+            val position = call.argument<Int>("position")
             
             if (playerId != null && position != null) {
                 playerManager.seekTo(playerId, position)
