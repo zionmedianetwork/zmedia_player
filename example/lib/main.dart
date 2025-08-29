@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:flutter_media_player/src/models/streaming_config.dart';
+import 'package:flutter_media_player/src/models/subtitle_track.dart';
+import 'package:flutter_media_player/src/core/media_config.dart';
 
 void main() {
   runApp(const MyApp());
@@ -74,6 +77,81 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
           'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/Sintel.jpg',
       mediaType: MediaType.video,
     ),
+    // Phase 2: HLS and subtitle examples
+    MediaItem(
+      id: '5',
+      title: 'HLS Sample (Big Buck Bunny)',
+      artist: 'Blender Foundation',
+      url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+      artworkUrl:
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg',
+      mediaType: MediaType.video,
+      httpHeaders: {
+        'User-Agent': 'Flutter Media Player Example',
+      },
+    ),
+    MediaItem(
+      id: '6',
+      title: 'DASH Sample (Sintel)',
+      artist: 'Blender Foundation',
+      url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd',
+      artworkUrl:
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/Sintel.jpg',
+      mediaType: MediaType.video,
+      httpHeaders: {
+        'User-Agent': 'Flutter Media Player Example',
+      },
+    ),
+    // Additional streaming content for testing
+    MediaItem(
+      id: '7',
+      title: 'HLS Multi-Quality (Tears of Steel)',
+      artist: 'Blender Foundation',
+      url:
+          'https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8',
+      artworkUrl:
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/TearsOfSteel.jpg',
+      mediaType: MediaType.video,
+      httpHeaders: {
+        'User-Agent': 'Flutter Media Player Example',
+      },
+    ),
+    MediaItem(
+      id: '8',
+      title: 'DASH Multi-Quality (Big Buck Bunny)',
+      artist: 'Blender Foundation',
+      url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd',
+      artworkUrl:
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg',
+      mediaType: MediaType.video,
+      httpHeaders: {
+        'User-Agent': 'Flutter Media Player Example',
+      },
+    ),
+    MediaItem(
+      id: '9',
+      title: 'HLS Live Stream Test',
+      artist: 'Live Stream',
+      url: 'https://cph-p2p-msl.akamaized.net/hls/live/2000341/test01.m3u8',
+      artworkUrl:
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg',
+      mediaType: MediaType.video,
+      httpHeaders: {
+        'User-Agent': 'Flutter Media Player Example',
+      },
+    ),
+    MediaItem(
+      id: '10',
+      title: 'HLS with Subtitles (Big Buck Bunny)',
+      artist: 'Blender Foundation',
+      url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+      artworkUrl:
+          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/images/BigBuckBunny.jpg',
+      mediaType: MediaType.video,
+      httpHeaders: {
+        'User-Agent': 'Flutter Media Player Example',
+      },
+    ),
   ];
 
   @override
@@ -90,6 +168,37 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
         volume: 1.0,
         speed: 1.0,
         boxFit: BoxFit.contain,
+        enableSubtitles: true,
+        subtitleConfig: SubtitleConfig(
+          fontSize: 18.0,
+          fontColor: 0xFFFFFFFF,
+          backgroundColor: 0x80000000,
+          showOutline: true,
+          outlineColor: 0xFF000000,
+          verticalPosition: 0.85,
+          horizontalAlignment: SubtitleAlignment.center,
+        ),
+        cacheConfig: CacheConfig(
+          enabled: true,
+          maxCacheSize: 200 * 1024 * 1024, // 200MB
+          cacheExpiration: Duration(days: 30),
+        ),
+        hlsConfig: HlsConfig(
+          enableAdaptiveBitrate: true,
+          enableLiveStream: false,
+          enableDvr: false,
+          enableSegmentPrefetch: true,
+          maxPrefetchSegments: 5,
+        ),
+        dashConfig: DashConfig(
+          enableAdaptiveBitrate: true,
+          enableLiveStream: false,
+          enableDvr: false,
+          enableSegmentPrefetch: true,
+          maxPrefetchSegments: 5,
+          enableMpdCaching: true,
+          mpdCacheExpiration: Duration(minutes: 10),
+        ),
       ),
     );
   }
@@ -107,50 +216,59 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         title: const Text('Flutter Media Player Example'),
       ),
-      body: Column(
-        children: [
-          // Video Player Section
-          Container(
-            height: 250,
-            color: Colors.black,
-            child: MediaPlayerWidget(
-              controller: _controller,
-              showControls:
-                  true, // Disable built-in controls to avoid double overlay
-              placeholder: const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.video_library, size: 64, color: Colors.white54),
-                    SizedBox(height: 16),
-                    Text(
-                      'Select a video to start playing',
-                      style: TextStyle(color: Colors.white70),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Video Player Section - make height flexible
+            Flexible(
+              flex: 2,
+              child: Container(
+                constraints: const BoxConstraints(
+                  minHeight: 200,
+                  maxHeight: 300,
+                ),
+                color: Colors.black,
+                child: MediaPlayerWidget(
+                  controller: _controller,
+                  showControls:
+                      true, // Disable built-in controls to avoid double overlay
+                  placeholder: const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.video_library,
+                            size: 64, color: Colors.white54),
+                        SizedBox(height: 16),
+                        Text(
+                          'Select a video to start playing',
+                          style: TextStyle(color: Colors.white70),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
             ),
-          ),
 
-          // Video Selection Buttons (not duplicate controls)
-          Container(
-            padding: const EdgeInsets.all(16),
-            child: _buildVideoSelectionButtons(),
-          ),
-
-          // Bottom Navigation
-          Expanded(
-            child: Column(
-              children: [
-                _buildTabBar(),
-                Expanded(
-                  child: _buildTabContent(),
-                ),
-              ],
+            // Video Selection Buttons - make more compact
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: _buildVideoSelectionButtons(),
             ),
-          ),
-        ],
+
+            // Bottom Navigation
+            Expanded(
+              child: Column(
+                children: [
+                  _buildTabBar(),
+                  Expanded(
+                    child: _buildTabContent(),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -192,7 +310,55 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
           ],
         ),
 
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
+
+        // Streaming Content Buttons
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ElevatedButton(
+                  onPressed: () => _playVideo(_sampleVideos[5]),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue[100],
+                    foregroundColor: Colors.blue[800],
+                  ),
+                  child: const Text('HLS', style: TextStyle(fontSize: 12)),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ElevatedButton(
+                  onPressed: () => _playVideo(_sampleVideos[6]),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green[100],
+                    foregroundColor: Colors.green[800],
+                  ),
+                  child: const Text('DASH', style: TextStyle(fontSize: 12)),
+                ),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: ElevatedButton(
+                  onPressed: () => _playVideo(_sampleVideos[7]),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple[100],
+                    foregroundColor: Colors.purple[800],
+                  ),
+                  child: const Text('Multi-Q', style: TextStyle(fontSize: 12)),
+                ),
+              ),
+            ),
+          ],
+        ),
+
+        const SizedBox(height: 8),
 
         // Configuration Controls (not duplicate playback controls)
         Row(
@@ -205,9 +371,13 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
                   onPressed: _controller.toggleMute,
                   icon: Icon(
                     _controller.isMuted ? Icons.volume_off : Icons.volume_up,
+                    size: 20,
                   ),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
-                const Text('Volume', style: TextStyle(fontSize: 12)),
+                const Text('Volume', style: TextStyle(fontSize: 10)),
               ],
             ),
 
@@ -216,10 +386,13 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
               children: [
                 IconButton(
                   onPressed: _controller.cycleSpeed,
-                  icon: const Icon(Icons.speed),
+                  icon: const Icon(Icons.speed, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
                 Text('${_controller.speed}x',
-                    style: const TextStyle(fontSize: 12)),
+                    style: const TextStyle(fontSize: 10)),
               ],
             ),
 
@@ -228,13 +401,36 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
               children: [
                 IconButton(
                   onPressed: _cycleBoxFit,
-                  icon: const Icon(Icons.aspect_ratio),
+                  icon: const Icon(Icons.aspect_ratio, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
-                Text(_getBoxFitName(), style: const TextStyle(fontSize: 12)),
+                Text(_getBoxFitName(), style: const TextStyle(fontSize: 10)),
+              ],
+            ),
+
+            // Streaming Quality Info
+            Column(
+              children: [
+                IconButton(
+                  onPressed: _showQualityInfo,
+                  icon: const Icon(Icons.high_quality, size: 20),
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+                const Text('Quality', style: TextStyle(fontSize: 10)),
               ],
             ),
           ],
         ),
+
+        // Streaming Status Indicator
+        if (_controller.currentItem != null) ...[
+          const SizedBox(height: 8),
+          _buildStreamingStatus(),
+        ],
       ],
     );
   }
@@ -261,7 +457,7 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
       child: InkWell(
         onTap: () => setState(() => _currentTabIndex = index),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
             color: isSelected ? Colors.blue : Colors.transparent,
           ),
@@ -500,6 +696,18 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
             );
           },
         ),
+
+        const SizedBox(height: 16),
+
+        // Streaming Performance Info
+        if (_controller.currentItem != null) ...[
+          const Text(
+            'Streaming Performance',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          _buildStreamingPerformanceInfo(),
+        ],
       ],
     );
   }
@@ -572,5 +780,169 @@ class _MediaPlayerExamplePageState extends State<MediaPlayerExamplePage> {
       case BoxFit.scaleDown:
         return 'Scale Down';
     }
+  }
+
+  /// Show streaming quality information
+  void _showQualityInfo() {
+    final currentItem = _controller.currentItem;
+    if (currentItem == null) {
+      _showSnackBar('No media loaded');
+      return;
+    }
+
+    final url = currentItem.url.toLowerCase();
+    String streamType = 'Unknown';
+    String qualityInfo = 'No quality info available';
+
+    if (url.contains('.m3u8')) {
+      streamType = 'HLS (HTTP Live Streaming)';
+      qualityInfo =
+          'Adaptive bitrate streaming with automatic quality switching';
+    } else if (url.contains('.mpd')) {
+      streamType = 'DASH (Dynamic Adaptive Streaming over HTTP)';
+      qualityInfo = 'MPEG-DASH with multiple quality tracks';
+    } else if (url.contains('.mp4') || url.contains('.mov')) {
+      streamType = 'Progressive Download';
+      qualityInfo = 'Single quality, progressive download';
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Streaming Quality Info'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Media: ${currentItem.title}'),
+            const SizedBox(height: 8),
+            Text('Stream Type: $streamType'),
+            const SizedBox(height: 8),
+            Text('Quality: $qualityInfo'),
+            const SizedBox(height: 8),
+            Text('URL: ${currentItem.url}'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Show a snackbar message
+  void _showSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message)),
+      );
+    }
+  }
+
+  /// Build streaming status indicator
+  Widget _buildStreamingStatus() {
+    final currentItem = _controller.currentItem;
+    if (currentItem == null) return const SizedBox.shrink();
+
+    final url = currentItem.url.toLowerCase();
+    String streamType = 'Unknown';
+    Color statusColor = Colors.grey;
+    IconData statusIcon = Icons.help_outline;
+
+    if (url.contains('.m3u8')) {
+      streamType = 'HLS Streaming';
+      statusColor = Colors.blue;
+      statusIcon = Icons.stream;
+    } else if (url.contains('.mpd')) {
+      streamType = 'DASH Streaming';
+      statusColor = Colors.green;
+      statusIcon = Icons.high_quality;
+    } else if (url.contains('.mp4') || url.contains('.mov')) {
+      streamType = 'Progressive Download';
+      statusColor = Colors.orange;
+      statusIcon = Icons.download;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: statusColor.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: statusColor.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(statusIcon, size: 16, color: statusColor),
+          const SizedBox(width: 6),
+          Text(
+            streamType,
+            style: TextStyle(
+              fontSize: 12,
+              color: statusColor,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build streaming performance information
+  Widget _buildStreamingPerformanceInfo() {
+    final currentItem = _controller.currentItem;
+    if (currentItem == null) return const SizedBox.shrink();
+
+    final url = currentItem.url.toLowerCase();
+    final isStreaming = url.contains('.m3u8') || url.contains('.mpd');
+
+    if (!isStreaming) {
+      return const Card(
+        child: Padding(
+          padding: EdgeInsets.all(12),
+          child: Text('Not a streaming source'),
+        ),
+      );
+    }
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  url.contains('.m3u8') ? Icons.stream : Icons.high_quality,
+                  color: url.contains('.m3u8') ? Colors.blue : Colors.green,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  url.contains('.m3u8') ? 'HLS Stream' : 'DASH Stream',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+                'Protocol: ${url.contains('.m3u8') ? 'HTTP Live Streaming' : 'MPEG-DASH'}'),
+            Text('Adaptive Bitrate: Enabled'),
+            Text('Quality Switching: Automatic'),
+            if (url.contains('.m3u8')) ...[
+              Text('Segment Prefetching: Enabled'),
+              Text('Live Stream Support: Available'),
+            ],
+            if (url.contains('.mpd')) ...[
+              Text('MPD Caching: Enabled'),
+              Text('Multiple Quality Tracks: Available'),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }

@@ -56,6 +56,18 @@
       "languageVersion": "3.8"
     },
     {
+      "name": "http",
+      "rootUri": "file:///Users/acheraime/.pub-cache/hosted/pub.dev/http-1.5.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
+      "name": "http_parser",
+      "rootUri": "file:///Users/acheraime/.pub-cache/hosted/pub.dev/http_parser-4.1.2",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
+    },
+    {
       "name": "leak_tracker",
       "rootUri": "file:///Users/acheraime/.pub-cache/hosted/pub.dev/leak_tracker-11.0.1",
       "packageUri": "lib/",
@@ -152,6 +164,12 @@
       "languageVersion": "3.5"
     },
     {
+      "name": "typed_data",
+      "rootUri": "file:///Users/acheraime/.pub-cache/hosted/pub.dev/typed_data-1.4.0",
+      "packageUri": "lib/",
+      "languageVersion": "3.5"
+    },
+    {
       "name": "vector_math",
       "rootUri": "file:///Users/acheraime/.pub-cache/hosted/pub.dev/vector_math-2.2.0",
       "packageUri": "lib/",
@@ -162,6 +180,12 @@
       "rootUri": "file:///Users/acheraime/.pub-cache/hosted/pub.dev/vm_service-15.0.2",
       "packageUri": "lib/",
       "languageVersion": "3.5"
+    },
+    {
+      "name": "web",
+      "rootUri": "file:///Users/acheraime/.pub-cache/hosted/pub.dev/web-1.1.1",
+      "packageUri": "lib/",
+      "languageVersion": "3.4"
     },
     {
       "name": "flutter_media_player",

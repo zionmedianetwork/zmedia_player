@@ -2,7 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/media_controller.dart';
 import '../models/player_state.dart';
+import '../services/subtitle_service.dart';
+import '../services/cache_service.dart';
+import '../core/media_config.dart';
+import '../models/subtitle_track.dart';
 import 'media_controls.dart';
+import 'subtitle_view.dart';
 
 /// Main widget for displaying video content with optional controls
 ///
@@ -93,6 +98,12 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// Current media item ID to track changes
   String? _currentMediaId;
 
+  /// Subtitle service for managing subtitle tracks
+  late final SubtitleService _subtitleService;
+
+  /// Cache service for media caching
+  late final CacheService _cacheService;
+
   /// Keep alive for performance
   @override
   bool get wantKeepAlive => true;
@@ -100,6 +111,11 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   @override
   void initState() {
     super.initState();
+
+    // Initialize services
+    _subtitleService = SubtitleService();
+    _cacheService = CacheService(
+        widget.controller.config?.cacheConfig ?? const CacheConfig());
 
     // Listen to app lifecycle changes
     WidgetsBinding.instance.addObserver(this);
@@ -134,6 +150,10 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     // Clean up observers and listeners
     WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_onControllerChanged);
+
+    // Clean up services
+    _subtitleService.dispose();
+    _cacheService.dispose();
 
     // Clean up native view
     _cleanupNativeView();
@@ -276,11 +296,34 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
           // Video content - ensure it fills the available space
           Positioned.fill(child: content),
 
+          // Subtitle overlay - show when subtitles are enabled
+          if (widget.controller.config?.enableSubtitles == true)
+            _buildSubtitleOverlay(),
+
           // Controls overlay - only show when needed
           if (widget.showControls && widget.controller.controlsVisible)
             Positioned.fill(child: _buildControlsOverlay()),
         ],
       ),
+    );
+  }
+
+  /// Build subtitle overlay
+  Widget _buildSubtitleOverlay() {
+    if (widget.controller.currentItem == null) {
+      return const SizedBox.shrink();
+    }
+
+    return SubtitleView(
+      subtitleService: _subtitleService,
+      position: widget.controller.state.position,
+      config:
+          widget.controller.config?.subtitleConfig ?? const SubtitleConfig(),
+      enabled: widget.controller.config?.enableSubtitles ?? true,
+      onTrackChanged: (track) {
+        // Handle subtitle track change
+        debugPrint('Subtitle track changed to: ${track.title}');
+      },
     );
   }
 

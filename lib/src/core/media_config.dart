@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/drm_config.dart';
 import '../models/subtitle_track.dart';
+import '../models/streaming_config.dart';
 
 /// Configuration class for the media player
 class MediaConfig {
@@ -55,6 +56,15 @@ class MediaConfig {
   /// Buffer configuration
   final BufferConfig? bufferConfig;
 
+  /// HLS configuration
+  final HlsConfig? hlsConfig;
+
+  /// DASH configuration
+  final DashConfig? dashConfig;
+
+  /// Whether to enable subtitles by default
+  final bool enableSubtitles;
+
   const MediaConfig({
     this.autoPlay = false,
     this.looping = false,
@@ -73,6 +83,9 @@ class MediaConfig {
     this.allowBackgroundPlayback = false,
     this.useHardwareAcceleration = true,
     this.bufferConfig,
+    this.hlsConfig,
+    this.dashConfig,
+    this.enableSubtitles = true,
   });
 
   /// Creates a copy of this config with updated values
@@ -94,6 +107,9 @@ class MediaConfig {
     bool? allowBackgroundPlayback,
     bool? useHardwareAcceleration,
     BufferConfig? bufferConfig,
+    HlsConfig? hlsConfig,
+    DashConfig? dashConfig,
+    bool? enableSubtitles,
   }) {
     return MediaConfig(
       autoPlay: autoPlay ?? this.autoPlay,
@@ -115,6 +131,9 @@ class MediaConfig {
       useHardwareAcceleration:
           useHardwareAcceleration ?? this.useHardwareAcceleration,
       bufferConfig: bufferConfig ?? this.bufferConfig,
+      hlsConfig: hlsConfig ?? this.hlsConfig,
+      dashConfig: dashConfig ?? this.dashConfig,
+      enableSubtitles: enableSubtitles ?? this.enableSubtitles,
     );
   }
 
