@@ -31,18 +31,24 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         containerView.layer.addSublayer(playerLayer)
         playerLayer.videoGravity = .resizeAspect
         
-        // Ensure the player layer is visible
+        // Configure layer for proper video rendering
         playerLayer.isHidden = false
         playerLayer.opacity = 1.0
+        playerLayer.backgroundColor = UIColor.black.cgColor
+        playerLayer.needsDisplayOnBoundsChange = true
+        playerLayer.contentsGravity = .resizeAspect
         
         // Set initial frame
         playerLayer.frame = containerView.bounds
         
         // Force a redraw
         playerLayer.setNeedsDisplay()
+        playerLayer.setNeedsLayout()
         
         // Add KVO observer safely
         addBoundsObserver()
+        
+        print("MediaPlayerView.setupPlayerLayer(): Layer configured - frame: \(playerLayer.frame), player: \(player != nil)")
     }
     
     private func addBoundsObserver() {
@@ -166,7 +172,7 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
     }
     
     func updatePlayer(_ newPlayer: AVPlayer?) {
-        print("MediaPlayerView: updatePlayer called with player: \(newPlayer != nil)")
+        print("MediaPlayerView: updatePlayer called with player: \(newPlayer != nil), has current item: \(newPlayer?.currentItem != nil)")
         
         // Update on main thread to ensure UI consistency
         DispatchQueue.main.async { [weak self] in
@@ -176,22 +182,45 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
             self.player = newPlayer
             
             if let player = newPlayer {
-                print("MediaPlayerView: Setting player and configuring layer")
+                print("MediaPlayerView: Setting player and configuring layer, frame: \(self.containerView.bounds)")
                 
                 // Ensure the player layer is visible and properly configured
                 self.playerLayer.isHidden = false
                 self.playerLayer.opacity = 1.0
+                self.playerLayer.backgroundColor = UIColor.black.cgColor
+                
+                // Update frame immediately
+                self.updatePlayerLayerFrame()
                 
                 // Force a redraw of the layer
                 self.playerLayer.setNeedsDisplay()
+                self.playerLayer.setNeedsLayout()
                 
-                // Ensure proper frame
-                self.updatePlayerLayerFrame()
+                // Force container view to layout
+                self.containerView.setNeedsLayout()
+                self.containerView.layoutIfNeeded()
                 
-                // Add a small delay and force another redraw to ensure visibility
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                // Multiple redraws with delays to ensure the video surface is ready
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+                    guard let self = self else { return }
                     self.playerLayer.setNeedsDisplay()
                     self.updatePlayerLayerFrame()
+                    print("MediaPlayerView: First redraw, frame: \(self.playerLayer.frame)")
+                }
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+                    guard let self = self else { return }
+                    self.playerLayer.setNeedsDisplay()
+                    self.updatePlayerLayerFrame()
+                    self.containerView.layoutIfNeeded()
+                    print("MediaPlayerView: Second redraw, frame: \(self.playerLayer.frame), player item: \(player.currentItem != nil)")
+                }
+                
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    guard let self = self else { return }
+                    self.playerLayer.setNeedsDisplay()
+                    self.updatePlayerLayerFrame()
+                    print("MediaPlayerView: Final redraw, frame: \(self.playerLayer.frame)")
                 }
             } else {
                 print("MediaPlayerView: Player set to nil")

@@ -198,6 +198,8 @@ class MediaPlayerInstance: NSObject {
             return
         }
         
+        print("MediaPlayerInstance.loadMediaItem(): Loading URL: \(urlString)")
+        
         // Create AVURLAsset with custom headers if provided
         var asset: AVURLAsset
         if let httpHeaders = mediaItem["httpHeaders"] as? [String: String] {
@@ -212,14 +214,27 @@ class MediaPlayerInstance: NSObject {
         // Add observer for duration
         playerItem.addObserver(self, forKeyPath: "duration", options: [.new], context: nil)
         
-        avPlayer?.replaceCurrentItem(with: playerItem)
-        
-        // Update the player view if it exists
-        playerView?.updatePlayer(avPlayer)
-        
-        // Auto play if configured
-        if config?["autoPlay"] as? Bool == true {
-            avPlayer?.play()
+        // Ensure we're on main thread for player operations
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            
+            self.avPlayer?.replaceCurrentItem(with: playerItem)
+            
+            print("MediaPlayerInstance.loadMediaItem(): Item replaced, player: \(self.avPlayer != nil)")
+            
+            // Force update the player view with the current player
+            if let playerView = self.playerView {
+                print("MediaPlayerInstance.loadMediaItem(): Updating existing player view")
+                playerView.updatePlayer(self.avPlayer)
+            } else {
+                print("MediaPlayerInstance.loadMediaItem(): No player view exists yet")
+            }
+            
+            // Auto play if configured
+            if self.config?["autoPlay"] as? Bool == true {
+                print("MediaPlayerInstance.loadMediaItem(): Auto-playing")
+                self.avPlayer?.play()
+            }
         }
     }
     
@@ -289,11 +304,19 @@ class MediaPlayerInstance: NSObject {
     
     func getPlayerView() -> MediaPlayerView {
         if playerView == nil {
-            print("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil)")
+            print("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil), has item: \(avPlayer?.currentItem != nil)")
             playerView = MediaPlayerView(player: avPlayer)
+            
+            // If the player already has a current item, ensure the view is updated
+            if avPlayer?.currentItem != nil {
+                print("MediaPlayerInstance.getPlayerView(): Player already has item, forcing update")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.playerView?.updatePlayer(self?.avPlayer)
+                }
+            }
         } else {
             // Ensure the existing player view has the current player
-            print("MediaPlayerInstance.getPlayerView(): Updating existing player view")
+            print("MediaPlayerInstance.getPlayerView(): Updating existing player view, has item: \(avPlayer?.currentItem != nil)")
             playerView?.updatePlayer(avPlayer)
         }
         return playerView!
@@ -345,9 +368,19 @@ class MediaPlayerInstance: NSObject {
         case .unknown:
             notifyStateChanged(state: "idle", isBuffering: false)
         case .readyToPlay:
+            print("MediaPlayerInstance: Player status changed to readyToPlay")
             notifyStateChanged(state: "ready", isBuffering: false)
             notifyDurationChanged()
+            
+            // Force player view to update when ready
+            if let playerView = self.playerView {
+                print("MediaPlayerInstance: Forcing player view update on ready state")
+                DispatchQueue.main.async {
+                    playerView.updatePlayer(self.avPlayer)
+                }
+            }
         case .failed:
+            print("MediaPlayerInstance: Player failed with error: \(avPlayer?.error?.localizedDescription ?? "Unknown")")
             notifyError(error: avPlayer?.error?.localizedDescription ?? "Unknown error")
         @unknown default:
             break
