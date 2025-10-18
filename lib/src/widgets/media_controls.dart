@@ -1326,10 +1326,21 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
   late AnimationController _slideController;
   late Animation<Offset> _slideAnimation;
   bool _isExiting = false;
+  List<DeviceOrientation>? _previousOrientations;
+  SystemUiMode? _previousSystemUiMode;
 
   @override
   void initState() {
     super.initState();
+
+    // Store previous settings - we'll use defaults since we can't retrieve current values
+    _previousOrientations = [
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ];
+    _previousSystemUiMode = SystemUiMode.edgeToEdge;
 
     // Force landscape orientation for fullscreen
     SystemChrome.setPreferredOrientations([
@@ -1337,8 +1348,8 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
       DeviceOrientation.landscapeRight,
     ]);
 
-    // Hide system UI for immersive experience
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
+    // Hide system UI for truly immersive experience
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
     _slideController = AnimationController(
       duration: const Duration(milliseconds: 300),
@@ -1346,7 +1357,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
     );
 
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, -1),
+      begin: const Offset(0, 1),
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _slideController,
@@ -1358,17 +1369,35 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
 
   @override
   void dispose() {
-    // Restore system UI and orientation
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-
+    // Restore previous settings
+    _restoreSystemSettings();
     _slideController.dispose();
     super.dispose();
+  }
+
+  Future<void> _restoreSystemSettings() async {
+    try {
+      // Restore system UI
+      if (_previousSystemUiMode != null) {
+        await SystemChrome.setEnabledSystemUIMode(_previousSystemUiMode!);
+      } else {
+        await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      }
+
+      // Restore orientations
+      if (_previousOrientations != null && _previousOrientations!.isNotEmpty) {
+        await SystemChrome.setPreferredOrientations(_previousOrientations!);
+      } else {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.portraitUp,
+          DeviceOrientation.portraitDown,
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      }
+    } catch (e) {
+      debugPrint('Error restoring system settings: $e');
+    }
   }
 
   Future<void> _exitFullscreen() async {
@@ -1396,20 +1425,23 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
           position: _slideAnimation,
           child: Stack(
             children: [
-              // Fullscreen video player
+              // Fullscreen video player - truly fullscreen
               Positioned.fill(
-                child: MediaPlayerWidget(
-                  controller: widget.controller,
-                  showControls: true,
-                  expandToFill: true,
-                  backgroundColor: Colors.black,
-                  onTap: () {
-                    widget.controller.toggleControls();
-                  },
-                  onDoubleTap: () {
-                    widget.controller.togglePlayPause();
-                    HapticFeedback.mediumImpact();
-                  },
+                child: Container(
+                  color: Colors.black,
+                  child: MediaPlayerWidget(
+                    controller: widget.controller,
+                    showControls: true,
+                    expandToFill: true,
+                    backgroundColor: Colors.black,
+                    onTap: () {
+                      widget.controller.toggleControls();
+                    },
+                    onDoubleTap: () {
+                      widget.controller.togglePlayPause();
+                      HapticFeedback.mediumImpact();
+                    },
+                  ),
                 ),
               ),
 

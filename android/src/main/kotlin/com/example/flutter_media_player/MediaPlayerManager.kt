@@ -271,13 +271,14 @@ class MediaPlayerInstance(
     }
 
     fun setBoxFit(boxFit: String) {
-        val resizeMode = when (boxFit) {
-            "contain" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+        val resizeMode = when (boxFit.lowercase()) {
             "cover" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-            "fitWidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
-            "fitHeight" -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
-            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+            "fitwidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_WIDTH
+            "fitheight" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_HEIGHT
+            "none" -> AspectRatioFrameLayout.RESIZE_MODE_NONE
+            "scaledown" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT // "contain" and default
         }
         
         playerView?.setResizeMode(resizeMode)
@@ -304,7 +305,11 @@ class MediaPlayerInstance(
 
     fun getPlayerView(): MediaPlayerView? {
         if (playerView == null) {
+            android.util.Log.d("MediaPlayerInstance", "Creating new player view with player: ${exoPlayer != null}")
             playerView = MediaPlayerView(context, exoPlayer)
+        } else {
+            // Ensure the existing player view has the current player
+            android.util.Log.d("MediaPlayerInstance", "Returning existing player view")
         }
         return playerView
     }

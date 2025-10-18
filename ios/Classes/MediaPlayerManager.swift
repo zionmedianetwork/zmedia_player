@@ -289,7 +289,12 @@ class MediaPlayerInstance: NSObject {
     
     func getPlayerView() -> MediaPlayerView {
         if playerView == nil {
+            print("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil)")
             playerView = MediaPlayerView(player: avPlayer)
+        } else {
+            // Ensure the existing player view has the current player
+            print("MediaPlayerInstance.getPlayerView(): Updating existing player view")
+            playerView?.updatePlayer(avPlayer)
         }
         return playerView!
     }

@@ -104,6 +104,9 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// Cache service for media caching
   late final CacheService _cacheService;
 
+  /// Whether we're currently in fullscreen mode
+  bool _isInFullscreen = false;
+
   /// Keep alive for performance
   @override
   bool get wantKeepAlive => true;
@@ -131,6 +134,25 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     widget.controller.addListener(_onControllerChanged);
   }
 
+  /// Force resize the native view to fix sizing issues
+  void _forceResizeNativeView() {
+    if (!_isDisposed && mounted) {
+      debugPrint('Force resizing native view...');
+      setState(() {
+        // Force a rebuild to ensure proper sizing
+      });
+
+      // Additional resize after a delay to ensure the platform view gets the correct size
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && !_isDisposed) {
+          setState(() {
+            // Final resize to ensure video is properly sized
+          });
+        }
+      });
+    }
+  }
+
   @override
   void didUpdateWidget(MediaPlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -140,6 +162,16 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       oldWidget.controller.removeListener(_onControllerChanged);
       widget.controller.addListener(_onControllerChanged);
       _refreshVideoSurface();
+    }
+
+    // Force resize if we detect potential sizing issues
+    if (oldWidget.key != widget.key) {
+      debugPrint('Widget key changed, forcing resize...');
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_isDisposed && mounted) {
+          _forceResizeNativeView();
+        }
+      });
     }
   }
 
@@ -181,12 +213,8 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       }
     }
 
-    // Update UI state if mounted
-    if (mounted && !_isDisposed) {
-      setState(() {
-        // State updated
-      });
-    }
+    // Don't force rebuild here - let the native view creation handle it
+    // This prevents race conditions between media loading and UI updates
   }
 
   void _refreshVideoSurface() {
@@ -236,6 +264,19 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   @override
   Widget build(BuildContext context) {
     super.build(context); // Required for AutomaticKeepAliveClientMixin
+
+    // Listen to orientation changes for responsive behavior
+    final orientation = MediaQuery.of(context).orientation;
+    final isLandscape = orientation == Orientation.landscape;
+
+    // In landscape mode, prioritize video display
+    if (isLandscape && widget.expandToFill) {
+      return Container(
+        color: widget.backgroundColor,
+        child: _buildPlayerContent(),
+      );
+    }
+
     return _buildPlayerContent();
   }
 
@@ -399,6 +440,9 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
         return;
       }
 
+      // Add a small delay to ensure media is properly loaded
+      await Future.delayed(const Duration(milliseconds: 100));
+
       debugPrint('Creating platform view for media: ${currentItem.title}');
 
       // Create platform-specific video surface
@@ -491,10 +535,19 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     // Platform view is ready - trigger a rebuild to ensure it's displayed
     if (mounted && !_isDisposed) {
       // Add a small delay to ensure the platform view is fully initialized
-      Future.delayed(const Duration(milliseconds: 100), () {
+      Future.delayed(const Duration(milliseconds: 150), () {
         if (mounted && !_isDisposed) {
           setState(() {
             // Force a rebuild to ensure the native view is displayed
+          });
+
+          // Additional delay and rebuild to ensure visibility
+          Future.delayed(const Duration(milliseconds: 200), () {
+            if (mounted && !_isDisposed) {
+              setState(() {
+                // Final rebuild to ensure video is visible
+              });
+            }
           });
         }
       });
@@ -682,6 +735,21 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     }
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // Check if we're returning from fullscreen and refresh video surface
+    if (!_isDisposed && mounted) {
+      // Small delay to ensure we're back from fullscreen
+      Future.delayed(const Duration(milliseconds: 50), () {
+        if (mounted && !_isDisposed) {
+          refreshVideoSurface();
+        }
+      });
+    }
+  }
+
   double _getVideoAspectRatio() {
     // Try to get actual video aspect ratio from controller state
     try {
@@ -733,6 +801,60 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       debugPrint('Force recreating native view...');
       _cleanupNativeView();
       _createNativeView();
+    }
+  }
+
+  /// Refresh video surface (useful after returning from fullscreen)
+  void refreshVideoSurface() {
+    if (!_isDisposed && mounted) {
+      debugPrint('Refreshing video surface...');
+      setState(() {
+        // Force rebuild of video surface
+      });
+
+      // Additional refresh after a short delay
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted && !_isDisposed) {
+          setState(() {
+            // Final refresh to ensure video is visible
+          });
+        }
+      });
+    }
+  }
+
+  /// Update box fit for the current video
+  Future<void> updateBoxFit(BoxFit newBoxFit) async {
+    if (_isDisposed || !_hasNativeView) return;
+
+    debugPrint('Updating box fit to: $newBoxFit');
+
+    try {
+      // Update the box fit through the method channel
+      await widget.controller.player.setBoxFit(newBoxFit);
+
+      // Force a refresh of the video surface to apply the new box fit
+      await _forceRefreshVideoSurface();
+    } catch (e) {
+      debugPrint('Error updating box fit: $e');
+    }
+  }
+
+  /// Force refresh video surface to fix black screen issues
+  Future<void> _forceRefreshVideoSurface() async {
+    if (_isDisposed) return;
+
+    debugPrint('Force refreshing video surface...');
+
+    // Clean up existing view
+    _cleanupNativeView();
+
+    // Wait a bit before recreating
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // Recreate if we still have media
+    if (widget.controller.currentItem != null && !_isDisposed) {
+      await _createNativeView();
     }
   }
 }

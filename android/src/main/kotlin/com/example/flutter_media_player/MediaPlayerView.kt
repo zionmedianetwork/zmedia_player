@@ -16,15 +16,50 @@ class MediaPlayerView(
         player = exoPlayer
         useController = false // We handle controls in Flutter
         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        
+        // Ensure view is visible and properly configured
+        setBackgroundColor(android.graphics.Color.BLACK)
+        setKeepScreenOn(true)
+        
+        // Force the video surface to be visible
+        useArtwork = false
+        defaultArtwork = null
+        controllerShowTimeoutMs = 0
+        controllerHideOnTouch = false
+        
+        android.util.Log.d("MediaPlayerView", "PlayerView created with player: ${exoPlayer != null}, isAttached: ${exoPlayer != null}")
+        
+        // Post a delayed task to ensure the surface is created
+        post {
+            android.util.Log.d("MediaPlayerView", "PlayerView posted - requesting layout")
+            requestLayout()
+            invalidate()
+        }
     }
 
-    override fun getView(): View = playerView
+    override fun getView(): View {
+        android.util.Log.d("MediaPlayerView", "getView() called, player attached: ${playerView.player != null}")
+        return playerView
+    }
 
     override fun dispose() {
         playerView.player = null
     }
 
     fun setResizeMode(resizeMode: Int) {
+        playerView.resizeMode = resizeMode
+    }
+
+    fun setResizeModeFromString(boxFit: String) {
+        val resizeMode = when (boxFit.lowercase()) {
+            "cover" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+            "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
+            "fitwidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_WIDTH
+            "fitheight" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_HEIGHT
+            "none" -> AspectRatioFrameLayout.RESIZE_MODE_NONE
+            "scaledown" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
+            else -> AspectRatioFrameLayout.RESIZE_MODE_FIT // "contain" and default
+        }
         playerView.resizeMode = resizeMode
     }
 }

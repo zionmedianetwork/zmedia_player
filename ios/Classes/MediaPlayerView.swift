@@ -73,9 +73,23 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
     }
     
     func view() -> UIView {
-        // Ensure the player layer is properly sized when view is returned
+        // Ensure the player layer is properly sized and visible when view is returned
         DispatchQueue.main.async { [weak self] in
-            self?.updatePlayerLayerFrame()
+            guard let self = self else { return }
+            
+            // Force update of player layer frame
+            self.updatePlayerLayerFrame()
+            
+            // Ensure the layer is visible and force redraw
+            self.playerLayer.isHidden = false
+            self.playerLayer.opacity = 1.0
+            self.playerLayer.setNeedsDisplay()
+            
+            // Force container view layout
+            self.containerView.setNeedsLayout()
+            self.containerView.layoutIfNeeded()
+            
+            print("MediaPlayerView.view(): Frame set to \(self.playerLayer.frame), player: \(self.player != nil)")
         }
         return containerView
     }
@@ -84,11 +98,16 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         // Ensure we're on the main thread for UI operations
         let gravity = videoGravity(from: boxFit)
         
+        print("MediaPlayerView: Setting video gravity to '\(boxFit)' -> \(gravity.rawValue)")
+        
         if Thread.isMainThread {
             playerLayer.videoGravity = gravity
+            // Force a redraw to ensure the change takes effect
+            playerLayer.setNeedsDisplay()
         } else {
             DispatchQueue.main.async { [weak self] in
                 self?.playerLayer.videoGravity = gravity
+                self?.playerLayer.setNeedsDisplay()
             }
         }
     }
@@ -99,10 +118,18 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
             return .resizeAspectFill
         case "fill":
             return .resize
-        case "contain", "fitwidth", "fitheight", "none", "scaledown", "":
+        case "fitwidth":
+            return .resizeAspect
+        case "fitheight":
+            return .resizeAspect
+        case "none":
+            return .resizeAspect
+        case "scaledown":
+            return .resizeAspect
+        case "contain", "":
             return .resizeAspect
         default:
-            print("MediaPlayerView: Unknown boxFit value '\(boxFit)', using default")
+            print("MediaPlayerView: Unknown boxFit value '\(boxFit)', using default .resizeAspect")
             return .resizeAspect
         }
     }
