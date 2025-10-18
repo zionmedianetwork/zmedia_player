@@ -5,6 +5,7 @@ import '../models/media_item.dart';
 import '../models/player_state.dart';
 import '../models/playlist.dart';
 import '../models/subtitle_track.dart';
+import '../models/streaming_config.dart';
 import 'media_config.dart';
 
 /// Main media player controller class
@@ -40,6 +41,10 @@ class MediaPlayer {
       StreamController<double>.broadcast();
   final StreamController<List<SubtitleTrack>> _subtitleTracksController =
       StreamController<List<SubtitleTrack>>.broadcast();
+  final StreamController<List<QualityTrack>> _qualityTracksController =
+      StreamController<List<QualityTrack>>.broadcast();
+  final StreamController<List<AudioTrack>> _audioTracksController =
+      StreamController<List<AudioTrack>>.broadcast();
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
@@ -49,6 +54,18 @@ class MediaPlayer {
 
   /// Currently selected subtitle track
   SubtitleTrack? _selectedSubtitleTrack;
+
+  /// Available quality tracks
+  List<QualityTrack> _qualityTracks = [];
+
+  /// Currently selected quality track
+  QualityTrack? _selectedQualityTrack;
+
+  /// Available audio tracks
+  List<AudioTrack> _audioTracks = [];
+
+  /// Currently selected audio track
+  AudioTrack? _selectedAudioTrack;
 
   /// Timer for position updates
   Timer? _positionTimer;
@@ -145,6 +162,18 @@ class MediaPlayer {
     return _subtitleTracksController.stream;
   }
 
+  /// Stream of quality track updates
+  Stream<List<QualityTrack>> get qualityTracksStream {
+    _throwIfDisposed();
+    return _qualityTracksController.stream;
+  }
+
+  /// Stream of audio track updates
+  Stream<List<AudioTrack>> get audioTracksStream {
+    _throwIfDisposed();
+    return _audioTracksController.stream;
+  }
+
   /// Available subtitle tracks
   List<SubtitleTrack> get subtitleTracks {
     _throwIfDisposed();
@@ -155,6 +184,30 @@ class MediaPlayer {
   SubtitleTrack? get selectedSubtitleTrack {
     _throwIfDisposed();
     return _selectedSubtitleTrack;
+  }
+
+  /// Available quality tracks
+  List<QualityTrack> get qualityTracks {
+    _throwIfDisposed();
+    return List.unmodifiable(_qualityTracks);
+  }
+
+  /// Currently selected quality track
+  QualityTrack? get selectedQualityTrack {
+    _throwIfDisposed();
+    return _selectedQualityTrack;
+  }
+
+  /// Available audio tracks
+  List<AudioTrack> get audioTracks {
+    _throwIfDisposed();
+    return List.unmodifiable(_audioTracks);
+  }
+
+  /// Currently selected audio track
+  AudioTrack? get selectedAudioTrack {
+    _throwIfDisposed();
+    return _selectedAudioTrack;
   }
 
   /// Whether the player is initialized
@@ -400,6 +453,69 @@ class MediaPlayer {
     }
   }
 
+  /// Set quality track
+  Future<void> setQualityTrack(QualityTrack track) async {
+    await _ensureInitialized();
+
+    // Validate track exists in available tracks
+    if (!_qualityTracks.any((t) => t.id == track.id)) {
+      throw MediaPlayerException('Quality track not found: ${track.id}');
+    }
+
+    try {
+      await _channel.invokeMethod('setQualityTrack', {
+        'playerId': playerId,
+        'qualityTrack': _qualityTrackToMap(track),
+      });
+
+      _selectedQualityTrack = track;
+      _updateQualityTracksSelection(track.id);
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to set quality track: ${e.message ?? e.code}');
+    }
+  }
+
+  /// Set audio track
+  Future<void> setAudioTrack(AudioTrack track) async {
+    await _ensureInitialized();
+
+    // Validate track exists in available tracks
+    if (!_audioTracks.any((t) => t.id == track.id)) {
+      throw MediaPlayerException('Audio track not found: ${track.id}');
+    }
+
+    try {
+      await _channel.invokeMethod('setAudioTrack', {
+        'playerId': playerId,
+        'audioTrack': _audioTrackToMap(track),
+      });
+
+      _selectedAudioTrack = track;
+      _updateAudioTracksSelection(track.id);
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to set audio track: ${e.message ?? e.code}');
+    }
+  }
+
+  /// Enable automatic quality selection (adaptive bitrate)
+  Future<void> enableAutoQuality() async {
+    await _ensureInitialized();
+
+    try {
+      await _channel.invokeMethod('enableAutoQuality', {
+        'playerId': playerId,
+      });
+
+      _selectedQualityTrack = null;
+      _updateQualityTracksSelection(null);
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to enable auto quality: ${e.message ?? e.code}');
+    }
+  }
+
   /// Skip to next item in playlist
   Future<void> skipToNext() async {
     _validatePlaylistOperation();
@@ -497,6 +613,8 @@ class MediaPlayer {
       _volumeController.close(),
       _speedController.close(),
       _subtitleTracksController.close(),
+      _qualityTracksController.close(),
+      _audioTracksController.close(),
     ]);
 
     _isInitialized = false;
@@ -526,6 +644,22 @@ class MediaPlayer {
         .map((t) => t.copyWith(isSelected: t.id == selectedId))
         .toList();
     _subtitleTracksController.add(_subtitleTracks);
+  }
+
+  /// Update quality tracks selection state
+  void _updateQualityTracksSelection(String? selectedId) {
+    _qualityTracks = _qualityTracks
+        .map((t) => t.copyWith(isSelected: t.id == selectedId))
+        .toList();
+    _qualityTracksController.add(_qualityTracks);
+  }
+
+  /// Update audio tracks selection state
+  void _updateAudioTracksSelection(String selectedId) {
+    _audioTracks = _audioTracks
+        .map((t) => t.copyWith(isSelected: t.id == selectedId))
+        .toList();
+    _audioTracksController.add(_audioTracks);
   }
 
   /// Throw if disposed
@@ -559,6 +693,12 @@ class MediaPlayer {
           break;
         case 'onSubtitleTracksChanged':
           _handleSubtitleTracksChanged(arguments!);
+          break;
+        case 'onQualityTracksChanged':
+          _handleQualityTracksChanged(arguments!);
+          break;
+        case 'onAudioTracksChanged':
+          _handleAudioTracksChanged(arguments!);
           break;
         case 'onError':
           _handleError(arguments!);
@@ -630,6 +770,44 @@ class MediaPlayer {
       }
     } catch (e) {
       debugPrint('Error processing subtitle tracks: $e');
+    }
+  }
+
+  /// Handle quality tracks change events from platform
+  void _handleQualityTracksChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final tracksData = arguments['tracks'] as List<dynamic>;
+      _qualityTracks = tracksData
+          .cast<Map<dynamic, dynamic>>()
+          .map((data) => _qualityTrackFromMap(Map<String, dynamic>.from(data)))
+          .toList();
+
+      if (!_qualityTracksController.isClosed) {
+        _qualityTracksController.add(_qualityTracks);
+      }
+    } catch (e) {
+      debugPrint('Error processing quality tracks: $e');
+    }
+  }
+
+  /// Handle audio tracks change events from platform
+  void _handleAudioTracksChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final tracksData = arguments['tracks'] as List<dynamic>;
+      _audioTracks = tracksData
+          .cast<Map<dynamic, dynamic>>()
+          .map((data) => _audioTrackFromMap(Map<String, dynamic>.from(data)))
+          .toList();
+
+      if (!_audioTracksController.isClosed) {
+        _audioTracksController.add(_audioTracks);
+      }
+    } catch (e) {
+      debugPrint('Error processing audio tracks: $e');
     }
   }
 
@@ -739,6 +917,64 @@ class MediaPlayer {
       'error' => PlayerState.error,
       _ => PlayerState.idle,
     };
+  }
+
+  /// Convert QualityTrack to Map
+  Map<String, dynamic> _qualityTrackToMap(QualityTrack track) {
+    return {
+      'id': track.id,
+      'name': track.name,
+      'bitrate': track.bitrate,
+      'width': track.width,
+      'height': track.height,
+      'frameRate': track.frameRate,
+      'isSelected': track.isSelected,
+      'isAvailable': track.isAvailable,
+      'codec': track.codec,
+    };
+  }
+
+  /// Convert Map to QualityTrack
+  QualityTrack _qualityTrackFromMap(Map<String, dynamic> map) {
+    return QualityTrack(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      bitrate: map['bitrate'] as int,
+      width: map['width'] as int?,
+      height: map['height'] as int?,
+      frameRate: (map['frameRate'] as num?)?.toDouble(),
+      isSelected: map['isSelected'] as bool? ?? false,
+      isAvailable: map['isAvailable'] as bool? ?? true,
+      codec: map['codec'] as String?,
+    );
+  }
+
+  /// Convert AudioTrack to Map
+  Map<String, dynamic> _audioTrackToMap(AudioTrack track) {
+    return {
+      'id': track.id,
+      'name': track.name,
+      'language': track.language,
+      'isSelected': track.isSelected,
+      'isAvailable': track.isAvailable,
+      'codec': track.codec,
+      'channels': track.channels,
+      'sampleRate': track.sampleRate,
+    };
+  }
+
+  /// Convert Map to AudioTrack
+  AudioTrack _audioTrackFromMap(Map<String, dynamic> map) {
+    return AudioTrack(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      language: map['language'] as String?,
+      isSelected: map['isSelected'] as bool? ?? false,
+      isAvailable: map['isAvailable'] as bool? ?? true,
+      codec: map['codec'] as String?,
+      channels: map['channels'] as int?,
+      sampleRate: map['sampleRate'] as int?,
+    );
   }
 }
 

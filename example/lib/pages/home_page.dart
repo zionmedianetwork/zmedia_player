@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'simple_player_page.dart';
 import 'full_featured_player_page.dart';
 import 'playlist_demo_page.dart';
+import 'streaming_demo_page.dart';
 import 'settings_page.dart';
 
 class HomePage extends StatelessWidget {
@@ -129,6 +130,28 @@ class HomePage extends StatelessWidget {
                   const SizedBox(height: 16),
 
                   _FeatureCard(
+                    icon: Icons.stream,
+                    iconColor: const Color(0xFFF59E0B),
+                    title: 'Streaming Demo (Phase 2)',
+                    description:
+                        'HLS/DASH adaptive streaming with quality selection',
+                    features: const [
+                      'HLS & DASH Support',
+                      'Adaptive Bitrate',
+                      'Quality Selection',
+                      'Offline Download',
+                    ],
+                    badge: 'NEW',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const StreamingDemoPage(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  _FeatureCard(
                     icon: Icons.settings,
                     iconColor: const Color(0xFF14B8A6),
                     title: 'Settings & Configuration',
@@ -237,6 +260,7 @@ class _FeatureCard extends StatelessWidget {
   final String description;
   final List<String> features;
   final VoidCallback onTap;
+  final String? badge;
 
   const _FeatureCard({
     required this.icon,
@@ -245,6 +269,7 @@ class _FeatureCard extends StatelessWidget {
     required this.description,
     required this.features,
     required this.onTap,
+    this.badge,
   });
 
   @override
@@ -277,9 +302,36 @@ class _FeatureCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          title,
-                          style: Theme.of(context).textTheme.titleLarge,
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                title,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                            ),
+                            if (badge != null) ...[
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  badge!,
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                         const SizedBox(height: 4),
                         Text(
@@ -289,6 +341,7 @@ class _FeatureCard extends StatelessWidget {
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Icon(
                     Icons.arrow_forward_ios,
                     size: 16,

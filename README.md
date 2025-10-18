@@ -4,7 +4,7 @@ A comprehensive Flutter media player package with advanced features for video an
 
 ## Features
 
-### Phase 1 (Current) - Core Features
+### Phase 1 (Complete) - Core Features ✅
 - ✅ **Basic Media Playback**: Play, pause, stop, seek operations with volume control
 - ✅ **Cross-Platform Support**: Android (ExoPlayer) and iOS (AVPlayer) implementations
 - ✅ **Flutter Widget Integration**: Easy-to-use widgets with customizable controls
@@ -15,11 +15,14 @@ A comprehensive Flutter media player package with advanced features for video an
 - ✅ **State Management**: Comprehensive state tracking and event streaming
 - ✅ **Error Handling**: Robust error handling and recovery mechanisms
 
-### Phase 2 (Planned) - Streaming & Subtitles
-- 🔄 **HLS/DASH Support**: Adaptive streaming protocols
-- 🔄 **Subtitle Support**: Multiple subtitle formats (SRT, WebVTT, etc.)
-- 🔄 **Alternative Resolution**: Manual quality selection
-- 🔄 **Cache System**: Media caching for offline playback
+### Phase 2 (Complete) - Streaming & Subtitles ✅
+- ✅ **HLS/DASH Support**: Adaptive streaming with automatic quality switching
+- ✅ **Subtitle Support**: Multiple formats (SRT, WebVTT, ASS/SSA, embedded)
+- ✅ **Quality Selection**: Manual and automatic quality/resolution selection
+- ✅ **Cache System**: Progressive download with offline playback support
+- ✅ **Bandwidth Monitoring**: Real-time bandwidth estimation
+- ✅ **Audio Tracks**: Multiple audio language support
+- ✅ **Streaming Service**: Smart quality selection algorithms
 
 ### Phase 3 (Planned) - Advanced Features
 - 🔄 **Notifications**: Media playback notifications with controls
@@ -151,6 +154,122 @@ final controller = MediaController.create(
     },
   ),
 );
+```
+
+### Phase 2 Features - Streaming & Quality Selection
+
+#### HLS/DASH Adaptive Streaming
+
+```dart
+// Configure HLS streaming
+final controller = MediaController.create(
+  config: MediaConfig(
+    hlsConfig: const HlsConfig(
+      enableAdaptiveBitrate: true,
+      bitrateStrategy: BitrateSelectionStrategy.auto,
+      enableSegmentPrefetch: true,
+      maxPrefetchSegments: 3,
+    ),
+  ),
+);
+
+// Load HLS stream
+final hlsVideo = MediaItem(
+  id: 'hls_video',
+  title: 'HLS Stream',
+  url: 'https://example.com/playlist.m3u8',
+  mediaType: MediaType.video,
+);
+
+await controller.load(hlsVideo);
+```
+
+#### Quality Track Selection
+
+```dart
+// Get available quality tracks
+final qualityTracks = controller.player.qualityTracks;
+
+// Manual quality selection
+await controller.player.setQualityTrack(qualityTracks[0]);
+
+// Enable automatic quality (adaptive bitrate)
+await controller.player.enableAutoQuality();
+
+// Listen to quality changes
+controller.player.qualityTracksStream.listen((tracks) {
+  print('Available qualities: ${tracks.length}');
+});
+```
+
+#### Subtitle Support
+
+```dart
+// Configure subtitle styling
+final controller = MediaController.create(
+  config: MediaConfig(
+    subtitleConfig: const SubtitleConfig(
+      fontSize: 18.0,
+      fontColor: 0xFFFFFFFF,
+      backgroundColor: 0x80000000,
+      showOutline: true,
+      verticalPosition: 0.9,
+    ),
+  ),
+);
+
+// Set subtitle track
+await controller.setSubtitleTrack(subtitleTracks[0]);
+
+// Disable subtitles
+await controller.disableSubtitles();
+
+// Cycle through available subtitles
+await controller.cycleSubtitleTrack();
+```
+
+#### Offline Download & Caching
+
+```dart
+// Initialize cache service
+final cacheService = CacheService(
+  const CacheConfig(
+    maxCacheSize: 200 * 1024 * 1024, // 200MB
+    cacheExpiration: Duration(days: 7),
+    enabled: true,
+  ),
+);
+
+// Download with progress tracking
+cacheService.downloadProgressStream.listen((progress) {
+  print('Download: ${progress.formattedProgress}');
+});
+
+await cacheService.downloadAndCache(mediaItem);
+
+// Check if cached
+final isCached = await cacheService.isCached(mediaItem.id);
+```
+
+#### Bandwidth Monitoring
+
+```dart
+// Create streaming service
+final streamingService = StreamingService(
+  const StreamingConfig(
+    enableBandwidthEstimation: true,
+    enableAutoQualitySwitch: true,
+    qualitySwitchThreshold: 0.8,
+  ),
+);
+
+// Monitor bandwidth
+streamingService.bandwidthStream.listen((bandwidth) {
+  print('Bandwidth: ${streamingService.getFormattedBandwidth()}');
+});
+
+// Get recommended quality
+final recommended = streamingService.getRecommendedQuality();
 ```
 
 ## API Reference
