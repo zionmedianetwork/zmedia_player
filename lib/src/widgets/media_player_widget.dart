@@ -346,8 +346,16 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
             _buildSubtitleOverlay(),
 
           // Controls overlay - only show when needed
-          if (widget.showControls && widget.controller.controlsVisible)
-            Positioned.fill(child: _buildControlsOverlay()),
+          // Use ListenableBuilder to rebuild when controls visibility changes
+          ListenableBuilder(
+            listenable: widget.controller,
+            builder: (context, _) {
+              if (widget.showControls && widget.controller.controlsVisible) {
+                return Positioned.fill(child: _buildControlsOverlay());
+              }
+              return const SizedBox.shrink();
+            },
+          ),
         ],
       ),
     );

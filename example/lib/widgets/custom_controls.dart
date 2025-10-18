@@ -20,6 +20,21 @@ class _CustomControlsState extends State<CustomControls> {
   void initState() {
     super.initState();
     _hideControlsAfterDelay();
+    // Listen to controller changes
+    widget.controller.addListener(_onControllerChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
+    super.dispose();
+  }
+
+  void _onControllerChanged() {
+    // Rebuild when controller state changes
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _hideControlsAfterDelay() {

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../models/media_item.dart';
 import '../models/player_state.dart';
@@ -22,7 +21,7 @@ class MediaController extends ChangeNotifier {
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
 
   /// Whether controls are currently visible
-  bool _controlsVisible = true;
+  bool _controlsVisible = false; // Start hidden, show on user interaction
 
   /// Timer for auto-hiding controls
   Timer? _controlsTimer;
@@ -144,7 +143,7 @@ class MediaController extends ChangeNotifier {
 
     try {
       await _executeOperation(() => _player.load(item));
-      _showControlsTemporarily();
+      // Don't show controls on load - let user interaction trigger them
     } catch (e) {
       debugPrint('MediaController: Error loading media item: $e');
       rethrow;
@@ -158,7 +157,7 @@ class MediaController extends ChangeNotifier {
     try {
       await _executeOperation(
           () => _player.setPlaylist(playlist, startIndex: startIndex));
-      _showControlsTemporarily();
+      // Don't show controls on load - let user interaction trigger them
     } catch (e) {
       debugPrint('MediaController: Error setting playlist: $e');
       rethrow;
@@ -442,7 +441,7 @@ class MediaController extends ChangeNotifier {
     if (_controlsVisible) {
       hideControls();
     } else {
-      showControls();
+      showControlsTemporarily(); // Show with auto-hide
     }
   }
 
@@ -514,10 +513,11 @@ class MediaController extends ChangeNotifier {
     if (_operationInProgress) {
       // Wait a short time for the current operation to complete
       await Future.delayed(const Duration(milliseconds: 100));
-      
+
       // If still in progress, check if it's a critical operation
       if (_operationInProgress) {
-        debugPrint('MediaController: Operation in progress, queuing: ${operation.toString()}');
+        debugPrint(
+            'MediaController: Operation in progress, queuing: ${operation.toString()}');
         // For non-critical operations, just return without throwing
         if (_isNonCriticalOperation(operation)) {
           return Future.value() as T;
@@ -553,9 +553,9 @@ class MediaController extends ChangeNotifier {
     // Volume, speed, and subtitle changes are non-critical
     final operationStr = operation.toString();
     return operationStr.contains('setVolume') ||
-           operationStr.contains('setSpeed') ||
-           operationStr.contains('setSubtitleTrack') ||
-           operationStr.contains('setMuted');
+        operationStr.contains('setSpeed') ||
+        operationStr.contains('setSubtitleTrack') ||
+        operationStr.contains('setMuted');
   }
 
   /// Reset operation state (useful for recovery from stuck operations)
@@ -585,10 +585,11 @@ class MediaController extends ChangeNotifier {
         timer.cancel();
         return;
       }
-      
+
       // If an operation has been in progress for more than 5 seconds, reset it
       if (_operationInProgress) {
-        debugPrint('MediaController: Operation state monitor detected stuck operation, resetting');
+        debugPrint(
+            'MediaController: Operation state monitor detected stuck operation, resetting');
         _resetOperationState();
       }
     });
