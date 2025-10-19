@@ -173,7 +173,7 @@ await controller.load(drmItem);
 
 **Status:** ✅ Complete and up-to-date  
 **Last Updated:** October 19, 2025  
-**Version:** 1.0.0
+**Version:** 0.1.0
 
 ### Coverage
 - ✅ All features documented

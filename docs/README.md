@@ -111,7 +111,7 @@ ZMedia Player is a production-ready Flutter media player package that provides:
 
 ## 🚀 Project Status
 
-**Version:** 1.0.0  
+**Version:** 0.1.0  
 **Status:** ✅ **Production Ready**  
 **Test Coverage:** 113/113 tests passing (100%)  
 **Completion Date:** October 19, 2025
@@ -259,7 +259,7 @@ This project is licensed under the MIT License - see the [LICENSE](../LICENSE) f
 
 **Project:** ZMedia Player  
 **Organization:** Zion Media Network  
-**Version:** 1.0.0  
+**Version:** 0.1.0  
 **Last Updated:** October 19, 2025  
 **Status:** ✅ Production Ready
 

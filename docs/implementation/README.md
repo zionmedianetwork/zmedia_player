@@ -206,6 +206,6 @@ flutter run
 
 ---
 
-**Version:** 1.0.0  
+**Version:** 0.1.0  
 **Last Updated:** October 19, 2025
 

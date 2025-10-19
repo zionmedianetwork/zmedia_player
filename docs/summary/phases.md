@@ -366,5 +366,5 @@ The ZMedia Player project successfully completed all four phases, delivering a p
 ---
 
 **Last Updated:** October 19, 2025  
-**Version:** 1.0.0
+**Version:** 0.1.0
 
