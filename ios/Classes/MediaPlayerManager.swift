@@ -132,6 +132,21 @@ class MediaPlayerManager {
         return players[playerId]?.getPlayerView()
     }
     
+    // Phase 3: Helper methods for PiP and AirPlay handlers
+    func getPlayer(playerId: String) throws -> AVPlayer? {
+        guard let playerInstance = players[playerId] else {
+            throw MediaPlayerError.playerNotFound
+        }
+        return playerInstance.getAVPlayer()
+    }
+    
+    func getPlayerLayer(playerId: String) throws -> AVPlayerLayer? {
+        guard let playerView = players[playerId]?.getPlayerView() else {
+            throw MediaPlayerError.playerNotFound
+        }
+        return playerView.playerLayer
+    }
+    
     func disposePlayer(playerId: String) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
@@ -363,6 +378,11 @@ class MediaPlayerInstance: NSObject {
             playerView?.updatePlayer(avPlayer)
         }
         return playerView!
+    }
+    
+    // Phase 3: Helper to expose AVPlayer for PiP and AirPlay
+    func getAVPlayer() -> AVPlayer? {
+        return avPlayer
     }
     
     func dispose() {

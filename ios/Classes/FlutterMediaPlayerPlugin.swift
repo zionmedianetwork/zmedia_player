@@ -4,12 +4,19 @@ import AVFoundation
 
 public class FlutterMediaPlayerPlugin: NSObject, FlutterPlugin {
     private var playerManager: MediaPlayerManager!
+    private var methodChannel: FlutterMethodChannel!
+    
+    // Phase 3: Handler maps
+    private var notificationHandlers: [String: NotificationHandler] = [:]
+    private var pipHandlers: [String: PipHandler] = [:]
+    private var airPlayHandlers: [String: AirPlayHandler] = [:]
     
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "flutter_media_player", binaryMessenger: registrar.messenger())
         let instance = FlutterMediaPlayerPlugin()
         
         // Initialize player manager
+        instance.methodChannel = channel
         instance.playerManager = MediaPlayerManager(methodChannel: channel)
         
         registrar.addMethodCallDelegate(instance, channel: channel)
@@ -59,6 +66,49 @@ public class FlutterMediaPlayerPlugin: NSObject, FlutterPlugin {
             handleUpdateConfig(call, result: result)
         case "dispose":
             handleDispose(call, result: result)
+            
+        // Phase 3: Notification handlers
+        case "initializeNotification":
+            handleInitializeNotification(call, result: result)
+        case "showNotification":
+            handleShowNotification(call, result: result)
+        case "updateNotificationState":
+            handleUpdateNotificationState(call, result: result)
+        case "updateNotificationPosition":
+            handleUpdateNotificationPosition(call, result: result)
+        case "dismissNotification":
+            handleDismissNotification(call, result: result)
+            
+        // Phase 3: PiP handlers
+        case "checkPipAvailability":
+            handleCheckPipAvailability(call, result: result)
+        case "enterPictureInPicture":
+            handleEnterPictureInPicture(call, result: result)
+        case "exitPictureInPicture":
+            handleExitPictureInPicture(call, result: result)
+            
+        // Phase 3: Cast/AirPlay handlers
+        case "initializeCast":
+            handleInitializeCast(call, result: result)
+        case "startCastDiscovery":
+            handleStartCastDiscovery(call, result: result)
+        case "stopCastDiscovery":
+            handleStopCastDiscovery(call, result: result)
+        case "connectToCastDevice":
+            handleConnectToCastDevice(call, result: result)
+        case "disconnectFromCastDevice":
+            handleDisconnectFromCastDevice(call, result: result)
+        case "loadMediaOnCastDevice":
+            handleLoadMediaOnCastDevice(call, result: result)
+        case "castPlay":
+            handleCastPlay(call, result: result)
+        case "castPause":
+            handleCastPause(call, result: result)
+        case "castSeekTo":
+            handleCastSeekTo(call, result: result)
+        case "castSetVolume":
+            handleCastSetVolume(call, result: result)
+            
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -343,11 +393,344 @@ public class FlutterMediaPlayerPlugin: NSObject, FlutterPlugin {
             return
         }
         
+        // Dispose Phase 3 handlers
+        notificationHandlers[playerId]?.dispose()
+        notificationHandlers.removeValue(forKey: playerId)
+        
+        pipHandlers[playerId]?.dispose()
+        pipHandlers.removeValue(forKey: playerId)
+        
+        airPlayHandlers[playerId]?.dispose()
+        airPlayHandlers.removeValue(forKey: playerId)
+        
         do {
             try playerManager.disposePlayer(playerId: playerId)
             result(nil)
         } catch {
             result(FlutterError(code: "DISPOSE_ERROR", message: error.localizedDescription, details: nil))
         }
+    }
+    
+    // MARK: - Phase 3: Notification Handlers
+    
+    private func handleInitializeNotification(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let config = args["config"] as? [String: Any] else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and config are required", details: nil))
+            return
+        }
+        
+        let handler = NotificationHandler(playerId: playerId, channel: methodChannel)
+        handler.initialize(config: config)
+        notificationHandlers[playerId] = handler
+        
+        result(nil)
+    }
+    
+    private func handleShowNotification(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let mediaItem = args["mediaItem"] as? [String: Any],
+              let state = args["state"] as? [String: Any] else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID, media item, and state are required", details: nil))
+            return
+        }
+        
+        guard let handler = notificationHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "Notification handler not initialized", details: nil))
+            return
+        }
+        
+        handler.showNotification(mediaItem: mediaItem, state: state)
+        result(nil)
+    }
+    
+    private func handleUpdateNotificationState(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let state = args["state"] as? [String: Any] else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and state are required", details: nil))
+            return
+        }
+        
+        guard let handler = notificationHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "Notification handler not initialized", details: nil))
+            return
+        }
+        
+        handler.updateState(state: state)
+        result(nil)
+    }
+    
+    private func handleUpdateNotificationPosition(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let position = args["position"] as? Int64 else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and position are required", details: nil))
+            return
+        }
+        
+        guard let handler = notificationHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "Notification handler not initialized", details: nil))
+            return
+        }
+        
+        handler.updatePosition(position: position)
+        result(nil)
+    }
+    
+    private func handleDismissNotification(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        guard let handler = notificationHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "Notification handler not initialized", details: nil))
+            return
+        }
+        
+        handler.dismiss()
+        result(nil)
+    }
+    
+    // MARK: - Phase 3: PiP Handlers
+    
+    private func handleCheckPipAvailability(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        // Get or create PiP handler
+        var handler = pipHandlers[playerId]
+        if handler == nil {
+            handler = PipHandler(playerId: playerId, channel: methodChannel)
+            pipHandlers[playerId] = handler
+            
+            // Get player and player layer from manager
+            if let player = try? playerManager.getPlayer(playerId: playerId),
+               let playerLayer = try? playerManager.getPlayerLayer(playerId: playerId) {
+                handler?.initialize(player: player, playerLayer: playerLayer)
+            }
+        }
+        
+        let isAvailable = handler?.checkAvailability() ?? false
+        result(isAvailable)
+    }
+    
+    private func handleEnterPictureInPicture(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        let config = args["config"] as? [String: Any]
+        
+        // Get or create PiP handler
+        var handler = pipHandlers[playerId]
+        if handler == nil {
+            handler = PipHandler(playerId: playerId, channel: methodChannel)
+            pipHandlers[playerId] = handler
+            
+            // Get player and player layer from manager
+            if let player = try? playerManager.getPlayer(playerId: playerId),
+               let playerLayer = try? playerManager.getPlayerLayer(playerId: playerId) {
+                handler?.initialize(player: player, playerLayer: playerLayer)
+            }
+        }
+        
+        let success = handler?.enterPip(config: config) ?? false
+        result(success)
+    }
+    
+    private func handleExitPictureInPicture(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        guard let handler = pipHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "PiP handler not initialized", details: nil))
+            return
+        }
+        
+        handler.exitPip()
+        result(nil)
+    }
+    
+    // MARK: - Phase 3: Cast/AirPlay Handlers
+    
+    private func handleInitializeCast(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let config = args["config"] as? [String: Any] else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and config are required", details: nil))
+            return
+        }
+        
+        let handler = AirPlayHandler(playerId: playerId, channel: methodChannel)
+        
+        // Get player from manager
+        if let player = try? playerManager.getPlayer(playerId: playerId),
+           let playerLayer = try? playerManager.getPlayerLayer(playerId: playerId) {
+            handler.initialize(config: config, player: player)
+        }
+        
+        airPlayHandlers[playerId] = handler
+        result(nil)
+    }
+    
+    private func handleStartCastDiscovery(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        handler.startDiscovery()
+        result(nil)
+    }
+    
+    private func handleStopCastDiscovery(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        handler.stopDiscovery()
+        result(nil)
+    }
+    
+    private func handleConnectToCastDevice(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let deviceId = args["deviceId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and device ID are required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        let success = handler.connect(deviceId: deviceId)
+        result(success)
+    }
+    
+    private func handleDisconnectFromCastDevice(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        handler.disconnect()
+        result(nil)
+    }
+    
+    private func handleLoadMediaOnCastDevice(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let mediaItem = args["mediaItem"] as? [String: Any] else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and media item are required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        handler.loadMedia(mediaItem: mediaItem)
+        result(nil)
+    }
+    
+    private func handleCastPlay(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        handler.play()
+        result(nil)
+    }
+    
+    private func handleCastPause(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        handler.pause()
+        result(nil)
+    }
+    
+    private func handleCastSeekTo(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let position = args["position"] as? Int64 else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and position are required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        handler.seekTo(position: position)
+        result(nil)
+    }
+    
+    private func handleCastSetVolume(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let volume = args["volume"] as? Double else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and volume are required", details: nil))
+            return
+        }
+        
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+        
+        handler.setVolume(volume: volume)
+        result(nil)
     }
 }

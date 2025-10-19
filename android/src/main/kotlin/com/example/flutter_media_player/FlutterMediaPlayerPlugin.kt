@@ -16,6 +16,11 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
     private lateinit var playerManager: MediaPlayerManager
+    
+    // Phase 3: Handler maps
+    private val notificationHandlers = mutableMapOf<String, NotificationHandler>()
+    private val pipHandlers = mutableMapOf<String, PipHandler>()
+    private val castHandlers = mutableMapOf<String, CastHandler>()
 
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
@@ -54,6 +59,31 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
             "skipToIndex" -> handleSkipToIndex(call, result)
             "updateConfig" -> handleUpdateConfig(call, result)
             "dispose" -> handleDispose(call, result)
+            
+            // Phase 3: Notification methods
+            "initializeNotification" -> handleInitializeNotification(call, result)
+            "showNotification" -> handleShowNotification(call, result)
+            "updateNotificationState" -> handleUpdateNotificationState(call, result)
+            "updateNotificationPosition" -> handleUpdateNotificationPosition(call, result)
+            "dismissNotification" -> handleDismissNotification(call, result)
+            
+            // Phase 3: PiP methods
+            "checkPipAvailability" -> handleCheckPipAvailability(call, result)
+            "enterPictureInPicture" -> handleEnterPictureInPicture(call, result)
+            "exitPictureInPicture" -> handleExitPictureInPicture(call, result)
+            
+            // Phase 3: Cast methods
+            "initializeCast" -> handleInitializeCast(call, result)
+            "startCastDiscovery" -> handleStartCastDiscovery(call, result)
+            "stopCastDiscovery" -> handleStopCastDiscovery(call, result)
+            "connectToCastDevice" -> handleConnectToCastDevice(call, result)
+            "disconnectFromCastDevice" -> handleDisconnectFromCastDevice(call, result)
+            "loadMediaOnCastDevice" -> handleLoadMediaOnCastDevice(call, result)
+            "castPlay" -> handleCastPlay(call, result)
+            "castPause" -> handleCastPause(call, result)
+            "castSeekTo" -> handleCastSeekTo(call, result)
+            "castSetVolume" -> handleCastSetVolume(call, result)
+            
             else -> result.notImplemented()
         }
     }
@@ -329,6 +359,10 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
             val playerId = call.argument<String>("playerId")
             if (playerId != null) {
                 playerManager.disposePlayer(playerId)
+                // Also dispose Phase 3 handlers
+                notificationHandlers.remove(playerId)?.dispose()
+                pipHandlers.remove(playerId)?.dispose()
+                castHandlers.remove(playerId)?.dispose()
                 result.success(null)
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID is required", null)
@@ -338,8 +372,343 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
         }
     }
 
+    // Phase 3: Notification method handlers
+    
+    private fun handleInitializeNotification(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val config = call.argument<Map<String, Any>>("config")
+            
+            if (playerId != null && config != null) {
+                val handler = NotificationHandler(context, playerId, channel)
+                handler.initialize(config)
+                notificationHandlers[playerId] = handler
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and config are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_INIT_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleShowNotification(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val mediaItem = call.argument<Map<String, Any>>("mediaItem")
+            val state = call.argument<Map<String, Any>>("state")
+            
+            if (playerId != null && mediaItem != null && state != null) {
+                val handler = notificationHandlers[playerId]
+                if (handler != null) {
+                    handler.showNotification(mediaItem, state)
+                    result.success(null)
+                } else {
+                    result.error("NOT_INITIALIZED", "Notification handler not initialized", null)
+                }
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID, media item and state are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_SHOW_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleUpdateNotificationState(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val state = call.argument<Map<String, Any>>("state")
+            
+            if (playerId != null && state != null) {
+                val handler = notificationHandlers[playerId]
+                handler?.updateState(state)
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and state are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_UPDATE_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleUpdateNotificationPosition(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val position = call.argument<Number>("position")
+            
+            if (playerId != null && position != null) {
+                val handler = notificationHandlers[playerId]
+                handler?.updatePosition(position.toLong())
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and position are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_POSITION_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleDismissNotification(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                val handler = notificationHandlers[playerId]
+                handler?.dismiss()
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("NOTIFICATION_DISMISS_ERROR", e.message, null)
+        }
+    }
+
+    // Phase 3: PiP method handlers
+    
+    private fun handleCheckPipAvailability(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                // Get activity context if available
+                val activity = context as? android.app.Activity
+                val handler = PipHandler(activity, playerId, channel)
+                pipHandlers[playerId] = handler
+                result.success(handler.checkAvailability())
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("PIP_CHECK_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleEnterPictureInPicture(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                val handler = pipHandlers[playerId]
+                if (handler != null) {
+                    val success = handler.enterPip(null)
+                    result.success(success)
+                } else {
+                    // Create handler if not exists
+                    val activity = context as? android.app.Activity
+                    val newHandler = PipHandler(activity, playerId, channel)
+                    pipHandlers[playerId] = newHandler
+                    val success = newHandler.enterPip(null)
+                    result.success(success)
+                }
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("PIP_ENTER_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleExitPictureInPicture(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                val handler = pipHandlers[playerId]
+                handler?.exitPip()
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("PIP_EXIT_ERROR", e.message, null)
+        }
+    }
+
+    // Phase 3: Cast method handlers
+    
+    private fun handleInitializeCast(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val config = call.argument<Map<String, Any>>("config")
+            
+            if (playerId != null && config != null) {
+                val handler = CastHandler(context, playerId, channel)
+                handler.initialize(config)
+                castHandlers[playerId] = handler
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and config are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_INIT_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleStartCastDiscovery(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                val handler = castHandlers[playerId]
+                handler?.startDiscovery()
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_DISCOVERY_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleStopCastDiscovery(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                val handler = castHandlers[playerId]
+                handler?.stopDiscovery()
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_STOP_DISCOVERY_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleConnectToCastDevice(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val deviceId = call.argument<String>("deviceId")
+            
+            if (playerId != null && deviceId != null) {
+                val handler = castHandlers[playerId]
+                if (handler != null) {
+                    val success = handler.connect(deviceId)
+                    result.success(success)
+                } else {
+                    result.error("NOT_INITIALIZED", "Cast handler not initialized", null)
+                }
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and device ID are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_CONNECT_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleDisconnectFromCastDevice(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                val handler = castHandlers[playerId]
+                handler?.disconnect()
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_DISCONNECT_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleLoadMediaOnCastDevice(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val mediaItem = call.argument<Map<String, Any>>("mediaItem")
+            
+            if (playerId != null && mediaItem != null) {
+                val handler = castHandlers[playerId]
+                handler?.loadMedia(mediaItem)
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and media item are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_LOAD_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleCastPlay(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                val handler = castHandlers[playerId]
+                handler?.play()
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_PLAY_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleCastPause(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                val handler = castHandlers[playerId]
+                handler?.pause()
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_PAUSE_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleCastSeekTo(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val position = call.argument<Number>("position")
+            
+            if (playerId != null && position != null) {
+                val handler = castHandlers[playerId]
+                handler?.seekTo(position.toLong())
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and position are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_SEEK_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleCastSetVolume(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val volume = call.argument<Double>("volume")
+            
+            if (playerId != null && volume != null) {
+                val handler = castHandlers[playerId]
+                handler?.setVolume(volume)
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and volume are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("CAST_VOLUME_ERROR", e.message, null)
+        }
+    }
+
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         playerManager.dispose()
+        
+        // Dispose all Phase 3 handlers
+        notificationHandlers.values.forEach { it.dispose() }
+        notificationHandlers.clear()
+        
+        pipHandlers.values.forEach { it.dispose() }
+        pipHandlers.clear()
+        
+        castHandlers.values.forEach { it.dispose() }
+        castHandlers.clear()
     }
 }
