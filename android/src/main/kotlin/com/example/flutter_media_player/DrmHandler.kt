@@ -1,0 +1,311 @@
+package com.example.flutter_media_player
+
+import android.content.Context
+import android.util.Log
+import com.google.android.exoplayer2.C
+import com.google.android.exoplayer2.drm.DefaultDrmSessionManager
+import com.google.android.exoplayer2.drm.DrmSession
+import com.google.android.exoplayer2.drm.FrameworkMediaCrypto
+import com.google.android.exoplayer2.drm.HttpMediaDrmCallback
+import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory
+import com.google.android.exoplayer2.upstream.HttpDataSource
+import com.google.android.exoplayer2.util.Util
+import io.flutter.plugin.common.MethodChannel
+import java.util.UUID
+
+/**
+ * Handles DRM (Digital Rights Management) for media playback
+ * Supports Widevine, PlayReady, and ClearKey DRM schemes for ExoPlayer v2
+ */
+class DrmHandler(
+    private val context: Context,
+    private val playerId: String,
+    private val methodChannel: MethodChannel
+) {
+    companion object {
+        private const val TAG = "DrmHandler"
+        
+        // DRM scheme UUIDs
+        val WIDEVINE_UUID: UUID = C.WIDEVINE_UUID
+        val PLAYREADY_UUID: UUID = C.PLAYREADY_UUID
+        val CLEARKEY_UUID: UUID = C.CLEARKEY_UUID
+        
+        private const val USER_AGENT = "FlutterMediaPlayer"
+    }
+
+    /**
+     * Create DRM session manager for ExoPlayer v2
+     */
+    fun createDrmSessionManager(
+        drmConfig: Map<String, Any>?
+    ): DrmSessionManager<FrameworkMediaCrypto>? {
+        if (drmConfig == null) {
+            return null
+        }
+
+        val scheme = drmConfig["scheme"] as? String ?: "widevine"
+        val licenseUrl = drmConfig["licenseUrl"] as? String
+            ?: run {
+                Log.e(TAG, "License URL is required for DRM")
+                notifyDrmError("License URL is required for DRM")
+                return null
+            }
+
+        val schemeUuid = when (scheme.lowercase()) {
+            "widevine" -> WIDEVINE_UUID
+            "playready" -> PLAYREADY_UUID
+            "clearkey" -> CLEARKEY_UUID
+            else -> {
+                Log.w(TAG, "Unknown DRM scheme: $scheme, defaulting to Widevine")
+                WIDEVINE_UUID
+            }
+        }
+
+        try {
+            // Create HTTP data source factory for license requests
+            val dataSourceFactory = buildHttpDataSourceFactory(drmConfig)
+
+            // Create DRM callback
+            val drmCallback = HttpMediaDrmCallback(licenseUrl, dataSourceFactory)
+
+            // Create DRM session manager
+            val drmSessionManager = DefaultDrmSessionManager.Builder()
+                .setUuidAndExoMediaDrmProvider(
+                    schemeUuid,
+                    FrameworkMediaDrm.DEFAULT_PROVIDER
+                )
+                .setMultiSession(false)
+                .build(drmCallback)
+
+            Log.d(TAG, "DRM session manager created successfully for scheme: $scheme")
+            notifyDrmSessionState("idle")
+            
+            return drmSessionManager
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to create DRM session manager: ${e.message}", e)
+            notifyDrmError("Failed to initialize DRM: ${e.message}")
+            return null
+        }
+    }
+
+    /**
+     * Build HTTP data source factory with custom headers
+     */
+    private fun buildHttpDataSourceFactory(
+        drmConfig: Map<String, Any>
+    ): HttpDataSource.Factory {
+        val userAgent = Util.getUserAgent(context, USER_AGENT)
+        val dataSourceFactory = DefaultHttpDataSourceFactory(userAgent)
+
+        // Add custom headers
+        val headers = drmConfig["headers"] as? Map<String, String>
+        val token = drmConfig["token"] as? String
+
+        val requestHeaders = mutableMapOf<String, String>()
+        headers?.let { requestHeaders.putAll(it) }
+        if (token != null) {
+            requestHeaders["Authorization"] = "Bearer $token"
+        }
+
+        if (requestHeaders.isNotEmpty()) {
+            dataSourceFactory.defaultRequestProperties.set(requestHeaders)
+        }
+
+        return dataSourceFactory
+    }
+
+    /**
+     * Check if Widevine DRM is supported on this device
+     */
+    fun isWidevineSupported(): Boolean {
+        return try {
+            val mediaDrm = FrameworkMediaDrm.newInstance(WIDEVINE_UUID)
+            mediaDrm.release()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Widevine not supported: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Get Widevine security level
+     */
+    fun getWidevineSecurityLevel(): String {
+        return try {
+            val mediaDrm = FrameworkMediaDrm.newInstance(WIDEVINE_UUID)
+            val securityLevel = mediaDrm.getPropertyString("securityLevel")
+            mediaDrm.release()
+            securityLevel ?: "Unknown"
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get security level: ${e.message}")
+            "Unknown"
+        }
+    }
+
+    /**
+     * Check if PlayReady is supported
+     */
+    fun isPlayReadySupported(): Boolean {
+        return try {
+            val mediaDrm = FrameworkMediaDrm.newInstance(PLAYREADY_UUID)
+            mediaDrm.release()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "PlayReady not supported: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Check if ClearKey is supported
+     */
+    fun isClearKeySupported(): Boolean {
+        return try {
+            val mediaDrm = FrameworkMediaDrm.newInstance(CLEARKEY_UUID)
+            mediaDrm.release()
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "ClearKey not supported: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Acquire offline license (placeholder for future implementation)
+     */
+    fun acquireOfflineLicense(
+        drmConfig: Map<String, Any>,
+        callback: (String?, String?) -> Unit
+    ) {
+        // TODO: Implement offline license acquisition
+        // This requires ExoPlayer's OfflineLicenseHelper
+        Log.w(TAG, "Offline license acquisition not yet implemented")
+        callback(null, "Offline licenses not yet implemented")
+    }
+
+    /**
+     * Release offline license (placeholder)
+     */
+    fun releaseOfflineLicense(licenseId: String) {
+        // TODO: Implement offline license release
+        Log.w(TAG, "Offline license release not yet implemented")
+    }
+
+    /**
+     * Renew offline license (placeholder)
+     */
+    fun renewOfflineLicense(licenseId: String) {
+        // TODO: Implement offline license renewal
+        Log.w(TAG, "Offline license renewal not yet implemented")
+    }
+
+    /**
+     * Notify Flutter of DRM errors
+     */
+    private fun notifyDrmError(errorMessage: String) {
+        try {
+            methodChannel.invokeMethod("onDrmError", mapOf(
+                "playerId" to playerId,
+                "error" to errorMessage,
+                "timestamp" to System.currentTimeMillis()
+            ))
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to notify DRM error: ${e.message}")
+        }
+    }
+
+    /**
+     * Notify Flutter of DRM session state changes
+     */
+    fun notifyDrmSessionState(state: String, license: Map<String, Any>? = null) {
+        try {
+            val args = mutableMapOf<String, Any>(
+                "playerId" to playerId,
+                "state" to state,
+                "timestamp" to System.currentTimeMillis()
+            )
+            
+            if (license != null) {
+                args["license"] = license
+            }
+
+            methodChannel.invokeMethod("onDrmSessionChanged", args)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to notify DRM session state: ${e.message}")
+        }
+    }
+
+    /**
+     * Get DRM system info
+     */
+    fun getDrmSystemInfo(): Map<String, Any> {
+        val info = mutableMapOf<String, Any>()
+        
+        info["widevineSupported"] = isWidevineSupported()
+        if (info["widevineSupported"] as Boolean) {
+            info["widevineSecurity"] = getWidevineSecurityLevel()
+        }
+        
+        info["playreadySupported"] = isPlayReadySupported()
+        info["clearkeySupported"] = isClearKeySupported()
+        
+        // Add device info
+        info["deviceManufacturer"] = android.os.Build.MANUFACTURER
+        info["deviceModel"] = android.os.Build.MODEL
+        info["androidVersion"] = android.os.Build.VERSION.SDK_INT
+
+        return info
+    }
+
+    /**
+     * Validate DRM configuration
+     */
+    fun validateDrmConfig(drmConfig: Map<String, Any>): Pair<Boolean, String?> {
+        val scheme = drmConfig["scheme"] as? String
+        if (scheme == null) {
+            return Pair(false, "DRM scheme is required")
+        }
+
+        val licenseUrl = drmConfig["licenseUrl"] as? String
+        if (licenseUrl == null || licenseUrl.isBlank()) {
+            return Pair(false, "License URL is required")
+        }
+
+        // Validate scheme is supported
+        when (scheme.lowercase()) {
+            "widevine" -> {
+                if (!isWidevineSupported()) {
+                    return Pair(false, "Widevine DRM is not supported on this device")
+                }
+            }
+            "playready" -> {
+                if (!isPlayReadySupported()) {
+                    return Pair(false, "PlayReady DRM is not supported on this device")
+                }
+            }
+            "clearkey" -> {
+                if (!isClearKeySupported()) {
+                    return Pair(false, "ClearKey DRM is not supported on this device")
+                }
+            }
+            else -> {
+                return Pair(false, "Unknown DRM scheme: $scheme")
+            }
+        }
+
+        return Pair(true, null)
+    }
+}
+
+/**
+ * Extension to FrameworkMediaDrm for easier instantiation
+ */
+object FrameworkMediaDrm {
+    val DEFAULT_PROVIDER = com.google.android.exoplayer2.drm.FrameworkMediaDrm.DEFAULT_PROVIDER
+
+    fun newInstance(uuid: UUID): com.google.android.exoplayer2.drm.ExoMediaDrm {
+        return com.google.android.exoplayer2.drm.FrameworkMediaDrm.newInstance(uuid)
+    }
+}

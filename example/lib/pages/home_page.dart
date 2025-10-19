@@ -6,6 +6,7 @@ import 'streaming_demo_page.dart';
 import 'notifications_demo_page.dart';
 import 'pip_demo_page.dart';
 import 'casting_demo_page.dart';
+import 'drm_demo_page.dart';
 import 'settings_page.dart';
 
 class HomePage extends StatelessWidget {
@@ -230,6 +231,26 @@ class HomePage extends StatelessWidget {
                       context,
                       MaterialPageRoute(
                         builder: (context) => const CastingDemoPage(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+
+                  _FeatureCard(
+                    icon: Icons.security,
+                    iconColor: const Color(0xFFDC2626),
+                    title: 'DRM Content Protection',
+                    description: 'Play DRM-protected media content',
+                    features: const [
+                      'Widevine (Android)',
+                      'FairPlay (iOS)',
+                      'EZDRM Support',
+                    ],
+                    badge: 'PHASE 4',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const DrmDemoPage(),
                       ),
                     ),
                   ),
