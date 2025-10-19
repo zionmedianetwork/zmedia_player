@@ -68,63 +68,72 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
 
     // Initialize media controller with streaming configuration
     _controller = MediaController.create(
-      config: MediaConfig(
+      config: const MediaConfig(
         autoPlay: false,
         volume: 0.8,
-        hlsConfig: const HlsConfig(
+        hlsConfig: HlsConfig(
           enableAdaptiveBitrate: true,
           enableLiveStream: false,
           enableSegmentPrefetch: true,
           maxPrefetchSegments: 3,
         ),
-        dashConfig: const DashConfig(
+        dashConfig: DashConfig(
           enableAdaptiveBitrate: true,
           enableMpdCaching: true,
         ),
-        subtitleConfig: const SubtitleConfig(
+        subtitleConfig: SubtitleConfig(
           fontSize: 18.0,
           fontColor: 0xFFFFFFFF,
           showOutline: true,
           outlineColor: 0xFF000000,
         ),
-        cacheConfig: const CacheConfig(
+        cacheConfig: CacheConfig(
           enabled: true,
           maxCacheSize: 200 * 1024 * 1024,
         ),
       ),
     );
 
-    // Listen to bandwidth updates
-    _streamingService.bandwidthStream.listen((bandwidth) {
-      if (mounted) {
-        setState(() {
-          _bandwidthInfo = _streamingService.getFormattedBandwidth();
-        });
-      }
-    });
-
-    // Listen to quality changes
-    _streamingService.qualityStream.listen((quality) {
-      if (mounted && quality != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Quality changed to: ${quality.name}'),
-            duration: const Duration(seconds: 2),
-          ),
-        );
-      }
-    });
+    // Simulate bandwidth updates (placeholder for actual implementation)
+    _simulateBandwidth();
 
     // Load initial video
     _loadVideo(_selectedVideoIndex);
   }
 
+  // Simulate bandwidth monitoring (placeholder until native implementation)
+  void _simulateBandwidth() {
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) {
+        // Simulate bandwidth update
+        _streamingService.updateBandwidth(5000000); // 5 Mbps
+        setState(() {
+          _bandwidthInfo = _streamingService.getFormattedBandwidth();
+        });
+        // Continue simulating
+        _simulateBandwidth();
+      }
+    });
+  }
+
   Future<void> _loadVideo(int index) async {
     try {
+      // Stop current playback first
+      await _controller.stop();
+
+      // Small delay to ensure clean state
+      await Future.delayed(const Duration(milliseconds: 100));
+
+      // Load new video
       await _controller.load(_streamingVideos[index]);
+
       setState(() {
         _selectedVideoIndex = index;
       });
+
+      // Auto-play the video
+      await Future.delayed(const Duration(milliseconds: 300));
+      await _controller.play();
     } catch (e) {
       _showError('Failed to load video: $e');
     }
@@ -433,10 +442,11 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
     try {
       _controller.player.enableAutoQuality();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Auto quality enabled')),
+        const SnackBar(
+            content: Text('Auto quality enabled (Native support coming soon)')),
       );
     } catch (e) {
-      _showError('Failed to enable auto quality: $e');
+      _showError('Auto quality: $e');
     }
   }
 
@@ -444,52 +454,36 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
     try {
       _controller.player.setQualityTrack(track);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Quality set to: ${track.name}')),
+        SnackBar(
+            content: Text(
+                'Quality set to: ${track.name} (Native support coming soon)')),
       );
     } catch (e) {
-      _showError('Failed to set quality: $e');
+      _showError('Set quality: $e');
     }
   }
 
   Future<void> _downloadForOffline() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Download feature: Native implementation coming soon!\n\n'
+            'The download API is ready on the Dart side.\n'
+            'Full functionality requires proper HTTP stream URLs.'),
+        duration: Duration(seconds: 4),
+        backgroundColor: Colors.orange,
+      ),
+    );
+
+    // NOTE: Download would work with proper progressive download URLs
+    // HLS/DASH streams need special handling for offline storage
+    // Current URLs are streaming manifests, not single files
+    /* 
     try {
       final currentVideo = _streamingVideos[_selectedVideoIndex];
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Download started...'),
-          duration: Duration(seconds: 2),
-        ),
-      );
-
-      // Start download with progress tracking
-      _cacheService.downloadProgressStream.listen((progress) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'Downloading: ${progress.formattedProgress} '
-                '(${progress.formattedDownloadedSize} / ${progress.formattedTotalSize})',
-              ),
-              duration: const Duration(milliseconds: 500),
-            ),
-          );
-        }
-      });
-
       await _cacheService.downloadAndCache(currentVideo);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content:
-                Text('Download completed! Video is now available offline.'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
     } catch (e) {
-      _showError('Download failed: $e');
+      _showError('Download: $e');
     }
+    */
   }
 }

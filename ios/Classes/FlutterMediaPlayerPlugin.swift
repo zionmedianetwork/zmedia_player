@@ -47,6 +47,12 @@ public class FlutterMediaPlayerPlugin: NSObject, FlutterPlugin {
             handleSetBoxFit(call, result: result)
         case "setSubtitleTrack":
             handleSetSubtitleTrack(call, result: result)
+        case "setQualityTrack":
+            handleSetQualityTrack(call, result: result)
+        case "setAudioTrack":
+            handleSetAudioTrack(call, result: result)
+        case "enableAutoQuality":
+            handleEnableAutoQuality(call, result: result)
         case "skipToIndex":
             handleSkipToIndex(call, result: result)
         case "updateConfig":
@@ -248,6 +254,53 @@ public class FlutterMediaPlayerPlugin: NSObject, FlutterPlugin {
             result(nil)
         } catch {
             result(FlutterError(code: "SUBTITLE_ERROR", message: error.localizedDescription, details: nil))
+        }
+    }
+    
+    private func handleSetQualityTrack(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let qualityTrack = args["qualityTrack"] as? [String: Any] else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and quality track are required", details: nil))
+            return
+        }
+        
+        do {
+            try playerManager.setQualityTrack(playerId: playerId, qualityTrack: qualityTrack)
+            result(nil)
+        } catch {
+            result(FlutterError(code: "QUALITY_ERROR", message: error.localizedDescription, details: nil))
+        }
+    }
+    
+    private func handleSetAudioTrack(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let audioTrack = args["audioTrack"] as? [String: Any] else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and audio track are required", details: nil))
+            return
+        }
+        
+        do {
+            try playerManager.setAudioTrack(playerId: playerId, audioTrack: audioTrack)
+            result(nil)
+        } catch {
+            result(FlutterError(code: "AUDIO_ERROR", message: error.localizedDescription, details: nil))
+        }
+    }
+    
+    private func handleEnableAutoQuality(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+        
+        do {
+            try playerManager.enableAutoQuality(playerId: playerId)
+            result(nil)
+        } catch {
+            result(FlutterError(code: "AUTO_QUALITY_ERROR", message: error.localizedDescription, details: nil))
         }
     }
     

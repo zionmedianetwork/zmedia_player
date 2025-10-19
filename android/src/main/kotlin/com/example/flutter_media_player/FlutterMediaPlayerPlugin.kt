@@ -48,6 +48,9 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
             "setMuted" -> handleSetMuted(call, result)
             "setBoxFit" -> handleSetBoxFit(call, result)
             "setSubtitleTrack" -> handleSetSubtitleTrack(call, result)
+            "setQualityTrack" -> handleSetQualityTrack(call, result)
+            "setAudioTrack" -> handleSetAudioTrack(call, result)
+            "enableAutoQuality" -> handleEnableAutoQuality(call, result)
             "skipToIndex" -> handleSkipToIndex(call, result)
             "updateConfig" -> handleUpdateConfig(call, result)
             "dispose" -> handleDispose(call, result)
@@ -239,6 +242,53 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
             }
         } catch (e: Exception) {
             result.error("SUBTITLE_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleSetQualityTrack(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val qualityTrack = call.argument<Map<String, Any>>("qualityTrack")
+            
+            if (playerId != null && qualityTrack != null) {
+                playerManager.setQualityTrack(playerId, qualityTrack)
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and quality track are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("QUALITY_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleSetAudioTrack(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val audioTrack = call.argument<Map<String, Any>>("audioTrack")
+            
+            if (playerId != null && audioTrack != null) {
+                playerManager.setAudioTrack(playerId, audioTrack)
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and audio track are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("AUDIO_ERROR", e.message, null)
+        }
+    }
+
+    private fun handleEnableAutoQuality(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            
+            if (playerId != null) {
+                playerManager.enableAutoQuality(playerId)
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("AUTO_QUALITY_ERROR", e.message, null)
         }
     }
 

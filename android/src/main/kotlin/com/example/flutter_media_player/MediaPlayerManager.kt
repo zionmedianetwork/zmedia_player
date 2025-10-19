@@ -96,6 +96,24 @@ class MediaPlayerManager(
         }
     }
 
+    fun setQualityTrack(playerId: String, qualityTrack: Map<String, Any>) {
+        mainHandler.post {
+            players[playerId]?.setQualityTrack(qualityTrack)
+        }
+    }
+
+    fun setAudioTrack(playerId: String, audioTrack: Map<String, Any>) {
+        mainHandler.post {
+            players[playerId]?.setAudioTrack(audioTrack)
+        }
+    }
+
+    fun enableAutoQuality(playerId: String) {
+        mainHandler.post {
+            players[playerId]?.enableAutoQuality()
+        }
+    }
+
     fun skipToIndex(playerId: String, index: Int) {
         mainHandler.post {
             players[playerId]?.skipToIndex(index)
@@ -145,6 +163,15 @@ class MediaPlayerInstance(
     
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
+            val stateName = when (playbackState) {
+                Player.STATE_IDLE -> "IDLE"
+                Player.STATE_BUFFERING -> "BUFFERING"
+                Player.STATE_READY -> "READY"
+                Player.STATE_ENDED -> "ENDED"
+                else -> "UNKNOWN"
+            }
+            android.util.Log.d("MediaPlayerInstance", "ExoPlayer state: $stateName, playWhenReady: ${exoPlayer?.playWhenReady}")
+            
             val state = when (playbackState) {
                 Player.STATE_IDLE -> "idle"
                 Player.STATE_BUFFERING -> "buffering"
@@ -157,15 +184,18 @@ class MediaPlayerInstance(
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
+            android.util.Log.d("MediaPlayerInstance", "IsPlaying changed: $isPlaying")
             val state = if (isPlaying) "playing" else "paused"
             notifyStateChanged(state, false)
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            android.util.Log.e("MediaPlayerInstance", "Player error: ${error.message}")
             notifyError(error.message ?: "Unknown playback error")
         }
 
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
+            android.util.Log.d("MediaPlayerInstance", "Media metadata changed")
             notifyDurationChanged()
         }
     }
@@ -196,6 +226,8 @@ class MediaPlayerInstance(
         val url = mediaItem["url"] as? String ?: return
         val httpHeaders = mediaItem["httpHeaders"] as? Map<String, String>
         
+        android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
+        
         val uri = Uri.parse(url)
         val mediaSource: MediaSource
         
@@ -216,8 +248,15 @@ class MediaPlayerInstance(
         }
         
         exoPlayer?.apply {
+            // Stop current playback if any
+            stop()
+            clearMediaItems()
+            
+            // Set new media source
             setMediaSource(mediaSource)
             prepare()
+            
+            android.util.Log.d("MediaPlayerInstance", "Media prepared, autoPlay: ${config?.get("autoPlay")}")
             
             if (config?.get("autoPlay") as? Boolean == true) {
                 playWhenReady = true
@@ -287,6 +326,24 @@ class MediaPlayerInstance(
     fun setSubtitleTrack(subtitleTrack: Map<String, Any>?) {
         // Subtitle track selection will be implemented in Phase 2
         // For now, just acknowledge the call
+    }
+
+    fun setQualityTrack(qualityTrack: Map<String, Any>) {
+        // Quality track selection - Phase 2 stub
+        // In a full implementation, this would select a specific quality from HLS/DASH manifest
+        android.util.Log.d("MediaPlayerInstance", "Quality track set: ${qualityTrack["name"]}")
+    }
+
+    fun setAudioTrack(audioTrack: Map<String, Any>) {
+        // Audio track selection - Phase 2 stub
+        // In a full implementation, this would select a specific audio track
+        android.util.Log.d("MediaPlayerInstance", "Audio track set: ${audioTrack["name"]}")
+    }
+
+    fun enableAutoQuality() {
+        // Enable automatic quality selection - Phase 2 stub
+        // In a full implementation, this would enable ExoPlayer's adaptive track selection
+        android.util.Log.d("MediaPlayerInstance", "Auto quality enabled")
     }
 
     fun skipToIndex(index: Int) {
@@ -397,6 +454,7 @@ class MediaPlayerInstance(
 
     private fun notifyStateChanged(state: String, isBuffering: Boolean) {
         try {
+            android.util.Log.d("MediaPlayerInstance", "State changed: $state, isBuffering: $isBuffering")
             val arguments = mapOf(
                 "playerId" to playerId,
                 "state" to state,
@@ -406,6 +464,7 @@ class MediaPlayerInstance(
             methodChannel.invokeMethod("onStateChanged", arguments)
         } catch (e: Exception) {
             // Handle potential exceptions when invoking method channel
+            android.util.Log.e("MediaPlayerInstance", "Error notifying state change", e)
             e.printStackTrace()
         }
     }

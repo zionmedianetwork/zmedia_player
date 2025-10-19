@@ -93,6 +93,27 @@ class MediaPlayerManager {
         playerInstance.setSubtitleTrack(subtitleTrack: subtitleTrack)
     }
     
+    func setQualityTrack(playerId: String, qualityTrack: [String: Any]) throws {
+        guard let playerInstance = players[playerId] else {
+            throw MediaPlayerError.playerNotFound
+        }
+        playerInstance.setQualityTrack(qualityTrack: qualityTrack)
+    }
+    
+    func setAudioTrack(playerId: String, audioTrack: [String: Any]) throws {
+        guard let playerInstance = players[playerId] else {
+            throw MediaPlayerError.playerNotFound
+        }
+        playerInstance.setAudioTrack(audioTrack: audioTrack)
+    }
+    
+    func enableAutoQuality(playerId: String) throws {
+        guard let playerInstance = players[playerId] else {
+            throw MediaPlayerError.playerNotFound
+        }
+        playerInstance.enableAutoQuality()
+    }
+    
     func skipToIndex(playerId: String, index: Int) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
@@ -287,6 +308,28 @@ class MediaPlayerInstance: NSObject {
     func setSubtitleTrack(subtitleTrack: [String: Any]?) {
         // Subtitle track selection will be implemented in Phase 2
         // For now, just acknowledge the call
+    }
+    
+    func setQualityTrack(qualityTrack: [String: Any]) {
+        // Quality track selection - Phase 2 stub
+        // In a full implementation, this would select a specific quality from HLS manifest
+        if let name = qualityTrack["name"] as? String {
+            print("MediaPlayerInstance: Quality track set: \(name)")
+        }
+    }
+    
+    func setAudioTrack(audioTrack: [String: Any]) {
+        // Audio track selection - Phase 2 stub
+        // In a full implementation, this would select a specific audio track
+        if let name = audioTrack["name"] as? String {
+            print("MediaPlayerInstance: Audio track set: \(name)")
+        }
+    }
+    
+    func enableAutoQuality() {
+        // Enable automatic quality selection - Phase 2 stub
+        // In a full implementation, this would enable AVPlayer's automatic quality selection
+        print("MediaPlayerInstance: Auto quality enabled")
     }
     
     func skipToIndex(index: Int) {
