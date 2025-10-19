@@ -35,8 +35,8 @@ class NotificationService {
         'config': _config.toMap(),
       });
 
-      // Setup method call handler for notification actions
-      _channel.setMethodCallHandler(_handleMethodCall);
+      // Note: Notification action events should be sent directly to the action stream
+      // via native callbacks, not through the main method channel handler
 
       debugPrint('NotificationService: Initialized successfully');
     } catch (e) {
@@ -149,31 +149,6 @@ class NotificationService {
       debugPrint('NotificationService: Notification dismissed');
     } catch (e) {
       debugPrint('NotificationService: Failed to dismiss notification: $e');
-    }
-  }
-
-  /// Handle notification action
-  Future<void> _handleMethodCall(MethodCall call) async {
-    try {
-      switch (call.method) {
-        case 'onNotificationAction':
-          final action = call.arguments['action'] as String;
-          _handleNotificationAction(action);
-          break;
-        default:
-          debugPrint(
-              'NotificationService: Unhandled method call: ${call.method}');
-      }
-    } catch (e) {
-      debugPrint('NotificationService: Error handling method call: $e');
-    }
-  }
-
-  /// Handle a notification action event
-  void _handleNotificationAction(String action) {
-    debugPrint('NotificationService: Action received: $action');
-    if (!_actionController.isClosed) {
-      _actionController.add(action);
     }
   }
 

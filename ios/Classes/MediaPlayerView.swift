@@ -4,7 +4,7 @@ import AVKit
 import Flutter
 
 class MediaPlayerView: NSObject, FlutterPlatformView {
-    private let playerLayer: AVPlayerLayer
+    let playerLayer: AVPlayerLayer
     private let containerView: UIView
     private var isObserving = false
     private var player: AVPlayer? {

@@ -134,8 +134,14 @@ enum CastState {
   /// Successfully connected
   connected,
 
-  /// Connection failed
+  /// Media is actively casting/playing
+  casting,
+
+  /// Connection failed or error occurred
   failed,
+
+  /// Error state (alias concept - use failed in code)
+  error,
 
   /// Disconnecting from device
   disconnecting,
@@ -169,6 +175,9 @@ class CastStatus {
     this.position,
     this.errorMessage,
   });
+
+  /// Convenience getter for connected device (alias for device)
+  CastDevice? get connectedDevice => device;
 
   CastStatus copyWith({
     CastState? state,

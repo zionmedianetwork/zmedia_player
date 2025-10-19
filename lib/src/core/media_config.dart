@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 import '../models/drm_config.dart';
 import '../models/subtitle_track.dart';
 import '../models/streaming_config.dart';
-import '../models/notification_config.dart' as notification;
-import '../models/pip_config.dart' as pip;
+import '../models/notification_config.dart';
+import '../models/pip_config.dart';
 import '../models/cast_device.dart';
 
 /// Configuration class for the media player
@@ -185,87 +185,6 @@ class CacheConfig {
       cacheExpiration: cacheExpiration ?? this.cacheExpiration,
       enabled: enabled ?? this.enabled,
       cacheDirectory: cacheDirectory ?? this.cacheDirectory,
-    );
-  }
-}
-
-/// Configuration for media notifications
-class NotificationConfig {
-  /// Whether to show notifications
-  final bool enabled;
-
-  /// Notification channel name
-  final String channelName;
-
-  /// Notification channel description
-  final String channelDescription;
-
-  /// Whether to show playback controls in notification
-  final bool showControls;
-
-  /// Whether to show progress in notification
-  final bool showProgress;
-
-  const NotificationConfig({
-    this.enabled = true,
-    this.channelName = 'Media Player',
-    this.channelDescription = 'Media playback notifications',
-    this.showControls = true,
-    this.showProgress = true,
-  });
-
-  /// Creates a copy of this notification config with updated values
-  NotificationConfig copyWith({
-    bool? enabled,
-    String? channelName,
-    String? channelDescription,
-    bool? showControls,
-    bool? showProgress,
-  }) {
-    return NotificationConfig(
-      enabled: enabled ?? this.enabled,
-      channelName: channelName ?? this.channelName,
-      channelDescription: channelDescription ?? this.channelDescription,
-      showControls: showControls ?? this.showControls,
-      showProgress: showProgress ?? this.showProgress,
-    );
-  }
-}
-
-/// Configuration for Picture-in-Picture mode
-class PipConfig {
-  /// Whether PiP is enabled
-  final bool enabled;
-
-  /// Whether to automatically enter PiP when app goes to background
-  final bool autoEnterOnBackground;
-
-  /// Aspect ratio for PiP window
-  final double aspectRatio;
-
-  /// Whether to show controls in PiP mode
-  final bool showControls;
-
-  const PipConfig({
-    this.enabled = true,
-    this.autoEnterOnBackground = false,
-    this.aspectRatio = 16 / 9,
-    this.showControls = true,
-  });
-
-  /// Creates a copy of this PiP config with updated values
-  PipConfig copyWith({
-    bool? enabled,
-    bool? autoEnterOnBackground,
-    double? aspectRatio,
-    bool? showControls,
-  }) {
-    return PipConfig(
-      enabled: enabled ?? this.enabled,
-      autoEnterOnBackground:
-          autoEnterOnBackground ?? this.autoEnterOnBackground,
-      aspectRatio: aspectRatio ?? this.aspectRatio,
-      showControls: showControls ?? this.showControls,
     );
   }
 }

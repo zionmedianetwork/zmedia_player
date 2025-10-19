@@ -3,6 +3,9 @@ import 'simple_player_page.dart';
 import 'full_featured_player_page.dart';
 import 'playlist_demo_page.dart';
 import 'streaming_demo_page.dart';
+import 'notifications_demo_page.dart';
+import 'pip_demo_page.dart';
+import 'casting_demo_page.dart';
 import 'settings_page.dart';
 
 class HomePage extends StatelessWidget {
@@ -141,7 +144,7 @@ class HomePage extends StatelessWidget {
                       'Quality Selection',
                       'Offline Download',
                     ],
-                    badge: 'NEW',
+                    badge: 'PHASE 2',
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -149,11 +152,92 @@ class HomePage extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 30),
+
+                  // Phase 3 Section Header
+                  Row(
+                    children: [
+                      const Icon(Icons.auto_awesome,
+                          color: Colors.amber, size: 24),
+                      const SizedBox(width: 10),
+                      Text(
+                        'Phase 3 - Advanced Features',
+                        style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                              color: Colors.amber,
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: 16),
 
                   _FeatureCard(
-                    icon: Icons.settings,
+                    icon: Icons.notifications_active,
+                    iconColor: const Color(0xFF9333EA),
+                    title: 'Notifications Demo',
+                    description:
+                        'Media playback notifications with lock screen controls',
+                    features: const [
+                      'Lock Screen Controls',
+                      'Control Center',
+                      'Background Playback',
+                      'Album Artwork',
+                    ],
+                    badge: 'PHASE 3',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const NotificationsDemoPage(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  _FeatureCard(
+                    icon: Icons.picture_in_picture_alt,
                     iconColor: const Color(0xFF14B8A6),
+                    title: 'Picture-in-Picture',
+                    description: 'Floating video playback on top of other apps',
+                    features: const [
+                      'PiP Mode',
+                      'Auto-enter on Background',
+                      'Custom Aspect Ratio',
+                      'iOS & Android Support',
+                    ],
+                    badge: 'PHASE 3',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const PipDemoPage(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  _FeatureCard(
+                    icon: Icons.cast,
+                    iconColor: const Color(0xFFDB2777),
+                    title: 'Chromecast & AirPlay',
+                    description: 'Stream media to external devices',
+                    features: const [
+                      'Chromecast (Android)',
+                      'AirPlay (iOS)',
+                      'Device Discovery',
+                      'Remote Control',
+                    ],
+                    badge: 'PHASE 3',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const CastingDemoPage(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+
+                  _FeatureCard(
+                    icon: Icons.settings,
+                    iconColor: const Color(0xFF64748B),
                     title: 'Settings & Configuration',
                     description: 'Explore player configuration options',
                     features: const [
@@ -195,12 +279,23 @@ class HomePage extends StatelessWidget {
                             ),
                             const SizedBox(width: 10),
                             Text(
-                              'Phase 1 Features',
+                              'All Features',
                               style: Theme.of(context).textTheme.titleLarge,
                             ),
                           ],
                         ),
                         const SizedBox(height: 20),
+
+                        // Phase 1
+                        Text(
+                          'Phase 1 - Core Features',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.amber[300],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         _FeatureItem(
                           icon: Icons.check_circle,
                           text: 'Cross-Platform (Android & iOS)',
@@ -225,9 +320,71 @@ class HomePage extends StatelessWidget {
                           icon: Icons.check_circle,
                           text: 'Playlist Management',
                         ),
+
+                        const SizedBox(height: 20),
+
+                        // Phase 2
+                        Text(
+                          'Phase 2 - Streaming Features',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange[300],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         _FeatureItem(
                           icon: Icons.check_circle,
-                          text: 'Comprehensive State Management',
+                          text: 'HLS & DASH Streaming',
+                        ),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'Adaptive Bitrate Streaming',
+                        ),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'Quality & Audio Track Selection',
+                        ),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'Subtitle Support (SRT, WebVTT)',
+                        ),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'Offline Caching & Download',
+                        ),
+
+                        const SizedBox(height: 20),
+
+                        // Phase 3
+                        Text(
+                          'Phase 3 - Advanced Features',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.purple[300],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'Media Notifications & Lock Screen',
+                        ),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'Picture-in-Picture Mode',
+                        ),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'Chromecast Support (Android)',
+                        ),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'AirPlay Support (iOS)',
+                        ),
+                        _FeatureItem(
+                          icon: Icons.check_circle,
+                          text: 'Background Playback',
                         ),
                       ],
                     ),

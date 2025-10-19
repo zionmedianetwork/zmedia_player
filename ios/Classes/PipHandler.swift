@@ -298,7 +298,7 @@ extension PipHandler: AVPictureInPictureControllerDelegate {
         )
     }
     
-    func picture(_ pictureInPictureController: AVPictureInPictureController,
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
                 restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
         print("PipHandler: Restore user interface for Picture-in-Picture stop")
         

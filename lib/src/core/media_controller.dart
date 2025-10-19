@@ -4,6 +4,8 @@ import '../models/media_item.dart';
 import '../models/player_state.dart';
 import '../models/playlist.dart';
 import '../models/subtitle_track.dart';
+import '../models/pip_config.dart';
+import '../models/cast_device.dart';
 import 'media_player.dart';
 import 'media_config.dart';
 
@@ -122,6 +124,39 @@ class MediaController extends ChangeNotifier {
       _currentState.state == PlayerState.ready ||
       _currentState.state == PlayerState.playing ||
       _currentState.state == PlayerState.paused;
+
+  // Phase 3: Additional getters
+  /// Player ID
+  String get playerId => _player.playerId;
+
+  /// Whether the player is initialized
+  bool get isInitialized => _player.isInitialized;
+
+  // Phase 3: PiP getters
+  /// Stream of PiP status changes
+  Stream<PipStatus> get pipStatusStream => _player.pipStatusStream;
+
+  /// Current PiP status
+  PipStatus get pipStatus => _player.pipStatus;
+
+  /// Whether PiP is available on this device
+  bool get isPipAvailable => _player.isPipAvailable;
+
+  /// Whether currently in PiP mode
+  bool get isInPipMode => _player.isInPipMode;
+
+  // Phase 3: Cast getters
+  /// Stream of cast status changes
+  Stream<CastStatus> get castStatusStream => _player.castStatusStream;
+
+  /// Current cast status
+  CastStatus get castStatus => _player.castStatus;
+
+  /// Whether casting is available
+  bool get isCastAvailable => _player.isCastAvailable;
+
+  /// Whether currently casting
+  bool get isCasting => _player.isCasting;
 
   /// Initialize the controller and underlying player
   Future<void> initialize() async {
@@ -728,6 +763,43 @@ class MediaController extends ChangeNotifier {
   void _cancelControlsTimer() {
     _controlsTimer?.cancel();
     _controlsTimer = null;
+  }
+
+  // Phase 3: PiP methods
+  /// Check if Picture-in-Picture is available
+  Future<bool> checkPipAvailability() async {
+    return await _player.checkPipAvailability();
+  }
+
+  /// Enter Picture-in-Picture mode
+  Future<void> enterPictureInPicture() async {
+    await _player.enterPictureInPicture();
+  }
+
+  /// Exit Picture-in-Picture mode
+  Future<void> exitPictureInPicture() async {
+    await _player.exitPictureInPicture();
+  }
+
+  // Phase 3: Cast methods
+  /// Start discovering cast devices
+  Future<void> startCastDiscovery() async {
+    await _player.startCastDiscovery();
+  }
+
+  /// Stop discovering cast devices
+  Future<void> stopCastDiscovery() async {
+    await _player.stopCastDiscovery();
+  }
+
+  /// Connect to a cast device
+  Future<void> connectToCastDevice(CastDevice device) async {
+    await _player.connectToCastDevice(device);
+  }
+
+  /// Disconnect from cast device
+  Future<void> disconnectFromCastDevice() async {
+    await _player.disconnectFromCastDevice();
   }
 
   /// Clean up all subscriptions

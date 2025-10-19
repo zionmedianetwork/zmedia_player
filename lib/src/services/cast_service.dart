@@ -54,8 +54,8 @@ class CastService {
         'config': _config.toMap(),
       });
 
-      // Setup method call handler for cast events
-      _channel.setMethodCallHandler(_handleMethodCall);
+      // Note: Method call handling is done by MediaPlayer, not here
+      // Cast events are handled through MediaPlayer.castStatusStream
 
       debugPrint('CastService: Initialized successfully');
     } catch (e) {
@@ -219,55 +219,6 @@ class CastService {
       });
     } catch (e) {
       debugPrint('CastService: Failed to set volume: $e');
-    }
-  }
-
-  /// Handle method calls from platform
-  Future<void> _handleMethodCall(MethodCall call) async {
-    try {
-      switch (call.method) {
-        case 'onCastDevicesChanged':
-          _handleDevicesChanged(call.arguments);
-          break;
-        case 'onCastStatusChanged':
-          _handleStatusChanged(call.arguments);
-          break;
-        default:
-          debugPrint('CastService: Unhandled method call: ${call.method}');
-      }
-    } catch (e) {
-      debugPrint('CastService: Error handling method call: $e');
-    }
-  }
-
-  /// Handle cast devices list update
-  void _handleDevicesChanged(dynamic arguments) {
-    try {
-      final devicesData = arguments['devices'] as List<dynamic>;
-      _availableDevices = devicesData
-          .map((data) => CastDevice.fromMap(Map<String, dynamic>.from(data)))
-          .toList();
-
-      if (!_devicesController.isClosed) {
-        _devicesController.add(_availableDevices);
-      }
-
-      debugPrint('CastService: Found ${_availableDevices.length} devices');
-    } catch (e) {
-      debugPrint('CastService: Error processing devices: $e');
-    }
-  }
-
-  /// Handle cast status update
-  void _handleStatusChanged(dynamic arguments) {
-    try {
-      final statusMap = Map<String, dynamic>.from(arguments);
-      final newStatus = CastStatus.fromMap(statusMap);
-      _updateStatus(newStatus);
-
-      debugPrint('CastService: Status changed to ${newStatus.state}');
-    } catch (e) {
-      debugPrint('CastService: Error processing status: $e');
     }
   }
 
