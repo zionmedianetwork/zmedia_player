@@ -36,6 +36,8 @@ A comprehensive Flutter media player package with advanced features for video an
 
 ### Phase 2 (Complete) - Streaming & Subtitles ✅
 - ✅ **HLS/DASH Support**: Adaptive streaming with automatic quality switching
+- ✅ **Live Streaming**: HLS/DASH live streams with DVR functionality
+- ✅ **Low-Latency Live**: Configurable latency targets for live content
 - ✅ **Subtitle Support**: Multiple formats (SRT, WebVTT, ASS/SSA, embedded)
 - ✅ **Quality Selection**: Manual and automatic quality/resolution selection
 - ✅ **Cache System**: Progressive download with offline playback support
@@ -291,6 +293,56 @@ streamingService.bandwidthStream.listen((bandwidth) {
 final recommended = streamingService.getRecommendedQuality();
 ```
 
+#### Live Streaming (HLS/DASH)
+
+ZMedia Player supports live streaming with DVR functionality:
+
+```dart
+// HLS Live Streaming
+final hlsLiveController = MediaController.create(
+  config: MediaConfig(
+    hlsConfig: HlsConfig(
+      enableLiveStream: true,          // Enable live streaming
+      enableDvr: true,                 // Allow time-shifting/seeking
+      liveLatency: Duration(seconds: 3), // Low-latency target
+      enableAdaptiveBitrate: true,
+      enableSegmentPrefetch: true,
+    ),
+  ),
+);
+
+// DASH Live Streaming
+final dashLiveController = MediaController.create(
+  config: MediaConfig(
+    dashConfig: DashConfig(
+      enableLiveStream: true,          // Enable live streaming
+      enableDvr: true,                 // Allow time-shifting/seeking
+      liveLatency: Duration(seconds: 3), // Low-latency target
+      enableAdaptiveBitrate: true,
+      enableMpdCaching: true,
+    ),
+  ),
+);
+
+// Load and play live stream
+final liveStream = MediaItem(
+  id: 'live_event',
+  title: 'Live Event',
+  url: 'https://example.com/live/stream.m3u8', // HLS
+  // url: 'https://example.com/live/stream.mpd', // DASH
+);
+
+await hlsLiveController.load(liveStream);
+await hlsLiveController.play();
+```
+
+**Live Streaming Features:**
+- ✅ Low-latency live playback
+- ✅ DVR functionality (time-shifting)
+- ✅ Live edge seeking
+- ✅ Adaptive bitrate for live
+- ✅ Configurable latency targets
+
 ### Phase 3 Features - Advanced Capabilities
 
 #### Media Notifications
@@ -522,6 +574,7 @@ controller.player.drmSessionStream.listen((session) {
 
 - **[Getting Started](docs/api-reference/README.md)** - Installation, setup, and first steps
 - **[Events & Callbacks](docs/api-reference/events.md)** - All available events and streams
+- **[Live Streaming](docs/api-reference/live-streaming.md)** - HLS/DASH live with DVR support
 - **[DRM Configuration](docs/api-reference/drm.md)** - Widevine, FairPlay, EZDRM setup
 - **[AirPlay & Chromecast](docs/api-reference/airplay.md)** - Casting implementation guide
 
@@ -713,7 +766,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ### Quality Metrics
 
 - **Test Coverage:** 113/113 tests passing (100%)
-- **Features:** 172/172 complete
+- **Features:** 179/179 complete
 - **Performance:** 94-99% faster than targets
 - **Documentation:** Comprehensive guides and API reference
 - **Version:** 0.1.0

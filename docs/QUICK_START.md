@@ -40,7 +40,7 @@ You'll find:
 **→ Go to [`docs/summary/`](summary/)**
 
 You'll find:
-- Complete feature list (172 features)
+- Complete feature list (179 features)
 - All phase summaries
 - Test coverage report
 - Production readiness status
@@ -88,7 +88,7 @@ docs/
 │
 └── summary/                     ← For overview
     ├── README.md               ← Summary hub
-    ├── features.md             ← All 172 features
+    ├── features.md             ← All 179 features
     ├── phases.md               ← Development phases
     ├── test-coverage.md        ← Test results
     └── production-readiness.md ← Go-live checklist
@@ -153,7 +153,7 @@ await controller.load(drmItem);
 4. [Security Audit](implementation/security.md)
 
 ### For Project Managers
-1. [Feature List](summary/features.md) - All 172 features
+1. [Feature List](summary/features.md) - All 179 features
 2. [Phase Summaries](summary/phases.md) - What was built
 3. [Production Readiness](summary/production-readiness.md) - Go-live status
 4. [Test Coverage](summary/test-coverage.md) - Quality metrics

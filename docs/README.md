@@ -61,6 +61,7 @@ This documentation is organized into three main sections:
 ### Common Tasks
 - [Playing Videos](api-reference/player-api.md#basic-playback)
 - [Managing Playlists](api-reference/player-api.md#playlists)
+- [Live Streaming Setup](api-reference/live-streaming.md)
 - [Adding Subtitles](api-reference/player-api.md#subtitles)
 - [Setting up DRM](api-reference/drm.md)
 - [Implementing Notifications](api-reference/advanced-features.md#notifications)
@@ -123,7 +124,7 @@ ZMedia Player is a production-ready Flutter media player package that provides:
 - ✅ **Phase 4** - DRM & Polish (Complete)
 
 ### Key Metrics
-- **Features:** 172/172 complete (100%)
+- **Features:** 179/179 complete (100%)
 - **Tests:** 113/113 passing (100%)
 - **Performance:** 94-99% faster than targets
 - **Documentation:** Comprehensive guides for all features
