@@ -2,6 +2,25 @@
 
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
+[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/zionmedianetwork/zmedia_player)
+[![Tests](https://img.shields.io/badge/tests-113%2F113-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
+
+## 📑 Table of Contents
+
+- [Features](#features) - All implemented features by phase
+- [Installation](#installation) - Setup instructions
+- [Quick Start](#quick-start) - Basic usage examples
+- [📚 Documentation](#-documentation) - Complete guides and API reference
+  - [For Users](docs/api-reference/) - API reference and usage guides
+  - [For Developers](docs/implementation/) - Architecture and testing
+  - [For Stakeholders](docs/summary/) - Status and metrics
+- [API Reference](#api-reference) - Core classes and methods
+- [Platform Setup](#platform-setup) - Android and iOS configuration
+- [Example App](#example-app) - Demo application
+- [Project Status](#project-status) - Current state and metrics
+- [Support](#support) - Get help
+
 ## Features
 
 ### Phase 1 (Complete) - Core Features ✅
@@ -493,21 +512,41 @@ controller.player.drmSessionStream.listen((session) {
 
 **For detailed DRM setup and troubleshooting, see [DRM Guide](docs/api-reference/drm.md)**
 
-## Documentation
+## 📚 Documentation
 
-📚 **[Complete Documentation](docs/)** - Comprehensive guides and API reference
+**[📖 Complete Documentation Hub](docs/)** - All guides, references, and resources
 
-- **[API Reference](docs/api-reference/)** - For users implementing the player
-- **[Implementation Guide](docs/implementation/)** - For contributors and maintainers  
-- **[Project Summary](docs/summary/)** - Features, phases, and status
+### 🎯 For Users - API Reference
 
-### Quick Links
+**[docs/api-reference/](docs/api-reference/)** - Everything you need to use ZMedia Player
 
-- [Getting Started](docs/api-reference/README.md) - Installation and basic usage
-- [DRM Setup](docs/api-reference/drm.md) - Content protection guide
-- [Events & Callbacks](docs/api-reference/events.md) - All available events
-- [Testing Guide](docs/implementation/testing.md) - Running tests
-- [Complete Feature List](docs/summary/features.md) - All 172 features
+- **[Getting Started](docs/api-reference/README.md)** - Installation, setup, and first steps
+- **[Events & Callbacks](docs/api-reference/events.md)** - All available events and streams
+- **[DRM Configuration](docs/api-reference/drm.md)** - Widevine, FairPlay, EZDRM setup
+- **[AirPlay & Chromecast](docs/api-reference/airplay.md)** - Casting implementation guide
+
+### 🔧 For Developers - Implementation Guide
+
+**[docs/implementation/](docs/implementation/)** - Architecture, testing, and contribution guides
+
+- **[Architecture Overview](docs/implementation/README.md)** - System design and patterns
+- **[Testing Guide](docs/implementation/testing.md)** - Running and writing tests
+- **[Security Audit](docs/implementation/security.md)** - Security best practices
+- **[Better Player Comparison](docs/implementation/better-player-comparison.md)** - Feature parity analysis
+
+### 📊 For Stakeholders - Project Summary
+
+**[docs/summary/](docs/summary/)** - Status, metrics, and achievements
+
+- **[Complete Feature List](docs/summary/features.md)** - All 172 implemented features
+- **[Development Phases](docs/summary/phases.md)** - Phases 1-4 detailed summaries
+- **[Test Coverage Report](docs/summary/test-coverage.md)** - 113/113 tests passing
+- **[Production Readiness](docs/summary/production-readiness.md)** - Deployment checklist
+
+### 🚀 Quick Start
+
+- **[Quick Start Guide](docs/QUICK_START.md)** - Find what you need fast
+- **[Documentation Index](docs/README.md)** - Main documentation hub
 
 ## API Reference
 
