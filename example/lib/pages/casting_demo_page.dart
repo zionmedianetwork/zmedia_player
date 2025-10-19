@@ -102,6 +102,11 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
     // Load first video
     await _controller.load(_videos[_currentVideoIndex]);
 
+    // On iOS, play immediately since AirPlay is controlled via player UI
+    if (Platform.isIOS) {
+      await _controller.play();
+    }
+
     setState(() {});
   }
 
@@ -183,7 +188,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
             children: [
               Icon(Icons.airplay, color: Colors.blue),
               SizedBox(width: 8),
-              Text('AirPlay on iOS'),
+              Text('How to Use AirPlay'),
             ],
           ),
           content: const SingleChildScrollView(
@@ -192,25 +197,30 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'iOS AirPlay uses the system picker for device selection.',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  '🎬 Video is playing above!',
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                      color: Colors.green),
                 ),
                 SizedBox(height: 16),
-                Text('To cast to your MacBook:'),
-                SizedBox(height: 8),
                 Text(
-                    '1️⃣ On your Mac:\n   • Open System Settings\n   • Go to General → AirDrop & Handoff\n   • Enable "AirPlay Receiver"'),
-                SizedBox(height: 8),
-                Text('2️⃣ Ensure both devices are on the same Wi-Fi network'),
-                SizedBox(height: 8),
+                  'To cast to your MacBook or Apple TV:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                SizedBox(height: 12),
                 Text(
-                    '3️⃣ In the video player, look for the AirPlay button (📡) in the native player controls'),
-                SizedBox(height: 8),
+                    '1️⃣ Setup on Mac:\n   • System Settings → General → AirDrop & Handoff\n   • Turn on "AirPlay Receiver"'),
+                SizedBox(height: 12),
                 Text(
-                    '4️⃣ Tap it to see available AirPlay devices including your MacBook'),
+                    '2️⃣ Look for the AirPlay button (📡) in the video player above'),
+                SizedBox(height: 12),
+                Text('3️⃣ Tap it to see available devices'),
+                SizedBox(height: 12),
+                Text('4️⃣ Select your device - video streams!'),
                 SizedBox(height: 16),
                 Text(
-                  '💡 Note: The AirPlay button appears automatically when devices are available.',
+                  '💡 AirPlay button appears when devices are on same Wi-Fi.',
                   style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
                 ),
               ],
@@ -219,7 +229,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Got it'),
+              child: const Text('Got it!'),
             ),
           ],
         ),
@@ -624,7 +634,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                               title: Text(device.name),
                               subtitle: Text(
                                 isSystemPicker
-                                    ? '📱 iOS uses system picker - Tap to open\n\n⚙️ To see your MacBook:\n1. Enable "AirPlay Receiver" on Mac\n2. Ensure same Wi-Fi network\n3. Tap this card to select device'
+                                    ? '🎬 Video playing! Use AirPlay button (📡) in player above\n\nTap this card for setup instructions'
                                     : device.type.toString().split('.').last,
                                 style: TextStyle(
                                   fontSize: isSystemPicker ? 12 : 14,
