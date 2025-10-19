@@ -6,6 +6,8 @@ import '../models/player_state.dart';
 import '../models/playlist.dart';
 import '../models/subtitle_track.dart';
 import '../models/streaming_config.dart';
+import '../models/pip_config.dart';
+import '../models/cast_device.dart';
 import 'media_config.dart';
 
 /// Main media player controller class
@@ -45,9 +47,27 @@ class MediaPlayer {
       StreamController<List<QualityTrack>>.broadcast();
   final StreamController<List<AudioTrack>> _audioTracksController =
       StreamController<List<AudioTrack>>.broadcast();
+  final StreamController<PipStatus> _pipStatusController =
+      StreamController<PipStatus>.broadcast();
+  final StreamController<CastStatus> _castStatusController =
+      StreamController<CastStatus>.broadcast();
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
+
+  /// Current PiP status
+  PipStatus _pipStatus = const PipStatus(
+    state: PipState.unavailable,
+    isSupported: false,
+    isActive: false,
+  );
+
+  /// Current cast status
+  CastStatus _castStatus = const CastStatus(
+    state: CastState.disconnected,
+    isAvailable: false,
+    isCasting: false,
+  );
 
   /// Available subtitle tracks
   List<SubtitleTrack> _subtitleTracks = [];
@@ -174,6 +194,18 @@ class MediaPlayer {
     return _audioTracksController.stream;
   }
 
+  /// Stream of PiP status updates
+  Stream<PipStatus> get pipStatusStream {
+    _throwIfDisposed();
+    return _pipStatusController.stream;
+  }
+
+  /// Stream of cast status updates
+  Stream<CastStatus> get castStatusStream {
+    _throwIfDisposed();
+    return _castStatusController.stream;
+  }
+
   /// Available subtitle tracks
   List<SubtitleTrack> get subtitleTracks {
     _throwIfDisposed();
@@ -209,6 +241,30 @@ class MediaPlayer {
     _throwIfDisposed();
     return _selectedAudioTrack;
   }
+
+  /// Current PiP status
+  PipStatus get pipStatus {
+    _throwIfDisposed();
+    return _pipStatus;
+  }
+
+  /// Whether PiP is available
+  bool get isPipAvailable => _pipStatus.isSupported;
+
+  /// Whether currently in PiP mode
+  bool get isInPipMode => _pipStatus.isActive;
+
+  /// Current cast status
+  CastStatus get castStatus {
+    _throwIfDisposed();
+    return _castStatus;
+  }
+
+  /// Whether casting is available
+  bool get isCastAvailable => _castStatus.isAvailable;
+
+  /// Whether currently casting
+  bool get isCasting => _castStatus.isCasting;
 
   /// Whether the player is initialized
   bool get isInitialized {
@@ -516,6 +572,118 @@ class MediaPlayer {
     }
   }
 
+  /// Check if Picture-in-Picture is available
+  Future<bool> checkPipAvailability() async {
+    await _ensureInitialized();
+
+    try {
+      final result = await _channel.invokeMethod<bool>('checkPipAvailability', {
+        'playerId': playerId,
+      });
+
+      return result ?? false;
+    } on PlatformException catch (e) {
+      debugPrint('Failed to check PiP availability: ${e.message ?? e.code}');
+      return false;
+    }
+  }
+
+  /// Enter Picture-in-Picture mode
+  Future<bool> enterPictureInPicture() async {
+    await _ensureInitialized();
+
+    if (!_pipStatus.isSupported) {
+      throw const MediaPlayerException(
+          'Picture-in-Picture not supported on this device');
+    }
+
+    try {
+      final result =
+          await _channel.invokeMethod<bool>('enterPictureInPicture', {
+        'playerId': playerId,
+      });
+
+      return result ?? false;
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to enter PiP mode: ${e.message ?? e.code}');
+    }
+  }
+
+  /// Exit Picture-in-Picture mode
+  Future<void> exitPictureInPicture() async {
+    await _ensureInitialized();
+
+    try {
+      await _channel.invokeMethod('exitPictureInPicture', {
+        'playerId': playerId,
+      });
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to exit PiP mode: ${e.message ?? e.code}');
+    }
+  }
+
+  /// Start cast device discovery
+  Future<void> startCastDiscovery() async {
+    await _ensureInitialized();
+
+    try {
+      await _channel.invokeMethod('startCastDiscovery', {
+        'playerId': playerId,
+      });
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to start cast discovery: ${e.message ?? e.code}');
+    }
+  }
+
+  /// Stop cast device discovery
+  Future<void> stopCastDiscovery() async {
+    await _ensureInitialized();
+
+    try {
+      await _channel.invokeMethod('stopCastDiscovery', {
+        'playerId': playerId,
+      });
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to stop cast discovery: ${e.message ?? e.code}');
+    }
+  }
+
+  /// Connect to a cast device
+  Future<bool> connectToCastDevice(CastDevice device) async {
+    await _ensureInitialized();
+
+    try {
+      final result = await _channel.invokeMethod<bool>('connectToCastDevice', {
+        'playerId': playerId,
+        'deviceId': device.id,
+        'deviceType': device.type.name,
+      });
+
+      return result ?? false;
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to connect to cast device: ${e.message ?? e.code}');
+    }
+  }
+
+  /// Disconnect from current cast device
+  Future<void> disconnectFromCastDevice() async {
+    await _ensureInitialized();
+
+    try {
+      await _channel.invokeMethod('disconnectFromCastDevice', {
+        'playerId': playerId,
+      });
+    } on PlatformException catch (e) {
+      throw MediaPlayerException(
+          'Failed to disconnect from cast device: ${e.message ?? e.code}');
+    }
+  }
+
   /// Skip to next item in playlist
   Future<void> skipToNext() async {
     _validatePlaylistOperation();
@@ -615,6 +783,8 @@ class MediaPlayer {
       _subtitleTracksController.close(),
       _qualityTracksController.close(),
       _audioTracksController.close(),
+      _pipStatusController.close(),
+      _castStatusController.close(),
     ]);
 
     _isInitialized = false;
@@ -699,6 +869,12 @@ class MediaPlayer {
           break;
         case 'onAudioTracksChanged':
           _handleAudioTracksChanged(arguments!);
+          break;
+        case 'onPipStatusChanged':
+          _handlePipStatusChanged(arguments!);
+          break;
+        case 'onCastStatusChanged':
+          _handleCastStatusChanged(arguments!);
           break;
         case 'onError':
           _handleError(arguments!);
@@ -821,6 +997,42 @@ class MediaPlayer {
       state: PlayerState.error,
       errorMessage: errorMessage,
     ));
+  }
+
+  /// Handle PiP status change events from platform
+  void _handlePipStatusChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final statusMap = Map<String, dynamic>.from(arguments);
+      _pipStatus = PipStatus.fromMap(statusMap);
+
+      if (!_pipStatusController.isClosed) {
+        _pipStatusController.add(_pipStatus);
+      }
+
+      debugPrint('PiP status changed: ${_pipStatus.state}');
+    } catch (e) {
+      debugPrint('Error processing PiP status: $e');
+    }
+  }
+
+  /// Handle cast status change events from platform
+  void _handleCastStatusChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final statusMap = Map<String, dynamic>.from(arguments);
+      _castStatus = CastStatus.fromMap(statusMap);
+
+      if (!_castStatusController.isClosed) {
+        _castStatusController.add(_castStatus);
+      }
+
+      debugPrint('Cast status changed: ${_castStatus.state}');
+    } catch (e) {
+      debugPrint('Error processing cast status: $e');
+    }
   }
 
   /// Update current state and notify listeners

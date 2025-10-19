@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import '../models/drm_config.dart';
 import '../models/subtitle_track.dart';
 import '../models/streaming_config.dart';
+import '../models/notification_config.dart' as notification;
+import '../models/pip_config.dart' as pip;
+import '../models/cast_device.dart';
 
 /// Configuration class for the media player
 class MediaConfig {
@@ -41,6 +44,9 @@ class MediaConfig {
   /// Picture-in-Picture configuration
   final PipConfig? pipConfig;
 
+  /// Cast configuration
+  final CastConfig? castConfig;
+
   /// Whether to show media controls
   final bool showControls;
 
@@ -78,6 +84,7 @@ class MediaConfig {
     this.cacheConfig,
     this.notificationConfig,
     this.pipConfig,
+    this.castConfig,
     this.showControls = true,
     this.controlsTimeout = const Duration(seconds: 3),
     this.allowBackgroundPlayback = false,
@@ -102,6 +109,7 @@ class MediaConfig {
     CacheConfig? cacheConfig,
     NotificationConfig? notificationConfig,
     PipConfig? pipConfig,
+    CastConfig? castConfig,
     bool? showControls,
     Duration? controlsTimeout,
     bool? allowBackgroundPlayback,
@@ -124,6 +132,7 @@ class MediaConfig {
       cacheConfig: cacheConfig ?? this.cacheConfig,
       notificationConfig: notificationConfig ?? this.notificationConfig,
       pipConfig: pipConfig ?? this.pipConfig,
+      castConfig: castConfig ?? this.castConfig,
       showControls: showControls ?? this.showControls,
       controlsTimeout: controlsTimeout ?? this.controlsTimeout,
       allowBackgroundPlayback:

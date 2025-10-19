@@ -18,12 +18,24 @@ export 'src/models/subtitle_track.dart';
 export 'src/models/drm_config.dart';
 export 'src/models/streaming_config.dart';
 
+// Phase 3 Models
+export 'src/models/notification_config.dart';
+export 'src/models/pip_config.dart';
+export 'src/models/cast_device.dart';
+
 // Services (Phase 2)
 export 'src/services/cache_service.dart';
 export 'src/services/subtitle_service.dart';
 export 'src/services/streaming_service.dart';
 
+// Phase 3 Services
+export 'src/services/notification_service.dart';
+export 'src/services/cast_service.dart';
+
 // Widgets
 export 'src/widgets/media_player_widget.dart';
 export 'src/widgets/media_controls.dart';
 export 'src/widgets/subtitle_view.dart';
+
+// Phase 3 Widgets
+export 'src/widgets/media_list_player.dart';

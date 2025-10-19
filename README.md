@@ -24,11 +24,11 @@ A comprehensive Flutter media player package with advanced features for video an
 - ✅ **Audio Tracks**: Multiple audio language support
 - ✅ **Streaming Service**: Smart quality selection algorithms
 
-### Phase 3 (Planned) - Advanced Features
-- 🔄 **Notifications**: Media playback notifications with controls
-- 🔄 **Picture in Picture**: PiP mode for video playback
-- 🔄 **ListView Integration**: Seamless integration with scrollable lists
-- 🔄 **Screencast Support**: AirPlay and Chromecast integration
+### Phase 3 (Complete) - Advanced Features ✅
+- ✅ **Notifications**: Media playback notifications with controls (Dart API ready)
+- ✅ **Picture in Picture**: PiP mode for video playback (Dart API ready)
+- ✅ **ListView Integration**: Auto play/pause in scrollable lists
+- ✅ **Screencast Support**: Chromecast and AirPlay integration (Dart API ready)
 
 ### Phase 4 (Planned) - DRM & Enterprise
 - 🔄 **DRM Support**: Widevine, FairPlay, and token-based DRM
@@ -270,6 +270,125 @@ streamingService.bandwidthStream.listen((bandwidth) {
 
 // Get recommended quality
 final recommended = streamingService.getRecommendedQuality();
+```
+
+### Phase 3 Features - Advanced Capabilities
+
+#### Media Notifications
+
+Display playback controls in system notifications:
+
+```dart
+final notificationConfig = NotificationConfig(
+  enabled: true,
+  channelId: 'media_playback',
+  channelName: 'Media Playback',
+  showPlayPause: true,
+  showNext: true,
+  showPrevious: true,
+  seekInterval: 10,
+);
+
+final notificationService = NotificationService(notificationConfig);
+await notificationService.initialize(playerId);
+
+// Show notification
+await notificationService.show(
+  mediaItem: mediaItem,
+  state: playbackState,
+  playerId: playerId,
+);
+
+// Listen to notification actions
+notificationService.actionStream.listen((action) {
+  if (action == NotificationActions.play) {
+    controller.play();
+  } else if (action == NotificationActions.pause) {
+    controller.pause();
+  }
+});
+```
+
+#### Picture-in-Picture
+
+Enable PiP mode for floating video playback:
+
+```dart
+// Check if PiP is available
+final isAvailable = await controller.player.checkPipAvailability();
+
+// Enter PiP mode
+if (isAvailable) {
+  await controller.player.enterPictureInPicture();
+}
+
+// Exit PiP mode
+await controller.player.exitPictureInPicture();
+
+// Listen to PiP status
+controller.player.pipStatusStream.listen((status) {
+  print('PiP Active: ${status.isActive}');
+});
+```
+
+#### ListView Integration
+
+Auto-play/pause videos in scrollable lists:
+
+```dart
+ListView.builder(
+  itemCount: videos.length,
+  itemBuilder: (context, index) {
+    final controller = MediaController.create();
+    controller.load(videos[index]);
+    
+    return MediaListPlayer(
+      controller: controller,
+      config: MediaListPlayerConfig(
+        visibilityThreshold: 0.6, // 60% visible to play
+        autoPlay: true,
+        autoPause: true,
+      ),
+      aspectRatio: 16 / 9,
+      showControls: true,
+    );
+  },
+)
+```
+
+#### Screencast (Chromecast/AirPlay)
+
+Cast media to external devices:
+
+```dart
+final castService = CastService(
+  CastConfig(
+    enabled: true,
+    enableChromecast: true,
+    enableAirPlay: true,
+  ),
+);
+await castService.initialize(playerId);
+
+// Start discovery
+await castService.startDiscovery(playerId);
+
+// Listen to available devices
+castService.devicesStream.listen((devices) {
+  print('Found ${devices.length} devices');
+});
+
+// Connect to a device
+await castService.connect(
+  device: selectedDevice,
+  playerId: playerId,
+);
+
+// Load media on cast device
+await castService.loadMedia(
+  mediaItem: mediaItem,
+  playerId: playerId,
+);
 ```
 
 ## API Reference
