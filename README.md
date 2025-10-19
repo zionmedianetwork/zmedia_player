@@ -30,11 +30,11 @@ A comprehensive Flutter media player package with advanced features for video an
 - ✅ **ListView Integration**: Auto play/pause in scrollable lists
 - ✅ **Screencast Support**: Chromecast and AirPlay integration (Dart API ready)
 
-### Phase 4 (Planned) - DRM & Enterprise
-- 🔄 **DRM Support**: Widevine, FairPlay, and token-based DRM
-- 🔄 **Performance Optimization**: Memory and battery optimizations
-- 🔄 **Testing Suite**: Comprehensive test coverage
-- 🔄 **Documentation**: Complete API documentation and guides
+### Phase 4 (Complete) - DRM & Polish ✅
+- ✅ **DRM Support**: Widevine (Android), FairPlay (iOS), EZDRM integration
+- ✅ **Token-Based DRM**: Custom authentication with JWT tokens
+- ✅ **Comprehensive Documentation**: DRM setup guide and best practices
+- ✅ **Example App**: Full DRM demo with test content
 
 ## Installation
 
@@ -390,6 +390,108 @@ await castService.loadMedia(
   playerId: playerId,
 );
 ```
+
+### Phase 4 Features - DRM Content Protection
+
+#### DRM-Protected Content Playback
+
+ZMedia Player supports industry-standard DRM systems:
+
+```dart
+// Android: Widevine DRM
+final androidDrmConfig = DrmConfig.widevine(
+  licenseUrl: 'https://your-license-server.com/widevine',
+  headers: {
+    'Authorization': 'Bearer YOUR_TOKEN',
+  },
+);
+
+// iOS: FairPlay DRM
+final iosDrmConfig = DrmConfig.fairplay(
+  licenseUrl: 'https://your-license-server.com/fairplay',
+  certificateUrl: 'https://your-server.com/certificate.cer',
+);
+
+// Create media item with DRM
+final protectedMedia = MediaItem(
+  id: 'protected_video',
+  title: 'Protected Content',
+  url: 'https://your-cdn.com/video.mpd',  // DASH for Android
+  drmConfig: Platform.isAndroid ? androidDrmConfig : iosDrmConfig,
+);
+
+await controller.load(protectedMedia);
+await controller.play();
+```
+
+#### EZDRM Integration
+
+Simplified DRM setup with EZDRM service:
+
+```dart
+// Android Widevine via EZDRM
+final ezdrmConfig = EzdrmConfig.widevine(
+  customerId: 'YOUR_EZDRM_CUSTOMER_ID',
+  apiKey: 'YOUR_EZDRM_API_KEY',
+  contentId: 'unique_content_id',
+);
+
+final drmConfig = DrmConfig.ezdrm(
+  ezdrmConfig: ezdrmConfig,
+  allowOffline: true,
+);
+
+final mediaItem = MediaItem(
+  id: 'ezdrm_video',
+  title: 'EZDRM Protected',
+  url: 'https://your-content-url.com/video.mpd',
+  drmConfig: drmConfig,
+);
+```
+
+#### Token-Based DRM
+
+Custom authentication with JWT tokens:
+
+```dart
+final drmConfig = DrmConfig.token(
+  licenseUrl: 'https://license-server.com/license',
+  token: 'your_jwt_token',
+  keyId: 'content_key_id',
+  headers: {
+    'X-Session-ID': 'session_123',
+  },
+);
+```
+
+#### Monitor DRM Sessions
+
+Listen to DRM session state changes:
+
+```dart
+controller.player.drmSessionStream.listen((session) {
+  print('DRM State: ${session.state}');
+  
+  switch (session.state) {
+    case DrmSessionState.acquiringLicense:
+      showLoadingIndicator();
+      break;
+    case DrmSessionState.licensed:
+      hideLoadingIndicator();
+      if (session.license != null) {
+        print('License expires: ${session.license!.expirationTime}');
+      }
+      break;
+    case DrmSessionState.error:
+      showError('DRM Error: ${session.errorMessage}');
+      break;
+    default:
+      break;
+  }
+});
+```
+
+**For detailed DRM setup and troubleshooting, see [DRM_GUIDE.md](./DRM_GUIDE.md)**
 
 ## API Reference
 

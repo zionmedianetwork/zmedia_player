@@ -8,6 +8,7 @@ import '../models/subtitle_track.dart';
 import '../models/streaming_config.dart';
 import '../models/pip_config.dart';
 import '../models/cast_device.dart';
+import '../models/drm_config.dart';
 import 'media_config.dart';
 
 /// Main media player controller class
@@ -53,6 +54,8 @@ class MediaPlayer {
       StreamController<CastStatus>.broadcast();
   final StreamController<List<CastDevice>> _castDevicesController =
       StreamController<List<CastDevice>>.broadcast();
+  final StreamController<DrmSession> _drmSessionController =
+      StreamController<DrmSession>.broadcast();
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
@@ -279,6 +282,12 @@ class MediaPlayer {
 
   /// Available cast devices
   List<CastDevice> get castDevices => List.unmodifiable(_castDevices);
+
+  /// Stream of DRM session updates
+  Stream<DrmSession> get drmSessionStream {
+    _throwIfDisposed();
+    return _drmSessionController.stream;
+  }
 
   /// Whether the player is initialized
   bool get isInitialized {
@@ -800,6 +809,7 @@ class MediaPlayer {
       _pipStatusController.close(),
       _castStatusController.close(),
       _castDevicesController.close(),
+      _drmSessionController.close(),
     ]);
 
     _isInitialized = false;

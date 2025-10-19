@@ -1,3 +1,5 @@
+import 'drm_config.dart';
+
 /// Represents a media item that can be played by the media player.
 class MediaItem {
   /// Unique identifier for the media item
@@ -30,6 +32,9 @@ class MediaItem {
   /// Whether this is a video or audio-only content
   final MediaType mediaType;
 
+  /// DRM configuration for protected content
+  final DrmConfig? drmConfig;
+
   /// Additional metadata
   final Map<String, dynamic>? metadata;
 
@@ -44,6 +49,7 @@ class MediaItem {
     this.mimeType,
     this.httpHeaders,
     this.mediaType = MediaType.video,
+    this.drmConfig,
     this.metadata,
   });
 
@@ -59,6 +65,7 @@ class MediaItem {
     String? mimeType,
     Map<String, String>? httpHeaders,
     MediaType? mediaType,
+    DrmConfig? drmConfig,
     Map<String, dynamic>? metadata,
   }) {
     return MediaItem(
@@ -72,6 +79,7 @@ class MediaItem {
       mimeType: mimeType ?? this.mimeType,
       httpHeaders: httpHeaders ?? this.httpHeaders,
       mediaType: mediaType ?? this.mediaType,
+      drmConfig: drmConfig ?? this.drmConfig,
       metadata: metadata ?? this.metadata,
     );
   }
@@ -89,6 +97,7 @@ class MediaItem {
       'mimeType': mimeType,
       'httpHeaders': httpHeaders,
       'mediaType': mediaType.name,
+      'drmConfig': drmConfig?.toMap(),
       'metadata': metadata,
     };
   }
@@ -113,6 +122,9 @@ class MediaItem {
         (type) => type.name == map['mediaType'],
         orElse: () => MediaType.video,
       ),
+      drmConfig: map['drmConfig'] != null
+          ? DrmConfig.fromMap(map['drmConfig'] as Map<String, dynamic>)
+          : null,
       metadata: map['metadata'] as Map<String, dynamic>?,
     );
   }

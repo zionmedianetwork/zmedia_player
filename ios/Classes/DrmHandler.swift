@@ -1,0 +1,419 @@
+import Foundation
+import AVFoundation
+
+/// Handles DRM (Digital Rights Management) for iOS media playback
+/// Supports FairPlay Streaming (FPS)
+@available(iOS 10.0, *)
+class DrmHandler: NSObject {
+    private let playerId: String
+    private let channel: FlutterMethodChannel
+    
+    // FairPlay content key session
+    private var contentKeySession: AVContentKeySession?
+    private var contentKeyDelegate: ContentKeyDelegate?
+    
+    // DRM configuration
+    private var drmConfig: [String: Any]?
+    private var certificateData: Data?
+    
+    init(playerId: String, channel: FlutterMethodChannel) {
+        self.playerId = playerId
+        self.channel = channel
+        super.init()
+    }
+    
+    // MARK: - Configuration
+    
+    /// Configure DRM with provided settings
+    func configure(drmConfig: [String: Any]) -> Bool {
+        self.drmConfig = drmConfig
+        
+        guard let scheme = drmConfig["scheme"] as? String else {
+            notifyDrmError("DRM scheme is required")
+            return false
+        }
+        
+        // Only FairPlay is supported on iOS
+        guard scheme.lowercased() == "fairplay" else {
+            notifyDrmError("Only FairPlay DRM is supported on iOS")
+            return false
+        }
+        
+        guard let licenseUrl = drmConfig["licenseUrl"] as? String else {
+            notifyDrmError("License URL is required for FairPlay")
+            return false
+        }
+        
+        guard let certificateUrl = drmConfig["certificateUrl"] as? String else {
+            notifyDrmError("Certificate URL is required for FairPlay")
+            return false
+        }
+        
+        // Load FairPlay certificate
+        loadCertificate(from: certificateUrl) { [weak self] success in
+            if success {
+                print("DrmHandler: FairPlay certificate loaded successfully")
+                self?.notifyDrmSessionState(state: "idle")
+            } else {
+                self?.notifyDrmError("Failed to load FairPlay certificate")
+            }
+        }
+        
+        return true
+    }
+    
+    /// Create content key session for FairPlay
+    func createContentKeySession(for player: AVPlayer) -> AVContentKeySession {
+        if let existingSession = contentKeySession {
+            return existingSession
+        }
+        
+        // Create content key session
+        let keySession = AVContentKeySession(keySystem: .fairPlayStreaming)
+        
+        // Create and set delegate
+        let delegate = ContentKeyDelegate(
+            playerId: playerId,
+            drmHandler: self,
+            certificateData: certificateData
+        )
+        self.contentKeyDelegate = delegate
+        
+        // Set delegate on background queue
+        let delegateQueue = DispatchQueue(label: "com.flutter_media_player.drm.content_key")
+        keySession.setDelegate(delegate, queue: delegateQueue)
+        
+        // Add player as content key recipient
+        keySession.addContentKeyRecipient(player)
+        
+        self.contentKeySession = keySession
+        
+        print("DrmHandler: Content key session created")
+        return keySession
+    }
+    
+    // MARK: - Certificate Loading
+    
+    /// Load FairPlay certificate from URL
+    private func loadCertificate(from urlString: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: urlString) else {
+            print("DrmHandler: Invalid certificate URL")
+            completion(false)
+            return
+        }
+        
+        print("DrmHandler: Loading FairPlay certificate from: \\(urlString)")
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        
+        // Add custom headers if provided
+        if let headers = drmConfig?["headers"] as? [String: String] {
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+        
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("DrmHandler: Certificate loading error: \\(error.localizedDescription)")
+                completion(false)
+                return
+            }
+            
+            guard let data = data, !data.isEmpty else {
+                print("DrmHandler: No certificate data received")
+                completion(false)
+                return
+            }
+            
+            self.certificateData = data
+            print("DrmHandler: Certificate loaded successfully (\\(data.count) bytes)")
+            completion(true)
+        }
+        
+        task.resume()
+    }
+    
+    // MARK: - License Acquisition
+    
+    /// Request license from FairPlay license server
+    func requestLicense(
+        spcData: Data,
+        assetId: String,
+        completion: @escaping (Data?, Error?) -> Void
+    ) {
+        guard let licenseUrl = drmConfig?["licenseUrl"] as? String else {
+            completion(nil, DrmError.missingLicenseUrl)
+            return
+        }
+        
+        guard let url = URL(string: licenseUrl) else {
+            completion(nil, DrmError.invalidLicenseUrl)
+            return
+        }
+        
+        print("DrmHandler: Requesting license for asset: \\(assetId)")
+        notifyDrmSessionState(state: "acquiringLicense")
+        
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = spcData
+        
+        // Add custom headers
+        if let headers = drmConfig?["headers"] as? [String: String] {
+            for (key, value) in headers {
+                request.setValue(value, forHTTPHeaderField: key)
+            }
+        }
+        
+        // Add token if provided
+        if let token = drmConfig?["token"] as? String {
+            request.setValue("Bearer \\(token)", forHTTPHeaderField: "Authorization")
+        }
+        
+        // Content-Type for FairPlay SPC
+        request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        
+        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                print("DrmHandler: License request error: \\(error.localizedDescription)")
+                self.notifyDrmError("License request failed: \\(error.localizedDescription)")
+                completion(nil, error)
+                return
+            }
+            
+            guard let data = data, !data.isEmpty else {
+                print("DrmHandler: No license data received")
+                self.notifyDrmError("No license data received")
+                completion(nil, DrmError.noLicenseData)
+                return
+            }
+            
+            print("DrmHandler: License received successfully (\\(data.count) bytes)")
+            self.notifyDrmSessionState(state: "licensed")
+            completion(data, nil)
+        }
+        
+        task.resume()
+    }
+    
+    // MARK: - Utility Methods
+    
+    /// Extract content identifier from URL
+    func extractContentIdentifier(from url: URL) -> String? {
+        // Get the scheme-specific part (everything after "skd://")
+        guard url.scheme == "skd" else {
+            return nil
+        }
+        
+        // Use the host and path as content ID
+        if let host = url.host {
+            return host + (url.path.isEmpty ? "" : url.path)
+        }
+        
+        return url.absoluteString.replacingOccurrences(of: "skd://", with: "")
+    }
+    
+    /// Check if FairPlay is supported
+    static func isFairPlaySupported() -> Bool {
+        if #available(iOS 10.0, *) {
+            return AVContentKeySession.contentKeySessionSupports(keySystem: .fairPlayStreaming)
+        }
+        return false
+    }
+    
+    /// Get DRM system info
+    func getDrmSystemInfo() -> [String: Any] {
+        var info: [String: Any] = [:]
+        
+        info["fairplaySupported"] = DrmHandler.isFairPlaySupported()
+        info["deviceModel"] = UIDevice.current.model
+        info["systemVersion"] = UIDevice.current.systemVersion
+        info["certificateLoaded"] = (certificateData != nil)
+        
+        return info
+    }
+    
+    // MARK: - Flutter Communication
+    
+    /// Notify Flutter of DRM errors
+    func notifyDrmError(_ message: String) {
+        print("DrmHandler Error: \\(message)")
+        channel.invokeMethod("onDrmError", arguments: [
+            "playerId": playerId,
+            "error": message,
+            "timestamp": Date().timeIntervalSince1970 * 1000
+        ])
+    }
+    
+    /// Notify Flutter of DRM session state changes
+    func notifyDrmSessionState(state: String, license: [String: Any]? = nil) {
+        var args: [String: Any] = [
+            "playerId": playerId,
+            "state": state,
+            "timestamp": Date().timeIntervalSince1970 * 1000
+        ]
+        
+        if let license = license {
+            args["license"] = license
+        }
+        
+        channel.invokeMethod("onDrmSessionChanged", arguments: args)
+    }
+    
+    // MARK: - Cleanup
+    
+    func dispose() {
+        contentKeySession?.invalidateAllPersistableContentKeys(for: nil, options: nil) { _, _ in }
+        contentKeySession = nil
+        contentKeyDelegate = nil
+        certificateData = nil
+        print("DrmHandler: Disposed")
+    }
+}
+
+// MARK: - Content Key Delegate
+
+@available(iOS 10.0, *)
+private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
+    private let playerId: String
+    private weak var drmHandler: DrmHandler?
+    private let certificateData: Data?
+    
+    init(playerId: String, drmHandler: DrmHandler, certificateData: Data?) {
+        self.playerId = playerId
+        self.drmHandler = drmHandler
+        self.certificateData = certificateData
+    }
+    
+    func contentKeySession(
+        _ session: AVContentKeySession,
+        didProvide keyRequest: AVContentKeyRequest
+    ) {
+        print("ContentKeyDelegate: Content key requested")
+        handleStreamingContentKeyRequest(keyRequest)
+    }
+    
+    func contentKeySession(
+        _ session: AVContentKeySession,
+        didProvideRenewingContentKeyRequest keyRequest: AVContentKeyRequest
+    ) {
+        print("ContentKeyDelegate: Renewing content key requested")
+        handleStreamingContentKeyRequest(keyRequest)
+    }
+    
+    func contentKeySession(
+        _ session: AVContentKeySession,
+        contentKeyRequest keyRequest: AVContentKeyRequest,
+        didFailWithError err: Error
+    ) {
+        print("ContentKeyDelegate: Content key request failed: \\(err.localizedDescription)")
+        drmHandler?.notifyDrmError("Content key request failed: \\(err.localizedDescription)")
+    }
+    
+    private func handleStreamingContentKeyRequest(_ keyRequest: AVContentKeyRequest) {
+        guard let certificateData = certificateData else {
+            drmHandler?.notifyDrmError("Certificate not loaded")
+            keyRequest.processContentKeyResponseError(DrmError.certificateNotLoaded as! Error)
+            return
+        }
+        
+        // Extract content identifier
+        guard let contentIdentifier = keyRequest.identifier as? String else {
+            drmHandler?.notifyDrmError("Invalid content identifier")
+            keyRequest.processContentKeyResponseError(DrmError.invalidContentIdentifier as! Error)
+            return
+        }
+        
+        print("ContentKeyDelegate: Processing key request for: \\(contentIdentifier)")
+        
+        // Prepare SPC (Server Playback Context) request
+        do {
+            // Create data from content identifier
+            let contentIdentifierData = contentIdentifier.data(using: .utf8)!
+            
+            // Make SPC request
+            keyRequest.makeStreamingContentKeyRequestData(
+                forApp: certificateData,
+                contentIdentifier: contentIdentifierData,
+                options: nil
+            ) { [weak self] spcData, error in
+                guard let self = self else { return }
+                
+                if let error = error {
+                    print("ContentKeyDelegate: SPC request error: \\(error.localizedDescription)")
+                    self.drmHandler?.notifyDrmError("SPC request failed: \\(error.localizedDescription)")
+                    keyRequest.processContentKeyResponseError(error)
+                    return
+                }
+                
+                guard let spcData = spcData else {
+                    self.drmHandler?.notifyDrmError("No SPC data")
+                    keyRequest.processContentKeyResponseError(DrmError.noSpcData as! Error)
+                    return
+                }
+                
+                print("ContentKeyDelegate: SPC data generated (\\(spcData.count) bytes)")
+                
+                // Request CKC (Content Key Context) from license server
+                self.drmHandler?.requestLicense(
+                    spcData: spcData,
+                    assetId: contentIdentifier
+                ) { ckcData, error in
+                    if let error = error {
+                        keyRequest.processContentKeyResponseError(error)
+                        return
+                    }
+                    
+                    guard let ckcData = ckcData else {
+                        keyRequest.processContentKeyResponseError(DrmError.noCkcData as! Error)
+                        return
+                    }
+                    
+                    // Create content key response
+                    let keyResponse = AVContentKeyResponse(fairPlayStreamingKeyResponseData: ckcData)
+                    keyRequest.processContentKeyResponse(keyResponse)
+                    
+                    print("ContentKeyDelegate: Content key processed successfully")
+                }
+            }
+        }
+    }
+}
+
+// MARK: - DRM Errors
+
+enum DrmError: Error, LocalizedError {
+    case missingLicenseUrl
+    case invalidLicenseUrl
+    case noLicenseData
+    case certificateNotLoaded
+    case invalidContentIdentifier
+    case noSpcData
+    case noCkcData
+    
+    var errorDescription: String? {
+        switch self {
+        case .missingLicenseUrl:
+            return "License URL is missing"
+        case .invalidLicenseUrl:
+            return "Invalid license URL"
+        case .noLicenseData:
+            return "No license data received"
+        case .certificateNotLoaded:
+            return "FairPlay certificate not loaded"
+        case .invalidContentIdentifier:
+            return "Invalid content identifier"
+        case .noSpcData:
+            return "No SPC data generated"
+        case .noCkcData:
+            return "No CKC data received from server"
+        }
+    }
+}
+

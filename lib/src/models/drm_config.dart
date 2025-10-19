@@ -1,198 +1,503 @@
-/// Configuration for Digital Rights Management (DRM)
+/// DRM (Digital Rights Management) configuration and models
+library;
+
+/// DRM scheme types
+enum DrmScheme {
+  /// Token-based DRM (custom authentication)
+  token,
+
+  /// Google Widevine (Android)
+  widevine,
+
+  /// Apple FairPlay (iOS)
+  fairplay,
+
+  /// EZDRM service
+  ezdrm,
+
+  /// PlayReady (Microsoft)
+  playready,
+
+  /// Clear Key (for testing)
+  clearkey,
+}
+
+/// DRM configuration
 class DrmConfig {
-  /// Type of DRM protection
-  final DrmType type;
+  /// DRM scheme to use
+  final DrmScheme scheme;
 
   /// License server URL
   final String licenseUrl;
 
-  /// Authentication token for license requests
-  final String? token;
-
-  /// Additional headers for license requests
-  final Map<String, String>? headers;
-
-  /// Certificate data for FairPlay (iOS)
+  /// Certificate URL (required for FairPlay)
   final String? certificateUrl;
 
-  /// Key system identifier
-  final String? keySystem;
+  /// Custom HTTP headers for license requests
+  final Map<String, String>? headers;
 
-  /// Additional DRM-specific configuration
-  final Map<String, dynamic>? config;
+  /// Authentication token
+  final String? token;
+
+  /// Key ID (for token-based DRM)
+  final String? keyId;
+
+  /// Content ID (for FairPlay)
+  final String? contentId;
+
+  /// Whether to allow offline playback
+  final bool allowOffline;
+
+  /// Offline license duration in seconds
+  final int? offlineLicenseDuration;
+
+  /// Whether to automatically renew licenses
+  final bool autoRenewLicense;
+
+  /// Custom license request data
+  final Map<String, dynamic>? customData;
+
+  /// EZDRM configuration
+  final EzdrmConfig? ezdrmConfig;
 
   const DrmConfig({
-    required this.type,
+    required this.scheme,
     required this.licenseUrl,
-    this.token,
-    this.headers,
     this.certificateUrl,
-    this.keySystem,
-    this.config,
+    this.headers,
+    this.token,
+    this.keyId,
+    this.contentId,
+    this.allowOffline = false,
+    this.offlineLicenseDuration,
+    this.autoRenewLicense = true,
+    this.customData,
+    this.ezdrmConfig,
   });
 
-  /// Creates a copy of this DRM config with updated values
-  DrmConfig copyWith({
-    DrmType? type,
-    String? licenseUrl,
-    String? token,
-    Map<String, String>? headers,
-    String? certificateUrl,
-    String? keySystem,
-    Map<String, dynamic>? config,
-  }) {
-    return DrmConfig(
-      type: type ?? this.type,
-      licenseUrl: licenseUrl ?? this.licenseUrl,
-      token: token ?? this.token,
-      headers: headers ?? this.headers,
-      certificateUrl: certificateUrl ?? this.certificateUrl,
-      keySystem: keySystem ?? this.keySystem,
-      config: config ?? this.config,
-    );
-  }
-
-  /// Converts the DRM config to a map for serialization
-  Map<String, dynamic> toMap() {
-    return {
-      'type': type.name,
-      'licenseUrl': licenseUrl,
-      'token': token,
-      'headers': headers,
-      'certificateUrl': certificateUrl,
-      'keySystem': keySystem,
-      'config': config,
-    };
-  }
-
-  /// Creates a DRM config from a map
-  factory DrmConfig.fromMap(Map<String, dynamic> map) {
-    return DrmConfig(
-      type: DrmType.values.firstWhere(
-        (type) => type.name == map['type'],
-        orElse: () => DrmType.none,
-      ),
-      licenseUrl: map['licenseUrl'] as String,
-      token: map['token'] as String?,
-      headers: map['headers'] != null
-          ? Map<String, String>.from(map['headers'] as Map)
-          : null,
-      certificateUrl: map['certificateUrl'] as String?,
-      keySystem: map['keySystem'] as String?,
-      config: map['config'] as Map<String, dynamic>?,
-    );
-  }
-
-  /// Factory constructor for Widevine DRM (Android)
-  factory DrmConfig.widevine({
-    required String licenseUrl,
-    String? token,
-    Map<String, String>? headers,
-    Map<String, dynamic>? config,
-  }) {
-    return DrmConfig(
-      type: DrmType.widevine,
-      licenseUrl: licenseUrl,
-      token: token,
-      headers: headers,
-      keySystem: 'com.widevine.alpha',
-      config: config,
-    );
-  }
-
-  /// Factory constructor for FairPlay DRM (iOS)
-  factory DrmConfig.fairPlay({
-    required String licenseUrl,
-    required String certificateUrl,
-    String? token,
-    Map<String, String>? headers,
-    Map<String, dynamic>? config,
-  }) {
-    return DrmConfig(
-      type: DrmType.fairPlay,
-      licenseUrl: licenseUrl,
-      certificateUrl: certificateUrl,
-      token: token,
-      headers: headers,
-      keySystem: 'com.apple.fps.1_0',
-      config: config,
-    );
-  }
-
-  /// Factory constructor for token-based DRM
+  /// Create a token-based DRM configuration
   factory DrmConfig.token({
     required String licenseUrl,
     required String token,
+    String? keyId,
     Map<String, String>? headers,
-    Map<String, dynamic>? config,
+    Map<String, dynamic>? customData,
   }) {
     return DrmConfig(
-      type: DrmType.token,
+      scheme: DrmScheme.token,
       licenseUrl: licenseUrl,
       token: token,
+      keyId: keyId,
       headers: headers,
-      config: config,
+      customData: customData,
     );
   }
 
-  /// Factory constructor for EZDRM
-  factory DrmConfig.ezdrm({
+  /// Create a Widevine DRM configuration (Android)
+  factory DrmConfig.widevine({
     required String licenseUrl,
-    String? token,
     Map<String, String>? headers,
-    Map<String, dynamic>? config,
+    bool allowOffline = false,
+    int? offlineLicenseDuration,
+    Map<String, dynamic>? customData,
   }) {
     return DrmConfig(
-      type: DrmType.ezdrm,
+      scheme: DrmScheme.widevine,
       licenseUrl: licenseUrl,
-      token: token,
       headers: headers,
-      config: config,
+      allowOffline: allowOffline,
+      offlineLicenseDuration: offlineLicenseDuration,
+      customData: customData,
     );
   }
 
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is DrmConfig &&
-        other.type == type &&
-        other.licenseUrl == licenseUrl &&
-        other.token == token &&
-        other.certificateUrl == certificateUrl &&
-        other.keySystem == keySystem;
-  }
-
-  @override
-  int get hashCode {
-    return Object.hash(
-      type,
-      licenseUrl,
-      token,
-      certificateUrl,
-      keySystem,
+  /// Create a FairPlay DRM configuration (iOS)
+  factory DrmConfig.fairplay({
+    required String licenseUrl,
+    required String certificateUrl,
+    String? contentId,
+    Map<String, String>? headers,
+    Map<String, dynamic>? customData,
+  }) {
+    return DrmConfig(
+      scheme: DrmScheme.fairplay,
+      licenseUrl: licenseUrl,
+      certificateUrl: certificateUrl,
+      contentId: contentId,
+      headers: headers,
+      customData: customData,
     );
   }
 
-  @override
-  String toString() {
-    return 'DrmConfig(type: $type, licenseUrl: $licenseUrl, keySystem: $keySystem)';
+  /// Create an EZDRM configuration
+  factory DrmConfig.ezdrm({
+    required EzdrmConfig ezdrmConfig,
+    bool allowOffline = false,
+  }) {
+    return DrmConfig(
+      scheme: DrmScheme.ezdrm,
+      licenseUrl: ezdrmConfig.licenseUrl,
+      certificateUrl: ezdrmConfig.certificateUrl,
+      headers: ezdrmConfig.headers,
+      allowOffline: allowOffline,
+      ezdrmConfig: ezdrmConfig,
+    );
+  }
+
+  /// Convert to map for platform channel
+  Map<String, dynamic> toMap() {
+    return {
+      'scheme': scheme.name,
+      'licenseUrl': licenseUrl,
+      'certificateUrl': certificateUrl,
+      'headers': headers,
+      'token': token,
+      'keyId': keyId,
+      'contentId': contentId,
+      'allowOffline': allowOffline,
+      'offlineLicenseDuration': offlineLicenseDuration,
+      'autoRenewLicense': autoRenewLicense,
+      'customData': customData,
+      'ezdrmConfig': ezdrmConfig?.toMap(),
+    };
+  }
+
+  /// Create from map
+  factory DrmConfig.fromMap(Map<String, dynamic> map) {
+    return DrmConfig(
+      scheme: DrmScheme.values.firstWhere(
+        (e) => e.name == map['scheme'],
+        orElse: () => DrmScheme.token,
+      ),
+      licenseUrl: map['licenseUrl'] as String,
+      certificateUrl: map['certificateUrl'] as String?,
+      headers: map['headers'] != null
+          ? Map<String, String>.from(map['headers'] as Map)
+          : null,
+      token: map['token'] as String?,
+      keyId: map['keyId'] as String?,
+      contentId: map['contentId'] as String?,
+      allowOffline: map['allowOffline'] as bool? ?? false,
+      offlineLicenseDuration: map['offlineLicenseDuration'] as int?,
+      autoRenewLicense: map['autoRenewLicense'] as bool? ?? true,
+      customData: map['customData'] as Map<String, dynamic>?,
+      ezdrmConfig: map['ezdrmConfig'] != null
+          ? EzdrmConfig.fromMap(map['ezdrmConfig'] as Map<String, dynamic>)
+          : null,
+    );
+  }
+
+  DrmConfig copyWith({
+    DrmScheme? scheme,
+    String? licenseUrl,
+    String? certificateUrl,
+    Map<String, String>? headers,
+    String? token,
+    String? keyId,
+    String? contentId,
+    bool? allowOffline,
+    int? offlineLicenseDuration,
+    bool? autoRenewLicense,
+    Map<String, dynamic>? customData,
+    EzdrmConfig? ezdrmConfig,
+  }) {
+    return DrmConfig(
+      scheme: scheme ?? this.scheme,
+      licenseUrl: licenseUrl ?? this.licenseUrl,
+      certificateUrl: certificateUrl ?? this.certificateUrl,
+      headers: headers ?? this.headers,
+      token: token ?? this.token,
+      keyId: keyId ?? this.keyId,
+      contentId: contentId ?? this.contentId,
+      allowOffline: allowOffline ?? this.allowOffline,
+      offlineLicenseDuration:
+          offlineLicenseDuration ?? this.offlineLicenseDuration,
+      autoRenewLicense: autoRenewLicense ?? this.autoRenewLicense,
+      customData: customData ?? this.customData,
+      ezdrmConfig: ezdrmConfig ?? this.ezdrmConfig,
+    );
   }
 }
 
-/// Types of DRM protection
-enum DrmType {
-  /// No DRM protection
-  none,
+/// EZDRM service configuration
+class EzdrmConfig {
+  /// EZDRM customer ID
+  final String customerId;
 
-  /// Widevine DRM (Google - Android)
-  widevine,
+  /// EZDRM API key
+  final String apiKey;
 
-  /// FairPlay DRM (Apple - iOS)
-  fairPlay,
+  /// Content ID
+  final String contentId;
 
-  /// Token-based DRM
-  token,
+  /// License URL (auto-generated from customer ID)
+  String get licenseUrl {
+    // Widevine license URL
+    if (_isWidevine) {
+      return 'https://widevine-dash.ezdrm.com/widevine-php/widevine-foreignkey.php?pX=$customerId';
+    }
+    // FairPlay license URL
+    return 'https://fps.ezdrm.com/api/licenses/$customerId';
+  }
 
-  /// EZDRM service
-  ezdrm,
+  /// Certificate URL for FairPlay
+  String? get certificateUrl {
+    if (_isFairPlay) {
+      return 'https://fps.ezdrm.com/demo/video/eleisure.cer';
+    }
+    return null;
+  }
+
+  /// HTTP headers for EZDRM requests
+  Map<String, String> get headers {
+    return {
+      'X-EZDRM-CUSTOMER-ID': customerId,
+      'X-EZDRM-API-KEY': apiKey,
+      'X-EZDRM-CONTENT-ID': contentId,
+    };
+  }
+
+  final bool _isWidevine;
+  final bool _isFairPlay;
+
+  EzdrmConfig({
+    required this.customerId,
+    required this.apiKey,
+    required this.contentId,
+    bool isWidevine = false,
+    bool isFairPlay = false,
+  })  : _isWidevine = isWidevine,
+        _isFairPlay = isFairPlay;
+
+  /// Create EZDRM config for Widevine (Android)
+  factory EzdrmConfig.widevine({
+    required String customerId,
+    required String apiKey,
+    required String contentId,
+  }) {
+    return EzdrmConfig(
+      customerId: customerId,
+      apiKey: apiKey,
+      contentId: contentId,
+      isWidevine: true,
+    );
+  }
+
+  /// Create EZDRM config for FairPlay (iOS)
+  factory EzdrmConfig.fairplay({
+    required String customerId,
+    required String apiKey,
+    required String contentId,
+  }) {
+    return EzdrmConfig(
+      customerId: customerId,
+      apiKey: apiKey,
+      contentId: contentId,
+      isFairPlay: true,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'customerId': customerId,
+      'apiKey': apiKey,
+      'contentId': contentId,
+      'isWidevine': _isWidevine,
+      'isFairPlay': _isFairPlay,
+    };
+  }
+
+  factory EzdrmConfig.fromMap(Map<String, dynamic> map) {
+    return EzdrmConfig(
+      customerId: map['customerId'] as String,
+      apiKey: map['apiKey'] as String,
+      contentId: map['contentId'] as String,
+      isWidevine: map['isWidevine'] as bool? ?? false,
+      isFairPlay: map['isFairPlay'] as bool? ?? false,
+    );
+  }
+}
+
+/// DRM license information
+class DrmLicense {
+  /// License ID
+  final String id;
+
+  /// License key data
+  final String keyData;
+
+  /// License expiration timestamp
+  final DateTime? expirationTime;
+
+  /// Playback duration limit in seconds
+  final int? playbackDuration;
+
+  /// License renewal URL
+  final String? renewalUrl;
+
+  /// License status
+  final DrmLicenseStatus status;
+
+  const DrmLicense({
+    required this.id,
+    required this.keyData,
+    this.expirationTime,
+    this.playbackDuration,
+    this.renewalUrl,
+    this.status = DrmLicenseStatus.active,
+  });
+
+  /// Check if license is expired
+  bool get isExpired {
+    if (expirationTime == null) return false;
+    return DateTime.now().isAfter(expirationTime!);
+  }
+
+  /// Check if license is about to expire (within 1 hour)
+  bool get isExpiringSoon {
+    if (expirationTime == null) return false;
+    final oneHourFromNow = DateTime.now().add(const Duration(hours: 1));
+    return expirationTime!.isBefore(oneHourFromNow);
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'keyData': keyData,
+      'expirationTime': expirationTime?.millisecondsSinceEpoch,
+      'playbackDuration': playbackDuration,
+      'renewalUrl': renewalUrl,
+      'status': status.name,
+    };
+  }
+
+  factory DrmLicense.fromMap(Map<String, dynamic> map) {
+    return DrmLicense(
+      id: map['id'] as String,
+      keyData: map['keyData'] as String,
+      expirationTime: map['expirationTime'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['expirationTime'] as int)
+          : null,
+      playbackDuration: map['playbackDuration'] as int?,
+      renewalUrl: map['renewalUrl'] as String?,
+      status: DrmLicenseStatus.values.firstWhere(
+        (e) => e.name == map['status'],
+        orElse: () => DrmLicenseStatus.active,
+      ),
+    );
+  }
+}
+
+/// DRM license status
+enum DrmLicenseStatus {
+  /// License is active and valid
+  active,
+
+  /// License has expired
+  expired,
+
+  /// License is pending acquisition
+  pending,
+
+  /// License acquisition failed
+  failed,
+
+  /// License has been revoked
+  revoked,
+}
+
+/// DRM session state
+enum DrmSessionState {
+  /// DRM session not initialized
+  idle,
+
+  /// Acquiring license from server
+  acquiringLicense,
+
+  /// License acquired successfully
+  licensed,
+
+  /// License renewal in progress
+  renewing,
+
+  /// DRM session error
+  error,
+
+  /// DRM session closed
+  closed,
+}
+
+/// DRM session information
+class DrmSession {
+  /// Session ID
+  final String id;
+
+  /// Current state
+  final DrmSessionState state;
+
+  /// Associated license
+  final DrmLicense? license;
+
+  /// Error message if state is error
+  final String? errorMessage;
+
+  /// Session creation time
+  final DateTime createdAt;
+
+  /// Last updated time
+  final DateTime updatedAt;
+
+  const DrmSession({
+    required this.id,
+    required this.state,
+    this.license,
+    this.errorMessage,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  DrmSession copyWith({
+    String? id,
+    DrmSessionState? state,
+    DrmLicense? license,
+    String? errorMessage,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  }) {
+    return DrmSession(
+      id: id ?? this.id,
+      state: state ?? this.state,
+      license: license ?? this.license,
+      errorMessage: errorMessage ?? this.errorMessage,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'state': state.name,
+      'license': license?.toMap(),
+      'errorMessage': errorMessage,
+      'createdAt': createdAt.millisecondsSinceEpoch,
+      'updatedAt': updatedAt.millisecondsSinceEpoch,
+    };
+  }
+
+  factory DrmSession.fromMap(Map<String, dynamic> map) {
+    return DrmSession(
+      id: map['id'] as String,
+      state: DrmSessionState.values.firstWhere(
+        (e) => e.name == map['state'],
+        orElse: () => DrmSessionState.idle,
+      ),
+      license: map['license'] != null
+          ? DrmLicense.fromMap(map['license'] as Map<String, dynamic>)
+          : null,
+      errorMessage: map['errorMessage'] as String?,
+      createdAt: DateTime.fromMillisecondsSinceEpoch(map['createdAt'] as int),
+      updatedAt: DateTime.fromMillisecondsSinceEpoch(map['updatedAt'] as int),
+    );
+  }
 }
