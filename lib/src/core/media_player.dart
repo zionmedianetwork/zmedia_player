@@ -51,6 +51,8 @@ class MediaPlayer {
       StreamController<PipStatus>.broadcast();
   final StreamController<CastStatus> _castStatusController =
       StreamController<CastStatus>.broadcast();
+  final StreamController<List<CastDevice>> _castDevicesController =
+      StreamController<List<CastDevice>>.broadcast();
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
@@ -86,6 +88,9 @@ class MediaPlayer {
 
   /// Currently selected audio track
   AudioTrack? _selectedAudioTrack;
+
+  /// Available cast devices
+  List<CastDevice> _castDevices = [];
 
   /// Timer for position updates
   Timer? _positionTimer;
@@ -206,6 +211,12 @@ class MediaPlayer {
     return _castStatusController.stream;
   }
 
+  /// Stream of available cast devices
+  Stream<List<CastDevice>> get castDevicesStream {
+    _throwIfDisposed();
+    return _castDevicesController.stream;
+  }
+
   /// Available subtitle tracks
   List<SubtitleTrack> get subtitleTracks {
     _throwIfDisposed();
@@ -265,6 +276,9 @@ class MediaPlayer {
 
   /// Whether currently casting
   bool get isCasting => _castStatus.isCasting;
+
+  /// Available cast devices
+  List<CastDevice> get castDevices => List.unmodifiable(_castDevices);
 
   /// Whether the player is initialized
   bool get isInitialized {
@@ -785,6 +799,7 @@ class MediaPlayer {
       _audioTracksController.close(),
       _pipStatusController.close(),
       _castStatusController.close(),
+      _castDevicesController.close(),
     ]);
 
     _isInitialized = false;
@@ -875,6 +890,9 @@ class MediaPlayer {
           break;
         case 'onCastStatusChanged':
           _handleCastStatusChanged(arguments!);
+          break;
+        case 'onCastDevicesChanged':
+          _handleCastDevicesChanged(arguments!);
           break;
         case 'onError':
           _handleError(arguments!);
@@ -1032,6 +1050,27 @@ class MediaPlayer {
       debugPrint('Cast status changed: ${_castStatus.state}');
     } catch (e) {
       debugPrint('Error processing cast status: $e');
+    }
+  }
+
+  /// Handle cast devices change events from platform
+  void _handleCastDevicesChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final devicesData = arguments['devices'] as List<dynamic>;
+      _castDevices = devicesData
+          .map((data) => CastDevice.fromMap(Map<String, dynamic>.from(data)))
+          .toList();
+
+      if (!_castDevicesController.isClosed) {
+        _castDevicesController.add(_castDevices);
+      }
+
+      debugPrint(
+          'Cast devices updated: ${_castDevices.length} device(s) found');
+    } catch (e) {
+      debugPrint('Error processing cast devices: $e');
     }
   }
 

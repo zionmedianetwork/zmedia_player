@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../models/cast_device.dart';
 import '../models/media_item.dart';
+import '../core/media_player.dart';
 
 /// Service for managing screencast (Chromecast, AirPlay, etc.)
 class CastService {
@@ -20,6 +21,9 @@ class CastService {
     isAvailable: false,
     isCasting: false,
   );
+
+  StreamSubscription<List<CastDevice>>? _devicesSubscription;
+  StreamSubscription<CastStatus>? _statusSubscription;
 
   CastService(this._config);
 
@@ -42,7 +46,7 @@ class CastService {
   CastDevice? get connectedDevice => _currentStatus.device;
 
   /// Initialize the cast service
-  Future<void> initialize(String playerId) async {
+  Future<void> initialize(String playerId, MediaPlayer mediaPlayer) async {
     if (!_config.enabled) {
       debugPrint('CastService: Casting is disabled');
       return;
@@ -54,8 +58,24 @@ class CastService {
         'config': _config.toMap(),
       });
 
-      // Note: Method call handling is done by MediaPlayer, not here
-      // Cast events are handled through MediaPlayer.castStatusStream
+      // Subscribe to MediaPlayer's cast streams
+      _devicesSubscription = mediaPlayer.castDevicesStream.listen((devices) {
+        _availableDevices = devices;
+        if (!_devicesController.isClosed) {
+          _devicesController.add(devices);
+        }
+        debugPrint(
+            'CastService: Devices updated from MediaPlayer: ${devices.length}');
+      });
+
+      _statusSubscription = mediaPlayer.castStatusStream.listen((status) {
+        _currentStatus = status;
+        if (!_statusController.isClosed) {
+          _statusController.add(status);
+        }
+        debugPrint(
+            'CastService: Status updated from MediaPlayer: ${status.state}');
+      });
 
       debugPrint('CastService: Initialized successfully');
     } catch (e) {
@@ -232,6 +252,8 @@ class CastService {
 
   /// Dispose the service
   void dispose() {
+    _devicesSubscription?.cancel();
+    _statusSubscription?.cancel();
     _devicesController.close();
     _statusController.close();
   }

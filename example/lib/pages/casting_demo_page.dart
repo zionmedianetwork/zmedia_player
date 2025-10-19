@@ -80,7 +80,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
 
     // Initialize cast service
     _castService = CastService(castConfig);
-    await _castService?.initialize(_controller.playerId);
+    await _castService?.initialize(_controller.playerId, _controller.player);
 
     // Listen to cast status changes
     _controller.castStatusStream.listen((status) {
