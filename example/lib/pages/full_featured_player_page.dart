@@ -322,289 +322,208 @@ class _FullFeaturedPlayerPageState extends State<FullFeaturedPlayerPage> {
     final orientation = MediaQuery.of(context).orientation;
     final isLandscape = orientation == Orientation.landscape;
 
-    // In landscape, show fullscreen video without app bar
-    if (isLandscape) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            // Fullscreen video
-            SizedBox.expand(
-              child: _buildPlayer(),
-            ),
-            // Back button
-            Positioned(
-              top: 8,
-              left: 8,
-              child: SafeArea(
-                child: IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.black54,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+    // Build player once
+    final player = _buildPlayer();
 
-    // Portrait mode - normal layout
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Full Featured Player'),
-        actions: [
-          IconButton(
-            icon: Icon(
-                _showDebugInfo ? Icons.bug_report : Icons.bug_report_outlined),
-            onPressed: () {
-              setState(() {
-                _showDebugInfo = !_showDebugInfo;
-              });
-            },
-            tooltip: 'Toggle Debug Info',
-          ),
-        ],
-      ),
+      appBar: isLandscape
+          ? null
+          : AppBar(
+              title: const Text('Full Featured Player'),
+              actions: [
+                IconButton(
+                  icon: Icon(_showDebugInfo
+                      ? Icons.bug_report
+                      : Icons.bug_report_outlined),
+                  onPressed: () {
+                    setState(() {
+                      _showDebugInfo = !_showDebugInfo;
+                    });
+                  },
+                  tooltip: 'Toggle Debug Info',
+                ),
+              ],
+            ),
+      backgroundColor: isLandscape ? Colors.black : null,
       body: Column(
         children: [
-          // Video Player
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: Container(
-              color: Colors.black,
-              child: _buildPlayer(),
-            ),
-          ),
-
-          // Controls Section
-          Expanded(
-            child: SingleChildScrollView(
-              child: Column(
-                children: [
-                  // Video Info
-                  ListenableBuilder(
-                    listenable: _controller,
-                    builder: (context, _) {
-                      final item = _controller.currentItem;
-                      if (item == null) return const SizedBox.shrink();
-
-                      return Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(20),
-                        color: const Color(0xFF1E293B),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              item.title,
-                              style: Theme.of(context).textTheme.titleLarge,
-                            ),
-                            if (item.artist != null) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                item.artist!,
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyMedium
-                                    ?.copyWith(
-                                      color: const Color(0xFF6366F1),
-                                    ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      );
-                    },
+          // Video Player - wrapped differently based on orientation
+          isLandscape
+              ? Expanded(child: player)
+              : AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Container(
+                    color: Colors.black,
+                    child: player,
                   ),
+                ),
 
-                  // Control Buttons
-                  Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      children: [
-                        // Primary Controls
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                          children: [
-                            _ControlButton(
-                              icon: Icons.video_library,
-                              label: 'Videos',
-                              onPressed: _showVideoSelector,
-                            ),
-                            _ControlButton(
-                              icon: Icons.aspect_ratio,
-                              label: 'BoxFit',
-                              onPressed: _showBoxFitPicker,
-                            ),
-                            _ControlButton(
-                              icon: Icons.speed,
-                              label: 'Speed',
-                              onPressed: _showSpeedPicker,
-                            ),
-                            ListenableBuilder(
-                              listenable: _controller,
-                              builder: (context, _) {
-                                return _ControlButton(
-                                  icon: _controller.isMuted
-                                      ? Icons.volume_off
-                                      : Icons.volume_up,
-                                  label: 'Mute',
-                                  onPressed: _controller.toggleMute,
-                                );
-                              },
-                            ),
-                          ],
-                        ),
+          // Controls Section - only show in portrait
+          if (!isLandscape)
 
-                        const SizedBox(height: 16),
+            // Controls Section
+            Expanded(
+              child: SingleChildScrollView(
+                child: Column(
+                  children: [
+                    // Video Info
+                    ListenableBuilder(
+                      listenable: _controller,
+                      builder: (context, _) {
+                        final item = _controller.currentItem;
+                        if (item == null) return const SizedBox.shrink();
 
-                        // Volume Control
-                        ListenableBuilder(
-                          listenable: _controller,
-                          builder: (context, _) {
-                            return Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.volume_up,
-                                        size: 20, color: Colors.white70),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      child: Slider(
-                                        value: _controller.volume,
-                                        onChanged: (value) =>
-                                            _controller.setVolume(value),
-                                        min: 0.0,
-                                        max: 1.0,
+                        return Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          color: const Color(0xFF1E293B),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                item.title,
+                                style: Theme.of(context).textTheme.titleLarge,
+                              ),
+                              if (item.artist != null) ...[
+                                const SizedBox(height: 4),
+                                Text(
+                                  item.artist!,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .bodyMedium
+                                      ?.copyWith(
+                                        color: const Color(0xFF6366F1),
                                       ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    SizedBox(
-                                      width: 40,
-                                      child: Text(
-                                        '${(_controller.volume * 100).toInt()}%',
-                                        style: const TextStyle(
-                                          color: Colors.white70,
-                                          fontSize: 12,
-                                        ),
-                                        textAlign: TextAlign.right,
-                                      ),
-                                    ),
-                                  ],
                                 ),
                               ],
-                            );
-                          },
-                        ),
-
-                        const SizedBox(height: 16),
-
-                        // Current Settings Display
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
-                            borderRadius: BorderRadius.circular(12),
+                            ],
                           ),
-                          child: Column(
+                        );
+                      },
+                    ),
+
+                    // Control Buttons
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        children: [
+                          // Primary Controls
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
+                              _ControlButton(
+                                icon: Icons.video_library,
+                                label: 'Videos',
+                                onPressed: _showVideoSelector,
+                              ),
+                              _ControlButton(
+                                icon: Icons.aspect_ratio,
+                                label: 'BoxFit',
+                                onPressed: _showBoxFitPicker,
+                              ),
+                              _ControlButton(
+                                icon: Icons.speed,
+                                label: 'Speed',
+                                onPressed: _showSpeedPicker,
+                              ),
                               ListenableBuilder(
                                 listenable: _controller,
                                 builder: (context, _) {
-                                  return Column(
-                                    children: [
-                                      _SettingRow(
-                                        icon: Icons.aspect_ratio,
-                                        label: 'BoxFit',
-                                        value: _boxFitOptions
-                                            .firstWhere(
-                                                (e) => e.key == _currentBoxFit)
-                                            .value,
-                                      ),
-                                      _SettingRow(
-                                        icon: Icons.speed,
-                                        label: 'Speed',
-                                        value: '${_controller.speed}x',
-                                      ),
-                                      _SettingRow(
-                                        icon: Icons.play_arrow,
-                                        label: 'State',
-                                        value: _controller.state.state.name
-                                            .toUpperCase(),
-                                      ),
-                                      _SettingRow(
-                                        icon: Icons.schedule,
-                                        label: 'Position',
-                                        value:
-                                            '${_controller.formattedPosition} / ${_controller.formattedDuration}',
-                                      ),
-                                    ],
+                                  return _ControlButton(
+                                    icon: _controller.isMuted
+                                        ? Icons.volume_off
+                                        : Icons.volume_up,
+                                    label: 'Mute',
+                                    onPressed: _controller.toggleMute,
                                   );
                                 },
                               ),
                             ],
                           ),
-                        ),
 
-                        // Debug Info
-                        if (_showDebugInfo) ...[
                           const SizedBox(height: 16),
+
+                          // Volume Control
+                          ListenableBuilder(
+                            listenable: _controller,
+                            builder: (context, _) {
+                              return Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.volume_up,
+                                          size: 20, color: Colors.white70),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Slider(
+                                          value: _controller.volume,
+                                          onChanged: (value) =>
+                                              _controller.setVolume(value),
+                                          min: 0.0,
+                                          max: 1.0,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      SizedBox(
+                                        width: 40,
+                                        child: Text(
+                                          '${(_controller.volume * 100).toInt()}%',
+                                          style: const TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 12,
+                                          ),
+                                          textAlign: TextAlign.right,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+
+                          const SizedBox(height: 16),
+
+                          // Current Settings Display
                           Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.orange.withOpacity(0.1),
+                              color: const Color(0xFF1E293B),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: Colors.orange.withOpacity(0.3),
-                              ),
                             ),
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Row(
-                                  children: [
-                                    Icon(Icons.bug_report,
-                                        color: Colors.orange, size: 20),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Debug Information',
-                                      style: TextStyle(
-                                        color: Colors.orange,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
                                 ListenableBuilder(
                                   listenable: _controller,
                                   builder: (context, _) {
                                     return Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
                                       children: [
-                                        _DebugRow('State',
-                                            _controller.state.state.name),
-                                        _DebugRow('Is Playing',
-                                            _controller.isPlaying.toString()),
-                                        _DebugRow('Is Paused',
-                                            _controller.isPaused.toString()),
-                                        _DebugRow('Is Buffering',
-                                            _controller.isBuffering.toString()),
-                                        _DebugRow('Is Muted',
-                                            _controller.isMuted.toString()),
-                                        _DebugRow('Progress',
-                                            '${(_controller.progress * 100).toStringAsFixed(1)}%'),
-                                        _DebugRow(
-                                            'Volume',
-                                            _controller.volume
-                                                .toStringAsFixed(2)),
-                                        _DebugRow('Speed',
-                                            _controller.speed.toString()),
+                                        _SettingRow(
+                                          icon: Icons.aspect_ratio,
+                                          label: 'BoxFit',
+                                          value: _boxFitOptions
+                                              .firstWhere((e) =>
+                                                  e.key == _currentBoxFit)
+                                              .value,
+                                        ),
+                                        _SettingRow(
+                                          icon: Icons.speed,
+                                          label: 'Speed',
+                                          value: '${_controller.speed}x',
+                                        ),
+                                        _SettingRow(
+                                          icon: Icons.play_arrow,
+                                          label: 'State',
+                                          value: _controller.state.state.name
+                                              .toUpperCase(),
+                                        ),
+                                        _SettingRow(
+                                          icon: Icons.schedule,
+                                          label: 'Position',
+                                          value:
+                                              '${_controller.formattedPosition} / ${_controller.formattedDuration}',
+                                        ),
                                       ],
                                     );
                                   },
@@ -612,14 +531,79 @@ class _FullFeaturedPlayerPageState extends State<FullFeaturedPlayerPage> {
                               ],
                             ),
                           ),
+
+                          // Debug Info
+                          if (_showDebugInfo) ...[
+                            const SizedBox(height: 16),
+                            Container(
+                              padding: const EdgeInsets.all(16),
+                              decoration: BoxDecoration(
+                                color: Colors.orange.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: Colors.orange.withOpacity(0.3),
+                                ),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Row(
+                                    children: [
+                                      Icon(Icons.bug_report,
+                                          color: Colors.orange, size: 20),
+                                      SizedBox(width: 8),
+                                      Text(
+                                        'Debug Information',
+                                        style: TextStyle(
+                                          color: Colors.orange,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ListenableBuilder(
+                                    listenable: _controller,
+                                    builder: (context, _) {
+                                      return Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _DebugRow('State',
+                                              _controller.state.state.name),
+                                          _DebugRow('Is Playing',
+                                              _controller.isPlaying.toString()),
+                                          _DebugRow('Is Paused',
+                                              _controller.isPaused.toString()),
+                                          _DebugRow(
+                                              'Is Buffering',
+                                              _controller.isBuffering
+                                                  .toString()),
+                                          _DebugRow('Is Muted',
+                                              _controller.isMuted.toString()),
+                                          _DebugRow('Progress',
+                                              '${(_controller.progress * 100).toStringAsFixed(1)}%'),
+                                          _DebugRow(
+                                              'Volume',
+                                              _controller.volume
+                                                  .toStringAsFixed(2)),
+                                          _DebugRow('Speed',
+                                              _controller.speed.toString()),
+                                        ],
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );

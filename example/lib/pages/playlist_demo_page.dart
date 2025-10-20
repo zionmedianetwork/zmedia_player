@@ -100,228 +100,207 @@ class _PlaylistDemoPageState extends State<PlaylistDemoPage> {
     final orientation = MediaQuery.of(context).orientation;
     final isLandscape = orientation == Orientation.landscape;
 
-    // In landscape, show fullscreen video without app bar
-    if (isLandscape) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            // Fullscreen video
-            SizedBox.expand(
-              child: _buildPlayer(),
-            ),
-            // Back button
-            Positioned(
-              top: 8,
-              left: 8,
-              child: SafeArea(
-                child: IconButton(
-                  onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
-                  style: IconButton.styleFrom(
-                    backgroundColor: Colors.black54,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+    // Build player once
+    final player = _buildPlayer();
 
-    // Portrait mode - normal layout
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Playlist Demo'),
-        actions: [
-          PopupMenuButton<PlaybackMode>(
-            icon: const Icon(Icons.shuffle),
-            tooltip: 'Playback Mode',
-            onSelected: _changePlaybackMode,
-            itemBuilder: (context) => [
-              CheckedPopupMenuItem(
-                value: PlaybackMode.sequential,
-                checked: _playbackMode == PlaybackMode.sequential,
-                child: const Text('Sequential'),
-              ),
-              CheckedPopupMenuItem(
-                value: PlaybackMode.shuffle,
-                checked: _playbackMode == PlaybackMode.shuffle,
-                child: const Text('Shuffle'),
-              ),
-            ],
-          ),
-          PopupMenuButton<RepeatMode>(
-            icon: Icon(
-              _repeatMode == RepeatMode.none
-                  ? Icons.repeat
-                  : _repeatMode == RepeatMode.single
-                      ? Icons.repeat_one
-                      : Icons.repeat_on,
+      appBar: isLandscape
+          ? null
+          : AppBar(
+              title: const Text('Playlist Demo'),
+              actions: [
+                PopupMenuButton<PlaybackMode>(
+                  icon: const Icon(Icons.shuffle),
+                  tooltip: 'Playback Mode',
+                  onSelected: _changePlaybackMode,
+                  itemBuilder: (context) => [
+                    CheckedPopupMenuItem(
+                      value: PlaybackMode.sequential,
+                      checked: _playbackMode == PlaybackMode.sequential,
+                      child: const Text('Sequential'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: PlaybackMode.shuffle,
+                      checked: _playbackMode == PlaybackMode.shuffle,
+                      child: const Text('Shuffle'),
+                    ),
+                  ],
+                ),
+                PopupMenuButton<RepeatMode>(
+                  icon: Icon(
+                    _repeatMode == RepeatMode.none
+                        ? Icons.repeat
+                        : _repeatMode == RepeatMode.single
+                            ? Icons.repeat_one
+                            : Icons.repeat_on,
+                  ),
+                  tooltip: 'Repeat Mode',
+                  onSelected: _changeRepeatMode,
+                  itemBuilder: (context) => [
+                    CheckedPopupMenuItem(
+                      value: RepeatMode.none,
+                      checked: _repeatMode == RepeatMode.none,
+                      child: const Text('No Repeat'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: RepeatMode.single,
+                      checked: _repeatMode == RepeatMode.single,
+                      child: const Text('Repeat One'),
+                    ),
+                    CheckedPopupMenuItem(
+                      value: RepeatMode.all,
+                      checked: _repeatMode == RepeatMode.all,
+                      child: const Text('Repeat All'),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            tooltip: 'Repeat Mode',
-            onSelected: _changeRepeatMode,
-            itemBuilder: (context) => [
-              CheckedPopupMenuItem(
-                value: RepeatMode.none,
-                checked: _repeatMode == RepeatMode.none,
-                child: const Text('No Repeat'),
-              ),
-              CheckedPopupMenuItem(
-                value: RepeatMode.single,
-                checked: _repeatMode == RepeatMode.single,
-                child: const Text('Repeat One'),
-              ),
-              CheckedPopupMenuItem(
-                value: RepeatMode.all,
-                checked: _repeatMode == RepeatMode.all,
-                child: const Text('Repeat All'),
-              ),
-            ],
-          ),
-        ],
-      ),
+      backgroundColor: isLandscape ? Colors.black : null,
       body: Column(
         children: [
-          // Video Player
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: Container(
-              color: Colors.black,
-              child: _buildPlayer(),
-            ),
-          ),
+          // Video Player - wrapped differently based on orientation
+          isLandscape
+              ? Expanded(child: player)
+              : AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: Container(
+                    color: Colors.black,
+                    child: player,
+                  ),
+                ),
 
-          // Player Controls
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: const Color(0xFF1E293B),
-            child: ListenableBuilder(
-              listenable: _controller,
-              builder: (context, _) {
-                return Column(
-                  children: [
-                    // Progress Bar
-                    Row(
-                      children: [
-                        Text(
-                          _controller.formattedPosition,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                          ),
-                        ),
-                        Expanded(
-                          child: Slider(
-                            value:
-                                _controller.position.inMilliseconds.toDouble(),
-                            max: _controller.duration.inMilliseconds
-                                .toDouble()
-                                .clamp(1.0, double.infinity),
-                            onChanged: (value) {
-                              _controller.seekTo(
-                                  Duration(milliseconds: value.toInt()));
-                            },
-                          ),
-                        ),
-                        Text(
-                          _controller.formattedDuration,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-
-                    // Playback Controls
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        // Previous
-                        IconButton(
-                          icon: Icon(
-                            Icons.skip_previous,
-                            color: _controller.hasPrevious
-                                ? Colors.white
-                                : Colors.white38,
-                          ),
-                          onPressed: _controller.hasPrevious
-                              ? _controller.skipToPrevious
-                              : null,
-                          iconSize: 32,
-                        ),
-
-                        const SizedBox(width: 16),
-
-                        // Play/Pause
-                        Container(
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [
-                                const Color(0xFF6366F1),
-                                const Color(0xFF8B5CF6),
-                              ],
-                            ),
-                          ),
-                          child: IconButton(
-                            icon: Icon(
-                              _controller.isPlaying
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
+          // Player Controls - only show in portrait
+          if (!isLandscape)
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: const Color(0xFF1E293B),
+              child: ListenableBuilder(
+                listenable: _controller,
+                builder: (context, _) {
+                  return Column(
+                    children: [
+                      // Progress Bar
+                      Row(
+                        children: [
+                          Text(
+                            _controller.formattedPosition,
+                            style: const TextStyle(
                               color: Colors.white,
+                              fontSize: 12,
                             ),
-                            onPressed: _controller.togglePlayPause,
+                          ),
+                          Expanded(
+                            child: Slider(
+                              value: _controller.position.inMilliseconds
+                                  .toDouble(),
+                              max: _controller.duration.inMilliseconds
+                                  .toDouble()
+                                  .clamp(1.0, double.infinity),
+                              onChanged: (value) {
+                                _controller.seekTo(
+                                    Duration(milliseconds: value.toInt()));
+                              },
+                            ),
+                          ),
+                          Text(
+                            _controller.formattedDuration,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+
+                      // Playback Controls
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          // Previous
+                          IconButton(
+                            icon: Icon(
+                              Icons.skip_previous,
+                              color: _controller.hasPrevious
+                                  ? Colors.white
+                                  : Colors.white38,
+                            ),
+                            onPressed: _controller.hasPrevious
+                                ? _controller.skipToPrevious
+                                : null,
                             iconSize: 32,
                           ),
-                        ),
 
-                        const SizedBox(width: 16),
+                          const SizedBox(width: 16),
 
-                        // Next
-                        IconButton(
-                          icon: Icon(
-                            Icons.skip_next,
-                            color: _controller.hasNext
-                                ? Colors.white
-                                : Colors.white38,
+                          // Play/Pause
+                          Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              gradient: LinearGradient(
+                                colors: [
+                                  const Color(0xFF6366F1),
+                                  const Color(0xFF8B5CF6),
+                                ],
+                              ),
+                            ),
+                            child: IconButton(
+                              icon: Icon(
+                                _controller.isPlaying
+                                    ? Icons.pause
+                                    : Icons.play_arrow,
+                                color: Colors.white,
+                              ),
+                              onPressed: _controller.togglePlayPause,
+                              iconSize: 32,
+                            ),
                           ),
-                          onPressed: _controller.hasNext
-                              ? _controller.skipToNext
-                              : null,
-                          iconSize: 32,
-                        ),
-                      ],
-                    ),
 
-                    // Current Video Info
-                    if (_controller.currentItem != null) ...[
-                      const SizedBox(height: 8),
-                      Text(
-                        _controller.currentItem!.title,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        textAlign: TextAlign.center,
+                          const SizedBox(width: 16),
+
+                          // Next
+                          IconButton(
+                            icon: Icon(
+                              Icons.skip_next,
+                              color: _controller.hasNext
+                                  ? Colors.white
+                                  : Colors.white38,
+                            ),
+                            onPressed: _controller.hasNext
+                                ? _controller.skipToNext
+                                : null,
+                            iconSize: 32,
+                          ),
+                        ],
                       ),
-                      if (_controller.currentItem!.artist != null)
+
+                      // Current Video Info
+                      if (_controller.currentItem != null) ...[
+                        const SizedBox(height: 8),
                         Text(
-                          _controller.currentItem!.artist!,
+                          _controller.currentItem!.title,
                           style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 14,
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
                           ),
                           textAlign: TextAlign.center,
                         ),
+                        if (_controller.currentItem!.artist != null)
+                          Text(
+                            _controller.currentItem!.artist!,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 14,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                      ],
                     ],
-                  ],
-                );
-              },
+                  );
+                },
+              ),
             ),
-          ),
 
           // Playlist Settings
           Container(
