@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Flutter
 
 /// Handles DRM (Digital Rights Management) for iOS media playback
 /// Supports FairPlay Streaming (FPS)
@@ -83,8 +84,8 @@ class DrmHandler: NSObject {
         let delegateQueue = DispatchQueue(label: "com.flutter_media_player.drm.content_key")
         keySession.setDelegate(delegate, queue: delegateQueue)
         
-        // Add player as content key recipient
-        keySession.addContentKeyRecipient(player)
+        // Note: We don't add the player as recipient here.
+        // Instead, we'll add the AVURLAsset when creating the player item
         
         self.contentKeySession = keySession
         
@@ -222,7 +223,8 @@ class DrmHandler: NSObject {
     /// Check if FairPlay is supported
     static func isFairPlaySupported() -> Bool {
         if #available(iOS 10.0, *) {
-            return AVContentKeySession.contentKeySessionSupports(keySystem: .fairPlayStreaming)
+            // FairPlay is available on iOS 10.0+
+            return true
         }
         return false
     }
@@ -269,7 +271,9 @@ class DrmHandler: NSObject {
     // MARK: - Cleanup
     
     func dispose() {
-        contentKeySession?.invalidateAllPersistableContentKeys(for: nil, options: nil) { _, _ in }
+        // Invalidate content key session
+        // Note: We don't call invalidateAllPersistableContentKeys as it requires app-specific data
+        // The session will be cleaned up when set to nil
         contentKeySession = nil
         contentKeyDelegate = nil
         certificateData = nil
