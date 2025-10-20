@@ -1,19 +1,18 @@
 package com.example.flutter_media_player
 
 import android.content.Context
+import io.flutter.plugin.common.StandardMessageCodec
 import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 
 /**
  * Factory for creating MediaPlayerView instances
- * Uses Hybrid Composition (null codec) for better performance and stability with video playback
- * 
- * IMPORTANT: Passing null as the codec parameter enables Hybrid Composition mode,
- * which is required for proper video playback without SurfaceProducer crashes
+ * Uses StandardMessageCodec to properly decode creation parameters
+ * Hybrid Composition is enabled on the Dart side via AndroidView
  */
 class MediaPlayerViewFactory(
     private val playerManager: MediaPlayerManager
-) : PlatformViewFactory(null) {
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
 
     override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
         android.util.Log.d("MediaPlayerViewFactory", "Creating platform view with viewId: $viewId, args: $args")

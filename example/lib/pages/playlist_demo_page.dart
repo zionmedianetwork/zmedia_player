@@ -94,6 +94,39 @@ class _PlaylistDemoPageState extends State<PlaylistDemoPage> {
 
   @override
   Widget build(BuildContext context) {
+    final orientation = MediaQuery.of(context).orientation;
+    final isLandscape = orientation == Orientation.landscape;
+
+    // In landscape, show fullscreen video without app bar
+    if (isLandscape) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            // Fullscreen video
+            SizedBox.expand(
+              child: _buildPlayer(),
+            ),
+            // Back button
+            Positioned(
+              top: 8,
+              left: 8,
+              child: SafeArea(
+                child: IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.black54,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Portrait mode - normal layout
     return Scaffold(
       appBar: AppBar(
         title: const Text('Playlist Demo'),

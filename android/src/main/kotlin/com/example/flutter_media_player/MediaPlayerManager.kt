@@ -200,6 +200,11 @@ class MediaPlayerInstance(
             }
             
             notifyStateChanged(state, playbackState == Player.STATE_BUFFERING)
+            
+            // Notify duration when player is ready
+            if (playbackState == Player.STATE_READY) {
+                notifyDurationChanged()
+            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -277,9 +282,8 @@ class MediaPlayerInstance(
             
             android.util.Log.d("MediaPlayerInstance", "Media prepared, autoPlay: ${config?.get("autoPlay")}")
             
-            if (config?.get("autoPlay") as? Boolean == true) {
-                playWhenReady = true
-            }
+            // Set playWhenReady based on autoPlay - explicitly set false if not auto-playing
+            playWhenReady = config?.get("autoPlay") as? Boolean ?: false
         }
         
         currentMediaSource = mediaSource
