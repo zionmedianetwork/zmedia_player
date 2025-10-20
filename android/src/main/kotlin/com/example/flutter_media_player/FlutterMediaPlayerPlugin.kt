@@ -1,8 +1,11 @@
 package com.example.flutter_media_player
 
+import android.app.Activity
 import android.content.Context
 import androidx.annotation.NonNull
 import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.embedding.engine.plugins.activity.ActivityAware
+import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.MethodChannel.MethodCallHandler
@@ -12,10 +15,11 @@ import io.flutter.plugin.platform.PlatformViewRegistry
 /**
  * FlutterMediaPlayerPlugin
  */
-class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
+class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
     private lateinit var playerManager: MediaPlayerManager
+    private var activity: Activity? = null
     
     // Phase 3: Handler maps
     private val notificationHandlers = mutableMapOf<String, NotificationHandler>()
@@ -471,15 +475,17 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
             val playerId = call.argument<String>("playerId")
             
             if (playerId != null) {
-                // Get activity context if available
-                val activity = context as? android.app.Activity
+                // Use the actual activity from ActivityAware
                 val handler = PipHandler(activity, playerId, channel)
                 pipHandlers[playerId] = handler
-                result.success(handler.checkAvailability())
+                val isAvailable = handler.checkAvailability()
+                android.util.Log.d("FlutterMediaPlayerPlugin", "PiP availability check: $isAvailable (activity: ${activity != null})")
+                result.success(isAvailable)
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID is required", null)
             }
         } catch (e: Exception) {
+            android.util.Log.e("FlutterMediaPlayerPlugin", "PiP check error: ${e.message}", e)
             result.error("PIP_CHECK_ERROR", e.message, null)
         }
     }
@@ -494,17 +500,18 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
                     val success = handler.enterPip(null)
                     result.success(success)
                 } else {
-                    // Create handler if not exists
-                    val activity = context as? android.app.Activity
+                    // Create handler if not exists - use actual activity from ActivityAware
                     val newHandler = PipHandler(activity, playerId, channel)
                     pipHandlers[playerId] = newHandler
                     val success = newHandler.enterPip(null)
+                    android.util.Log.d("FlutterMediaPlayerPlugin", "PiP enter result: $success (activity: ${activity != null})")
                     result.success(success)
                 }
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID is required", null)
             }
         } catch (e: Exception) {
+            android.util.Log.e("FlutterMediaPlayerPlugin", "PiP enter error: ${e.message}", e)
             result.error("PIP_ENTER_ERROR", e.message, null)
         }
     }
@@ -707,8 +714,29 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler {
         
         pipHandlers.values.forEach { it.dispose() }
         pipHandlers.clear()
-        
+
         castHandlers.values.forEach { it.dispose() }
         castHandlers.clear()
+    }
+    
+    // ActivityAware implementation
+    override fun onAttachedToActivity(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        android.util.Log.d("FlutterMediaPlayerPlugin", "Activity attached: ${activity != null}")
+    }
+    
+    override fun onDetachedFromActivityForConfigChanges() {
+        // Keep activity reference during config changes
+        android.util.Log.d("FlutterMediaPlayerPlugin", "Activity detached for config changes")
+    }
+    
+    override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
+        activity = binding.activity
+        android.util.Log.d("FlutterMediaPlayerPlugin", "Activity reattached after config changes")
+    }
+    
+    override fun onDetachedFromActivity() {
+        activity = null
+        android.util.Log.d("FlutterMediaPlayerPlugin", "Activity detached")
     }
 }
