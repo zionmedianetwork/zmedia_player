@@ -54,9 +54,9 @@ class MediaPlayerView(
         val resizeMode = when (boxFit.lowercase()) {
             "cover" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-            "fitwidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_WIDTH
-            "fitheight" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_HEIGHT
-            "none" -> AspectRatioFrameLayout.RESIZE_MODE_NONE
+            "fitwidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
+            "fitheight" -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
+            "none" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
             "scaledown" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
             else -> AspectRatioFrameLayout.RESIZE_MODE_FIT // "contain" and default
         }

@@ -3,7 +3,9 @@ package com.example.flutter_media_player
 import android.content.Context
 import com.google.android.gms.cast.*
 import com.google.android.gms.cast.framework.*
+import com.google.android.gms.cast.framework.media.RemoteMediaClient
 import com.google.android.gms.common.api.ResultCallback
+import com.google.android.gms.common.images.WebImage
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.*
 import org.json.JSONObject
@@ -208,7 +210,7 @@ class CastHandler(
      * Seek on cast device
      */
     fun seekTo(position: Long) {
-        remoteMediaClient?.seek(position)
+        remoteMediaClient?.seek(position, RemoteMediaClient.RESUME_STATE_UNCHANGED)
     }
 
     /**
@@ -283,10 +285,10 @@ class CastHandler(
     private fun getDeviceInfo(session: CastSession): Map<String, Any> {
         val device = session.castDevice
         return mapOf(
-            "id" to (device.deviceId ?: "unknown"),
-            "name" to (device.friendlyName ?: "Unknown Device"),
+            "id" to (device?.deviceId ?: "unknown"),
+            "name" to (device?.friendlyName ?: "Unknown Device"),
             "type" to "chromecast",
-            "model" to (device.modelName ?: ""),
+            "model" to (device?.modelName ?: ""),
             "manufacturer" to "Google",
             "isConnected" to true
         )

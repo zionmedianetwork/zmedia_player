@@ -4,10 +4,11 @@ import android.content.Context
 import android.util.Log
 import com.google.android.exoplayer2.C
 import com.google.android.exoplayer2.drm.DefaultDrmSessionManager
-import com.google.android.exoplayer2.drm.DrmSession
-import com.google.android.exoplayer2.drm.FrameworkMediaCrypto
+import com.google.android.exoplayer2.drm.DrmSessionManager
+import com.google.android.exoplayer2.drm.ExoMediaDrm
+import com.google.android.exoplayer2.drm.FrameworkMediaDrm
 import com.google.android.exoplayer2.drm.HttpMediaDrmCallback
-import com.google.android.exoplayer2.upstream.DefaultHttpDataSourceFactory
+import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
 import com.google.android.exoplayer2.upstream.HttpDataSource
 import com.google.android.exoplayer2.util.Util
 import io.flutter.plugin.common.MethodChannel
@@ -38,7 +39,7 @@ class DrmHandler(
      */
     fun createDrmSessionManager(
         drmConfig: Map<String, Any>?
-    ): DrmSessionManager<FrameworkMediaCrypto>? {
+    ): DrmSessionManager? {
         if (drmConfig == null) {
             return null
         }
@@ -96,7 +97,7 @@ class DrmHandler(
         drmConfig: Map<String, Any>
     ): HttpDataSource.Factory {
         val userAgent = Util.getUserAgent(context, USER_AGENT)
-        val dataSourceFactory = DefaultHttpDataSourceFactory(userAgent)
+        val dataSourceFactory = DefaultHttpDataSource.Factory().setUserAgent(userAgent)
 
         // Add custom headers
         val headers = drmConfig["headers"] as? Map<String, String>
@@ -109,7 +110,7 @@ class DrmHandler(
         }
 
         if (requestHeaders.isNotEmpty()) {
-            dataSourceFactory.defaultRequestProperties.set(requestHeaders)
+            dataSourceFactory.setDefaultRequestProperties(requestHeaders)
         }
 
         return dataSourceFactory
