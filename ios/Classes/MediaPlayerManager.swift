@@ -506,7 +506,14 @@ class MediaPlayerInstance: NSObject {
             notifyStateChanged(state: "buffering", isBuffering: true)
         case .readyToPlay:
             print("MediaPlayerInstance: PlayerItem status = readyToPlay")
-            notifyStateChanged(state: "ready", isBuffering: false)
+            // Check if player is currently playing to set correct state
+            if let player = avPlayer, player.rate > 0 {
+                print("MediaPlayerInstance: Player is playing (rate: \(player.rate))")
+                notifyStateChanged(state: "playing", isBuffering: false)
+            } else {
+                print("MediaPlayerInstance: Player is ready but not playing")
+                notifyStateChanged(state: "ready", isBuffering: false)
+            }
             notifyDurationChanged()
         case .failed:
             print("MediaPlayerInstance: PlayerItem status = failed")
