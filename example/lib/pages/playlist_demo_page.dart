@@ -16,6 +16,9 @@ class _PlaylistDemoPageState extends State<PlaylistDemoPage> {
   PlaybackMode _playbackMode = PlaybackMode.sequential;
   RepeatMode _repeatMode = RepeatMode.none;
 
+  // Use GlobalKey to preserve MediaPlayerWidget state across orientation changes
+  final GlobalKey _playerKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -406,6 +409,7 @@ class _PlaylistDemoPageState extends State<PlaylistDemoPage> {
     return Stack(
       children: [
         MediaPlayerWidget(
+          key: _playerKey,
           controller: _controller,
           showControls: false,
         ),

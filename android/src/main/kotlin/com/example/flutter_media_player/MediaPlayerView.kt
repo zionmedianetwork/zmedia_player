@@ -54,7 +54,36 @@ class MediaPlayerView(
     }
 
     override fun dispose() {
-        playerView.player = null
+        android.util.Log.d("MediaPlayerView", "Disposing MediaPlayerView")
+        // Ensure disposal happens on the main thread
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            disposeInternal()
+        } else {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                disposeInternal()
+            }
+        }
+    }
+    
+    private fun disposeInternal() {
+        try {
+            // First, detach the player to stop rendering
+            playerView.player = null
+            
+            // Give the BufferQueue time to clean up
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try {
+                    // Clear any remaining callbacks
+                    playerView.removeCallbacks(null)
+                } catch (e: Exception) {
+                    android.util.Log.e("MediaPlayerView", "Error during final cleanup: ${e.message}")
+                }
+            }, 100)
+            
+            android.util.Log.d("MediaPlayerView", "MediaPlayerView disposed successfully")
+        } catch (e: Exception) {
+            android.util.Log.e("MediaPlayerView", "Error disposing MediaPlayerView: ${e.message}")
+        }
     }
 
     fun setResizeMode(resizeMode: Int) {

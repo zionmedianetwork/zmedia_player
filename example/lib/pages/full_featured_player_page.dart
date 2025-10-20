@@ -17,6 +17,9 @@ class _FullFeaturedPlayerPageState extends State<FullFeaturedPlayerPage> {
   BoxFit _currentBoxFit = BoxFit.contain;
   bool _showDebugInfo = false;
 
+  // Use GlobalKey to preserve MediaPlayerWidget state across orientation changes
+  final GlobalKey _playerKey = GlobalKey();
+
   final List<MapEntry<BoxFit, String>> _boxFitOptions = [
     const MapEntry(BoxFit.contain, 'Contain'),
     const MapEntry(BoxFit.cover, 'Cover'),
@@ -676,6 +679,7 @@ class _FullFeaturedPlayerPageState extends State<FullFeaturedPlayerPage> {
     return Stack(
       children: [
         MediaPlayerWidget(
+          key: _playerKey,
           controller: _controller,
           showControls: false,
         ),

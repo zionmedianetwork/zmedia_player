@@ -222,16 +222,23 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
     debugPrint('Refreshing video surface...');
 
-    // Clean up existing view
-    _cleanupNativeView();
+    // Only cleanup and recreate if we don't have a valid native view
+    // This prevents unnecessary surface destruction during orientation changes
+    if (!_hasNativeView || _nativeView == null) {
+      // Clean up existing view
+      _cleanupNativeView();
 
-    // Recreate the native view if we have media
-    if (widget.controller.currentItem != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_isDisposed) {
-          _createNativeView();
-        }
-      });
+      // Recreate the native view if we have media
+      if (widget.controller.currentItem != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_isDisposed) {
+            _createNativeView();
+          }
+        });
+      }
+    } else {
+      debugPrint(
+          'Native view already exists, skipping refresh to preserve surface');
     }
   }
 

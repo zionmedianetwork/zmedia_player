@@ -14,6 +14,9 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
   bool _isInitializing = true;
   String? _error;
 
+  // Use GlobalKey to preserve MediaPlayerWidget state across orientation changes
+  final GlobalKey _playerKey = GlobalKey();
+
   @override
   void initState() {
     super.initState();
@@ -310,6 +313,7 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
     }
 
     return MediaPlayerWidget(
+      key: _playerKey,
       controller: _controller,
       showControls: true,
     );
