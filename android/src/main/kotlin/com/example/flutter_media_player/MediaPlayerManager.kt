@@ -24,9 +24,19 @@ class MediaPlayerManager(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun initializePlayer(playerId: String, config: Map<String, Any>?) {
-        mainHandler.post {
+        android.util.Log.d("MediaPlayerManager", "initializePlayer called for playerId: $playerId")
+        
+        // Initialize synchronously on main thread to avoid timing issues with platform view creation
+        if (Looper.myLooper() == Looper.getMainLooper()) {
             val playerInstance = MediaPlayerInstance(context, playerId, methodChannel, config)
             players[playerId] = playerInstance
+            android.util.Log.d("MediaPlayerManager", "Player instance created synchronously")
+        } else {
+            mainHandler.post {
+                val playerInstance = MediaPlayerInstance(context, playerId, methodChannel, config)
+                players[playerId] = playerInstance
+                android.util.Log.d("MediaPlayerManager", "Player instance created via handler post")
+            }
         }
     }
 
@@ -127,7 +137,16 @@ class MediaPlayerManager(
     }
 
     fun getPlayerView(playerId: String): MediaPlayerView? {
-        return players[playerId]?.getPlayerView()
+        android.util.Log.d("MediaPlayerManager", "getPlayerView called for playerId: $playerId, player exists: ${players.containsKey(playerId)}")
+        
+        // If player doesn't exist yet, wait for it to be initialized
+        val playerInstance = players[playerId]
+        if (playerInstance == null) {
+            android.util.Log.e("MediaPlayerManager", "Player instance not found for $playerId - ensure initialize() was called first")
+            return null
+        }
+        
+        return playerInstance.getPlayerView()
     }
 
     fun disposePlayer(playerId: String) {

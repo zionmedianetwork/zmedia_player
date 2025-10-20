@@ -13,7 +13,14 @@ class MediaPlayerView(
 ) : PlatformView {
     
     private val playerView: PlayerView = PlayerView(context).apply {
-        player = exoPlayer
+        // Only attach player if it's not null
+        if (exoPlayer != null) {
+            player = exoPlayer
+            android.util.Log.d("MediaPlayerView", "PlayerView created with player attached")
+        } else {
+            android.util.Log.e("MediaPlayerView", "WARNING: PlayerView created with null ExoPlayer!")
+        }
+        
         useController = false // We handle controls in Flutter
         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
         
@@ -27,14 +34,18 @@ class MediaPlayerView(
         controllerShowTimeoutMs = 0
         controllerHideOnTouch = false
         
-        android.util.Log.d("MediaPlayerView", "PlayerView created with player: ${exoPlayer != null}, isAttached: ${exoPlayer != null}")
-        
         // Post a delayed task to ensure the surface is created
         post {
-            android.util.Log.d("MediaPlayerView", "PlayerView posted - requesting layout")
+            android.util.Log.d("MediaPlayerView", "PlayerView posted - requesting layout, player: ${player != null}")
             requestLayout()
             invalidate()
         }
+    }
+    
+    // Allow setting the player later if it was null during construction
+    fun setPlayer(player: ExoPlayer?) {
+        android.util.Log.d("MediaPlayerView", "setPlayer called, player: ${player != null}")
+        playerView.player = player
     }
 
     override fun getView(): View {
