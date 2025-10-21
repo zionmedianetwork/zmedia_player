@@ -2,7 +2,7 @@ import Flutter
 import UIKit
 import AVFoundation
 
-public class FlutterMediaPlayerPlugin: NSObject, FlutterPlugin {
+public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
     private var playerManager: MediaPlayerManager!
     private var methodChannel: FlutterMethodChannel!
     
@@ -12,8 +12,8 @@ public class FlutterMediaPlayerPlugin: NSObject, FlutterPlugin {
     private var airPlayHandlers: [String: AirPlayHandler] = [:]
     
     public static func register(with registrar: FlutterPluginRegistrar) {
-        let channel = FlutterMethodChannel(name: "flutter_media_player", binaryMessenger: registrar.messenger())
-        let instance = FlutterMediaPlayerPlugin()
+        let channel = FlutterMethodChannel(name: "zmedia_player", binaryMessenger: registrar.messenger())
+        let instance = ZMediaPlayerPlugin()
         
         // Initialize player manager
         instance.methodChannel = channel
@@ -24,7 +24,7 @@ public class FlutterMediaPlayerPlugin: NSObject, FlutterPlugin {
         // Register platform view factory
         registrar.register(
             MediaPlayerViewFactory(playerManager: instance.playerManager),
-            withId: "flutter_media_player_view"
+            withId: "zmedia_player_view"
         )
     }
 

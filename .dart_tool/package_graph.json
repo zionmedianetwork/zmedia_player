@@ -1,10 +1,10 @@
 {
   "roots": [
-    "flutter_media_player"
+    "zmedia_player"
   ],
   "packages": [
     {
-      "name": "flutter_media_player",
+      "name": "zmedia_player",
       "version": "0.1.0",
       "dependencies": [
         "flutter",

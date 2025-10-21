@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 /// Demo page for DRM (Digital Rights Management) content playback
 class DrmDemoPage extends StatefulWidget {

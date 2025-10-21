@@ -100,7 +100,7 @@ docs/
 
 ### Basic Playback
 ```dart
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 // Create controller
 final controller = MediaController();

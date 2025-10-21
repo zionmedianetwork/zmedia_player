@@ -7,7 +7,7 @@ import '../core/media_player.dart';
 
 /// Service for managing screencast (Chromecast, AirPlay, etc.)
 class CastService {
-  static const MethodChannel _channel = MethodChannel('flutter_media_player');
+  static const MethodChannel _channel = MethodChannel('zmedia_player');
 
   final CastConfig _config;
   final StreamController<List<CastDevice>> _devicesController =

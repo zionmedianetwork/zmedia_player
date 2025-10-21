@@ -466,7 +466,7 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       debugPrint('Creating platform view for media: ${currentItem.title}');
 
       // Create platform-specific video surface
-      const viewType = 'flutter_media_player_view';
+      const viewType = 'zmedia_player_view';
       final creationParams = {
         'playerId': widget.controller.player.playerId,
         'boxFit':

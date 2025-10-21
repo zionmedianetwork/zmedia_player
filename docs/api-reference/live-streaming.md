@@ -51,7 +51,7 @@ ZMedia Player provides comprehensive support for live streaming via both HLS (HT
 ### Basic Setup
 
 ```dart
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 // Create controller with HLS live configuration
 final controller = MediaController.create(
@@ -363,7 +363,7 @@ final controller = MediaController.create(
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 class LiveStreamPage extends StatefulWidget {
   @override

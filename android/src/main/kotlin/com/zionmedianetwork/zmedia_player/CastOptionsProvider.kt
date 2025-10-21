@@ -1,4 +1,4 @@
-package com.example.flutter_media_player
+package com.zionmedianetwork.zmedia_player
 
 import android.content.Context
 import com.google.android.gms.cast.framework.CastOptions

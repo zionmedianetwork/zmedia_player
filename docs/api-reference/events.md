@@ -342,7 +342,7 @@ player.audioTracksStream.listen((List<AudioTrack> tracks) {
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 class PlayerEventsDemo extends StatefulWidget {
   @override

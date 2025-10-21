@@ -8,7 +8,7 @@ import '../core/media_player.dart';
 
 /// Service for managing media playback notifications
 class NotificationService {
-  static const MethodChannel _channel = MethodChannel('flutter_media_player');
+  static const MethodChannel _channel = MethodChannel('zmedia_player');
 
   final NotificationConfig _config;
   final StreamController<String> _actionController =

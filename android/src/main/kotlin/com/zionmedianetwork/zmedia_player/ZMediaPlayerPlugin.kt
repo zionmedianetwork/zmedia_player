@@ -1,4 +1,4 @@
-package com.example.flutter_media_player
+package com.zionmedianetwork.zmedia_player
 
 import android.app.Activity
 import android.content.Context
@@ -13,9 +13,9 @@ import io.flutter.plugin.common.MethodChannel.Result
 import io.flutter.plugin.platform.PlatformViewRegistry
 
 /**
- * FlutterMediaPlayerPlugin
+ * ZMediaPlayerPlugin
  */
-class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
+class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
     private lateinit var playerManager: MediaPlayerManager
@@ -28,7 +28,7 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware 
 
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
-        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "flutter_media_player")
+        channel = MethodChannel(flutterPluginBinding.binaryMessenger, "zmedia_player")
         channel.setMethodCallHandler(this)
         
         // Initialize player manager
@@ -38,7 +38,7 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware 
         flutterPluginBinding
             .platformViewRegistry
             .registerViewFactory(
-                "flutter_media_player_view",
+                "zmedia_player_view",
                 MediaPlayerViewFactory(playerManager)
             )
     }
@@ -479,13 +479,13 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware 
                 val handler = PipHandler(activity, playerId, channel)
                 pipHandlers[playerId] = handler
                 val isAvailable = handler.checkAvailability()
-                android.util.Log.d("FlutterMediaPlayerPlugin", "PiP availability check: $isAvailable (activity: ${activity != null})")
+                android.util.Log.d("ZMediaPlayerPlugin", "PiP availability check: $isAvailable (activity: ${activity != null})")
                 result.success(isAvailable)
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID is required", null)
             }
         } catch (e: Exception) {
-            android.util.Log.e("FlutterMediaPlayerPlugin", "PiP check error: ${e.message}", e)
+            android.util.Log.e("ZMediaPlayerPlugin", "PiP check error: ${e.message}", e)
             result.error("PIP_CHECK_ERROR", e.message, null)
         }
     }
@@ -504,14 +504,14 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware 
                     val newHandler = PipHandler(activity, playerId, channel)
                     pipHandlers[playerId] = newHandler
                     val success = newHandler.enterPip(null)
-                    android.util.Log.d("FlutterMediaPlayerPlugin", "PiP enter result: $success (activity: ${activity != null})")
+                    android.util.Log.d("ZMediaPlayerPlugin", "PiP enter result: $success (activity: ${activity != null})")
                     result.success(success)
                 }
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID is required", null)
             }
         } catch (e: Exception) {
-            android.util.Log.e("FlutterMediaPlayerPlugin", "PiP enter error: ${e.message}", e)
+            android.util.Log.e("ZMediaPlayerPlugin", "PiP enter error: ${e.message}", e)
             result.error("PIP_ENTER_ERROR", e.message, null)
         }
     }
@@ -722,21 +722,21 @@ class FlutterMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware 
     // ActivityAware implementation
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
-        android.util.Log.d("FlutterMediaPlayerPlugin", "Activity attached: ${activity != null}")
+        android.util.Log.d("ZMediaPlayerPlugin", "Activity attached: ${activity != null}")
     }
     
     override fun onDetachedFromActivityForConfigChanges() {
         // Keep activity reference during config changes
-        android.util.Log.d("FlutterMediaPlayerPlugin", "Activity detached for config changes")
+        android.util.Log.d("ZMediaPlayerPlugin", "Activity detached for config changes")
     }
     
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
-        android.util.Log.d("FlutterMediaPlayerPlugin", "Activity reattached after config changes")
+        android.util.Log.d("ZMediaPlayerPlugin", "Activity reattached after config changes")
     }
     
     override fun onDetachedFromActivity() {
         activity = null
-        android.util.Log.d("FlutterMediaPlayerPlugin", "Activity detached")
+        android.util.Log.d("ZMediaPlayerPlugin", "Activity detached")
     }
 }

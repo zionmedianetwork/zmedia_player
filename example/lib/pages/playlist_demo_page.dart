@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 import '../data/sample_videos.dart';
 
 class PlaylistDemoPage extends StatefulWidget {

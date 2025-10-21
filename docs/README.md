@@ -185,7 +185,7 @@ ZMedia Player is a production-ready Flutter media player package that provides:
 
 ### Basic Usage
 ```dart
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 // Create a controller
 final controller = MediaController();

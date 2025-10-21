@@ -1,4 +1,4 @@
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 /// Mock DRM configurations for testing
 class MockDrmConfigs {

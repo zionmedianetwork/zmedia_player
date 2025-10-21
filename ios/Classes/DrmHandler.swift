@@ -81,7 +81,7 @@ class DrmHandler: NSObject {
         self.contentKeyDelegate = delegate
         
         // Set delegate on background queue
-        let delegateQueue = DispatchQueue(label: "com.flutter_media_player.drm.content_key")
+        let delegateQueue = DispatchQueue(label: "com.zmedia_player.drm.content_key")
         keySession.setDelegate(delegate, queue: delegateQueue)
         
         // Note: We don't add the player as recipient here.

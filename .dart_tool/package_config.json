@@ -188,7 +188,7 @@
       "languageVersion": "3.4"
     },
     {
-      "name": "flutter_media_player",
+      "name": "zmedia_player",
       "rootUri": "../",
       "packageUri": "lib/",
       "languageVersion": "3.0"

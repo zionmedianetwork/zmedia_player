@@ -2,7 +2,7 @@
 
 ## Executive Summary
 
-This document provides a comprehensive comparison between the [better_player package](https://pub.dev/packages/better_player) and our zmedia_player (flutter_media_player) implementation. The goal is to ensure zmedia_player achieves feature parity with better_player while maintaining a clean, well-architected API.
+This document provides a comprehensive comparison between the [better_player package](https://pub.dev/packages/better_player) and our zmedia_player (zmedia_player) implementation. The goal is to ensure zmedia_player achieves feature parity with better_player while maintaining a clean, well-architected API.
 
 ## Package Overview
 
