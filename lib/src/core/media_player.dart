@@ -19,6 +19,10 @@ class MediaPlayer {
   static const MethodChannel _channel = MethodChannel('zmedia_player');
   static final Map<String, MediaPlayer> _instances = {};
 
+  /// Activity tracking for memory leak prevention
+  static final Map<String, DateTime> _lastActivity = {};
+  static Timer? _cleanupTimer;
+
   /// Unique identifier for this player instance
   final String playerId;
 
@@ -112,7 +116,52 @@ class MediaPlayer {
   /// Private constructor for factory pattern
   MediaPlayer._(this.playerId, this._config) {
     _instances[playerId] = this;
+    _markActivity();
+    _ensureCleanupTimer();
     _setupMethodCallHandler();
+  }
+
+  /// Track activity to prevent premature cleanup
+  void _markActivity() {
+    _lastActivity[playerId] = DateTime.now();
+  }
+
+  /// Ensure cleanup timer is running
+  static void _ensureCleanupTimer() {
+    _cleanupTimer ??= Timer.periodic(
+      const Duration(minutes: 5),
+      (_) => _cleanupStaleInstances(),
+    );
+  }
+
+  /// Clean up stale player instances
+  static void _cleanupStaleInstances() {
+    final now = DateTime.now();
+    const staleThreshold = Duration(minutes: 15);
+
+    final staleKeys = <String>[];
+
+    for (final entry in _lastActivity.entries) {
+      if (now.difference(entry.value) > staleThreshold) {
+        staleKeys.add(entry.key);
+      }
+    }
+
+    for (final key in staleKeys) {
+      final instance = _instances[key];
+      if (instance != null && !instance.isPlaying) {
+        debugPrint('MediaPlayer: Auto-cleaning stale instance: $key');
+        instance.dispose();
+        _instances.remove(key);
+        _lastActivity.remove(key);
+      }
+    }
+
+    // Stop timer if no instances
+    if (_instances.isEmpty) {
+      _cleanupTimer?.cancel();
+      _cleanupTimer = null;
+    }
   }
 
   /// Factory constructor to create a new media player instance
@@ -154,6 +203,12 @@ class MediaPlayer {
   PlaybackState get currentState {
     _throwIfDisposed();
     return _currentState;
+  }
+
+  /// Whether the player is currently playing
+  bool get isPlaying {
+    if (_isDisposed) return false;
+    return _currentState.state == PlayerState.playing;
   }
 
   /// Stream of playbook state changes
@@ -338,6 +393,7 @@ class MediaPlayer {
   /// Load a single media item
   Future<void> load(MediaItem item) async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       _currentItem = item;
@@ -361,6 +417,7 @@ class MediaPlayer {
   /// Set and load a playlist
   Future<void> setPlaylist(Playlist playlist, {int? startIndex}) async {
     await _ensureInitialized();
+    _markActivity();
 
     if (playlist.items.isEmpty) {
       throw const MediaPlayerException('Playlist cannot be empty');
@@ -394,6 +451,7 @@ class MediaPlayer {
   /// Start or resume playback
   Future<void> play() async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       await _channel.invokeMethod('play', {'playerId': playerId});
@@ -405,6 +463,7 @@ class MediaPlayer {
   /// Pause playback
   Future<void> pause() async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       await _channel.invokeMethod('pause', {'playerId': playerId});
@@ -789,6 +848,7 @@ class MediaPlayer {
 
     _isDisposed = true;
     _instances.remove(playerId);
+    _lastActivity.remove(playerId);
 
     // Cancel timers
     _positionTimer?.cancel();
@@ -804,24 +864,39 @@ class MediaPlayer {
       }
     }
 
-    // Close stream controllers
-    await Future.wait([
-      _stateController.close(),
-      _positionController.close(),
-      _durationController.close(),
-      _volumeController.close(),
-      _speedController.close(),
-      _subtitleTracksController.close(),
-      _qualityTracksController.close(),
-      _audioTracksController.close(),
-      _pipStatusController.close(),
-      _castStatusController.close(),
-      _castDevicesController.close(),
-      _drmSessionController.close(),
-      _notificationActionController.close(),
-    ]);
+    // Close stream controllers safely
+    await _safeCloseStreams();
 
     _isInitialized = false;
+  }
+
+  /// Safely close all stream controllers
+  Future<void> _safeCloseStreams() async {
+    final controllers = [
+      _stateController,
+      _positionController,
+      _durationController,
+      _volumeController,
+      _speedController,
+      _subtitleTracksController,
+      _qualityTracksController,
+      _audioTracksController,
+      _pipStatusController,
+      _castStatusController,
+      _castDevicesController,
+      _drmSessionController,
+      _notificationActionController,
+    ];
+
+    for (final controller in controllers) {
+      if (!controller.isClosed) {
+        try {
+          await controller.close();
+        } catch (e) {
+          debugPrint('Error closing controller: $e');
+        }
+      }
+    }
   }
 
   // Private helper methods
