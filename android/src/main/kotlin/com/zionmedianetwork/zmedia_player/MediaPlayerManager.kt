@@ -243,7 +243,10 @@ class MediaPlayerInstance(
     private var currentIndex = 0
     private var positionUpdateHandler: Handler? = null
     private var positionUpdateRunnable: Runnable? = null
+    private var bandwidthUpdateHandler: Handler? = null
+    private var bandwidthUpdateRunnable: Runnable? = null
     private var originalVolume: Float = 1f
+    private var currentMediaItem: Map<String, Any>? = null
     
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -309,11 +312,17 @@ class MediaPlayerInstance(
         
         // Start position updates
         startPositionUpdates()
+        
+        // Start bandwidth monitoring
+        startBandwidthMonitoring()
     }
 
     fun loadMediaItem(mediaItem: Map<String, Any>) {
         val url = mediaItem["url"] as? String ?: return
         val httpHeaders = mediaItem["httpHeaders"] as? Map<String, String>
+        
+        // Store current media item (for live stream detection)
+        currentMediaItem = mediaItem
         
         android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
         
@@ -467,12 +476,16 @@ class MediaPlayerInstance(
         // Stop position updates
         stopPositionUpdates()
         
+        // Stop bandwidth monitoring
+        stopBandwidthMonitoring()
+        
         exoPlayer?.apply {
             removeListener(playerListener)
             release()
         }
         exoPlayer = null
         playerView = null
+        currentMediaItem = null
     }
 
     private fun createMediaSource(uri: Uri, dataSourceFactory: DataSource.Factory = this.dataSourceFactory): MediaSource {
@@ -544,6 +557,61 @@ class MediaPlayerInstance(
         positionUpdateHandler = null
     }
 
+    private fun startBandwidthMonitoring() {
+        stopBandwidthMonitoring() // Ensure we don't have multiple runnables
+        
+        bandwidthUpdateHandler = Handler(Looper.getMainLooper())
+        bandwidthUpdateRunnable = object : Runnable {
+            override fun run() {
+                exoPlayer?.let { player ->
+                    // Get current bandwidth estimate from ExoPlayer
+                    val currentBandwidth = getCurrentBandwidthEstimate(player)
+                    if (currentBandwidth > 0) {
+                        notifyBandwidthChanged(currentBandwidth)
+                    }
+                }
+                // Update every 2 seconds
+                bandwidthUpdateHandler?.postDelayed(this, 2000)
+            }
+        }
+        bandwidthUpdateHandler?.post(bandwidthUpdateRunnable!!)
+    }
+    
+    private fun stopBandwidthMonitoring() {
+        bandwidthUpdateRunnable?.let { runnable ->
+            bandwidthUpdateHandler?.removeCallbacks(runnable)
+        }
+        bandwidthUpdateRunnable = null
+        bandwidthUpdateHandler = null
+    }
+    
+    private fun getCurrentBandwidthEstimate(player: ExoPlayer): Long {
+        // ExoPlayer's bandwidth estimate is available through the LoadControl
+        // We can access it via the player's current tracks selection
+        try {
+            // Get bandwidth estimate from current adaptive track selection
+            val trackSelector = player.currentTracks
+            // ExoPlayer internally maintains bandwidth estimates
+            // For now, we'll use a workaround by checking video/audio bitrate
+            var estimatedBandwidth: Long = 0
+            
+            for (trackGroup in trackSelector.groups) {
+                if (trackGroup.isSelected) {
+                    val format = trackGroup.getTrackFormat(0)
+                    if (format.bitrate != com.google.android.exoplayer2.Format.NO_VALUE) {
+                        estimatedBandwidth += format.bitrate.toLong()
+                    }
+                }
+            }
+            
+            // If we have a valid estimate, return it; otherwise return 0
+            return if (estimatedBandwidth > 0) estimatedBandwidth else 0
+        } catch (e: Exception) {
+            android.util.Log.e("MediaPlayerInstance", "Error getting bandwidth estimate: ${e.message}")
+            return 0
+        }
+    }
+
     private fun notifyStateChanged(state: String, isBuffering: Boolean) {
         try {
             android.util.Log.d("MediaPlayerInstance", "State changed: $state, isBuffering: $isBuffering")
@@ -577,12 +645,26 @@ class MediaPlayerInstance(
         try {
             val duration = exoPlayer?.duration ?: 0L
             if (duration > 0) {
+                val isLive = currentMediaItem?.get("isLive") as? Boolean ?: false
                 val arguments = mapOf(
                     "playerId" to playerId,
-                    "duration" to duration.toInt()
+                    "duration" to duration.toInt(),
+                    "isLive" to isLive
                 )
                 methodChannel.invokeMethod("onDurationChanged", arguments)
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun notifyBandwidthChanged(bandwidth: Long) {
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "bandwidth" to bandwidth
+            )
+            methodChannel.invokeMethod("onBandwidthChanged", arguments)
         } catch (e: Exception) {
             e.printStackTrace()
         }

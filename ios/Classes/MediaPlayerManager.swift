@@ -252,9 +252,11 @@ class MediaPlayerInstance: NSObject {
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
+    private var bandwidthTimer: Timer?
     
     private var currentPlaylist: [[String: Any]]?
     private var currentIndex = 0
+    private var currentMediaItem: [String: Any]?
     
     init(playerId: String, methodChannel: FlutterMethodChannel, config: [String: Any]?) {
         self.playerId = playerId
@@ -269,6 +271,7 @@ class MediaPlayerInstance: NSObject {
         avPlayer = AVPlayer()
         setupObservers()
         applyConfig()
+        startBandwidthMonitoring()
     }
     
     private func setupObservers() {
@@ -314,6 +317,9 @@ class MediaPlayerInstance: NSObject {
             notifyError(error: "Invalid media URL")
             return
         }
+        
+        // Store current media item (for live stream detection)
+        currentMediaItem = mediaItem
         
         print("MediaPlayerInstance.loadMediaItem(): Loading URL: \(urlString)")
         
@@ -481,7 +487,38 @@ class MediaPlayerInstance: NSObject {
         return player.rate > 0
     }
     
+    private func startBandwidthMonitoring() {
+        // Start a timer that monitors bandwidth every 2 seconds
+        bandwidthTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+            self?.updateBandwidth()
+        }
+    }
+    
+    private func stopBandwidthMonitoring() {
+        bandwidthTimer?.invalidate()
+        bandwidthTimer = nil
+    }
+    
+    private func updateBandwidth() {
+        guard let playerItem = avPlayer?.currentItem,
+              let accessLog = playerItem.accessLog() else { return }
+        
+        // Get the most recent access log event
+        if let lastEvent = accessLog.events.last {
+            // observedBitrate is in bits per second
+            let bandwidth = Int64(lastEvent.observedBitrate)
+            
+            // Only report if we have a valid bandwidth estimate
+            if bandwidth > 0 {
+                notifyBandwidthChanged(bandwidth: bandwidth)
+            }
+        }
+    }
+    
     func dispose() {
+        // Stop bandwidth monitoring
+        stopBandwidthMonitoring()
+        
         // Remove AVPlayerItem observers
         if let currentItem = avPlayer?.currentItem {
             currentItem.removeObserver(self, forKeyPath: "duration")
@@ -502,6 +539,9 @@ class MediaPlayerInstance: NSObject {
         // Clean up player
         avPlayer?.pause()
         avPlayer?.replaceCurrentItem(with: nil)
+        
+        // Clear references
+        currentMediaItem = nil
         avPlayer = nil
         playerView = nil
     }
@@ -637,11 +677,21 @@ class MediaPlayerInstance: NSObject {
               duration.isValid && !duration.isIndefinite else { return }
         
         let durationMs = Int(duration.seconds * 1000)
+        let isLive = currentMediaItem?["isLive"] as? Bool ?? false
         let arguments: [String: Any] = [
             "playerId": playerId,
-            "duration": durationMs
+            "duration": durationMs,
+            "isLive": isLive
         ]
         methodChannel.invokeMethod("onDurationChanged", arguments: arguments)
+    }
+    
+    private func notifyBandwidthChanged(bandwidth: Int64) {
+        let arguments: [String: Any] = [
+            "playerId": playerId,
+            "bandwidth": bandwidth
+        ]
+        methodChannel.invokeMethod("onBandwidthChanged", arguments: arguments)
     }
     
     private func notifyError(error: String) {

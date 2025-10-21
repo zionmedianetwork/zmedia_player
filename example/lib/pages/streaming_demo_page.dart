@@ -4,7 +4,7 @@ import 'package:zmedia_player/zmedia_player.dart';
 /// Demonstrates Phase 2 features: HLS/DASH streaming, quality selection,
 /// subtitle tracks, and adaptive bitrate streaming
 class StreamingDemoPage extends StatefulWidget {
-  const StreamingDemoPage({Key? key}) : super(key: key);
+  const StreamingDemoPage({super.key});
 
   @override
   State<StreamingDemoPage> createState() => _StreamingDemoPageState();
@@ -31,6 +31,14 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd',
       mediaType: MediaType.video,
       metadata: const {'description': 'DASH adaptive streaming demo'},
+    ),
+    MediaItem(
+      id: 'alelouyatv',
+      title: 'Alelouya TV Live',
+      url: 'https://streaming-dev.zionmedianetwork.com/livegospel/index.m3u8',
+      mediaType: MediaType.video,
+      metadata: const {'description': 'Alelouya TV Live Stream'},
+      isLive: true,
     ),
   ];
 
@@ -73,9 +81,10 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
         volume: 0.8,
         hlsConfig: HlsConfig(
           enableAdaptiveBitrate: true,
-          enableLiveStream: false,
+          enableLiveStream: true,
           enableSegmentPrefetch: true,
           maxPrefetchSegments: 3,
+          enableAutoQualitySwitch: true,
         ),
         dashConfig: DashConfig(
           enableAdaptiveBitrate: true,
@@ -94,24 +103,22 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       ),
     );
 
-    // Simulate bandwidth updates (placeholder for actual implementation)
-    _simulateBandwidth();
+    // Setup bandwidth listener for native updates
+    _setupBandwidthListener();
 
     // Load initial video
     _loadVideo(_selectedVideoIndex);
   }
 
-  // Simulate bandwidth monitoring (placeholder until native implementation)
-  void _simulateBandwidth() {
-    Future.delayed(const Duration(seconds: 2), () {
+  // Listen to bandwidth updates from native implementation
+  void _setupBandwidthListener() {
+    _controller.player.bandwidthStream.listen((bandwidth) {
       if (mounted) {
-        // Simulate bandwidth update
-        _streamingService.updateBandwidth(5000000); // 5 Mbps
+        // Update streaming service with native bandwidth
+        _streamingService.updateBandwidth(bandwidth);
         setState(() {
           _bandwidthInfo = _streamingService.getFormattedBandwidth();
         });
-        // Continue simulating
-        _simulateBandwidth();
       }
     });
   }

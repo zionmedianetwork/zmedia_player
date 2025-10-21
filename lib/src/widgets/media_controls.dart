@@ -431,6 +431,8 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildBottomControls(MediaControlsTheme theme) {
+    final isLive = widget.controller.player.isLive;
+
     return Positioned(
       bottom: 0,
       left: 0,
@@ -452,48 +454,53 @@ class _MediaControlsState extends State<MediaControls>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Enhanced progress bar
-                _buildModernProgressBar(theme),
+                // Enhanced progress bar (hidden for live streams without DVR)
+                if (!isLive)
+                  _buildModernProgressBar(theme)
+                else
+                  _buildLiveIndicator(theme),
 
                 const SizedBox(height: 12),
 
                 // Time display and controls
                 Row(
                   children: [
-                    // Current time with modern styling
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        _isDraggingProgress
-                            ? _formatDuration(
-                                widget.controller.duration * _dragValue)
-                            : widget.controller.formattedPosition,
-                        style: TextStyle(
-                          color: theme.textColor,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                    // Current time with modern styling (or LIVE indicator)
+                    if (!isLive)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          _isDraggingProgress
+                              ? _formatDuration(
+                                  widget.controller.duration * _dragValue)
+                              : widget.controller.formattedPosition,
+                          style: TextStyle(
+                            color: theme.textColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
                         ),
                       ),
-                    ),
 
                     const Spacer(),
 
-                    // Duration
-                    Text(
-                      widget.controller.formattedDuration,
-                      style: TextStyle(
-                        color: theme.textColor.withOpacity(0.8),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w400,
-                        fontFeatures: const [FontFeature.tabularFigures()],
+                    // Duration (hidden for live streams)
+                    if (!isLive)
+                      Text(
+                        widget.controller.formattedDuration,
+                        style: TextStyle(
+                          color: theme.textColor.withOpacity(0.8),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w400,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
                       ),
-                    ),
 
                     const SizedBox(width: 12),
 
@@ -512,6 +519,50 @@ class _MediaControlsState extends State<MediaControls>
               ],
             ),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLiveIndicator(MediaControlsTheme theme) {
+    return Container(
+      height: 40,
+      alignment: Alignment.centerLeft,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.9),
+          borderRadius: BorderRadius.circular(4),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.red.withOpacity(0.5),
+              blurRadius: 8,
+              spreadRadius: 1,
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'LIVE',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ],
         ),
       ),
     );
