@@ -22,6 +22,7 @@ class MediaPlayerManager(
 ) {
     private val players = ConcurrentHashMap<String, MediaPlayerInstance>()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val crashHandler = CrashHandler(methodChannel)
     
     // Activity tracking for memory leak prevention
     private val lastActivity = ConcurrentHashMap<String, Long>()
@@ -88,7 +89,9 @@ class MediaPlayerManager(
     fun loadMediaItem(playerId: String, mediaItem: Map<String, Any>) {
         markActivity(playerId)
         mainHandler.post {
-            players[playerId]?.loadMediaItem(mediaItem)
+            crashHandler.wrapOperation("loadMediaItem", playerId, mapOf("url" to (mediaItem["url"] ?: "unknown"))) {
+                players[playerId]?.loadMediaItem(mediaItem)
+            }
         }
     }
 
@@ -102,14 +105,18 @@ class MediaPlayerManager(
     fun play(playerId: String) {
         markActivity(playerId)
         mainHandler.post {
-            players[playerId]?.play()
+            crashHandler.wrapOperation("play", playerId) {
+                players[playerId]?.play()
+            }
         }
     }
 
     fun pause(playerId: String) {
         markActivity(playerId)
         mainHandler.post {
-            players[playerId]?.pause()
+            crashHandler.wrapOperation("pause", playerId) {
+                players[playerId]?.pause()
+            }
         }
     }
 

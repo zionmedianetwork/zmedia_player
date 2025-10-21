@@ -6,6 +6,7 @@ import Flutter
 class MediaPlayerManager {
     private var players: [String: MediaPlayerInstance] = [:]
     private let methodChannel: FlutterMethodChannel
+    private let crashHandler: CrashHandler
     
     // Activity tracking for memory leak prevention
     private var lastActivity: [String: Date] = [:]
@@ -17,6 +18,7 @@ class MediaPlayerManager {
     
     init(methodChannel: FlutterMethodChannel) {
         self.methodChannel = methodChannel
+        self.crashHandler = CrashHandler(methodChannel: methodChannel)
         startCleanupTimer()
     }
     
@@ -63,10 +65,16 @@ class MediaPlayerManager {
     
     func loadMediaItem(playerId: String, mediaItem: [String: Any]) throws {
         markActivity(playerId: playerId)
-        guard let playerInstance = players[playerId] else {
-            throw MediaPlayerError.playerNotFound
+        try crashHandler.wrapOperation(
+            operation: "loadMediaItem",
+            playerId: playerId,
+            context: ["url": mediaItem["url"] ?? "unknown"]
+        ) {
+            guard let playerInstance = players[playerId] else {
+                throw MediaPlayerError.playerNotFound
+            }
+            playerInstance.loadMediaItem(mediaItem: mediaItem)
         }
-        playerInstance.loadMediaItem(mediaItem: mediaItem)
     }
     
     func setPlaylist(playerId: String, playlist: [String: Any], startIndex: Int) throws {
@@ -79,18 +87,28 @@ class MediaPlayerManager {
     
     func play(playerId: String) throws {
         markActivity(playerId: playerId)
-        guard let playerInstance = players[playerId] else {
-            throw MediaPlayerError.playerNotFound
+        try crashHandler.wrapOperation(
+            operation: "play",
+            playerId: playerId
+        ) {
+            guard let playerInstance = players[playerId] else {
+                throw MediaPlayerError.playerNotFound
+            }
+            playerInstance.play()
         }
-        playerInstance.play()
     }
     
     func pause(playerId: String) throws {
         markActivity(playerId: playerId)
-        guard let playerInstance = players[playerId] else {
-            throw MediaPlayerError.playerNotFound
+        try crashHandler.wrapOperation(
+            operation: "pause",
+            playerId: playerId
+        ) {
+            guard let playerInstance = players[playerId] else {
+                throw MediaPlayerError.playerNotFound
+            }
+            playerInstance.pause()
         }
-        playerInstance.pause()
     }
     
     func stop(playerId: String) throws {

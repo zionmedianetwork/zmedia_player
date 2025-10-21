@@ -10,6 +10,7 @@ import '../models/pip_config.dart';
 import '../models/cast_device.dart';
 import '../models/drm_config.dart';
 import 'media_config.dart';
+import 'crash_reporter.dart';
 
 /// Main media player controller class
 ///
@@ -22,6 +23,9 @@ class MediaPlayer {
   /// Activity tracking for memory leak prevention
   static final Map<String, DateTime> _lastActivity = {};
   static Timer? _cleanupTimer;
+
+  /// Global crash reporter (set once at app startup)
+  static CrashReporter? crashReporter;
 
   /// Unique identifier for this player instance
   final String playerId;
@@ -119,6 +123,25 @@ class MediaPlayer {
     _markActivity();
     _ensureCleanupTimer();
     _setupMethodCallHandler();
+  }
+
+  /// Enable crash reporting (call once at app startup)
+  ///
+  /// [reporter] - The crash reporter implementation to use
+  ///
+  /// Example:
+  /// ```dart
+  /// MediaPlayer.enableCrashReporting(ConsoleOnlyCrashReporter());
+  /// ```
+  static void enableCrashReporting(CrashReporter reporter) {
+    crashReporter = reporter;
+    crashReporter?.log('MediaPlayer crash reporting enabled');
+  }
+
+  /// Disable crash reporting
+  static void disableCrashReporting() {
+    crashReporter?.log('MediaPlayer crash reporting disabled');
+    crashReporter = null;
   }
 
   /// Track activity to prevent premature cleanup
@@ -375,6 +398,11 @@ class MediaPlayer {
     _initializationCompleter = Completer<void>();
 
     try {
+      crashReporter?.log('Initializing MediaPlayer', context: {
+        'playerId': playerId,
+        'autoPlay': _config.autoPlay,
+      });
+
       await _channel.invokeMethod('initialize', {
         'playerId': playerId,
         'config': _configToMap(_config),
@@ -382,7 +410,19 @@ class MediaPlayer {
       _isInitialized = true;
       _startPositionTimer();
       _initializationCompleter!.complete();
-    } catch (e) {
+
+      crashReporter?.log('MediaPlayer initialized successfully', context: {
+        'playerId': playerId,
+      });
+    } catch (e, stack) {
+      crashReporter?.reportError(e, stack,
+          context: {
+            'operation': 'initialize',
+            'playerId': playerId,
+            'config': _config.toString(),
+          },
+          fatal: true);
+
       final exception = MediaPlayerException('Failed to initialize player: $e');
       _initializationCompleter!.completeError(exception);
       _initializationCompleter = null;
@@ -396,6 +436,10 @@ class MediaPlayer {
     _markActivity();
 
     try {
+      crashReporter?.setCustomKey('media_id', item.id);
+      crashReporter?.setCustomKey('media_url', item.url);
+      crashReporter?.setCustomKey('drm_enabled', item.drmConfig != null);
+
       _currentItem = item;
       await _channel.invokeMethod('load', {
         'playerId': playerId,
@@ -403,12 +447,35 @@ class MediaPlayer {
       });
 
       _updateState(_currentState.copyWith(state: PlayerState.buffering));
-    } on PlatformException catch (e) {
+
+      crashReporter?.log('Media loaded successfully', context: {
+        'mediaId': item.id,
+        'duration': item.duration?.inSeconds,
+        'mediaType': item.mediaType.name,
+      });
+    } on PlatformException catch (e, stack) {
       final errorMsg = 'Failed to load media: ${e.message ?? e.code}';
+
+      crashReporter?.reportError(e, stack, context: {
+        'operation': 'load',
+        'mediaId': item.id,
+        'url': item.url,
+        'playerId': playerId,
+        'errorCode': e.code,
+      });
+
       _handleLoadError(errorMsg);
       throw MediaPlayerException(errorMsg);
-    } catch (e) {
+    } catch (e, stack) {
       final errorMsg = 'Failed to load media: $e';
+
+      crashReporter?.reportError(e, stack, context: {
+        'operation': 'load',
+        'mediaId': item.id,
+        'url': item.url,
+        'playerId': playerId,
+      });
+
       _handleLoadError(errorMsg);
       throw MediaPlayerException(errorMsg);
     }
@@ -455,7 +522,19 @@ class MediaPlayer {
 
     try {
       await _channel.invokeMethod('play', {'playerId': playerId});
-    } on PlatformException catch (e) {
+
+      crashReporter?.log('Playback started', context: {
+        'playerId': playerId,
+        'mediaId': _currentItem?.id,
+      });
+    } on PlatformException catch (e, stack) {
+      crashReporter?.reportError(e, stack, context: {
+        'operation': 'play',
+        'playerId': playerId,
+        'state': _currentState.state.name,
+        'mediaId': _currentItem?.id,
+      });
+
       throw MediaPlayerException('Failed to play: ${e.message ?? e.code}');
     }
   }
@@ -467,7 +546,18 @@ class MediaPlayer {
 
     try {
       await _channel.invokeMethod('pause', {'playerId': playerId});
-    } on PlatformException catch (e) {
+
+      crashReporter?.log('Playback paused', context: {
+        'playerId': playerId,
+        'position': _currentState.position.inSeconds,
+      });
+    } on PlatformException catch (e, stack) {
+      crashReporter?.reportError(e, stack, context: {
+        'operation': 'pause',
+        'playerId': playerId,
+        'state': _currentState.state.name,
+      });
+
       throw MediaPlayerException('Failed to pause: ${e.message ?? e.code}');
     }
   }
