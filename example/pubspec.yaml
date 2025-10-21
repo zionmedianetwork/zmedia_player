@@ -1,5 +1,5 @@
-name: flutter_media_player_example
-description: A comprehensive example app demonstrating Flutter Media Player features.
+name: zmedia_player_example
+description: A comprehensive example app demonstrating ZMedia Player features.
 version: 1.0.0+1
 
 environment:
@@ -9,7 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  flutter_media_player:
+  zmedia_player:
     path: ../
   cupertino_icons: ^1.0.2
 

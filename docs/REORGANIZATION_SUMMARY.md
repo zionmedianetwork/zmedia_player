@@ -163,7 +163,7 @@ docs-archive/
 The following files remain in the project root:
 
 - `README.md` - Main project README (updated to link to docs/)
-- `flutter_media_player_trd.md` - Technical Requirements Document (reference)
+- `zmedia_player_trd.md` - Technical Requirements Document (reference)
 - `LICENSE` - Project license
 - `pubspec.yaml` - Package configuration
 - `CHANGELOG.md` - Version history (if exists)

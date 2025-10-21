@@ -1,4 +1,4 @@
-package com.example.flutter_media_player
+package com.zionmedianetwork.zmedia_player
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -283,7 +283,7 @@ class NotificationHandler(
     }
 
     private fun createAction(icon: Int, title: String, action: String): NotificationCompat.Action {
-        val intent = Intent("com.example.flutter_media_player.NOTIFICATION_ACTION").apply {
+        val intent = Intent("com.zionmedianetwork.zmedia_player.NOTIFICATION_ACTION").apply {
             putExtra("action", action)
             putExtra("playerId", playerId)
         }

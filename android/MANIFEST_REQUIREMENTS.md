@@ -70,7 +70,7 @@ Declare the features your app uses:
 
 ```xml
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.flutter_media_player_example">
+    package="com.zionmedianetwork.zmedia_player_example">
 
     <!-- Phase 3: Required Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -117,7 +117,7 @@ Declare the features your app uses:
         <!-- Phase 3: Google Cast Options Provider (if using Chromecast) -->
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
-            android:value="com.example.flutter_media_player.CastOptionsProvider" />
+            android:value="com.zionmedianetwork.zmedia_player.CastOptionsProvider" />
         
         <meta-data
             android:name="flutterEmbedding"
@@ -132,7 +132,7 @@ Declare the features your app uses:
 For Chromecast support, you need to create a `CastOptionsProvider` class. This is already included in the plugin at:
 
 ```
-android/src/main/kotlin/com/example/flutter_media_player/CastOptionsProvider.kt
+android/src/main/kotlin/com/zionmedianetwork/zmedia_player/CastOptionsProvider.kt
 ```
 
 Make sure the `<meta-data>` tag in your manifest points to the correct package path.

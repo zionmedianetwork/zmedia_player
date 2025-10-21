@@ -16,7 +16,7 @@ import 'media_config.dart';
 /// This class provides the primary interface for controlling media playbook,
 /// managing playlists, and configuring player behavior.
 class MediaPlayer {
-  static const MethodChannel _channel = MethodChannel('flutter_media_player');
+  static const MethodChannel _channel = MethodChannel('zmedia_player');
   static final Map<String, MediaPlayer> _instances = {};
 
   /// Unique identifier for this player instance

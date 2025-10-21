@@ -15,7 +15,7 @@
         android:required="false" />
     
     <application
-        android:label="flutter_media_player_example"
+        android:label="zmedia_player_example"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
@@ -52,7 +52,7 @@
         <!-- Phase 3: Google Cast Options Provider -->
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
-            android:value="com.example.flutter_media_player.CastOptionsProvider" />
+            android:value="com.zionmedianetwork.zmedia_player.CastOptionsProvider" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

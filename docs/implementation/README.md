@@ -41,7 +41,7 @@ Platform Channel
 
 ### Native Layer (Android)
 ```
-FlutterMediaPlayerPlugin
+ZMediaPlayerPlugin
   ├── MediaPlayerManager (ExoPlayer)
   ├── DrmHandler (Widevine)
   ├── NotificationHandler (MediaSession)
@@ -51,7 +51,7 @@ FlutterMediaPlayerPlugin
 
 ### Native Layer (iOS)
 ```
-FlutterMediaPlayerPlugin
+ZMediaPlayerPlugin
   ├── MediaPlayerManager (AVPlayer)
   ├── DrmHandler (FairPlay)
   ├── NotificationHandler (MPNowPlayingInfoCenter)

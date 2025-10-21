@@ -9,7 +9,7 @@ import '../core/media_config.dart';
 
 /// Service for managing media caching
 class CacheService {
-  static const String _cacheDirName = 'flutter_media_player_cache';
+  static const String _cacheDirName = 'zmedia_player_cache';
   static const String _metadataFileName = 'cache_metadata.json';
 
   late final Directory _cacheDir;

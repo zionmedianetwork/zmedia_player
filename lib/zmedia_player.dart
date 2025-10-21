@@ -1,9 +1,9 @@
-/// Flutter Media Player Package
+/// ZMedia Player Package
 ///
 /// A comprehensive media player package for Flutter applications with
 /// advanced features including DRM support, streaming protocols, and
 /// cross-platform compatibility.
-library flutter_media_player;
+library zmedia_player;
 
 // Core
 export 'src/core/media_player.dart';

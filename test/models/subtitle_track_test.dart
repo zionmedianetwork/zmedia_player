@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 /// Phase 2: Subtitle Track tests
 void main() {

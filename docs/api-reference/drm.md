@@ -22,7 +22,7 @@ ZMedia Player supports industry-standard DRM technologies to play protected cont
 ### 1. Basic DRM Setup
 
 ```dart
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 // For Android Widevine
 final androidDrmConfig = DrmConfig.widevine(

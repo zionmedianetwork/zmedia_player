@@ -1,4 +1,4 @@
-# Flutter Media Player
+# ZMedia Player
 
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
@@ -63,9 +63,9 @@ Add this to your package's `pubspec.yaml` file:
 
 ```yaml
 dependencies:
-  flutter_media_player:
+  zmedia_player:
     git:
-      url: https://github.com/your-org/flutter_media_player.git
+      url: https://github.com/zionmedianetwork/zmedia_player.git
 ```
 
 ## Quick Start
@@ -74,7 +74,7 @@ dependencies:
 
 ```dart
 import 'package:flutter/material.dart';
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 class SimplePlayerPage extends StatefulWidget {
   @override
@@ -782,4 +782,4 @@ For questions and support:
 
 ---
 
-Made with ❤️ by the Flutter Media Player team
+Made with ❤️ by the Zion Media Network team

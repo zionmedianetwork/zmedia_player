@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_media_player/flutter_media_player.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
 /// Demonstrates Phase 2 features: HLS/DASH streaming, quality selection,
 /// subtitle tracks, and adaptive bitrate streaming

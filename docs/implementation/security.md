@@ -136,7 +136,7 @@ debugPrint('DRM: License acquisition failed');
 ```proguard
 # Keep DRM classes
 -keep class com.google.android.exoplayer2.drm.** { *; }
--keep class com.example.flutter_media_player.DrmHandler { *; }
+-keep class com.zionmedianetwork.zmedia_player.DrmHandler { *; }
 ```
 
 **Status:** ☐ Pass ☐ Fail ☐ N/A  
