@@ -83,7 +83,8 @@ class _NotificationsDemoPageState extends State<NotificationsDemoPage> {
 
     // Initialize notification service
     _notificationService = NotificationService(notificationConfig);
-    await _notificationService?.initialize(_controller.playerId);
+    await _notificationService?.initialize(_controller.playerId,
+        mediaPlayer: _controller.player);
 
     // Listen to notification actions
     _notificationService?.actionStream.listen((actionString) {
@@ -191,7 +192,8 @@ class _NotificationsDemoPageState extends State<NotificationsDemoPage> {
     // Reinitialize notification service
     _notificationService?.dispose();
     _notificationService = NotificationService(notificationConfig);
-    await _notificationService?.initialize(_controller.playerId);
+    await _notificationService?.initialize(_controller.playerId,
+        mediaPlayer: _controller.player);
 
     // Re-subscribe to actions
     _notificationService?.actionStream.listen((actionString) {

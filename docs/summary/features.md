@@ -47,6 +47,9 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 ### Protocol Support
 - ✅ **HLS** - HTTP Live Streaming
 - ✅ **DASH** - Dynamic Adaptive Streaming over HTTP
+- ✅ **HLS Live Streaming** - Live HLS with DVR support
+- ✅ **DASH Live Streaming** - Live DASH with DVR support
+- ✅ **Low-Latency Live** - Configurable latency targets
 - ✅ **MP4** - Standard MP4 files
 - ✅ **Progressive Download** - HTTP progressive streaming
 
@@ -60,7 +63,13 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - ✅ **Codec Information** - Video/audio codec details
 - ✅ **Resolution Selection** - Choose specific resolutions
 
-**Total:** 12 features ✅
+### Live Streaming
+- ✅ **Live Edge Detection** - Automatic positioning at live
+- ✅ **DVR/Time-Shifting** - Seek within live streams
+- ✅ **Latency Configuration** - Configurable live latency
+- ✅ **Segment Prefetching** - Smooth live playback
+
+**Total:** 19 features ✅
 
 ---
 
@@ -311,12 +320,12 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 
 ---
 
-## Grand Total: 172 Features ✅
+## Grand Total: 179 Features ✅
 
 ### By Category
 - Core Playback: 10 ✅
 - Configuration: 12 ✅
-- Streaming: 12 ✅
+- Streaming: 19 ✅
 - Subtitles: 9 ✅
 - Audio: 6 ✅
 - Playlists: 11 ✅

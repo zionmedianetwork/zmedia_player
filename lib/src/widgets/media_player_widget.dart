@@ -222,16 +222,23 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
     debugPrint('Refreshing video surface...');
 
-    // Clean up existing view
-    _cleanupNativeView();
+    // Only cleanup and recreate if we don't have a valid native view
+    // This prevents unnecessary surface destruction during orientation changes
+    if (!_hasNativeView || _nativeView == null) {
+      // Clean up existing view
+      _cleanupNativeView();
 
-    // Recreate the native view if we have media
-    if (widget.controller.currentItem != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_isDisposed) {
-          _createNativeView();
-        }
-      });
+      // Recreate the native view if we have media
+      if (widget.controller.currentItem != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_isDisposed) {
+            _createNativeView();
+          }
+        });
+      }
+    } else {
+      debugPrint(
+          'Native view already exists, skipping refresh to preserve surface');
     }
   }
 
@@ -287,23 +294,31 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     debugPrint(
         'Building player content - State: ${widget.controller.state.state}, HasNativeView: $_hasNativeView, NativeView: ${_nativeView != null}');
 
-    // Determine what content to show based on player state
-    switch (widget.controller.state.state) {
-      case PlayerState.idle:
-        content = _buildPlaceholder();
-        break;
-      case PlayerState.buffering:
-        content = _buildBuffering();
-        break;
-      case PlayerState.error:
-        content = _buildError();
-        break;
-      case PlayerState.ready:
-      case PlayerState.playing:
-      case PlayerState.paused:
-      case PlayerState.completed:
-        content = _buildVideoSurface();
-        break;
+    // Determine what content to show based on player state and native view availability
+    final playerState = widget.controller.state.state;
+
+    // If we have a native view and media loaded, show the video surface (even if buffering)
+    if (_hasNativeView && widget.controller.currentItem != null) {
+      content = _buildVideoSurface();
+    } else {
+      // Otherwise, determine content based on state
+      switch (playerState) {
+        case PlayerState.idle:
+          content = _buildPlaceholder();
+          break;
+        case PlayerState.buffering:
+          content = _buildBuffering();
+          break;
+        case PlayerState.error:
+          content = _buildError();
+          break;
+        case PlayerState.ready:
+        case PlayerState.playing:
+        case PlayerState.paused:
+        case PlayerState.completed:
+          content = _buildVideoSurface();
+          break;
+      }
     }
 
     // Wrap content with gesture detection and controls
@@ -391,23 +406,20 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     debugPrint(
         'Building video surface - State: $playerState, HasNativeView: $_hasNativeView, NativeView: ${_nativeView != null}');
 
-    if (playerState == PlayerState.buffering && !_hasNativeView) {
-      debugPrint(
-          'Player is buffering and no native view, showing buffering...');
-      return _buildBuffering();
-    }
-
+    // Show error state if there's an error
     if (playerState == PlayerState.error) {
       debugPrint('Player has error, showing error...');
       return _buildError();
     }
 
-    // Only show loading if we don't have a native view yet
+    // Only show buffering if we truly don't have a native view yet
     if (!_hasNativeView || _nativeView == null) {
       debugPrint('No native view available, showing buffering...');
       return _buildBuffering();
     }
 
+    // We have a native view - show it regardless of buffering state
+    // The native player will handle its own buffering overlay if needed
     debugPrint('Returning native view with type: ${_nativeView.runtimeType}');
 
     // If we have a native view, return it with proper sizing and ensure it's visible

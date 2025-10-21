@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/media_item.dart';
 import '../models/notification_config.dart';
 import '../models/player_state.dart';
+import '../core/media_player.dart';
 
 /// Service for managing media playback notifications
 class NotificationService {
@@ -16,6 +17,7 @@ class NotificationService {
   bool _isShowing = false;
   MediaItem? _currentMedia;
   PlaybackState? _currentState;
+  StreamSubscription<String>? _notificationActionSubscription;
 
   NotificationService(this._config);
 
@@ -26,7 +28,7 @@ class NotificationService {
   bool get isShowing => _isShowing;
 
   /// Initialize the notification service
-  Future<void> initialize(String playerId) async {
+  Future<void> initialize(String playerId, {MediaPlayer? mediaPlayer}) async {
     if (!_config.enabled) return;
 
     try {
@@ -35,8 +37,15 @@ class NotificationService {
         'config': _config.toMap(),
       });
 
-      // Note: Notification action events should be sent directly to the action stream
-      // via native callbacks, not through the main method channel handler
+      // Subscribe to notification actions from MediaPlayer if provided
+      if (mediaPlayer != null) {
+        _notificationActionSubscription =
+            mediaPlayer.notificationActionStream.listen((action) {
+          if (!_actionController.isClosed) {
+            _actionController.add(action);
+          }
+        });
+      }
 
       debugPrint('NotificationService: Initialized successfully');
     } catch (e) {
@@ -154,6 +163,8 @@ class NotificationService {
 
   /// Dispose the service
   void dispose() {
+    _notificationActionSubscription?.cancel();
+    _notificationActionSubscription = null;
     _actionController.close();
   }
 }

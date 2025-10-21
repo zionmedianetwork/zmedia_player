@@ -13,7 +13,14 @@ class MediaPlayerView(
 ) : PlatformView {
     
     private val playerView: PlayerView = PlayerView(context).apply {
-        player = exoPlayer
+        // Only attach player if it's not null
+        if (exoPlayer != null) {
+            player = exoPlayer
+            android.util.Log.d("MediaPlayerView", "PlayerView created with player attached")
+        } else {
+            android.util.Log.e("MediaPlayerView", "WARNING: PlayerView created with null ExoPlayer!")
+        }
+        
         useController = false // We handle controls in Flutter
         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
         
@@ -27,14 +34,18 @@ class MediaPlayerView(
         controllerShowTimeoutMs = 0
         controllerHideOnTouch = false
         
-        android.util.Log.d("MediaPlayerView", "PlayerView created with player: ${exoPlayer != null}, isAttached: ${exoPlayer != null}")
-        
         // Post a delayed task to ensure the surface is created
         post {
-            android.util.Log.d("MediaPlayerView", "PlayerView posted - requesting layout")
+            android.util.Log.d("MediaPlayerView", "PlayerView posted - requesting layout, player: ${player != null}")
             requestLayout()
             invalidate()
         }
+    }
+    
+    // Allow setting the player later if it was null during construction
+    fun setPlayer(player: ExoPlayer?) {
+        android.util.Log.d("MediaPlayerView", "setPlayer called, player: ${player != null}")
+        playerView.player = player
     }
 
     override fun getView(): View {
@@ -43,7 +54,36 @@ class MediaPlayerView(
     }
 
     override fun dispose() {
-        playerView.player = null
+        android.util.Log.d("MediaPlayerView", "Disposing MediaPlayerView")
+        // Ensure disposal happens on the main thread
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            disposeInternal()
+        } else {
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                disposeInternal()
+            }
+        }
+    }
+    
+    private fun disposeInternal() {
+        try {
+            // First, detach the player to stop rendering
+            playerView.player = null
+            
+            // Give the BufferQueue time to clean up
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try {
+                    // Clear any remaining callbacks
+                    playerView.removeCallbacks(null)
+                } catch (e: Exception) {
+                    android.util.Log.e("MediaPlayerView", "Error during final cleanup: ${e.message}")
+                }
+            }, 100)
+            
+            android.util.Log.d("MediaPlayerView", "MediaPlayerView disposed successfully")
+        } catch (e: Exception) {
+            android.util.Log.e("MediaPlayerView", "Error disposing MediaPlayerView: ${e.message}")
+        }
     }
 
     fun setResizeMode(resizeMode: Int) {
@@ -54,9 +94,9 @@ class MediaPlayerView(
         val resizeMode = when (boxFit.lowercase()) {
             "cover" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-            "fitwidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_WIDTH
-            "fitheight" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_HEIGHT
-            "none" -> AspectRatioFrameLayout.RESIZE_MODE_NONE
+            "fitwidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
+            "fitheight" -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
+            "none" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
             "scaledown" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
             else -> AspectRatioFrameLayout.RESIZE_MODE_FIT // "contain" and default
         }

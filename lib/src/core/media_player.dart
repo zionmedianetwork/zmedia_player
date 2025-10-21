@@ -56,6 +56,8 @@ class MediaPlayer {
       StreamController<List<CastDevice>>.broadcast();
   final StreamController<DrmSession> _drmSessionController =
       StreamController<DrmSession>.broadcast();
+  final StreamController<String> _notificationActionController =
+      StreamController<String>.broadcast();
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
@@ -287,6 +289,12 @@ class MediaPlayer {
   Stream<DrmSession> get drmSessionStream {
     _throwIfDisposed();
     return _drmSessionController.stream;
+  }
+
+  /// Stream of notification action events
+  Stream<String> get notificationActionStream {
+    _throwIfDisposed();
+    return _notificationActionController.stream;
   }
 
   /// Whether the player is initialized
@@ -810,6 +818,7 @@ class MediaPlayer {
       _castStatusController.close(),
       _castDevicesController.close(),
       _drmSessionController.close(),
+      _notificationActionController.close(),
     ]);
 
     _isInitialized = false;
@@ -903,6 +912,9 @@ class MediaPlayer {
           break;
         case 'onCastDevicesChanged':
           _handleCastDevicesChanged(arguments!);
+          break;
+        case 'onNotificationAction':
+          _handleNotificationAction(arguments!);
           break;
         case 'onError':
           _handleError(arguments!);
@@ -1081,6 +1093,23 @@ class MediaPlayer {
           'Cast devices updated: ${_castDevices.length} device(s) found');
     } catch (e) {
       debugPrint('Error processing cast devices: $e');
+    }
+  }
+
+  /// Handle notification action events from platform
+  void _handleNotificationAction(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final action = arguments['action'] as String;
+
+      if (!_notificationActionController.isClosed) {
+        _notificationActionController.add(action);
+      }
+
+      debugPrint('Notification action received: $action');
+    } catch (e) {
+      debugPrint('Error processing notification action: $e');
     }
   }
 

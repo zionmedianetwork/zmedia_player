@@ -24,9 +24,19 @@ class MediaPlayerManager(
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun initializePlayer(playerId: String, config: Map<String, Any>?) {
-        mainHandler.post {
+        android.util.Log.d("MediaPlayerManager", "initializePlayer called for playerId: $playerId")
+        
+        // Initialize synchronously on main thread to avoid timing issues with platform view creation
+        if (Looper.myLooper() == Looper.getMainLooper()) {
             val playerInstance = MediaPlayerInstance(context, playerId, methodChannel, config)
             players[playerId] = playerInstance
+            android.util.Log.d("MediaPlayerManager", "Player instance created synchronously")
+        } else {
+            mainHandler.post {
+                val playerInstance = MediaPlayerInstance(context, playerId, methodChannel, config)
+                players[playerId] = playerInstance
+                android.util.Log.d("MediaPlayerManager", "Player instance created via handler post")
+            }
         }
     }
 
@@ -127,7 +137,16 @@ class MediaPlayerManager(
     }
 
     fun getPlayerView(playerId: String): MediaPlayerView? {
-        return players[playerId]?.getPlayerView()
+        android.util.Log.d("MediaPlayerManager", "getPlayerView called for playerId: $playerId, player exists: ${players.containsKey(playerId)}")
+        
+        // If player doesn't exist yet, wait for it to be initialized
+        val playerInstance = players[playerId]
+        if (playerInstance == null) {
+            android.util.Log.e("MediaPlayerManager", "Player instance not found for $playerId - ensure initialize() was called first")
+            return null
+        }
+        
+        return playerInstance.getPlayerView()
     }
 
     fun disposePlayer(playerId: String) {
@@ -181,6 +200,11 @@ class MediaPlayerInstance(
             }
             
             notifyStateChanged(state, playbackState == Player.STATE_BUFFERING)
+            
+            // Notify duration when player is ready
+            if (playbackState == Player.STATE_READY) {
+                notifyDurationChanged()
+            }
         }
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -258,9 +282,8 @@ class MediaPlayerInstance(
             
             android.util.Log.d("MediaPlayerInstance", "Media prepared, autoPlay: ${config?.get("autoPlay")}")
             
-            if (config?.get("autoPlay") as? Boolean == true) {
-                playWhenReady = true
-            }
+            // Set playWhenReady based on autoPlay - explicitly set false if not auto-playing
+            playWhenReady = config?.get("autoPlay") as? Boolean ?: false
         }
         
         currentMediaSource = mediaSource
@@ -313,9 +336,9 @@ class MediaPlayerInstance(
         val resizeMode = when (boxFit.lowercase()) {
             "cover" -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             "fill" -> AspectRatioFrameLayout.RESIZE_MODE_FILL
-            "fitwidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_WIDTH
-            "fitheight" -> AspectRatioFrameLayout.RESIZE_MODE_FIT_HEIGHT
-            "none" -> AspectRatioFrameLayout.RESIZE_MODE_NONE
+            "fitwidth" -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_WIDTH
+            "fitheight" -> AspectRatioFrameLayout.RESIZE_MODE_FIXED_HEIGHT
+            "none" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
             "scaledown" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
             else -> AspectRatioFrameLayout.RESIZE_MODE_FIT // "contain" and default
         }

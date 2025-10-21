@@ -15,6 +15,9 @@ Core `MediaPlayer` and `MediaController` API reference with all methods and prop
 ### [Events & Callbacks](events.md)
 All available events, streams, and callback handlers.
 
+### [Live Streaming](live-streaming.md)
+HLS/DASH live streaming with DVR functionality and low-latency support.
+
 ### [DRM Configuration](drm.md)
 Digital Rights Management setup for Widevine, FairPlay, and EZDRM.
 

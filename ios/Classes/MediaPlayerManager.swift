@@ -236,6 +236,12 @@ class MediaPlayerInstance: NSObject {
         
         print("MediaPlayerInstance.loadMediaItem(): Loading URL: \(urlString)")
         
+        // Remove observers from old player item
+        if let oldItem = avPlayer?.currentItem {
+            oldItem.removeObserver(self, forKeyPath: "duration")
+            oldItem.removeObserver(self, forKeyPath: "status")
+        }
+        
         // Create AVURLAsset with custom headers if provided
         var asset: AVURLAsset
         if let httpHeaders = mediaItem["httpHeaders"] as? [String: String] {
@@ -247,12 +253,16 @@ class MediaPlayerInstance: NSObject {
         
         let playerItem = AVPlayerItem(asset: asset)
         
-        // Add observer for duration
+        // Add observers for the player item
         playerItem.addObserver(self, forKeyPath: "duration", options: [.new], context: nil)
+        playerItem.addObserver(self, forKeyPath: "status", options: [.new], context: nil)
         
         // Ensure we're on main thread for player operations
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
+            
+            // Notify buffering state when starting to load
+            self.notifyStateChanged(state: "buffering", isBuffering: true)
             
             self.avPlayer?.replaceCurrentItem(with: playerItem)
             
@@ -386,10 +396,18 @@ class MediaPlayerInstance: NSObject {
     }
     
     func dispose() {
-        // Remove observers
+        // Remove AVPlayerItem observers
+        if let currentItem = avPlayer?.currentItem {
+            currentItem.removeObserver(self, forKeyPath: "duration")
+            currentItem.removeObserver(self, forKeyPath: "status")
+        }
+        
+        // Remove time observer
         if let timeObserver = timeObserver {
             avPlayer?.removeTimeObserver(timeObserver)
         }
+        
+        // Remove KVO observers
         statusObserver?.invalidate()
         rateObserver?.invalidate()
         
@@ -471,6 +489,42 @@ class MediaPlayerInstance: NSObject {
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
         if keyPath == "duration" {
             notifyDurationChanged()
+        } else if keyPath == "status" {
+            // Handle AVPlayerItem status changes
+            if let playerItem = object as? AVPlayerItem {
+                handlePlayerItemStatusChange(status: playerItem.status)
+            }
+        }
+    }
+    
+    private func handlePlayerItemStatusChange(status: AVPlayerItem.Status) {
+        print("MediaPlayerInstance: PlayerItem status changed to: \(status.rawValue)")
+        
+        switch status {
+        case .unknown:
+            print("MediaPlayerInstance: PlayerItem status = unknown")
+            notifyStateChanged(state: "buffering", isBuffering: true)
+        case .readyToPlay:
+            print("MediaPlayerInstance: PlayerItem status = readyToPlay")
+            // Check if player is currently playing to set correct state
+            if let player = avPlayer, player.rate > 0 {
+                print("MediaPlayerInstance: Player is playing (rate: \(player.rate))")
+                notifyStateChanged(state: "playing", isBuffering: false)
+            } else {
+                print("MediaPlayerInstance: Player is ready but not playing")
+                notifyStateChanged(state: "ready", isBuffering: false)
+            }
+            notifyDurationChanged()
+        case .failed:
+            print("MediaPlayerInstance: PlayerItem status = failed")
+            if let error = avPlayer?.currentItem?.error {
+                notifyError(error: error.localizedDescription)
+            } else {
+                notifyError(error: "Player item failed to load")
+            }
+        @unknown default:
+            print("MediaPlayerInstance: PlayerItem status = unknown default")
+            break
         }
     }
     

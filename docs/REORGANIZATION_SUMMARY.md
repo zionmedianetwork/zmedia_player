@@ -24,7 +24,7 @@ docs/
 │   └── better-player-parity.md         # Parity summary
 └── summary/                            # For stakeholders and overview
     ├── README.md                       # Summary index
-    ├── features.md                     # Complete feature list (172 features)
+    ├── features.md                     # Complete feature list (179 features)
     ├── phases.md                       # All phase summaries consolidated
     ├── test-coverage.md                # Test coverage report
     └── production-readiness.md         # Production readiness checklist
@@ -69,7 +69,7 @@ docs/
 **Purpose:** Provide high-level project status and achievements
 
 **Contents:**
-- Complete feature list (172 features)
+- Complete feature list (179 features)
 - Development phase summaries (Phases 1-4)
 - Test coverage reports (113/113 tests)
 - Production readiness status
