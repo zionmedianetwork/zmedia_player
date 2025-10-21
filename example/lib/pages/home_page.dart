@@ -7,6 +7,7 @@ import 'notifications_demo_page.dart';
 import 'pip_demo_page.dart';
 import 'casting_demo_page.dart';
 import 'drm_demo_page.dart';
+import 'exception_handling_demo_page.dart';
 import 'settings_page.dart';
 
 class HomePage extends StatelessWidget {
@@ -251,6 +252,27 @@ class HomePage extends StatelessWidget {
                       context,
                       MaterialPageRoute(
                         builder: (context) => const DrmDemoPage(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  _FeatureCard(
+                    icon: Icons.error_outline,
+                    iconColor: const Color(0xFFF97316),
+                    title: 'Exception Handling',
+                    description: 'Comprehensive error handling and recovery',
+                    features: const [
+                      'Typed Exceptions',
+                      'User-Friendly Errors',
+                      'Recovery Recommendations',
+                      'Error Logging',
+                    ],
+                    badge: 'PHASE 4',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const ExceptionHandlingDemoPage(),
                       ),
                     ),
                   ),

@@ -22,9 +22,55 @@ class MediaPlayerManager(
 ) {
     private val players = ConcurrentHashMap<String, MediaPlayerInstance>()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val crashHandler = CrashHandler(methodChannel)
+    
+    // Activity tracking for memory leak prevention
+    private val lastActivity = ConcurrentHashMap<String, Long>()
+    private val cleanupRunnable = object : Runnable {
+        override fun run() {
+            cleanupStaleInstances()
+            mainHandler.postDelayed(this, CLEANUP_INTERVAL_MS)
+        }
+    }
+    
+    companion object {
+        private const val CLEANUP_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
+        private const val STALE_THRESHOLD_MS = 15 * 60 * 1000L // 15 minutes
+    }
+    
+    init {
+        mainHandler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS)
+    }
+    
+    private fun markActivity(playerId: String) {
+        lastActivity[playerId] = System.currentTimeMillis()
+    }
+    
+    private fun cleanupStaleInstances() {
+        val now = System.currentTimeMillis()
+        val stalePlayers = mutableListOf<String>()
+        
+        lastActivity.forEach { (playerId, lastUsed) ->
+            if (now - lastUsed > STALE_THRESHOLD_MS) {
+                players[playerId]?.let { instance ->
+                    if (!instance.isPlaying()) {
+                        stalePlayers.add(playerId)
+                    }
+                }
+            }
+        }
+        
+        stalePlayers.forEach { playerId ->
+            android.util.Log.d("MediaPlayerManager", "Auto-cleaning stale instance: $playerId")
+            players[playerId]?.dispose()
+            players.remove(playerId)
+            lastActivity.remove(playerId)
+        }
+    }
 
     fun initializePlayer(playerId: String, config: Map<String, Any>?) {
         android.util.Log.d("MediaPlayerManager", "initializePlayer called for playerId: $playerId")
+        markActivity(playerId)
         
         // Initialize synchronously on main thread to avoid timing issues with platform view creation
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -41,36 +87,48 @@ class MediaPlayerManager(
     }
 
     fun loadMediaItem(playerId: String, mediaItem: Map<String, Any>) {
+        markActivity(playerId)
         mainHandler.post {
-            players[playerId]?.loadMediaItem(mediaItem)
+            crashHandler.wrapOperation("loadMediaItem", playerId, mapOf("url" to (mediaItem["url"] ?: "unknown"))) {
+                players[playerId]?.loadMediaItem(mediaItem)
+            }
         }
     }
 
     fun setPlaylist(playerId: String, playlist: Map<String, Any>, startIndex: Int) {
+        markActivity(playerId)
         mainHandler.post {
             players[playerId]?.setPlaylist(playlist, startIndex)
         }
     }
 
     fun play(playerId: String) {
+        markActivity(playerId)
         mainHandler.post {
-            players[playerId]?.play()
+            crashHandler.wrapOperation("play", playerId) {
+                players[playerId]?.play()
+            }
         }
     }
 
     fun pause(playerId: String) {
+        markActivity(playerId)
         mainHandler.post {
-            players[playerId]?.pause()
+            crashHandler.wrapOperation("pause", playerId) {
+                players[playerId]?.pause()
+            }
         }
     }
 
     fun stop(playerId: String) {
+        markActivity(playerId)
         mainHandler.post {
             players[playerId]?.stop()
         }
     }
 
     fun seekTo(playerId: String, position: Int) {
+        markActivity(playerId)
         mainHandler.post {
             players[playerId]?.seekTo(position)
         }
@@ -153,6 +211,7 @@ class MediaPlayerManager(
         mainHandler.post {
             players[playerId]?.dispose()
             players.remove(playerId)
+            lastActivity.remove(playerId)
         }
     }
 
@@ -160,7 +219,13 @@ class MediaPlayerManager(
         mainHandler.post {
             players.values.forEach { it.dispose() }
             players.clear()
+            lastActivity.clear()
         }
+    }
+    
+    fun shutdown() {
+        mainHandler.removeCallbacks(cleanupRunnable)
+        dispose()
     }
 }
 
@@ -392,6 +457,10 @@ class MediaPlayerInstance(
             android.util.Log.d("MediaPlayerInstance", "Returning existing player view")
         }
         return playerView
+    }
+    
+    fun isPlaying(): Boolean {
+        return exoPlayer?.isPlaying ?: false
     }
 
     fun dispose() {

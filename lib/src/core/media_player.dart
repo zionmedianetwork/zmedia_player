@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart'
+    show MethodCall, MethodChannel, PlatformException;
 import '../models/media_item.dart';
 import '../models/player_state.dart';
 import '../models/playlist.dart';
@@ -10,6 +11,8 @@ import '../models/pip_config.dart';
 import '../models/cast_device.dart';
 import '../models/drm_config.dart';
 import 'media_config.dart';
+import 'crash_reporter.dart';
+import 'exceptions.dart';
 
 /// Main media player controller class
 ///
@@ -18,6 +21,13 @@ import 'media_config.dart';
 class MediaPlayer {
   static const MethodChannel _channel = MethodChannel('zmedia_player');
   static final Map<String, MediaPlayer> _instances = {};
+
+  /// Activity tracking for memory leak prevention
+  static final Map<String, DateTime> _lastActivity = {};
+  static Timer? _cleanupTimer;
+
+  /// Global crash reporter (set once at app startup)
+  static CrashReporter? crashReporter;
 
   /// Unique identifier for this player instance
   final String playerId;
@@ -112,7 +122,71 @@ class MediaPlayer {
   /// Private constructor for factory pattern
   MediaPlayer._(this.playerId, this._config) {
     _instances[playerId] = this;
+    _markActivity();
+    _ensureCleanupTimer();
     _setupMethodCallHandler();
+  }
+
+  /// Enable crash reporting (call once at app startup)
+  ///
+  /// [reporter] - The crash reporter implementation to use
+  ///
+  /// Example:
+  /// ```dart
+  /// MediaPlayer.enableCrashReporting(ConsoleOnlyCrashReporter());
+  /// ```
+  static void enableCrashReporting(CrashReporter reporter) {
+    crashReporter = reporter;
+    crashReporter?.log('MediaPlayer crash reporting enabled');
+  }
+
+  /// Disable crash reporting
+  static void disableCrashReporting() {
+    crashReporter?.log('MediaPlayer crash reporting disabled');
+    crashReporter = null;
+  }
+
+  /// Track activity to prevent premature cleanup
+  void _markActivity() {
+    _lastActivity[playerId] = DateTime.now();
+  }
+
+  /// Ensure cleanup timer is running
+  static void _ensureCleanupTimer() {
+    _cleanupTimer ??= Timer.periodic(
+      const Duration(minutes: 5),
+      (_) => _cleanupStaleInstances(),
+    );
+  }
+
+  /// Clean up stale player instances
+  static void _cleanupStaleInstances() {
+    final now = DateTime.now();
+    const staleThreshold = Duration(minutes: 15);
+
+    final staleKeys = <String>[];
+
+    for (final entry in _lastActivity.entries) {
+      if (now.difference(entry.value) > staleThreshold) {
+        staleKeys.add(entry.key);
+      }
+    }
+
+    for (final key in staleKeys) {
+      final instance = _instances[key];
+      if (instance != null && !instance.isPlaying) {
+        debugPrint('MediaPlayer: Auto-cleaning stale instance: $key');
+        instance.dispose();
+        _instances.remove(key);
+        _lastActivity.remove(key);
+      }
+    }
+
+    // Stop timer if no instances
+    if (_instances.isEmpty) {
+      _cleanupTimer?.cancel();
+      _cleanupTimer = null;
+    }
   }
 
   /// Factory constructor to create a new media player instance
@@ -154,6 +228,12 @@ class MediaPlayer {
   PlaybackState get currentState {
     _throwIfDisposed();
     return _currentState;
+  }
+
+  /// Whether the player is currently playing
+  bool get isPlaying {
+    if (_isDisposed) return false;
+    return _currentState.state == PlayerState.playing;
   }
 
   /// Stream of playbook state changes
@@ -320,6 +400,11 @@ class MediaPlayer {
     _initializationCompleter = Completer<void>();
 
     try {
+      crashReporter?.log('Initializing MediaPlayer', context: {
+        'playerId': playerId,
+        'autoPlay': _config.autoPlay,
+      });
+
       await _channel.invokeMethod('initialize', {
         'playerId': playerId,
         'config': _configToMap(_config),
@@ -327,8 +412,24 @@ class MediaPlayer {
       _isInitialized = true;
       _startPositionTimer();
       _initializationCompleter!.complete();
-    } catch (e) {
-      final exception = MediaPlayerException('Failed to initialize player: $e');
+
+      crashReporter?.log('MediaPlayer initialized successfully', context: {
+        'playerId': playerId,
+      });
+    } catch (e, stack) {
+      crashReporter?.reportError(e, stack,
+          context: {
+            'operation': 'initialize',
+            'playerId': playerId,
+            'config': _config.toString(),
+          },
+          fatal: true);
+
+      final exception = ConfigurationException(
+        'Failed to initialize player: $e',
+        parameter: 'initialization',
+        value: playerId,
+      );
       _initializationCompleter!.completeError(exception);
       _initializationCompleter = null;
       throw exception;
@@ -338,8 +439,13 @@ class MediaPlayer {
   /// Load a single media item
   Future<void> load(MediaItem item) async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
+      crashReporter?.setCustomKey('media_id', item.id);
+      crashReporter?.setCustomKey('media_url', item.url);
+      crashReporter?.setCustomKey('drm_enabled', item.drmConfig != null);
+
       _currentItem = item;
       await _channel.invokeMethod('load', {
         'playerId': playerId,
@@ -347,23 +453,83 @@ class MediaPlayer {
       });
 
       _updateState(_currentState.copyWith(state: PlayerState.buffering));
-    } on PlatformException catch (e) {
-      final errorMsg = 'Failed to load media: ${e.message ?? e.code}';
-      _handleLoadError(errorMsg);
-      throw MediaPlayerException(errorMsg);
-    } catch (e) {
-      final errorMsg = 'Failed to load media: $e';
-      _handleLoadError(errorMsg);
-      throw MediaPlayerException(errorMsg);
+
+      crashReporter?.log('Media loaded successfully', context: {
+        'mediaId': item.id,
+        'duration': item.duration?.inSeconds,
+        'mediaType': item.mediaType.name,
+      });
+    } on PlatformException catch (e, stack) {
+      crashReporter?.reportError(e, stack, context: {
+        'operation': 'load',
+        'mediaId': item.id,
+        'url': item.url,
+        'playerId': playerId,
+        'errorCode': e.code,
+      });
+
+      _handleLoadError('Failed to load media: ${e.message ?? e.code}');
+
+      // Convert platform exceptions to typed exceptions
+      if (e.code == 'NETWORK_ERROR' || e.code == 'CONNECTIVITY_ERROR') {
+        final isOffline = e.message?.toLowerCase().contains('offline') ?? false;
+        final isTimeout = e.message?.toLowerCase().contains('timeout') ?? false;
+        throw NetworkException(
+          e.message ?? 'Network error occurred',
+          isOffline: isOffline,
+          isTimeout: isTimeout,
+          details: e.details as Map<String, dynamic>?,
+        );
+      } else if (e.code.startsWith('DRM_')) {
+        throw DrmException(
+          e.message ?? 'DRM error occurred',
+          drmType: item.drmConfig?.scheme.toString().split('.').last,
+          errorCode: e.code,
+          isLicenseError: e.code.contains('LICENSE'),
+          isCertificateError:
+              e.code.contains('CERTIFICATE') || e.code.contains('PROVISIONING'),
+          details: e.details as Map<String, dynamic>?,
+        );
+      } else {
+        throw MediaLoadException(
+          e.message ?? 'Failed to load media',
+          url: item.url,
+          statusCode:
+              e.code == 'HTTP_ERROR' ? int.tryParse(e.message ?? '') : null,
+          details: e.details as Map<String, dynamic>?,
+        );
+      }
+    } catch (e, stack) {
+      crashReporter?.reportError(e, stack, context: {
+        'operation': 'load',
+        'mediaId': item.id,
+        'url': item.url,
+        'playerId': playerId,
+      });
+
+      _handleLoadError('Failed to load media: $e');
+
+      // Re-throw if it's already a MediaPlayerException
+      if (e is MediaPlayerException) rethrow;
+
+      throw MediaLoadException(
+        'Failed to load media: $e',
+        url: item.url,
+      );
     }
   }
 
   /// Set and load a playlist
   Future<void> setPlaylist(Playlist playlist, {int? startIndex}) async {
     await _ensureInitialized();
+    _markActivity();
 
     if (playlist.items.isEmpty) {
-      throw const MediaPlayerException('Playlist cannot be empty');
+      throw const ConfigurationException(
+        'Playlist cannot be empty',
+        parameter: 'playlist.items',
+        value: [],
+      );
     }
 
     final index = (startIndex ?? playlist.currentIndex)
@@ -381,35 +547,79 @@ class MediaPlayer {
       _currentItem = _currentPlaylist!.items[index];
       _updateState(_currentState.copyWith(state: PlayerState.buffering));
     } on PlatformException catch (e) {
-      final errorMsg = 'Failed to set playlist: ${e.message ?? e.code}';
-      _handleLoadError(errorMsg);
-      throw MediaPlayerException(errorMsg);
+      _handleLoadError('Failed to set playlist: ${e.message ?? e.code}');
+      throw MediaLoadException(
+        'Failed to set playlist: ${e.message ?? e.code}',
+        details: {
+          'itemCount': playlist.items.length,
+          ...?e.details as Map<String, dynamic>?
+        },
+      );
     } catch (e) {
-      final errorMsg = 'Failed to set playlist: $e';
-      _handleLoadError(errorMsg);
-      throw MediaPlayerException(errorMsg);
+      _handleLoadError('Failed to set playlist: $e');
+
+      // Re-throw if it's already a MediaPlayerException
+      if (e is MediaPlayerException) rethrow;
+
+      throw MediaLoadException(
+        'Failed to set playlist: $e',
+        details: {'itemCount': playlist.items.length},
+      );
     }
   }
 
   /// Start or resume playback
   Future<void> play() async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       await _channel.invokeMethod('play', {'playerId': playerId});
-    } on PlatformException catch (e) {
-      throw MediaPlayerException('Failed to play: ${e.message ?? e.code}');
+
+      crashReporter?.log('Playback started', context: {
+        'playerId': playerId,
+        'mediaId': _currentItem?.id,
+      });
+    } on PlatformException catch (e, stack) {
+      crashReporter?.reportError(e, stack, context: {
+        'operation': 'play',
+        'playerId': playerId,
+        'state': _currentState.state.name,
+        'mediaId': _currentItem?.id,
+      });
+
+      throw PlaybackException(
+        'Failed to start playback: ${e.message ?? e.code}',
+        errorCode: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
   /// Pause playback
   Future<void> pause() async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       await _channel.invokeMethod('pause', {'playerId': playerId});
-    } on PlatformException catch (e) {
-      throw MediaPlayerException('Failed to pause: ${e.message ?? e.code}');
+
+      crashReporter?.log('Playback paused', context: {
+        'playerId': playerId,
+        'position': _currentState.position.inSeconds,
+      });
+    } on PlatformException catch (e, stack) {
+      crashReporter?.reportError(e, stack, context: {
+        'operation': 'pause',
+        'playerId': playerId,
+        'state': _currentState.state.name,
+      });
+
+      throw PlaybackException(
+        'Failed to pause: ${e.message ?? e.code}',
+        errorCode: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -421,7 +631,11 @@ class MediaPlayer {
       await _channel.invokeMethod('stop', {'playerId': playerId});
       _updateState(_currentState.copyWith(state: PlayerState.idle));
     } on PlatformException catch (e) {
-      throw MediaPlayerException('Failed to stop: ${e.message ?? e.code}');
+      throw PlaybackException(
+        'Failed to stop: ${e.message ?? e.code}',
+        errorCode: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -430,7 +644,11 @@ class MediaPlayer {
     await _ensureInitialized();
 
     if (position.isNegative) {
-      throw const MediaPlayerException('Seek position cannot be negative');
+      throw ConfigurationException(
+        'Seek position cannot be negative',
+        parameter: 'position',
+        value: position,
+      );
     }
 
     try {
@@ -439,7 +657,11 @@ class MediaPlayer {
         'position': position.inMilliseconds,
       });
     } on PlatformException catch (e) {
-      throw MediaPlayerException('Failed to seek: ${e.message ?? e.code}');
+      throw PlaybackException(
+        'Failed to seek: ${e.message ?? e.code}',
+        errorCode: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -459,8 +681,12 @@ class MediaPlayer {
       _volumeController.add(clampedVolume);
       _updateState(_currentState.copyWith(volume: clampedVolume));
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to set volume: ${e.message ?? e.code}');
+      throw ConfigurationException(
+        'Failed to set volume: ${e.message ?? e.code}',
+        parameter: 'volume',
+        value: volume,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -480,7 +706,12 @@ class MediaPlayer {
       _speedController.add(clampedSpeed);
       _updateState(_currentState.copyWith(speed: clampedSpeed));
     } on PlatformException catch (e) {
-      throw MediaPlayerException('Failed to set speed: ${e.message ?? e.code}');
+      throw ConfigurationException(
+        'Failed to set speed: ${e.message ?? e.code}',
+        parameter: 'speed',
+        value: speed,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -496,7 +727,12 @@ class MediaPlayer {
 
       _updateState(_currentState.copyWith(isMuted: muted));
     } on PlatformException catch (e) {
-      throw MediaPlayerException('Failed to set muted: ${e.message ?? e.code}');
+      throw ConfigurationException(
+        'Failed to set muted: ${e.message ?? e.code}',
+        parameter: 'muted',
+        value: muted,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -512,8 +748,12 @@ class MediaPlayer {
 
       _config = _config.copyWith(boxFit: boxFit);
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to set BoxFit: ${e.message ?? e.code}');
+      throw ConfigurationException(
+        'Failed to set BoxFit: ${e.message ?? e.code}',
+        parameter: 'boxFit',
+        value: boxFit.toString(),
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -523,7 +763,12 @@ class MediaPlayer {
 
     // Validate track exists in available tracks
     if (track != null && !_subtitleTracks.any((t) => t.id == track.id)) {
-      throw MediaPlayerException('Subtitle track not found: ${track.id}');
+      throw InvalidStateException(
+        'Subtitle track not found: ${track.id}',
+        currentState:
+            'Available tracks: ${_subtitleTracks.map((t) => t.id).join(", ")}',
+        requiredState: 'Valid track ID',
+      );
     }
 
     try {
@@ -535,8 +780,12 @@ class MediaPlayer {
       _selectedSubtitleTrack = track;
       _updateSubtitleTracksSelection(track?.id);
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to set subtitle track: ${e.message ?? e.code}');
+      throw ConfigurationException(
+        'Failed to set subtitle track: ${e.message ?? e.code}',
+        parameter: 'subtitleTrack',
+        value: track?.id,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -546,7 +795,12 @@ class MediaPlayer {
 
     // Validate track exists in available tracks
     if (!_qualityTracks.any((t) => t.id == track.id)) {
-      throw MediaPlayerException('Quality track not found: ${track.id}');
+      throw InvalidStateException(
+        'Quality track not found: ${track.id}',
+        currentState:
+            'Available tracks: ${_qualityTracks.map((t) => t.id).join(", ")}',
+        requiredState: 'Valid track ID',
+      );
     }
 
     try {
@@ -558,8 +812,12 @@ class MediaPlayer {
       _selectedQualityTrack = track;
       _updateQualityTracksSelection(track.id);
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to set quality track: ${e.message ?? e.code}');
+      throw ConfigurationException(
+        'Failed to set quality track: ${e.message ?? e.code}',
+        parameter: 'qualityTrack',
+        value: track.id,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -569,7 +827,12 @@ class MediaPlayer {
 
     // Validate track exists in available tracks
     if (!_audioTracks.any((t) => t.id == track.id)) {
-      throw MediaPlayerException('Audio track not found: ${track.id}');
+      throw InvalidStateException(
+        'Audio track not found: ${track.id}',
+        currentState:
+            'Available tracks: ${_audioTracks.map((t) => t.id).join(", ")}',
+        requiredState: 'Valid track ID',
+      );
     }
 
     try {
@@ -581,8 +844,12 @@ class MediaPlayer {
       _selectedAudioTrack = track;
       _updateAudioTracksSelection(track.id);
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to set audio track: ${e.message ?? e.code}');
+      throw ConfigurationException(
+        'Failed to set audio track: ${e.message ?? e.code}',
+        parameter: 'audioTrack',
+        value: track.id,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -598,8 +865,12 @@ class MediaPlayer {
       _selectedQualityTrack = null;
       _updateQualityTracksSelection(null);
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to enable auto quality: ${e.message ?? e.code}');
+      throw ConfigurationException(
+        'Failed to enable auto quality: ${e.message ?? e.code}',
+        parameter: 'autoQuality',
+        value: true,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -624,8 +895,11 @@ class MediaPlayer {
     await _ensureInitialized();
 
     if (!_pipStatus.isSupported) {
-      throw const MediaPlayerException(
-          'Picture-in-Picture not supported on this device');
+      throw const ConfigurationException(
+        'Picture-in-Picture not supported on this device',
+        parameter: 'pip',
+        value: 'unavailable',
+      );
     }
 
     try {
@@ -636,8 +910,11 @@ class MediaPlayer {
 
       return result ?? false;
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to enter PiP mode: ${e.message ?? e.code}');
+      throw PlatformOperationException(
+        'Failed to enter PiP mode: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -650,8 +927,11 @@ class MediaPlayer {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to exit PiP mode: ${e.message ?? e.code}');
+      throw PlatformOperationException(
+        'Failed to exit PiP mode: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -664,8 +944,11 @@ class MediaPlayer {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to start cast discovery: ${e.message ?? e.code}');
+      throw PlatformOperationException(
+        'Failed to start cast discovery: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -678,8 +961,11 @@ class MediaPlayer {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to stop cast discovery: ${e.message ?? e.code}');
+      throw PlatformOperationException(
+        'Failed to stop cast discovery: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -696,8 +982,11 @@ class MediaPlayer {
 
       return result ?? false;
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to connect to cast device: ${e.message ?? e.code}');
+      throw PlatformOperationException(
+        'Failed to connect to cast device: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -710,8 +999,11 @@ class MediaPlayer {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to disconnect from cast device: ${e.message ?? e.code}');
+      throw PlatformOperationException(
+        'Failed to disconnect from cast device: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -721,7 +1013,11 @@ class MediaPlayer {
 
     final nextIndex = _currentPlaylist!.nextIndex;
     if (nextIndex == null) {
-      throw const MediaPlayerException('No next item available');
+      throw const InvalidStateException(
+        'No next item available',
+        currentState: 'At last item',
+        requiredState: 'More items in playlist',
+      );
     }
 
     await skipToIndex(nextIndex);
@@ -733,7 +1029,11 @@ class MediaPlayer {
 
     final previousIndex = _currentPlaylist!.previousIndex;
     if (previousIndex == null) {
-      throw const MediaPlayerException('No previous item available');
+      throw const InvalidStateException(
+        'No previous item available',
+        currentState: 'At first item',
+        requiredState: 'More items in playlist',
+      );
     }
 
     await skipToIndex(previousIndex);
@@ -744,7 +1044,12 @@ class MediaPlayer {
     _validatePlaylistOperation();
 
     if (index < 0 || index >= _currentPlaylist!.items.length) {
-      throw MediaPlayerException('Invalid playlist index: $index');
+      throw ConfigurationException(
+        'Invalid playlist index: $index',
+        parameter: 'index',
+        value: index,
+        details: {'playlistLength': _currentPlaylist!.items.length},
+      );
     }
 
     try {
@@ -756,8 +1061,11 @@ class MediaPlayer {
       _currentPlaylist = _currentPlaylist!.copyWith(currentIndex: index);
       _currentItem = _currentPlaylist!.items[index];
     } on PlatformException catch (e) {
-      throw MediaPlayerException(
-          'Failed to skip to index: ${e.message ?? e.code}');
+      throw PlaybackException(
+        'Failed to skip to index: ${e.message ?? e.code}',
+        errorCode: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 
@@ -777,8 +1085,12 @@ class MediaPlayer {
       } on PlatformException catch (e) {
         // Revert config on failure
         _config = oldConfig;
-        throw MediaPlayerException(
-            'Failed to update config: ${e.message ?? e.code}');
+        throw ConfigurationException(
+          'Failed to update config: ${e.message ?? e.code}',
+          parameter: 'config',
+          value: config,
+          details: e.details as Map<String, dynamic>?,
+        );
       }
     }
   }
@@ -789,6 +1101,7 @@ class MediaPlayer {
 
     _isDisposed = true;
     _instances.remove(playerId);
+    _lastActivity.remove(playerId);
 
     // Cancel timers
     _positionTimer?.cancel();
@@ -804,24 +1117,39 @@ class MediaPlayer {
       }
     }
 
-    // Close stream controllers
-    await Future.wait([
-      _stateController.close(),
-      _positionController.close(),
-      _durationController.close(),
-      _volumeController.close(),
-      _speedController.close(),
-      _subtitleTracksController.close(),
-      _qualityTracksController.close(),
-      _audioTracksController.close(),
-      _pipStatusController.close(),
-      _castStatusController.close(),
-      _castDevicesController.close(),
-      _drmSessionController.close(),
-      _notificationActionController.close(),
-    ]);
+    // Close stream controllers safely
+    await _safeCloseStreams();
 
     _isInitialized = false;
+  }
+
+  /// Safely close all stream controllers
+  Future<void> _safeCloseStreams() async {
+    final controllers = [
+      _stateController,
+      _positionController,
+      _durationController,
+      _volumeController,
+      _speedController,
+      _subtitleTracksController,
+      _qualityTracksController,
+      _audioTracksController,
+      _pipStatusController,
+      _castStatusController,
+      _castDevicesController,
+      _drmSessionController,
+      _notificationActionController,
+    ];
+
+    for (final controller in controllers) {
+      if (!controller.isClosed) {
+        try {
+          await controller.close();
+        } catch (e) {
+          debugPrint('Error closing controller: $e');
+        }
+      }
+    }
   }
 
   // Private helper methods
@@ -830,7 +1158,11 @@ class MediaPlayer {
   void _validatePlaylistOperation() {
     _throwIfDisposed();
     if (_currentPlaylist == null) {
-      throw const MediaPlayerException('No playlist set');
+      throw const InvalidStateException(
+        'No playlist set',
+        currentState: 'No playlist',
+        requiredState: 'Playlist loaded',
+      );
     }
   }
 
@@ -869,7 +1201,7 @@ class MediaPlayer {
   /// Throw if disposed
   void _throwIfDisposed() {
     if (_isDisposed) {
-      throw const MediaPlayerException('MediaPlayer has been disposed');
+      throw const PlayerDisposedException();
     }
   }
 
@@ -1266,24 +1598,4 @@ class MediaPlayer {
       sampleRate: map['sampleRate'] as int?,
     );
   }
-}
-
-/// Exception thrown by MediaPlayer operations
-class MediaPlayerException implements Exception {
-  final String message;
-
-  const MediaPlayerException(this.message);
-
-  @override
-  String toString() => 'MediaPlayerException: $message';
-
-  @override
-  bool operator ==(Object other) =>
-      identical(this, other) ||
-      other is MediaPlayerException &&
-          runtimeType == other.runtimeType &&
-          message == other.message;
-
-  @override
-  int get hashCode => message.hashCode;
 }

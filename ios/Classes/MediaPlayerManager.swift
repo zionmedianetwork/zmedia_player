@@ -6,24 +6,79 @@ import Flutter
 class MediaPlayerManager {
     private var players: [String: MediaPlayerInstance] = [:]
     private let methodChannel: FlutterMethodChannel
+    private let crashHandler: CrashHandler
+    
+    // Activity tracking for memory leak prevention
+    private var lastActivity: [String: Date] = [:]
+    private var cleanupTimer: Timer?
+    
+    // Cleanup configuration
+    private static let cleanupInterval: TimeInterval = 5 * 60 // 5 minutes
+    private static let staleThreshold: TimeInterval = 15 * 60 // 15 minutes
     
     init(methodChannel: FlutterMethodChannel) {
         self.methodChannel = methodChannel
+        self.crashHandler = CrashHandler(methodChannel: methodChannel)
+        startCleanupTimer()
+    }
+    
+    // MARK: - Activity Tracking
+    
+    private func markActivity(playerId: String) {
+        lastActivity[playerId] = Date()
+    }
+    
+    private func startCleanupTimer() {
+        cleanupTimer = Timer.scheduledTimer(
+            withTimeInterval: MediaPlayerManager.cleanupInterval,
+            repeats: true
+        ) { [weak self] _ in
+            self?.cleanupStaleInstances()
+        }
+    }
+    
+    private func cleanupStaleInstances() {
+        let now = Date()
+        var stalePlayers: [String] = []
+        
+        for (playerId, lastUsed) in lastActivity {
+            if now.timeIntervalSince(lastUsed) > MediaPlayerManager.staleThreshold {
+                if let instance = players[playerId], !instance.isPlaying() {
+                    stalePlayers.append(playerId)
+                }
+            }
+        }
+        
+        for playerId in stalePlayers {
+            print("MediaPlayerManager: Auto-cleaning stale instance: \(playerId)")
+            players[playerId]?.dispose()
+            players.removeValue(forKey: playerId)
+            lastActivity.removeValue(forKey: playerId)
+        }
     }
     
     func initializePlayer(playerId: String, config: [String: Any]?) throws {
+        markActivity(playerId: playerId)
         let playerInstance = MediaPlayerInstance(playerId: playerId, methodChannel: methodChannel, config: config)
         players[playerId] = playerInstance
     }
     
     func loadMediaItem(playerId: String, mediaItem: [String: Any]) throws {
-        guard let playerInstance = players[playerId] else {
-            throw MediaPlayerError.playerNotFound
+        markActivity(playerId: playerId)
+        try crashHandler.wrapOperation(
+            operation: "loadMediaItem",
+            playerId: playerId,
+            context: ["url": mediaItem["url"] ?? "unknown"]
+        ) {
+            guard let playerInstance = players[playerId] else {
+                throw MediaPlayerError.playerNotFound
+            }
+            playerInstance.loadMediaItem(mediaItem: mediaItem)
         }
-        playerInstance.loadMediaItem(mediaItem: mediaItem)
     }
     
     func setPlaylist(playerId: String, playlist: [String: Any], startIndex: Int) throws {
+        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -31,20 +86,33 @@ class MediaPlayerManager {
     }
     
     func play(playerId: String) throws {
-        guard let playerInstance = players[playerId] else {
-            throw MediaPlayerError.playerNotFound
+        markActivity(playerId: playerId)
+        try crashHandler.wrapOperation(
+            operation: "play",
+            playerId: playerId
+        ) {
+            guard let playerInstance = players[playerId] else {
+                throw MediaPlayerError.playerNotFound
+            }
+            playerInstance.play()
         }
-        playerInstance.play()
     }
     
     func pause(playerId: String) throws {
-        guard let playerInstance = players[playerId] else {
-            throw MediaPlayerError.playerNotFound
+        markActivity(playerId: playerId)
+        try crashHandler.wrapOperation(
+            operation: "pause",
+            playerId: playerId
+        ) {
+            guard let playerInstance = players[playerId] else {
+                throw MediaPlayerError.playerNotFound
+            }
+            playerInstance.pause()
         }
-        playerInstance.pause()
     }
     
     func stop(playerId: String) throws {
+        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -52,6 +120,7 @@ class MediaPlayerManager {
     }
     
     func seekTo(playerId: String, position: Int64) throws {
+        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -153,11 +222,23 @@ class MediaPlayerManager {
         }
         playerInstance.dispose()
         players.removeValue(forKey: playerId)
+        lastActivity.removeValue(forKey: playerId)
     }
     
     func dispose() {
         players.values.forEach { $0.dispose() }
         players.removeAll()
+        lastActivity.removeAll()
+    }
+    
+    func shutdown() {
+        cleanupTimer?.invalidate()
+        cleanupTimer = nil
+        dispose()
+    }
+    
+    deinit {
+        shutdown()
     }
 }
 
@@ -393,6 +474,11 @@ class MediaPlayerInstance: NSObject {
     // Phase 3: Helper to expose AVPlayer for PiP and AirPlay
     func getAVPlayer() -> AVPlayer? {
         return avPlayer
+    }
+    
+    func isPlaying() -> Bool {
+        guard let player = avPlayer else { return false }
+        return player.rate > 0
     }
     
     func dispose() {

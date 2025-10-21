@@ -9,6 +9,8 @@ library zmedia_player;
 export 'src/core/media_player.dart';
 export 'src/core/media_controller.dart';
 export 'src/core/media_config.dart';
+export 'src/core/crash_reporter.dart';
+export 'src/core/exceptions.dart';
 
 // Models
 export 'src/models/media_item.dart';
