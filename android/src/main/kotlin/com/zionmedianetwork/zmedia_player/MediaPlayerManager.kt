@@ -9,6 +9,7 @@ import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.ProgressiveMediaSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
+import com.google.android.exoplayer2.trackselection.TrackSelectionOverride
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
 import com.google.android.exoplayer2.upstream.DataSource
@@ -290,6 +291,11 @@ class MediaPlayerInstance(
             android.util.Log.d("MediaPlayerInstance", "Media metadata changed")
             notifyDurationChanged()
         }
+
+        override fun onTracksChanged(tracks: Tracks) {
+            android.util.Log.d("MediaPlayerInstance", "Tracks changed")
+            extractAndNotifyQualityTracks()
+        }
     }
 
     init {
@@ -426,9 +432,47 @@ class MediaPlayerInstance(
     }
 
     fun setQualityTrack(qualityTrack: Map<String, Any>) {
-        // Quality track selection - Phase 2 stub
-        // In a full implementation, this would select a specific quality from HLS/DASH manifest
-        android.util.Log.d("MediaPlayerInstance", "Quality track set: ${qualityTrack["name"]}")
+        val trackId = qualityTrack["id"] as? String ?: return
+        android.util.Log.d("MediaPlayerInstance", "Setting quality track: ${qualityTrack["name"]}, id: $trackId")
+        
+        exoPlayer?.let { player ->
+            val currentTracks = player.currentTracks
+            var targetGroup: Tracks.Group? = null
+            var targetTrackIndex = -1
+            
+            // Find the video track group and index matching the requested quality
+            for (group in currentTracks.groups) {
+                if (group.type == C.TRACK_TYPE_VIDEO) {
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        val formatId = "${format.width}x${format.height}_${format.bitrate}"
+                        if (formatId == trackId) {
+                            targetGroup = group
+                            targetTrackIndex = i
+                            break
+                        }
+                    }
+                    if (targetGroup != null) break
+                }
+            }
+            
+            if (targetGroup != null && targetTrackIndex >= 0) {
+                // Override track selection to the specific quality
+                val override = TrackSelectionOverride(
+                    targetGroup.mediaTrackGroup,
+                    listOf(targetTrackIndex)
+                )
+                
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon()
+                    .setOverrideForType(override)
+                    .build()
+                    
+                android.util.Log.d("MediaPlayerInstance", "Quality track override applied")
+            } else {
+                android.util.Log.w("MediaPlayerInstance", "Quality track not found: $trackId")
+            }
+        }
     }
 
     fun setAudioTrack(audioTrack: Map<String, Any>) {
@@ -438,9 +482,17 @@ class MediaPlayerInstance(
     }
 
     fun enableAutoQuality() {
-        // Enable automatic quality selection - Phase 2 stub
-        // In a full implementation, this would enable ExoPlayer's adaptive track selection
-        android.util.Log.d("MediaPlayerInstance", "Auto quality enabled")
+        android.util.Log.d("MediaPlayerInstance", "Enabling auto quality (ABR)")
+        
+        exoPlayer?.let { player ->
+            // Clear all track overrides to enable adaptive bitrate selection
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                .build()
+                
+            android.util.Log.d("MediaPlayerInstance", "Auto quality enabled - track overrides cleared")
+        }
     }
 
     fun skipToIndex(index: Int) {
@@ -665,6 +717,62 @@ class MediaPlayerInstance(
                 "bandwidth" to bandwidth
             )
             methodChannel.invokeMethod("onBandwidthChanged", arguments)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun extractAndNotifyQualityTracks() {
+        exoPlayer?.let { player ->
+            val qualityTracks = mutableListOf<Map<String, Any>>()
+            val currentTracks = player.currentTracks
+            
+            // Extract video tracks
+            for (group in currentTracks.groups) {
+                if (group.type == C.TRACK_TYPE_VIDEO && group.length > 0) {
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        
+                        // Skip if format doesn't have valid dimensions or bitrate
+                        if (format.width <= 0 || format.height <= 0 || format.bitrate <= 0) {
+                            continue
+                        }
+                        
+                        val trackId = "${format.width}x${format.height}_${format.bitrate}"
+                        val trackName = "${format.height}p (${(format.bitrate / 1000)}kbps)"
+                        
+                        qualityTracks.add(mapOf(
+                            "id" to trackId,
+                            "name" to trackName,
+                            "bitrate" to format.bitrate,
+                            "width" to format.width,
+                            "height" to format.height,
+                            "frameRate" to (format.frameRate.takeIf { it > 0 } ?: 30.0),
+                            "isSelected" to group.isTrackSelected(i),
+                            "isAvailable" to true,
+                            "codec" to (format.codecs ?: "unknown")
+                        ))
+                    }
+                }
+            }
+            
+            // Sort by bitrate (highest first for better UX)
+            qualityTracks.sortByDescending { it["bitrate"] as Int }
+            
+            if (qualityTracks.isNotEmpty()) {
+                android.util.Log.d("MediaPlayerInstance", "Found ${qualityTracks.size} quality tracks")
+                notifyQualityTracksChanged(qualityTracks)
+            }
+        }
+    }
+
+    private fun notifyQualityTracksChanged(tracks: List<Map<String, Any>>) {
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "tracks" to tracks
+            )
+            methodChannel.invokeMethod("onQualityTracksChanged", arguments)
         } catch (e: Exception) {
             e.printStackTrace()
         }

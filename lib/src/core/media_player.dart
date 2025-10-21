@@ -477,14 +477,9 @@ class MediaPlayer {
       // Initialize isLive flag from the media item
       _isLive = item.isLive;
 
-      final mediaItemMap = item.toMap();
-      debugPrint(
-          'MediaPlayer: Loading media item: ${item.title}, isLive: ${item.isLive}');
-      debugPrint('MediaPlayer: Serialized mediaItem: $mediaItemMap');
-
       await _channel.invokeMethod('load', {
         'playerId': playerId,
-        'mediaItem': mediaItemMap,
+        'mediaItem': item.toMap(),
       });
 
       _updateState(_currentState.copyWith(state: PlayerState.buffering));
@@ -1388,10 +1383,19 @@ class MediaPlayer {
 
     try {
       final tracksData = arguments['tracks'] as List<dynamic>;
+      debugPrint(
+          'MediaPlayer: Received ${tracksData.length} quality tracks from native');
+
       _qualityTracks = tracksData
           .cast<Map<dynamic, dynamic>>()
           .map((data) => _qualityTrackFromMap(Map<String, dynamic>.from(data)))
           .toList();
+
+      debugPrint('MediaPlayer: Parsed quality tracks:');
+      for (var track in _qualityTracks) {
+        debugPrint(
+            '  - ${track.name}: ${track.width}x${track.height}, ${track.bitrate} bps');
+      }
 
       if (!_qualityTracksController.isClosed) {
         _qualityTracksController.add(_qualityTracks);
