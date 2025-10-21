@@ -473,9 +473,18 @@ class MediaPlayer {
       crashReporter?.setCustomKey('drm_enabled', item.drmConfig != null);
 
       _currentItem = item;
+
+      // Initialize isLive flag from the media item
+      _isLive = item.isLive;
+
+      final mediaItemMap = item.toMap();
+      debugPrint(
+          'MediaPlayer: Loading media item: ${item.title}, isLive: ${item.isLive}');
+      debugPrint('MediaPlayer: Serialized mediaItem: $mediaItemMap');
+
       await _channel.invokeMethod('load', {
         'playerId': playerId,
-        'mediaItem': item.toMap(),
+        'mediaItem': mediaItemMap,
       });
 
       _updateState(_currentState.copyWith(state: PlayerState.buffering));
@@ -1328,6 +1337,11 @@ class MediaPlayer {
     // Update isLive flag if provided
     if (arguments.containsKey('isLive')) {
       _isLive = arguments['isLive'] as bool? ?? false;
+      debugPrint(
+          'MediaPlayer: Duration changed - duration: ${duration.inMilliseconds}ms, isLive: $_isLive');
+    } else {
+      debugPrint(
+          'MediaPlayer: Duration changed - duration: ${duration.inMilliseconds}ms, isLive key not found in arguments');
     }
 
     _updateState(_currentState.copyWith(duration: duration));
