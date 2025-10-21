@@ -15,7 +15,6 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
 
   CastStatus? _castStatus;
   List<CastDevice> _availableDevices = [];
-  CastDevice? _selectedDevice;
   bool _isDiscovering = false;
 
   final List<MediaItem> _videos = [
@@ -237,10 +236,6 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
       return;
     }
 
-    setState(() {
-      _selectedDevice = device;
-    });
-
     final success = await _castService?.connect(
       device: device,
       playerId: _controller.playerId,
@@ -268,10 +263,6 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
 
   Future<void> _disconnect() async {
     await _castService?.disconnect(_controller.playerId);
-
-    setState(() {
-      _selectedDevice = null;
-    });
   }
 
   Future<void> _changeVideo(int index) async {
