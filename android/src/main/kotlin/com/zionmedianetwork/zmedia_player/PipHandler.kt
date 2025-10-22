@@ -28,12 +28,24 @@ class PipHandler(
      */
     fun checkAvailability(): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            android.util.Log.d(TAG, "PiP not available: Android version < O")
+            android.util.Log.d(TAG, "PiP not available: Android version ${Build.VERSION.SDK_INT} < O (26)")
+            notifyPipStatusChanged(
+                state = "unavailable",
+                isSupported = false,
+                isActive = false,
+                errorMessage = "PiP requires Android 8.0 (API 26) or higher"
+            )
             return false
         }
         
         if (activity == null) {
             android.util.Log.d(TAG, "PiP not available: No activity context")
+            notifyPipStatusChanged(
+                state = "unavailable",
+                isSupported = false,
+                isActive = false,
+                errorMessage = "No activity available"
+            )
             return false
         }
         
@@ -41,7 +53,15 @@ class PipHandler(
             PackageManager.FEATURE_PICTURE_IN_PICTURE
         )
         
-        android.util.Log.d(TAG, "PiP availability: $hasPipFeature")
+        android.util.Log.d(TAG, "PiP availability check: SDK=${Build.VERSION.SDK_INT}, hasFeature=$hasPipFeature, activity=${activity != null}")
+        
+        // Notify status
+        notifyPipStatusChanged(
+            state = if (hasPipFeature) "available" else "unavailable",
+            isSupported = hasPipFeature,
+            isActive = isInPipMode
+        )
+        
         return hasPipFeature
     }
 
@@ -49,18 +69,27 @@ class PipHandler(
      * Enter Picture-in-Picture mode
      */
     fun enterPip(config: Map<String, Any>?): Boolean {
+        android.util.Log.d(TAG, "Attempting to enter PiP mode")
+        
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             android.util.Log.w(TAG, "PiP not supported on Android version < O")
+            notifyPipStatusChanged(
+                state = "failed",
+                isSupported = false,
+                isActive = false,
+                errorMessage = "PiP requires Android 8.0 or higher"
+            )
             return false
         }
         
         if (activity == null) {
             android.util.Log.w(TAG, "Cannot enter PiP: No activity context")
-            return false
-        }
-        
-        if (!checkAvailability()) {
-            android.util.Log.w(TAG, "Cannot enter PiP: Feature not available")
+            notifyPipStatusChanged(
+                state = "failed",
+                isSupported = true,
+                isActive = false,
+                errorMessage = "No activity available"
+            )
             return false
         }
         
@@ -68,6 +97,8 @@ class PipHandler(
         
         return try {
             val params = buildPipParams(config)
+            android.util.Log.d(TAG, "Built PiP params, entering PiP mode...")
+            
             val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 activity.enterPictureInPictureMode(params)
             } else {
@@ -83,12 +114,24 @@ class PipHandler(
                 )
                 android.util.Log.d(TAG, "Entered PiP mode successfully")
             } else {
-                android.util.Log.w(TAG, "Failed to enter PiP mode")
+                android.util.Log.w(TAG, "Activity.enterPictureInPictureMode() returned false")
+                notifyPipStatusChanged(
+                    state = "failed",
+                    isSupported = true,
+                    isActive = false,
+                    errorMessage = "Failed to enter PiP mode"
+                )
             }
             
             result
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error entering PiP mode: ${e.message}", e)
+            notifyPipStatusChanged(
+                state = "failed",
+                isSupported = true,
+                isActive = false,
+                errorMessage = e.message
+            )
             false
         }
     }

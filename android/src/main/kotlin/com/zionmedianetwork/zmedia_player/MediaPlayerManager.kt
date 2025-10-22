@@ -9,6 +9,7 @@ import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.ProgressiveMediaSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
+import com.google.android.exoplayer2.trackselection.TrackSelectionOverride
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
 import com.google.android.exoplayer2.upstream.DataSource
@@ -243,7 +244,10 @@ class MediaPlayerInstance(
     private var currentIndex = 0
     private var positionUpdateHandler: Handler? = null
     private var positionUpdateRunnable: Runnable? = null
+    private var bandwidthUpdateHandler: Handler? = null
+    private var bandwidthUpdateRunnable: Runnable? = null
     private var originalVolume: Float = 1f
+    private var currentMediaItem: Map<String, Any>? = null
     
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -287,6 +291,11 @@ class MediaPlayerInstance(
             android.util.Log.d("MediaPlayerInstance", "Media metadata changed")
             notifyDurationChanged()
         }
+
+        override fun onTracksChanged(tracks: Tracks) {
+            android.util.Log.d("MediaPlayerInstance", "Tracks changed")
+            extractAndNotifyQualityTracks()
+        }
     }
 
     init {
@@ -309,11 +318,17 @@ class MediaPlayerInstance(
         
         // Start position updates
         startPositionUpdates()
+        
+        // Start bandwidth monitoring
+        startBandwidthMonitoring()
     }
 
     fun loadMediaItem(mediaItem: Map<String, Any>) {
         val url = mediaItem["url"] as? String ?: return
         val httpHeaders = mediaItem["httpHeaders"] as? Map<String, String>
+        
+        // Store current media item (for live stream detection)
+        currentMediaItem = mediaItem
         
         android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
         
@@ -417,9 +432,47 @@ class MediaPlayerInstance(
     }
 
     fun setQualityTrack(qualityTrack: Map<String, Any>) {
-        // Quality track selection - Phase 2 stub
-        // In a full implementation, this would select a specific quality from HLS/DASH manifest
-        android.util.Log.d("MediaPlayerInstance", "Quality track set: ${qualityTrack["name"]}")
+        val trackId = qualityTrack["id"] as? String ?: return
+        android.util.Log.d("MediaPlayerInstance", "Setting quality track: ${qualityTrack["name"]}, id: $trackId")
+        
+        exoPlayer?.let { player ->
+            val currentTracks = player.currentTracks
+            var targetGroup: Tracks.Group? = null
+            var targetTrackIndex = -1
+            
+            // Find the video track group and index matching the requested quality
+            for (group in currentTracks.groups) {
+                if (group.type == C.TRACK_TYPE_VIDEO) {
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        val formatId = "${format.width}x${format.height}_${format.bitrate}"
+                        if (formatId == trackId) {
+                            targetGroup = group
+                            targetTrackIndex = i
+                            break
+                        }
+                    }
+                    if (targetGroup != null) break
+                }
+            }
+            
+            if (targetGroup != null && targetTrackIndex >= 0) {
+                // Override track selection to the specific quality
+                val override = TrackSelectionOverride(
+                    targetGroup.mediaTrackGroup,
+                    listOf(targetTrackIndex)
+                )
+                
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon()
+                    .setOverrideForType(override)
+                    .build()
+                    
+                android.util.Log.d("MediaPlayerInstance", "Quality track override applied")
+            } else {
+                android.util.Log.w("MediaPlayerInstance", "Quality track not found: $trackId")
+            }
+        }
     }
 
     fun setAudioTrack(audioTrack: Map<String, Any>) {
@@ -429,9 +482,17 @@ class MediaPlayerInstance(
     }
 
     fun enableAutoQuality() {
-        // Enable automatic quality selection - Phase 2 stub
-        // In a full implementation, this would enable ExoPlayer's adaptive track selection
-        android.util.Log.d("MediaPlayerInstance", "Auto quality enabled")
+        android.util.Log.d("MediaPlayerInstance", "Enabling auto quality (ABR)")
+        
+        exoPlayer?.let { player ->
+            // Clear all track overrides to enable adaptive bitrate selection
+            player.trackSelectionParameters = player.trackSelectionParameters
+                .buildUpon()
+                .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
+                .build()
+                
+            android.util.Log.d("MediaPlayerInstance", "Auto quality enabled - track overrides cleared")
+        }
     }
 
     fun skipToIndex(index: Int) {
@@ -467,12 +528,16 @@ class MediaPlayerInstance(
         // Stop position updates
         stopPositionUpdates()
         
+        // Stop bandwidth monitoring
+        stopBandwidthMonitoring()
+        
         exoPlayer?.apply {
             removeListener(playerListener)
             release()
         }
         exoPlayer = null
         playerView = null
+        currentMediaItem = null
     }
 
     private fun createMediaSource(uri: Uri, dataSourceFactory: DataSource.Factory = this.dataSourceFactory): MediaSource {
@@ -544,6 +609,61 @@ class MediaPlayerInstance(
         positionUpdateHandler = null
     }
 
+    private fun startBandwidthMonitoring() {
+        stopBandwidthMonitoring() // Ensure we don't have multiple runnables
+        
+        bandwidthUpdateHandler = Handler(Looper.getMainLooper())
+        bandwidthUpdateRunnable = object : Runnable {
+            override fun run() {
+                exoPlayer?.let { player ->
+                    // Get current bandwidth estimate from ExoPlayer
+                    val currentBandwidth = getCurrentBandwidthEstimate(player)
+                    if (currentBandwidth > 0) {
+                        notifyBandwidthChanged(currentBandwidth)
+                    }
+                }
+                // Update every 2 seconds
+                bandwidthUpdateHandler?.postDelayed(this, 2000)
+            }
+        }
+        bandwidthUpdateHandler?.post(bandwidthUpdateRunnable!!)
+    }
+    
+    private fun stopBandwidthMonitoring() {
+        bandwidthUpdateRunnable?.let { runnable ->
+            bandwidthUpdateHandler?.removeCallbacks(runnable)
+        }
+        bandwidthUpdateRunnable = null
+        bandwidthUpdateHandler = null
+    }
+    
+    private fun getCurrentBandwidthEstimate(player: ExoPlayer): Long {
+        // ExoPlayer's bandwidth estimate is available through the LoadControl
+        // We can access it via the player's current tracks selection
+        try {
+            // Get bandwidth estimate from current adaptive track selection
+            val trackSelector = player.currentTracks
+            // ExoPlayer internally maintains bandwidth estimates
+            // For now, we'll use a workaround by checking video/audio bitrate
+            var estimatedBandwidth: Long = 0
+            
+            for (trackGroup in trackSelector.groups) {
+                if (trackGroup.isSelected) {
+                    val format = trackGroup.getTrackFormat(0)
+                    if (format.bitrate != com.google.android.exoplayer2.Format.NO_VALUE) {
+                        estimatedBandwidth += format.bitrate.toLong()
+                    }
+                }
+            }
+            
+            // If we have a valid estimate, return it; otherwise return 0
+            return if (estimatedBandwidth > 0) estimatedBandwidth else 0
+        } catch (e: Exception) {
+            android.util.Log.e("MediaPlayerInstance", "Error getting bandwidth estimate: ${e.message}")
+            return 0
+        }
+    }
+
     private fun notifyStateChanged(state: String, isBuffering: Boolean) {
         try {
             android.util.Log.d("MediaPlayerInstance", "State changed: $state, isBuffering: $isBuffering")
@@ -577,12 +697,82 @@ class MediaPlayerInstance(
         try {
             val duration = exoPlayer?.duration ?: 0L
             if (duration > 0) {
+                val isLive = currentMediaItem?.get("isLive") as? Boolean ?: false
                 val arguments = mapOf(
                     "playerId" to playerId,
-                    "duration" to duration.toInt()
+                    "duration" to duration.toInt(),
+                    "isLive" to isLive
                 )
                 methodChannel.invokeMethod("onDurationChanged", arguments)
             }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun notifyBandwidthChanged(bandwidth: Long) {
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "bandwidth" to bandwidth
+            )
+            methodChannel.invokeMethod("onBandwidthChanged", arguments)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun extractAndNotifyQualityTracks() {
+        exoPlayer?.let { player ->
+            val qualityTracks = mutableListOf<Map<String, Any>>()
+            val currentTracks = player.currentTracks
+            
+            // Extract video tracks
+            for (group in currentTracks.groups) {
+                if (group.type == C.TRACK_TYPE_VIDEO && group.length > 0) {
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        
+                        // Skip if format doesn't have valid dimensions or bitrate
+                        if (format.width <= 0 || format.height <= 0 || format.bitrate <= 0) {
+                            continue
+                        }
+                        
+                        val trackId = "${format.width}x${format.height}_${format.bitrate}"
+                        val trackName = "${format.height}p (${(format.bitrate / 1000)}kbps)"
+                        
+                        qualityTracks.add(mapOf(
+                            "id" to trackId,
+                            "name" to trackName,
+                            "bitrate" to format.bitrate,
+                            "width" to format.width,
+                            "height" to format.height,
+                            "frameRate" to (format.frameRate.takeIf { it > 0 } ?: 30.0),
+                            "isSelected" to group.isTrackSelected(i),
+                            "isAvailable" to true,
+                            "codec" to (format.codecs ?: "unknown")
+                        ))
+                    }
+                }
+            }
+            
+            // Sort by bitrate (highest first for better UX)
+            qualityTracks.sortByDescending { it["bitrate"] as Int }
+            
+            if (qualityTracks.isNotEmpty()) {
+                android.util.Log.d("MediaPlayerInstance", "Found ${qualityTracks.size} quality tracks")
+                notifyQualityTracksChanged(qualityTracks)
+            }
+        }
+    }
+
+    private fun notifyQualityTracksChanged(tracks: List<Map<String, Any>>) {
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "tracks" to tracks
+            )
+            methodChannel.invokeMethod("onQualityTracksChanged", arguments)
         } catch (e: Exception) {
             e.printStackTrace()
         }

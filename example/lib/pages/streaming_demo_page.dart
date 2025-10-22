@@ -4,7 +4,7 @@ import 'package:zmedia_player/zmedia_player.dart';
 /// Demonstrates Phase 2 features: HLS/DASH streaming, quality selection,
 /// subtitle tracks, and adaptive bitrate streaming
 class StreamingDemoPage extends StatefulWidget {
-  const StreamingDemoPage({Key? key}) : super(key: key);
+  const StreamingDemoPage({super.key});
 
   @override
   State<StreamingDemoPage> createState() => _StreamingDemoPageState();
@@ -31,6 +31,14 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       url: 'https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd',
       mediaType: MediaType.video,
       metadata: const {'description': 'DASH adaptive streaming demo'},
+    ),
+    MediaItem(
+      id: 'alelouyatv',
+      title: 'Alelouya TV Live',
+      url: 'https://streaming-dev.zionmedianetwork.com/livegospel/index.m3u8',
+      mediaType: MediaType.video,
+      metadata: const {'description': 'Alelouya TV Live Stream'},
+      isLive: true,
     ),
   ];
 
@@ -73,9 +81,10 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
         volume: 0.8,
         hlsConfig: HlsConfig(
           enableAdaptiveBitrate: true,
-          enableLiveStream: false,
+          enableLiveStream: true,
           enableSegmentPrefetch: true,
           maxPrefetchSegments: 3,
+          enableAutoQualitySwitch: true,
         ),
         dashConfig: DashConfig(
           enableAdaptiveBitrate: true,
@@ -94,30 +103,48 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       ),
     );
 
-    // Simulate bandwidth updates (placeholder for actual implementation)
-    _simulateBandwidth();
+    // Setup bandwidth listener for native updates
+    _setupBandwidthListener();
 
     // Load initial video
     _loadVideo(_selectedVideoIndex);
   }
 
-  // Simulate bandwidth monitoring (placeholder until native implementation)
-  void _simulateBandwidth() {
-    Future.delayed(const Duration(seconds: 2), () {
+  // Listen to bandwidth updates from native implementation
+  void _setupBandwidthListener() {
+    _controller.player.bandwidthStream.listen((bandwidth) {
       if (mounted) {
-        // Simulate bandwidth update
-        _streamingService.updateBandwidth(5000000); // 5 Mbps
+        // Update streaming service with native bandwidth
+        _streamingService.updateBandwidth(bandwidth);
         setState(() {
           _bandwidthInfo = _streamingService.getFormattedBandwidth();
         });
-        // Continue simulating
-        _simulateBandwidth();
+      }
+    });
+
+    // Listen to quality track changes to update UI
+    _controller.player.qualityTracksStream.listen((tracks) {
+      if (mounted) {
+        setState(() {
+          // Quality tracks updated - UI will rebuild
+        });
       }
     });
   }
 
   Future<void> _loadVideo(int index) async {
     try {
+      final video = _streamingVideos[index];
+
+      // Check for DASH on iOS (not supported by AVPlayer)
+      if (Theme.of(context).platform == TargetPlatform.iOS &&
+          video.url.contains('.mpd')) {
+        _showError('DASH streams are not supported on iOS.\n'
+            'iOS only supports HLS (.m3u8) streams.\n'
+            'Please select an HLS stream instead.');
+        return;
+      }
+
       // Stop current playback first
       await _controller.stop();
 
@@ -125,7 +152,7 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       await Future.delayed(const Duration(milliseconds: 100));
 
       // Load new video
-      await _controller.load(_streamingVideos[index]);
+      await _controller.load(video);
 
       setState(() {
         _selectedVideoIndex = index;
@@ -239,18 +266,55 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
               itemBuilder: (context, index) {
                 final video = _streamingVideos[index];
                 final isSelected = index == _selectedVideoIndex;
+                final isDash = video.url.contains('.mpd');
+                final isIOS = Theme.of(context).platform == TargetPlatform.iOS;
+                final isUnsupported = isDash && isIOS;
 
                 return Card(
-                  color: isSelected ? Colors.deepPurple[100] : null,
+                  color: isSelected
+                      ? Colors.deepPurple[100]
+                      : isUnsupported
+                          ? Colors.grey[300]
+                          : null,
                   child: ListTile(
-                    leading: const Icon(Icons.play_circle_outline),
-                    title: Text(video.title),
-                    subtitle:
-                        Text(video.metadata?['description'] as String? ?? ''),
+                    leading: Icon(
+                      Icons.play_circle_outline,
+                      color: isUnsupported ? Colors.grey : null,
+                    ),
+                    title: Row(
+                      children: [
+                        Expanded(child: Text(video.title)),
+                        if (isUnsupported)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 6,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.orange,
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'iOS unsupported',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    subtitle: Text(
+                      video.metadata?['description'] as String? ?? '',
+                      style: TextStyle(
+                        color: isUnsupported ? Colors.grey : null,
+                      ),
+                    ),
                     trailing: isSelected
                         ? const Icon(Icons.check_circle, color: Colors.green)
                         : null,
-                    onTap: () => _loadVideo(index),
+                    onTap: isUnsupported ? null : () => _loadVideo(index),
+                    enabled: !isUnsupported,
                   ),
                 );
               },
@@ -294,6 +358,8 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
   }
 
   Widget _buildQualitySettingsSheet() {
+    final qualityTracks = _controller.player.qualityTracks;
+
     return Container(
       height: 300,
       decoration: const BoxDecoration(
@@ -308,9 +374,9 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Video Quality',
-                  style: TextStyle(
+                Text(
+                  'Video Quality (${qualityTracks.length})',
+                  style: const TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
                   ),
@@ -338,28 +404,48 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
             },
           ),
 
-          // Quality Track Options
+          // Quality Track Options or Empty State
           Expanded(
-            child: ListView.builder(
-              itemCount: _controller.player.qualityTracks.length,
-              itemBuilder: (context, index) {
-                final track = _controller.player.qualityTracks[index];
-                return ListTile(
-                  leading: const Icon(Icons.high_quality),
-                  title: Text(track.name),
-                  subtitle: Text(
-                    '${track.width}x${track.height} • ${(track.bitrate / 1000).toStringAsFixed(0)} Kbps',
+            child: qualityTracks.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.info_outline, size: 48, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text(
+                          'Loading quality options...',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          'Quality tracks will appear after\nthe stream starts playing',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey, fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  )
+                : ListView.builder(
+                    itemCount: qualityTracks.length,
+                    itemBuilder: (context, index) {
+                      final track = qualityTracks[index];
+                      return ListTile(
+                        leading: const Icon(Icons.high_quality),
+                        title: Text(track.name),
+                        subtitle: Text(
+                          '${track.width}x${track.height} • ${(track.bitrate / 1000).toStringAsFixed(0)} Kbps',
+                        ),
+                        trailing: track.isSelected
+                            ? const Icon(Icons.check, color: Colors.green)
+                            : null,
+                        onTap: () {
+                          _setQuality(track);
+                          setState(() => _showQualitySettings = false);
+                        },
+                      );
+                    },
                   ),
-                  trailing: track.isSelected
-                      ? const Icon(Icons.check, color: Colors.green)
-                      : null,
-                  onTap: () {
-                    _setQuality(track);
-                    setState(() => _showQualitySettings = false);
-                  },
-                );
-              },
-            ),
           ),
         ],
       ),
@@ -443,7 +529,10 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       _controller.player.enableAutoQuality();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Auto quality enabled (Native support coming soon)')),
+          content: Text(
+              'Auto quality enabled - Player will adapt based on bandwidth'),
+          backgroundColor: Colors.green,
+        ),
       );
     } catch (e) {
       _showError('Auto quality: $e');
@@ -455,8 +544,9 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       _controller.player.setQualityTrack(track);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(
-                'Quality set to: ${track.name} (Native support coming soon)')),
+          content: Text('Quality locked to: ${track.name}'),
+          backgroundColor: Colors.blue,
+        ),
       );
     } catch (e) {
       _showError('Set quality: $e');

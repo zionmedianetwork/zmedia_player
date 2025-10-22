@@ -68,9 +68,17 @@ class MediaPlayer {
       StreamController<DrmSession>.broadcast();
   final StreamController<String> _notificationActionController =
       StreamController<String>.broadcast();
+  final StreamController<int> _bandwidthController =
+      StreamController<int>.broadcast();
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
+
+  /// Current bandwidth estimate in bits per second
+  int _currentBandwidth = 0;
+
+  /// Whether current media is live
+  bool _isLive = false;
 
   /// Current PiP status
   PipStatus _pipStatus = const PipStatus(
@@ -284,6 +292,12 @@ class MediaPlayer {
     return _audioTracksController.stream;
   }
 
+  /// Stream of bandwidth updates (in bits per second)
+  Stream<int> get bandwidthStream {
+    _throwIfDisposed();
+    return _bandwidthController.stream;
+  }
+
   /// Stream of PiP status updates
   Stream<PipStatus> get pipStatusStream {
     _throwIfDisposed();
@@ -336,6 +350,18 @@ class MediaPlayer {
   AudioTrack? get selectedAudioTrack {
     _throwIfDisposed();
     return _selectedAudioTrack;
+  }
+
+  /// Current bandwidth estimate in bits per second
+  int get currentBandwidth {
+    _throwIfDisposed();
+    return _currentBandwidth;
+  }
+
+  /// Whether the current media is a live stream
+  bool get isLive {
+    _throwIfDisposed();
+    return _isLive;
   }
 
   /// Current PiP status
@@ -447,6 +473,10 @@ class MediaPlayer {
       crashReporter?.setCustomKey('drm_enabled', item.drmConfig != null);
 
       _currentItem = item;
+
+      // Initialize isLive flag from the media item
+      _isLive = item.isLive;
+
       await _channel.invokeMethod('load', {
         'playerId': playerId,
         'mediaItem': item.toMap(),
@@ -879,13 +909,18 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
+      debugPrint(
+          'MediaPlayer: Checking PiP availability for player: $playerId');
       final result = await _channel.invokeMethod<bool>('checkPipAvailability', {
         'playerId': playerId,
       });
 
+      debugPrint('MediaPlayer: PiP availability check result: $result');
       return result ?? false;
     } on PlatformException catch (e) {
-      debugPrint('Failed to check PiP availability: ${e.message ?? e.code}');
+      debugPrint(
+          'MediaPlayer: Failed to check PiP availability: ${e.message ?? e.code}');
+      debugPrint('MediaPlayer: Error details: ${e.details}');
       return false;
     }
   }
@@ -1134,6 +1169,7 @@ class MediaPlayer {
       _subtitleTracksController,
       _qualityTracksController,
       _audioTracksController,
+      _bandwidthController,
       _pipStatusController,
       _castStatusController,
       _castDevicesController,
@@ -1248,6 +1284,9 @@ class MediaPlayer {
         case 'onNotificationAction':
           _handleNotificationAction(arguments!);
           break;
+        case 'onBandwidthChanged':
+          _handleBandwidthChanged(arguments!);
+          break;
         case 'onError':
           _handleError(arguments!);
           break;
@@ -1295,10 +1334,32 @@ class MediaPlayer {
     final durationMs = arguments['duration'] as int;
     final duration = Duration(milliseconds: durationMs);
 
+    // Update isLive flag if provided
+    if (arguments.containsKey('isLive')) {
+      _isLive = arguments['isLive'] as bool? ?? false;
+      debugPrint(
+          'MediaPlayer: Duration changed - duration: ${duration.inMilliseconds}ms, isLive: $_isLive');
+    } else {
+      debugPrint(
+          'MediaPlayer: Duration changed - duration: ${duration.inMilliseconds}ms, isLive key not found in arguments');
+    }
+
     _updateState(_currentState.copyWith(duration: duration));
 
     if (!_durationController.isClosed) {
       _durationController.add(duration);
+    }
+  }
+
+  /// Handle bandwidth change events from platform
+  void _handleBandwidthChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    final bandwidth = arguments['bandwidth'] as int? ?? 0;
+    _currentBandwidth = bandwidth;
+
+    if (!_bandwidthController.isClosed) {
+      _bandwidthController.add(bandwidth);
     }
   }
 
@@ -1327,10 +1388,19 @@ class MediaPlayer {
 
     try {
       final tracksData = arguments['tracks'] as List<dynamic>;
+      debugPrint(
+          'MediaPlayer: Received ${tracksData.length} quality tracks from native');
+
       _qualityTracks = tracksData
           .cast<Map<dynamic, dynamic>>()
           .map((data) => _qualityTrackFromMap(Map<String, dynamic>.from(data)))
           .toList();
+
+      debugPrint('MediaPlayer: Parsed quality tracks:');
+      for (var track in _qualityTracks) {
+        debugPrint(
+            '  - ${track.name}: ${track.width}x${track.height}, ${track.bitrate} bps');
+      }
 
       if (!_qualityTracksController.isClosed) {
         _qualityTracksController.add(_qualityTracks);
@@ -1377,13 +1447,16 @@ class MediaPlayer {
 
     try {
       final statusMap = Map<String, dynamic>.from(arguments);
+      debugPrint('MediaPlayer: Received PiP status from native: $statusMap');
+
       _pipStatus = PipStatus.fromMap(statusMap);
 
       if (!_pipStatusController.isClosed) {
         _pipStatusController.add(_pipStatus);
       }
 
-      debugPrint('PiP status changed: ${_pipStatus.state}');
+      debugPrint(
+          'PiP status changed: ${_pipStatus.state}, isSupported: ${_pipStatus.isSupported}, isActive: ${_pipStatus.isActive}, error: ${_pipStatus.errorMessage ?? "none"}');
     } catch (e) {
       debugPrint('Error processing PiP status: $e');
     }

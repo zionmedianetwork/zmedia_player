@@ -31,6 +31,9 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         containerView.layer.addSublayer(playerLayer)
         playerLayer.videoGravity = .resizeAspect
         
+        // Ensure player layer is part of the presentation tree (required for PiP)
+        playerLayer.masksToBounds = false
+        
         // Configure layer for proper video rendering
         playerLayer.isHidden = false
         playerLayer.opacity = 1.0

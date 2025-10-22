@@ -38,6 +38,9 @@ class MediaItem {
   /// Additional metadata
   final Map<String, dynamic>? metadata;
 
+  /// Whether this is a live stream (affects seeking and DVR capabilities)
+  final bool isLive;
+
   const MediaItem({
     required this.id,
     required this.title,
@@ -51,6 +54,7 @@ class MediaItem {
     this.mediaType = MediaType.video,
     this.drmConfig,
     this.metadata,
+    this.isLive = false,
   });
 
   /// Creates a copy of this media item with updated values
@@ -67,6 +71,7 @@ class MediaItem {
     MediaType? mediaType,
     DrmConfig? drmConfig,
     Map<String, dynamic>? metadata,
+    bool? isLive,
   }) {
     return MediaItem(
       id: id ?? this.id,
@@ -81,6 +86,7 @@ class MediaItem {
       mediaType: mediaType ?? this.mediaType,
       drmConfig: drmConfig ?? this.drmConfig,
       metadata: metadata ?? this.metadata,
+      isLive: isLive ?? this.isLive,
     );
   }
 
@@ -99,6 +105,7 @@ class MediaItem {
       'mediaType': mediaType.name,
       'drmConfig': drmConfig?.toMap(),
       'metadata': metadata,
+      'isLive': isLive,
     };
   }
 
@@ -126,6 +133,7 @@ class MediaItem {
           ? DrmConfig.fromMap(map['drmConfig'] as Map<String, dynamic>)
           : null,
       metadata: map['metadata'] as Map<String, dynamic>?,
+      isLive: map['isLive'] as bool? ?? false,
     );
   }
 
@@ -140,7 +148,7 @@ class MediaItem {
 
   @override
   String toString() {
-    return 'MediaItem(id: $id, title: $title, url: $url, mediaType: $mediaType)';
+    return 'MediaItem(id: $id, title: $title, url: $url, mediaType: $mediaType, isLive: $isLive)';
   }
 }
 
