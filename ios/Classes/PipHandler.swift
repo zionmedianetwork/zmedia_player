@@ -26,12 +26,43 @@ class PipHandler: NSObject {
     
     func initialize(player: AVPlayer?, playerLayer: AVPlayerLayer?) {
         print("PipHandler: Initializing for player: \(playerId)")
+        print("PipHandler: Received player: \(player != nil)")
+        print("PipHandler: Received playerLayer: \(playerLayer != nil)")
+        
+        // Log device info on first init
+        if self.player == nil {
+            let deviceModel = UIDevice.current.model
+            let systemVersion = UIDevice.current.systemVersion
+            print("PipHandler: Device: \(deviceModel), iOS: \(systemVersion)")
+        }
+        
+        // Update references
+        let playerChanged = self.player !== player
+        let layerChanged = self.playerLayer !== playerLayer
         
         self.player = player
         self.playerLayer = playerLayer
         
+        // Ensure player is configured for PiP
+        if let player = player {
+            player.allowsExternalPlayback = true
+            player.usesExternalPlaybackWhileExternalScreenIsActive = false
+            
+            // CRITICAL: Ensure player layer's player is explicitly set
+            // This is necessary for AVPictureInPictureController to recognize it
+            if let layer = playerLayer {
+                layer.player = player
+                print("PipHandler: Explicitly set player on layer")
+            }
+            
+            print("PipHandler: Configured player for PiP playback")
+        }
+        
         // Check if PiP is supported
-        guard AVPictureInPictureController.isPictureInPictureSupported() else {
+        let isSupported = AVPictureInPictureController.isPictureInPictureSupported()
+        print("PipHandler: AVPictureInPictureController.isPictureInPictureSupported() = \(isSupported)")
+        
+        guard isSupported else {
             print("PipHandler: Picture-in-Picture not supported on this device")
             notifyPipStatusChanged(
                 state: "unavailable",
@@ -42,12 +73,32 @@ class PipHandler: NSObject {
             return
         }
         
-        // Setup PiP controller if we have a player layer
+        // Setup or update PiP controller if we have a player layer
         if let playerLayer = playerLayer {
-            setupPipController(with: playerLayer)
+            // Only recreate controller if layer changed or controller doesn't exist
+            if pipController == nil || layerChanged {
+                print("PipHandler: Setting up PiP controller with player layer (changed: \(layerChanged))")
+                setupPipController(with: playerLayer)
+            } else {
+                print("PipHandler: PiP controller already exists and layer unchanged")
+                // Still notify available status
+                notifyPipStatusChanged(
+                    state: "available",
+                    isSupported: true,
+                    isActive: isInPipMode
+                )
+            }
+        } else {
+            print("PipHandler: WARNING - No player layer provided, cannot setup PiP controller")
+            notifyPipStatusChanged(
+                state: "unavailable",
+                isSupported: true,
+                isActive: false,
+                errorMessage: "No player layer available"
+            )
         }
         
-        print("PipHandler: Initialized successfully")
+        print("PipHandler: Initialization complete")
     }
     
     // MARK: - PiP Controller Setup
@@ -57,6 +108,9 @@ class PipHandler: NSObject {
             print("PipHandler: Cannot setup PiP controller - not supported")
             return
         }
+        
+        // Configure audio session for PiP
+        configureAudioSessionForPiP()
         
         do {
             // Create PiP controller
@@ -87,11 +141,29 @@ class PipHandler: NSObject {
         }
     }
     
+    private func configureAudioSessionForPiP() {
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+            try audioSession.setActive(true)
+            print("PipHandler: Audio session configured for PiP")
+        } catch {
+            print("PipHandler: Failed to configure audio session: \(error.localizedDescription)")
+        }
+    }
+    
     // MARK: - PiP Availability
     
     func checkAvailability() -> Bool {
         let isSupported = AVPictureInPictureController.isPictureInPictureSupported()
-        print("PipHandler: PiP availability check - Supported: \(isSupported)")
+        print("PipHandler: PiP system support check: \(isSupported)")
+        print("PipHandler: Has player: \(player != nil)")
+        print("PipHandler: Has playerLayer: \(playerLayer != nil)")
+        print("PipHandler: Has pipController: \(pipController != nil)")
+        
+        if let controller = pipController {
+            print("PipHandler: PiP controller isPictureInPicturePossible: \(controller.isPictureInPicturePossible)")
+        }
         
         notifyPipStatusChanged(
             state: isSupported ? "available" : "unavailable",
@@ -114,10 +186,52 @@ class PipHandler: NSObject {
         
         self.config = config
         
+        // Verify player state
+        print("PipHandler: Player status check:")
+        print("  - Has player: \(player != nil)")
+        print("  - Has player layer: \(playerLayer != nil)")
+        print("  - Player has current item: \(player?.currentItem != nil)")
+        print("  - Player item status: \(player?.currentItem?.status.rawValue ?? -1)")
+        print("  - Player rate: \(player?.rate ?? 0)")
+        
+        // Ensure player has a valid item and is ready
+        guard let playerItem = player?.currentItem else {
+            print("PipHandler: Cannot enter PiP - no current player item")
+            notifyPipStatusChanged(
+                state: "failed",
+                isSupported: true,
+                isActive: false,
+                errorMessage: "No media loaded. Load and play a video first."
+            )
+            return false
+        }
+        
+        // Check if player item is ready
+        guard playerItem.status == .readyToPlay else {
+            print("PipHandler: Cannot enter PiP - player item not ready (status: \(playerItem.status.rawValue))")
+            notifyPipStatusChanged(
+                state: "failed",
+                isSupported: true,
+                isActive: false,
+                errorMessage: "Video not ready. Wait for playback to start."
+            )
+            return false
+        }
+        
+        // Ensure player layer's player is set (critical for PiP)
+        if let layer = playerLayer, let p = player {
+            layer.player = p
+            print("PipHandler: Ensured player is set on layer before PiP attempt")
+        }
+        
         // Create PiP controller if not exists
         if pipController == nil {
             if let playerLayer = playerLayer {
+                print("PipHandler: Creating PiP controller...")
                 setupPipController(with: playerLayer)
+                
+                // Wait a moment for controller to be ready
+                Thread.sleep(forTimeInterval: 0.2)
             } else {
                 print("PipHandler: Cannot enter PiP - no player layer available")
                 notifyPipStatusChanged(
@@ -135,14 +249,41 @@ class PipHandler: NSObject {
             return false
         }
         
-        // Check if PiP can be started
-        guard pipController.isPictureInPicturePossible else {
+        print("PipHandler: PiP controller exists")
+        print("PipHandler: Player layer frame: \(playerLayer?.frame ?? .zero)")
+        print("PipHandler: Player layer superlayer: \(playerLayer?.superlayer != nil)")
+        print("PipHandler: Player layer isReadyForDisplay: \(playerLayer?.isReadyForDisplay ?? false)")
+        print("PipHandler: isPictureInPicturePossible = \(pipController.isPictureInPicturePossible)")
+        
+        // Check if player layer is ready for display
+        if let layer = playerLayer, !layer.isReadyForDisplay {
+            print("PipHandler: Player layer not ready for display yet, waiting...")
+            
+            // Wait briefly for the layer to be ready
+            var attempts = 0
+            while !layer.isReadyForDisplay && attempts < 20 {
+                Thread.sleep(forTimeInterval: 0.1)
+                attempts += 1
+            }
+            
+            print("PipHandler: After waiting - isReadyForDisplay: \(layer.isReadyForDisplay), attempts: \(attempts)")
+        }
+        
+        // Re-check if PiP is possible after waiting
+        let isPossible = pipController.isPictureInPicturePossible
+        print("PipHandler: Final isPictureInPicturePossible check: \(isPossible)")
+        
+        guard isPossible else {
             print("PipHandler: Cannot enter PiP - not possible at this time")
+            print("PipHandler: Diagnostics:")
+            print("  - Player layer isReadyForDisplay: \(playerLayer?.isReadyForDisplay ?? false)")
+            print("  - Player layer has presentation: \(playerLayer?.presentation() != nil)")
+            
             notifyPipStatusChanged(
                 state: "failed",
                 isSupported: true,
                 isActive: false,
-                errorMessage: "PiP not possible at this time"
+                errorMessage: "PiP not ready. Wait a moment for video to render."
             )
             return false
         }

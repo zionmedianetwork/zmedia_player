@@ -75,6 +75,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             "checkPipAvailability" -> handleCheckPipAvailability(call, result)
             "enterPictureInPicture" -> handleEnterPictureInPicture(call, result)
             "exitPictureInPicture" -> handleExitPictureInPicture(call, result)
+            "onPipModeChanged" -> handlePipModeChanged(call, result)
             
             // Phase 3: Cast methods
             "initializeCast" -> handleInitializeCast(call, result)
@@ -529,6 +530,24 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             }
         } catch (e: Exception) {
             result.error("PIP_EXIT_ERROR", e.message, null)
+        }
+    }
+    
+    private fun handlePipModeChanged(call: MethodCall, result: Result) {
+        try {
+            val isInPictureInPictureMode = call.argument<Boolean>("isInPictureInPictureMode") ?: false
+            
+            android.util.Log.d("ZMediaPlayerPlugin", "PiP mode changed from MainActivity: $isInPictureInPictureMode")
+            
+            // Notify all active PiP handlers
+            pipHandlers.values.forEach { handler ->
+                handler.onPictureInPictureModeChanged(isInPictureInPictureMode)
+            }
+            
+            result.success(null)
+        } catch (e: Exception) {
+            android.util.Log.e("ZMediaPlayerPlugin", "Error handling PiP mode change: ${e.message}", e)
+            result.error("PIP_MODE_CHANGE_ERROR", e.message, null)
         }
     }
 

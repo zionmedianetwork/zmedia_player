@@ -909,13 +909,18 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
+      debugPrint(
+          'MediaPlayer: Checking PiP availability for player: $playerId');
       final result = await _channel.invokeMethod<bool>('checkPipAvailability', {
         'playerId': playerId,
       });
 
+      debugPrint('MediaPlayer: PiP availability check result: $result');
       return result ?? false;
     } on PlatformException catch (e) {
-      debugPrint('Failed to check PiP availability: ${e.message ?? e.code}');
+      debugPrint(
+          'MediaPlayer: Failed to check PiP availability: ${e.message ?? e.code}');
+      debugPrint('MediaPlayer: Error details: ${e.details}');
       return false;
     }
   }
@@ -1442,13 +1447,16 @@ class MediaPlayer {
 
     try {
       final statusMap = Map<String, dynamic>.from(arguments);
+      debugPrint('MediaPlayer: Received PiP status from native: $statusMap');
+
       _pipStatus = PipStatus.fromMap(statusMap);
 
       if (!_pipStatusController.isClosed) {
         _pipStatusController.add(_pipStatus);
       }
 
-      debugPrint('PiP status changed: ${_pipStatus.state}');
+      debugPrint(
+          'PiP status changed: ${_pipStatus.state}, isSupported: ${_pipStatus.isSupported}, isActive: ${_pipStatus.isActive}, error: ${_pipStatus.errorMessage ?? "none"}');
     } catch (e) {
       debugPrint('Error processing PiP status: $e');
     }

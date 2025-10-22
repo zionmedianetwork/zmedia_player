@@ -210,9 +210,13 @@ class MediaPlayerManager {
     }
     
     func getPlayerLayer(playerId: String) throws -> AVPlayerLayer? {
-        guard let playerView = players[playerId]?.getPlayerView() else {
+        guard let playerInstance = players[playerId] else {
+            print("MediaPlayerManager: Player instance not found for \(playerId)")
             throw MediaPlayerError.playerNotFound
         }
+        
+        let playerView = playerInstance.getPlayerView()
+        print("MediaPlayerManager: getPlayerLayer - playerView exists, returning playerLayer")
         return playerView.playerLayer
     }
     
@@ -270,6 +274,12 @@ class MediaPlayerInstance: NSObject {
     
     private func initializeAVPlayer() {
         avPlayer = AVPlayer()
+        
+        // Configure player for PiP and external playback
+        avPlayer?.allowsExternalPlayback = true
+        avPlayer?.usesExternalPlaybackWhileExternalScreenIsActive = false
+        avPlayer?.preventsDisplaySleepDuringVideoPlayback = true
+        
         setupObservers()
         applyConfig()
         startBandwidthMonitoring()
@@ -838,61 +848,87 @@ class MediaPlayerInstance: NSObject {
     }
     
     private func parseHLSManifest(url: URL, completion: @escaping ([[String: Any]]) -> Void) {
+        // Only parse if it's an HLS URL (.m3u8)
+        guard url.absoluteString.contains(".m3u8") else {
+            print("MediaPlayerInstance: Not an HLS URL, skipping manifest parsing")
+            completion([])
+            return
+        }
+        
+        print("MediaPlayerInstance: Fetching HLS manifest from: \(url)")
+        
         // Parse HLS master playlist to extract all variant streams
-        URLSession.shared.dataTask(with: url) { data, response, error in
-            guard let data = data,
-                  let manifestString = String(data: data, encoding: .utf8) else {
-                print("MediaPlayerInstance: Failed to fetch HLS manifest")
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 5.0
+        
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            if let error = error {
+                print("MediaPlayerInstance: Failed to fetch HLS manifest: \(error.localizedDescription)")
                 completion([])
                 return
             }
             
-            print("MediaPlayerInstance: Fetched HLS manifest, parsing...")
+            guard let data = data,
+                  let manifestString = String(data: data, encoding: .utf8) else {
+                print("MediaPlayerInstance: Failed to decode HLS manifest data")
+                completion([])
+                return
+            }
+            
+            print("MediaPlayerInstance: Fetched HLS manifest (\(manifestString.count) chars), parsing...")
             var tracks: [[String: Any]] = []
             var seenBitrates = Set<Int>()
             
             // Parse #EXT-X-STREAM-INF lines
             let lines = manifestString.components(separatedBy: .newlines)
             
-            for line in lines {
+            for (lineNum, line) in lines.enumerated() {
                 if line.hasPrefix("#EXT-X-STREAM-INF:") {
-                    // Extract BANDWIDTH
-                    if let bandwidthRange = line.range(of: "BANDWIDTH=(\\d+)", options: .regularExpression),
-                       let bandwidth = Int(line[bandwidthRange].replacingOccurrences(of: "BANDWIDTH=", with: "")) {
+                    print("MediaPlayerInstance: Found STREAM-INF at line \(lineNum): \(line)")
+                    
+                    // Extract BANDWIDTH using regex
+                    let bandwidthPattern = "BANDWIDTH=(\\d+)"
+                    if let regex = try? NSRegularExpression(pattern: bandwidthPattern),
+                       let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
+                       let range = Range(match.range(at: 1), in: line) {
                         
-                        if !seenBitrates.contains(bandwidth) {
-                            seenBitrates.insert(bandwidth)
-                            
-                            // Try to extract RESOLUTION
-                            var width = 0
-                            var height = 0
-                            
-                            if let resRange = line.range(of: "RESOLUTION=(\\d+)x(\\d+)", options: .regularExpression) {
-                                let resString = String(line[resRange]).replacingOccurrences(of: "RESOLUTION=", with: "")
-                                let parts = resString.components(separatedBy: "x")
-                                if parts.count == 2 {
-                                    width = Int(parts[0]) ?? 0
-                                    height = Int(parts[1]) ?? 0
+                        if let bandwidth = Int(line[range]) {
+                            if !seenBitrates.contains(bandwidth) {
+                                seenBitrates.insert(bandwidth)
+                                
+                                // Try to extract RESOLUTION
+                                var width = 0
+                                var height = 0
+                                
+                                let resPattern = "RESOLUTION=(\\d+)x(\\d+)"
+                                if let resRegex = try? NSRegularExpression(pattern: resPattern),
+                                   let resMatch = resRegex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
+                                    
+                                    if let widthRange = Range(resMatch.range(at: 1), in: line),
+                                       let heightRange = Range(resMatch.range(at: 2), in: line) {
+                                        width = Int(line[widthRange]) ?? 0
+                                        height = Int(line[heightRange]) ?? 0
+                                    }
                                 }
+                                
+                                let (finalWidth, finalHeight) = (width > 0 && height > 0)
+                                    ? (width, height)
+                                    : self.estimateResolutionFromBitrate(bitrate: bandwidth)
+                                
+                                tracks.append([
+                                    "id": "\(finalWidth)x\(finalHeight)_\(bandwidth)",
+                                    "name": "\(finalHeight)p (\(bandwidth / 1000)kbps)",
+                                    "bitrate": bandwidth,
+                                    "width": finalWidth,
+                                    "height": finalHeight,
+                                    "frameRate": 30.0,
+                                    "isSelected": false,
+                                    "isAvailable": true,
+                                    "codec": "unknown"
+                                ])
+                                
+                                print("MediaPlayerInstance: Parsed variant: \(finalHeight)p @ \(bandwidth / 1000)kbps, resolution: \(finalWidth)x\(finalHeight)")
                             }
-                            
-                            let (finalWidth, finalHeight) = (width > 0 && height > 0)
-                                ? (width, height)
-                                : self.estimateResolutionFromBitrate(bitrate: bandwidth)
-                            
-                            tracks.append([
-                                "id": "\(finalWidth)x\(finalHeight)_\(bandwidth)",
-                                "name": "\(finalHeight)p (\(bandwidth / 1000)kbps)",
-                                "bitrate": bandwidth,
-                                "width": finalWidth,
-                                "height": finalHeight,
-                                "frameRate": 30.0,
-                                "isSelected": false,
-                                "isAvailable": true,
-                                "codec": "unknown"
-                            ])
-                            
-                            print("MediaPlayerInstance: Parsed variant: \(finalHeight)p @ \(bandwidth / 1000)kbps")
                         }
                     }
                 }
