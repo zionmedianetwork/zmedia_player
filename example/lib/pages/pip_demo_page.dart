@@ -255,6 +255,18 @@ class _PipDemoPageState extends State<PipDemoPage> with WidgetsBindingObserver {
                   ? MediaPlayerWidget(
                       controller: _controller,
                       showControls: true,
+                      customControls: MediaControls(
+                        controller: _controller,
+                        title: 'Picture-in-Picture Demo',
+                        showCastButton: true,
+                        showPipButton: true,
+                        showSettingsButton: true,
+                        allowFullscreen: true,
+                        showSubtitleControls: true,
+                        showSpeedControls: true,
+                        showVolumeControls: true,
+                        showPlaylistControls: false,
+                      ),
                     )
                   : const Center(
                       child: CircularProgressIndicator(),

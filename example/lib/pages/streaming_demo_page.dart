@@ -197,6 +197,18 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
               child: MediaPlayerWidget(
                 controller: _controller,
                 showControls: true,
+                customControls: MediaControls(
+                  controller: _controller,
+                  title: _streamingVideos[_selectedVideoIndex].title,
+                  showCastButton: true,
+                  showPipButton: true,
+                  showSettingsButton: true,
+                  allowFullscreen: true,
+                  showSubtitleControls: true,
+                  showSpeedControls: true,
+                  showVolumeControls: true,
+                  showPlaylistControls: false,
+                ),
               ),
             ),
           ),

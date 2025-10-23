@@ -385,34 +385,22 @@ class _PlaylistDemoPageState extends State<PlaylistDemoPage> {
       );
     }
 
-    return Stack(
-      children: [
-        MediaPlayerWidget(
-          key: _playerKey,
-          controller: _controller,
-          showControls: false,
-        ),
-        // Tap to play/pause overlay
-        GestureDetector(
-          onTap: _controller.togglePlayPause,
-          child: Container(
-            color: Colors.transparent,
-            child: Center(
-              child: ListenableBuilder(
-                listenable: _controller,
-                builder: (context, _) {
-                  if (_controller.isBuffering) {
-                    return const CircularProgressIndicator(
-                      color: Colors.white,
-                    );
-                  }
-                  return const SizedBox.shrink();
-                },
-              ),
-            ),
-          ),
-        ),
-      ],
+    return MediaPlayerWidget(
+      key: _playerKey,
+      controller: _controller,
+      showControls: true,
+      customControls: MediaControls(
+        controller: _controller,
+        title: _controller.currentItem?.title ?? 'Playlist Demo',
+        showCastButton: true,
+        showPipButton: true,
+        showSettingsButton: true,
+        allowFullscreen: true,
+        showSubtitleControls: true,
+        showSpeedControls: true,
+        showVolumeControls: true,
+        showPlaylistControls: true, // Enable playlist navigation!
+      ),
     );
   }
 

@@ -7,6 +7,7 @@
       "name": "zmedia_player",
       "version": "0.1.0",
       "dependencies": [
+        "fluentui_system_icons",
         "flutter",
         "http",
         "path",
@@ -40,6 +41,13 @@
         "stream_channel",
         "test_api",
         "vector_math"
+      ]
+    },
+    {
+      "name": "fluentui_system_icons",
+      "version": "1.1.273",
+      "dependencies": [
+        "flutter"
       ]
     },
     {

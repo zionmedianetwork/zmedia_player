@@ -38,6 +38,12 @@
       "languageVersion": "3.3"
     },
     {
+      "name": "fluentui_system_icons",
+      "rootUri": "file:///Users/acheraime/.pub-cache/hosted/pub.dev/fluentui_system_icons-1.1.273",
+      "packageUri": "lib/",
+      "languageVersion": "2.12"
+    },
+    {
       "name": "flutter",
       "rootUri": "file:///Users/acheraime/Development/flutter/packages/flutter",
       "packageUri": "lib/",

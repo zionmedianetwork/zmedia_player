@@ -292,6 +292,18 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
       key: _playerKey,
       controller: _controller,
       showControls: true,
+      customControls: MediaControls(
+        controller: _controller,
+        title: _controller.currentItem?.title ?? 'Simple Player',
+        showCastButton: true,
+        showPipButton: true,
+        showSettingsButton: true,
+        allowFullscreen: true,
+        showSubtitleControls: true,
+        showSpeedControls: true,
+        showVolumeControls: true,
+        showPlaylistControls: false,
+      ),
     );
   }
 }
