@@ -240,6 +240,19 @@ class _NotificationsDemoPageState extends State<NotificationsDemoPage> {
                   ? MediaPlayerWidget(
                       controller: _controller,
                       showControls: true,
+                      customControls: MediaControls(
+                        controller: _controller,
+                        title: _controller.currentItem?.title ??
+                            'Notifications Demo',
+                        showCastButton: true,
+                        showPipButton: true,
+                        showSettingsButton: true,
+                        allowFullscreen: true,
+                        showSubtitleControls: true,
+                        showSpeedControls: true,
+                        showVolumeControls: true,
+                        showPlaylistControls: true, // Enable for playlist
+                      ),
                     )
                   : const Center(
                       child: CircularProgressIndicator(),

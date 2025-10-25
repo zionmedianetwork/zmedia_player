@@ -111,6 +111,12 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   @override
   bool get wantKeepAlive => true;
 
+  /// Whether we have a native view (for fullscreen reuse)
+  bool get hasNativeView => _hasNativeView;
+
+  /// The native view widget (for fullscreen reuse)
+  Widget? get nativeView => _nativeView;
+
   @override
   void initState() {
     super.initState();
@@ -346,33 +352,46 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   Widget _buildInteractiveContent(Widget content) {
-    return GestureDetector(
-      onTap: widget.onTap ?? _handleTap,
-      onDoubleTap: widget.onDoubleTap ?? _handleDoubleTap,
-      onLongPress: widget.onLongPress,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          // Video content - ensure it fills the available space
-          Positioned.fill(child: content),
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        // Video content - ensure it fills the available space
+        Positioned.fill(child: content),
 
-          // Subtitle overlay - show when subtitles are enabled
-          if (widget.controller.config?.enableSubtitles == true)
-            _buildSubtitleOverlay(),
+        // Subtitle overlay - show when subtitles are enabled
+        if (widget.controller.config?.enableSubtitles == true)
+          _buildSubtitleOverlay(),
 
-          // Controls overlay - only show when needed
-          // Use ListenableBuilder to rebuild when controls visibility changes
-          ListenableBuilder(
-            listenable: widget.controller,
-            builder: (context, _) {
-              if (widget.showControls && widget.controller.controlsVisible) {
-                return Positioned.fill(child: _buildControlsOverlay());
-              }
-              return const SizedBox.shrink();
-            },
-          ),
-        ],
-      ),
+        // Controls overlay - only show when needed
+        // Use ListenableBuilder to rebuild when controls visibility changes
+        ListenableBuilder(
+          listenable: widget.controller,
+          builder: (context, _) {
+            if (widget.showControls && widget.controller.controlsVisible) {
+              return Positioned.fill(child: _buildControlsOverlay());
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+
+        // Gesture detector for video area - only when controls are not visible
+        ListenableBuilder(
+          listenable: widget.controller,
+          builder: (context, _) {
+            if (!widget.controller.controlsVisible) {
+              return Positioned.fill(
+                child: GestureDetector(
+                  onTap: widget.onTap ?? _handleTap,
+                  onDoubleTap: widget.onDoubleTap ?? _handleDoubleTap,
+                  onLongPress: widget.onLongPress,
+                  behavior: HitTestBehavior.translucent,
+                ),
+              );
+            }
+            return const SizedBox.shrink();
+          },
+        ),
+      ],
     );
   }
 

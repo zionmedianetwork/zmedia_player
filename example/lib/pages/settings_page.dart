@@ -115,6 +115,21 @@ class _SettingsPageState extends State<SettingsPage> {
                   : MediaPlayerWidget(
                       controller: _controller,
                       showControls: _showControls,
+                      customControls: _showControls
+                          ? MediaControls(
+                              controller: _controller,
+                              title: _controller.currentItem?.title ??
+                                  'Settings Demo',
+                              showCastButton: true,
+                              showPipButton: true,
+                              showSettingsButton: true,
+                              allowFullscreen: true,
+                              showSubtitleControls: true,
+                              showSpeedControls: true,
+                              showVolumeControls: true,
+                              showPlaylistControls: false,
+                            )
+                          : null,
                     ),
             ),
           ),

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fluentui_system_icons/fluentui_system_icons.dart';
 import '../core/media_controller.dart';
 import '../models/player_state.dart';
+import '../models/cast_device.dart';
 import 'media_player_widget.dart';
 
 /// Modern media controls widget with enhanced UX and smooth animations
@@ -24,8 +26,20 @@ class MediaControls extends StatefulWidget {
   /// Whether to show playlist navigation controls
   final bool showPlaylistControls;
 
+  /// Whether to show cast button
+  final bool showCastButton;
+
+  /// Whether to show PiP button
+  final bool showPipButton;
+
+  /// Whether to show settings button
+  final bool showSettingsButton;
+
   /// Custom color scheme for the controls
   final MediaControlsTheme? theme;
+
+  /// Custom title to display
+  final String? title;
 
   const MediaControls({
     super.key,
@@ -35,7 +49,11 @@ class MediaControls extends StatefulWidget {
     this.showSpeedControls = true,
     this.showVolumeControls = true,
     this.showPlaylistControls = true,
+    this.showCastButton = true,
+    this.showPipButton = true,
+    this.showSettingsButton = true,
     this.theme,
+    this.title,
   });
 
   @override
@@ -47,8 +65,11 @@ class _MediaControlsState extends State<MediaControls>
   bool _showVolumeSlider = false;
   bool _showSpeedMenu = false;
   bool _showSubtitleMenu = false;
+  bool _showSettingsMenu = false;
+  bool _showCastMenu = false;
   bool _isDraggingProgress = false;
   double _dragValue = 0.0;
+  List<CastDevice> _castDevices = [];
 
   late AnimationController _fadeController;
   late AnimationController _scaleController;
@@ -61,6 +82,7 @@ class _MediaControlsState extends State<MediaControls>
   void initState() {
     super.initState();
     _initializeAnimations();
+    _initializeCastDevices();
   }
 
   void _initializeAnimations() {
@@ -93,6 +115,17 @@ class _MediaControlsState extends State<MediaControls>
     _fadeController.forward();
   }
 
+  void _initializeCastDevices() {
+    // Listen to cast devices stream
+    widget.controller.player.castDevicesStream.listen((devices) {
+      if (mounted) {
+        setState(() {
+          _castDevices = devices;
+        });
+      }
+    });
+  }
+
   @override
   void dispose() {
     _fadeController.dispose();
@@ -111,6 +144,8 @@ class _MediaControlsState extends State<MediaControls>
         return FadeTransition(
           opacity: _fadeAnimation,
           child: Container(
+            width: double.infinity,
+            height: double.infinity,
             decoration: BoxDecoration(
               gradient: RadialGradient(
                 center: Alignment.center,
@@ -147,6 +182,8 @@ class _MediaControlsState extends State<MediaControls>
                 if (_showVolumeSlider) _buildVolumeOverlay(theme),
                 if (_showSpeedMenu) _buildSpeedMenu(theme),
                 if (_showSubtitleMenu) _buildSubtitleMenu(theme),
+                if (_showSettingsMenu) _buildSettingsMenu(theme),
+                if (_showCastMenu) _buildCastMenu(theme),
 
                 // Loading overlay
                 if (widget.controller.state.state == PlayerState.buffering)
@@ -161,258 +198,249 @@ class _MediaControlsState extends State<MediaControls>
 
   Widget _buildMainControls(MediaControlsTheme theme) {
     return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.3),
-          borderRadius: BorderRadius.circular(50),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 10),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Previous track with haptic feedback
-            if (widget.showPlaylistControls && widget.controller.hasPrevious)
-              _AnimatedIconButton(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  widget.controller.skipToPrevious();
-                },
-                icon: Icons.skip_previous_rounded,
-                color: theme.iconColor,
-                size: 28,
-                tooltip: 'Previous',
-              ),
-
-            if (widget.showPlaylistControls && widget.controller.hasPrevious)
-              const SizedBox(width: 20),
-
-            // Seek backward with custom animation
-            _AnimatedIconButton(
-              onPressed: () {
-                HapticFeedback.selectionClick();
-                widget.controller.seekBackward();
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Previous track
+          if (widget.showPlaylistControls && widget.controller.hasPrevious)
+            _buildCenterControlButton(
+              icon: FluentIcons.previous_20_regular,
+              onTap: () {
+                HapticFeedback.lightImpact();
+                widget.controller.skipToPrevious();
               },
-              icon: Icons.replay_10_rounded,
-              color: theme.iconColor,
-              size: 32,
-              tooltip: 'Rewind 10s',
+              tooltip: 'Previous',
             ),
 
-            const SizedBox(width: 24),
+          if (widget.showPlaylistControls && widget.controller.hasPrevious)
+            const SizedBox(width: 32),
 
-            // Enhanced play/pause button
-            _buildModernPlayPauseButton(theme),
+          // Seek backward
+          _buildCenterControlButton(
+            icon: FluentIcons.rewind_20_regular,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              widget.controller.seekBackward();
+            },
+            tooltip: 'Rewind 10s',
+          ),
 
-            const SizedBox(width: 24),
+          const SizedBox(width: 40),
 
-            // Seek forward
-            _AnimatedIconButton(
-              onPressed: () {
-                HapticFeedback.selectionClick();
-                widget.controller.seekForward();
+          // Play/Pause button - larger and more prominent
+          _buildPlayPauseButton(theme),
+
+          const SizedBox(width: 40),
+
+          // Seek forward
+          _buildCenterControlButton(
+            icon: FluentIcons.fast_forward_20_regular,
+            onTap: () {
+              HapticFeedback.selectionClick();
+              widget.controller.seekForward();
+            },
+            tooltip: 'Forward 10s',
+          ),
+
+          if (widget.showPlaylistControls && widget.controller.hasNext)
+            const SizedBox(width: 32),
+
+          // Next track
+          if (widget.showPlaylistControls && widget.controller.hasNext)
+            _buildCenterControlButton(
+              icon: FluentIcons.next_20_regular,
+              onTap: () {
+                HapticFeedback.lightImpact();
+                widget.controller.skipToNext();
               },
-              icon: Icons.forward_10_rounded,
-              color: theme.iconColor,
-              size: 32,
-              tooltip: 'Forward 10s',
+              tooltip: 'Next',
             ),
-
-            if (widget.showPlaylistControls && widget.controller.hasNext)
-              const SizedBox(width: 20),
-
-            // Next track
-            if (widget.showPlaylistControls && widget.controller.hasNext)
-              _AnimatedIconButton(
-                onPressed: () {
-                  HapticFeedback.lightImpact();
-                  widget.controller.skipToNext();
-                },
-                icon: Icons.skip_next_rounded,
-                color: theme.iconColor,
-                size: 28,
-                tooltip: 'Next',
-              ),
-          ],
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildModernPlayPauseButton(MediaControlsTheme theme) {
-    return ScaleTransition(
-      scale: _scaleAnimation,
-      child: GestureDetector(
-        onTapDown: (_) => _scaleController.reverse(),
-        onTapUp: (_) => _scaleController.forward(),
-        onTapCancel: () => _scaleController.forward(),
-        child: _buildPlayPauseButton(theme),
+  Widget _buildCenterControlButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    String? tooltip,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Icon(
+          icon,
+          color: Colors.white,
+          size: 24,
+        ),
       ),
     );
   }
 
   Widget _buildPlayPauseButton(MediaControlsTheme theme) {
-    Widget iconWidget;
-    VoidCallback? onPressed;
-
     switch (widget.controller.state.state) {
       case PlayerState.playing:
-        iconWidget = Icon(
-          Icons.pause_circle_filled_rounded,
-          color: theme.iconColor,
-          size: 64,
+        return GestureDetector(
+          onTap: () {
+            HapticFeedback.mediumImpact();
+            widget.controller.pause();
+          },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(32),
+            ),
+            child: Icon(
+              FluentIcons.pause_24_regular,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
         );
-        onPressed = () {
-          HapticFeedback.mediumImpact();
-          widget.controller.pause();
-        };
-        break;
       case PlayerState.paused:
       case PlayerState.ready:
       case PlayerState.completed:
-        iconWidget = Icon(
-          Icons.play_circle_filled_rounded,
-          color: theme.iconColor,
-          size: 64,
+        return GestureDetector(
+          onTap: () {
+            HapticFeedback.mediumImpact();
+            widget.controller.play();
+          },
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(32),
+            ),
+            child: Icon(
+              FluentIcons.play_24_regular,
+              color: Colors.white,
+              size: 32,
+            ),
+          ),
         );
-        onPressed = () {
-          HapticFeedback.mediumImpact();
-          widget.controller.play();
-        };
-        break;
       case PlayerState.buffering:
         return Container(
-          width: 64,
-          height: 64,
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: theme.iconColor.withOpacity(0.1),
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(32),
           ),
-          child: Center(
-            child: SizedBox(
-              width: 32,
-              height: 32,
-              child: CircularProgressIndicator(
-                color: theme.iconColor,
-                strokeWidth: 3,
-                strokeCap: StrokeCap.round,
-              ),
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: CircularProgressIndicator(
+              color: Colors.white,
+              strokeWidth: 3,
+              strokeCap: StrokeCap.round,
             ),
           ),
         );
       default:
-        iconWidget = Icon(
-          Icons.play_circle_filled_rounded,
-          color: theme.iconColor.withOpacity(0.5),
-          size: 64,
-        );
-        onPressed = null;
-    }
-
-    return Container(
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        boxShadow: [
-          BoxShadow(
-            color: theme.iconColor.withOpacity(0.3),
-            blurRadius: 15,
-            spreadRadius: 2,
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.3),
+            borderRadius: BorderRadius.circular(32),
           ),
-        ],
-      ),
-      child: IconButton(
-        onPressed: onPressed,
-        icon: iconWidget,
-        padding: EdgeInsets.zero,
-        constraints: const BoxConstraints(),
-        tooltip: widget.controller.state.state == PlayerState.playing
-            ? 'Pause'
-            : 'Play',
-      ),
-    );
+          child: Icon(
+            FluentIcons.play_24_regular,
+            color: Colors.white.withOpacity(0.5),
+            size: 32,
+          ),
+        );
+    }
   }
 
   Widget _buildTopControls(MediaControlsTheme theme) {
+    final isCasting = widget.controller.isCasting;
+    final hasCastDevices = _castDevices.isNotEmpty || isCasting;
+
     return Positioned(
       top: 0,
       left: 0,
       right: 0,
       child: SafeArea(
         child: Container(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withOpacity(0.6),
+                Colors.black.withOpacity(0.8),
+                Colors.black.withOpacity(0.4),
                 Colors.transparent,
               ],
+              stops: const [0.0, 0.6, 1.0],
             ),
           ),
           child: Row(
             children: [
-              // Back button with modern styling
-              if (widget.allowFullscreen)
-                _ModernIconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: Icons.arrow_back_ios_rounded,
-                  color: theme.iconColor,
-                  backgroundColor: Colors.black.withOpacity(0.3),
-                  tooltip: 'Back',
+              // Back button - clean and minimal
+              GestureDetector(
+                onTap: () {
+                  if (Navigator.canPop(context)) {
+                    Navigator.of(context).pop();
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Icon(
+                    FluentIcons.arrow_left_20_regular,
+                    color: Colors.white,
+                    size: 20,
+                  ),
                 ),
+              ),
 
               const Spacer(),
 
-              // Control buttons row
+              // Action buttons - right aligned, clean spacing
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (widget.showSubtitleControls &&
-                      widget.controller.subtitleTracks.isNotEmpty)
-                    _ModernIconButton(
-                      onPressed: _toggleSubtitleMenu,
-                      icon: Icons.closed_caption_rounded,
-                      color: widget.controller.selectedSubtitleTrack != null
-                          ? theme.activeIconColor
-                          : theme.iconColor,
-                      backgroundColor: Colors.black.withOpacity(0.3),
-                      isActive: widget.controller.selectedSubtitleTrack != null,
-                      tooltip: 'Subtitles',
+                  // Cast button
+                  if (widget.showCastButton && hasCastDevices)
+                    _buildTopActionButton(
+                      icon: isCasting
+                          ? FluentIcons.cast_20_filled
+                          : FluentIcons.cast_20_regular,
+                      isActive: isCasting,
+                      onTap: _toggleCastMenu,
+                      tooltip: isCasting ? 'Connected' : 'Cast',
                     ),
-                  if (widget.showSubtitleControls &&
-                      widget.controller.subtitleTracks.isNotEmpty)
+
+                  if (widget.showCastButton && hasCastDevices)
                     const SizedBox(width: 12),
-                  if (widget.showSpeedControls)
-                    _ModernIconButton(
-                      onPressed: _toggleSpeedMenu,
-                      icon: Icons.speed_rounded,
-                      color: widget.controller.speed != 1.0
-                          ? theme.activeIconColor
-                          : theme.iconColor,
-                      backgroundColor: Colors.black.withOpacity(0.3),
-                      isActive: widget.controller.speed != 1.0,
-                      tooltip: 'Playback Speed',
-                      badge: widget.controller.speed != 1.0
-                          ? '${widget.controller.speed}x'
-                          : null,
+
+                  // PiP button
+                  if (widget.showPipButton && widget.controller.isPipAvailable)
+                    _buildTopActionButton(
+                      icon: FluentIcons.picture_in_picture_20_regular,
+                      onTap: _enterPictureInPicture,
+                      tooltip: 'Picture in Picture',
                     ),
-                  if (widget.showSpeedControls) const SizedBox(width: 12),
-                  if (widget.showVolumeControls)
-                    _ModernIconButton(
-                      onPressed: _toggleVolumeSlider,
-                      icon: widget.controller.isMuted
-                          ? Icons.volume_off_rounded
-                          : _getVolumeIcon(widget.controller.volume),
-                      color: theme.iconColor,
-                      backgroundColor: Colors.black.withOpacity(0.3),
-                      isActive: _showVolumeSlider,
-                      tooltip: widget.controller.isMuted ? 'Unmute' : 'Volume',
+
+                  if (widget.showPipButton && widget.controller.isPipAvailable)
+                    const SizedBox(width: 12),
+
+                  // Settings button
+                  if (widget.showSettingsButton)
+                    _buildTopActionButton(
+                      icon: FluentIcons.settings_20_regular,
+                      isActive: _showSettingsMenu,
+                      onTap: _toggleSettingsMenu,
+                      tooltip: 'Settings',
                     ),
                 ],
               ),
@@ -423,11 +451,39 @@ class _MediaControlsState extends State<MediaControls>
     );
   }
 
+  Widget _buildTopActionButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    String? tooltip,
+    bool isActive = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: isActive
+              ? Colors.orange.withOpacity(0.2)
+              : Colors.black.withOpacity(0.3),
+          borderRadius: BorderRadius.circular(20),
+          border: isActive
+              ? Border.all(color: Colors.orange.withOpacity(0.5), width: 1)
+              : null,
+        ),
+        child: Icon(
+          icon,
+          color: isActive ? Colors.orange : Colors.white,
+          size: 20,
+        ),
+      ),
+    );
+  }
+
   IconData _getVolumeIcon(double volume) {
-    if (volume > 0.6) return Icons.volume_up_rounded;
-    if (volume > 0.3) return Icons.volume_down_rounded;
-    if (volume > 0) return Icons.volume_mute_rounded;
-    return Icons.volume_off_rounded;
+    if (volume > 0.6) return FluentIcons.speaker_2_20_regular;
+    if (volume > 0.3) return FluentIcons.speaker_1_20_regular;
+    if (volume > 0) return FluentIcons.speaker_0_20_regular;
+    return FluentIcons.speaker_mute_20_regular;
   }
 
   Widget _buildBottomControls(MediaControlsTheme theme) {
@@ -445,76 +501,67 @@ class _MediaControlsState extends State<MediaControls>
               end: Alignment.bottomCenter,
               colors: [
                 Colors.transparent,
-                Colors.black.withOpacity(0.6),
+                Colors.black.withOpacity(0.8),
               ],
             ),
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
+          child: Align(
+            alignment: Alignment.bottomCenter,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Enhanced progress bar (hidden for live streams without DVR)
+                // Progress bar (hidden for live streams without DVR)
                 if (!isLive)
-                  _buildModernProgressBar(theme)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _buildModernProgressBar(theme),
+                  )
                 else
-                  _buildLiveIndicator(theme),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: _buildLiveIndicator(theme),
+                  ),
 
-                const SizedBox(height: 12),
+                const SizedBox(height: 2),
 
-                // Time display and controls
-                Row(
-                  children: [
-                    // Current time with modern styling (or LIVE indicator)
-                    if (!isLive)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withOpacity(0.5),
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: Text(
-                          _isDraggingProgress
-                              ? _formatDuration(
-                                  widget.controller.duration * _dragValue)
-                              : widget.controller.formattedPosition,
-                          style: TextStyle(
-                            color: theme.textColor,
-                            fontSize: 12,
+                // Time display and fullscreen button - at the very bottom
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Row(
+                    children: [
+                      // Current time / Duration
+                      if (!isLive)
+                        Text(
+                          '${_isDraggingProgress ? _formatDuration(widget.controller.duration * _dragValue) : widget.controller.formattedPosition} / ${widget.controller.formattedDuration}',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
                             fontWeight: FontWeight.w500,
-                            fontFeatures: const [FontFeature.tabularFigures()],
+                            fontFeatures: [FontFeature.tabularFigures()],
                           ),
                         ),
-                      ),
 
-                    const Spacer(),
+                      const Spacer(),
 
-                    // Duration (hidden for live streams)
-                    if (!isLive)
-                      Text(
-                        widget.controller.formattedDuration,
-                        style: TextStyle(
-                          color: theme.textColor.withOpacity(0.8),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w400,
-                          fontFeatures: const [FontFeature.tabularFigures()],
+                      // Fullscreen button
+                      if (widget.allowFullscreen)
+                        GestureDetector(
+                          onTap: _toggleFullscreen,
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.3),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Icon(
+                              FluentIcons.full_screen_maximize_20_regular,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ),
                         ),
-                      ),
-
-                    const SizedBox(width: 12),
-
-                    // Fullscreen toggle with modern design
-                    if (widget.allowFullscreen)
-                      _ModernIconButton(
-                        onPressed: _toggleFullscreen,
-                        icon: Icons.fullscreen_rounded,
-                        color: theme.iconColor,
-                        backgroundColor: Colors.black.withOpacity(0.3),
-                        size: 20,
-                        tooltip: 'Fullscreen',
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -573,19 +620,19 @@ class _MediaControlsState extends State<MediaControls>
         _isDraggingProgress ? _dragValue : widget.controller.progress;
 
     return Container(
-      height: 40,
+      height: 32,
       child: SliderTheme(
         data: SliderTheme.of(context).copyWith(
-          trackHeight: 4,
-          thumbShape: CustomSliderThumbShape(
-            enabledThumbRadius: 8,
-            color: theme.progressColor,
+          trackHeight: 3,
+          thumbShape: const RoundSliderThumbShape(
+            enabledThumbRadius: 6,
+            disabledThumbRadius: 6,
           ),
           overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
-          activeTrackColor: theme.progressColor,
-          inactiveTrackColor: theme.progressBackgroundColor,
-          overlayColor: theme.progressColor.withOpacity(0.2),
-          trackShape: CustomTrackShape(),
+          activeTrackColor: Colors.orange, // Orange as per template
+          inactiveTrackColor: Colors.white.withOpacity(0.3),
+          overlayColor: Colors.orange.withOpacity(0.2),
+          thumbColor: Colors.orange,
         ),
         child: Slider(
           value: progress,
@@ -612,14 +659,14 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildVolumeOverlay(MediaControlsTheme theme) {
-    return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(1.5, 0),
-        end: Offset.zero,
-      ).animate(_overlayController),
-      child: Positioned(
-        right: 16,
-        top: 80,
+    return Positioned(
+      right: 16,
+      top: 80,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(1.5, 0),
+          end: Offset.zero,
+        ).animate(_overlayController),
         child: Container(
           height: 180,
           width: 50,
@@ -644,7 +691,7 @@ class _MediaControlsState extends State<MediaControls>
                 },
                 icon: Icon(
                   widget.controller.isMuted
-                      ? Icons.volume_off_rounded
+                      ? FluentIcons.speaker_mute_20_regular
                       : _getVolumeIcon(widget.controller.volume),
                   color: theme.iconColor,
                   size: 20,
@@ -689,16 +736,16 @@ class _MediaControlsState extends State<MediaControls>
   Widget _buildSpeedMenu(MediaControlsTheme theme) {
     const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
-    return FadeTransition(
-      opacity: _overlayAnimation,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(1.5, 0),
-          end: Offset.zero,
-        ).animate(_overlayController),
-        child: Positioned(
-          right: 16,
-          top: 80,
+    return Positioned(
+      right: 16,
+      top: 80,
+      child: FadeTransition(
+        opacity: _overlayAnimation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1.5, 0),
+            end: Offset.zero,
+          ).animate(_overlayController),
           child: Container(
             decoration: BoxDecoration(
               color: Colors.black.withOpacity(0.9),
@@ -761,16 +808,16 @@ class _MediaControlsState extends State<MediaControls>
       ...widget.controller.subtitleTracks,
     ];
 
-    return FadeTransition(
-      opacity: _overlayAnimation,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(1.5, 0),
-          end: Offset.zero,
-        ).animate(_overlayController),
-        child: Positioned(
-          right: 16,
-          top: 80,
+    return Positioned(
+      right: 16,
+      top: 80,
+      child: FadeTransition(
+        opacity: _overlayAnimation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1.5, 0),
+            end: Offset.zero,
+          ).animate(_overlayController),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 200),
             decoration: BoxDecoration(
@@ -814,7 +861,7 @@ class _MediaControlsState extends State<MediaControls>
                         children: [
                           if (isSelected)
                             Icon(
-                              Icons.check_circle_rounded,
+                              FluentIcons.checkmark_circle_20_regular,
                               color: theme.activeIconColor,
                               size: 16,
                             ),
@@ -842,6 +889,427 @@ class _MediaControlsState extends State<MediaControls>
         ),
       ),
     );
+  }
+
+  Widget _buildSettingsMenu(MediaControlsTheme theme) {
+    return Positioned(
+      right: 8,
+      top: 60,
+      child: FadeTransition(
+        opacity: _overlayAnimation,
+        child: ScaleTransition(
+          scale: Tween<double>(
+            begin: 0.0,
+            end: 1.0,
+          ).animate(CurvedAnimation(
+            parent: _overlayController,
+            curve: Curves.easeOutBack,
+          )),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 250,
+              maxHeight: 400,
+            ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.95),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.1),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.5),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Colors.white.withOpacity(0.1),
+                          width: 1,
+                        ),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(FluentIcons.settings_20_regular,
+                            color: theme.iconColor, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Settings',
+                          style: TextStyle(
+                            color: theme.textColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Playback Speed
+                  if (widget.showSpeedControls)
+                    _buildSettingsItem(
+                      theme: theme,
+                      icon: FluentIcons.timer_20_regular,
+                      title: 'Playback Speed',
+                      value: '${widget.controller.speed}x',
+                      onTap: () {
+                        _toggleSettingsMenu();
+                        Future.delayed(const Duration(milliseconds: 200), () {
+                          _toggleSpeedMenu();
+                        });
+                      },
+                    ),
+
+                  // Subtitles
+                  if (widget.showSubtitleControls &&
+                      widget.controller.subtitleTracks.isNotEmpty)
+                    _buildSettingsItem(
+                      theme: theme,
+                      icon: FluentIcons.closed_caption_20_regular,
+                      title: 'Subtitles',
+                      value: widget.controller.selectedSubtitleTrack?.title ??
+                          'Off',
+                      onTap: () {
+                        _toggleSettingsMenu();
+                        Future.delayed(const Duration(milliseconds: 200), () {
+                          _toggleSubtitleMenu();
+                        });
+                      },
+                    ),
+
+                  // Volume
+                  if (widget.showVolumeControls)
+                    _buildSettingsItem(
+                      theme: theme,
+                      icon: widget.controller.isMuted
+                          ? FluentIcons.speaker_mute_20_regular
+                          : _getVolumeIcon(widget.controller.volume),
+                      title: 'Volume',
+                      value: widget.controller.isMuted
+                          ? 'Muted'
+                          : '${(widget.controller.volume * 100).round()}%',
+                      onTap: () {
+                        _toggleSettingsMenu();
+                        Future.delayed(const Duration(milliseconds: 200), () {
+                          _toggleVolumeSlider();
+                        });
+                      },
+                    ),
+
+                  // Quality (placeholder - can be implemented later)
+                  _buildSettingsItem(
+                    theme: theme,
+                    icon: FluentIcons.hd_20_regular,
+                    title: 'Quality',
+                    value: 'Auto',
+                    onTap: () {
+                      // TODO: Implement quality selection
+                      HapticFeedback.lightImpact();
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSettingsItem({
+    required MediaControlsTheme theme,
+    required IconData icon,
+    required String title,
+    required String value,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              Icon(icon, color: theme.iconColor.withOpacity(0.8), size: 20),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  title,
+                  style: TextStyle(
+                    color: theme.textColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              Text(
+                value,
+                style: TextStyle(
+                  color: theme.activeIconColor,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                FluentIcons.chevron_right_20_regular,
+                color: theme.iconColor.withOpacity(0.5),
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCastMenu(MediaControlsTheme theme) {
+    return Positioned(
+      right: 16,
+      top: 80,
+      child: FadeTransition(
+        opacity: _overlayAnimation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1.5, 0),
+            end: Offset.zero,
+          ).animate(_overlayController),
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 280, maxHeight: 400),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.1),
+                width: 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.5),
+                  blurRadius: 20,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: BorderSide(
+                        color: Colors.white.withOpacity(0.1),
+                        width: 1,
+                      ),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        FluentIcons.cast_20_regular,
+                        color: theme.activeIconColor,
+                        size: 20,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Cast to Device',
+                        style: TextStyle(
+                          color: theme.textColor,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Device list
+                if (_castDevices.isEmpty && !widget.controller.isCasting)
+                  Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      children: [
+                        SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            color: theme.activeIconColor,
+                            strokeWidth: 2,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Looking for devices...',
+                          style: TextStyle(
+                            color: theme.textColor.withOpacity(0.7),
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Flexible(
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: [
+                        // Disconnect option if currently casting
+                        if (widget.controller.isCasting)
+                          _buildCastDeviceItem(
+                            theme: theme,
+                            device: widget.controller.castStatus.device!,
+                            isConnected: true,
+                            onTap: () async {
+                              HapticFeedback.lightImpact();
+                              try {
+                                await widget.controller
+                                    .disconnectFromCastDevice();
+                                _toggleCastMenu();
+                              } catch (e) {
+                                debugPrint('Failed to disconnect: $e');
+                              }
+                            },
+                          ),
+
+                        // Available devices
+                        ..._castDevices.where((device) {
+                          // Don't show currently connected device again
+                          return !widget.controller.isCasting ||
+                              device.id !=
+                                  widget.controller.castStatus.device?.id;
+                        }).map((device) {
+                          return _buildCastDeviceItem(
+                            theme: theme,
+                            device: device,
+                            isConnected: false,
+                            onTap: () async {
+                              HapticFeedback.lightImpact();
+                              try {
+                                await widget.controller
+                                    .connectToCastDevice(device);
+                                _toggleCastMenu();
+                              } catch (e) {
+                                if (mounted) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                          'Failed to connect: ${e.toString()}'),
+                                      duration: const Duration(seconds: 2),
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                          );
+                        }).toList(),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCastDeviceItem({
+    required MediaControlsTheme theme,
+    required CastDevice device,
+    required bool isConnected,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          decoration: isConnected
+              ? BoxDecoration(
+                  color: theme.activeIconColor.withOpacity(0.15),
+                )
+              : null,
+          child: Row(
+            children: [
+              Icon(
+                _getCastDeviceIcon(device.type),
+                color: isConnected ? theme.activeIconColor : theme.iconColor,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      device.name,
+                      style: TextStyle(
+                        color: theme.textColor,
+                        fontSize: 14,
+                        fontWeight:
+                            isConnected ? FontWeight.w600 : FontWeight.w500,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (isConnected)
+                      Text(
+                        'Connected',
+                        style: TextStyle(
+                          color: theme.activeIconColor,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (isConnected)
+                Icon(
+                  FluentIcons.checkmark_circle_20_regular,
+                  color: theme.activeIconColor,
+                  size: 20,
+                )
+              else
+                Icon(
+                  FluentIcons.chevron_right_20_regular,
+                  color: theme.iconColor.withOpacity(0.5),
+                  size: 20,
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  IconData _getCastDeviceIcon(CastDeviceType type) {
+    switch (type) {
+      case CastDeviceType.chromecast:
+        return FluentIcons.cast_20_regular;
+      case CastDeviceType.airplay:
+        return FluentIcons.cast_20_regular;
+      case CastDeviceType.dlna:
+        return FluentIcons.tv_20_regular;
+      default:
+        return FluentIcons.cast_20_regular;
+    }
   }
 
   Widget _buildBufferingOverlay(MediaControlsTheme theme) {
@@ -884,6 +1352,8 @@ class _MediaControlsState extends State<MediaControls>
       _showVolumeSlider = !_showVolumeSlider;
       _showSpeedMenu = false;
       _showSubtitleMenu = false;
+      _showSettingsMenu = false;
+      _showCastMenu = false;
     });
 
     if (_showVolumeSlider) {
@@ -901,6 +1371,8 @@ class _MediaControlsState extends State<MediaControls>
       _showSpeedMenu = !_showSpeedMenu;
       _showVolumeSlider = false;
       _showSubtitleMenu = false;
+      _showSettingsMenu = false;
+      _showCastMenu = false;
     });
 
     if (_showSpeedMenu) {
@@ -918,6 +1390,8 @@ class _MediaControlsState extends State<MediaControls>
       _showSubtitleMenu = !_showSubtitleMenu;
       _showVolumeSlider = false;
       _showSpeedMenu = false;
+      _showSettingsMenu = false;
+      _showCastMenu = false;
     });
 
     if (_showSubtitleMenu) {
@@ -930,12 +1404,84 @@ class _MediaControlsState extends State<MediaControls>
     HapticFeedback.lightImpact();
   }
 
+  void _toggleSettingsMenu() {
+    setState(() {
+      _showSettingsMenu = !_showSettingsMenu;
+      _showVolumeSlider = false;
+      _showSpeedMenu = false;
+      _showSubtitleMenu = false;
+      _showCastMenu = false;
+    });
+
+    if (_showSettingsMenu) {
+      _overlayController.forward();
+    } else {
+      _overlayController.reverse();
+    }
+
+    widget.controller.showControlsTemporarily();
+    HapticFeedback.lightImpact();
+  }
+
+  void _toggleCastMenu() {
+    setState(() {
+      _showCastMenu = !_showCastMenu;
+      _showVolumeSlider = false;
+      _showSpeedMenu = false;
+      _showSubtitleMenu = false;
+      _showSettingsMenu = false;
+    });
+
+    if (_showCastMenu) {
+      _overlayController.forward();
+      // Start cast discovery when menu is opened
+      widget.controller.startCastDiscovery().catchError((e) {
+        debugPrint('Failed to start cast discovery: $e');
+      });
+    } else {
+      _overlayController.reverse();
+      // Stop cast discovery when menu is closed
+      widget.controller.stopCastDiscovery().catchError((e) {
+        debugPrint('Failed to stop cast discovery: $e');
+      });
+    }
+
+    widget.controller.showControlsTemporarily();
+    HapticFeedback.lightImpact();
+  }
+
+  void _enterPictureInPicture() async {
+    try {
+      HapticFeedback.lightImpact();
+      final success = await widget.controller.player.enterPictureInPicture();
+      if (!success && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to enter Picture-in-Picture mode'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString()}'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
   void _toggleFullscreen() {
     HapticFeedback.mediumImpact();
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
-            _FullscreenPlayerRoute(controller: widget.controller),
+            _FullscreenPlayerRoute(
+          controller: widget.controller,
+        ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },
@@ -1321,8 +1867,16 @@ class MediaControlsTheme {
     this.surfaceColor = const Color(0xFF1E1E1E),
   });
 
-  /// Default modern theme with gradient accents
-  static const defaultTheme = MediaControlsTheme();
+  /// Default modern theme with orange accents (matching template)
+  static const defaultTheme = MediaControlsTheme(
+    iconColor: Colors.white,
+    activeIconColor: Colors.orange,
+    textColor: Colors.white,
+    progressColor: Colors.orange,
+    progressBackgroundColor: Colors.white24,
+    accentColor: Colors.orange,
+    surfaceColor: Color(0xFF1E1E1E),
+  );
 
   /// Dark theme with blue accents
   static const darkTheme = MediaControlsTheme(
@@ -1476,23 +2030,11 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
           position: _slideAnimation,
           child: Stack(
             children: [
-              // Fullscreen video player - truly fullscreen
+              // Fullscreen video player - use the dedicated FullscreenMediaPlayer
               Positioned.fill(
-                child: Container(
-                  color: Colors.black,
-                  child: MediaPlayerWidget(
-                    controller: widget.controller,
-                    showControls: true,
-                    expandToFill: true,
-                    backgroundColor: Colors.black,
-                    onTap: () {
-                      widget.controller.toggleControls();
-                    },
-                    onDoubleTap: () {
-                      widget.controller.togglePlayPause();
-                      HapticFeedback.mediumImpact();
-                    },
-                  ),
+                child: FullscreenMediaPlayer(
+                  controller: widget.controller,
+                  backgroundColor: Colors.black,
                 ),
               ),
 
@@ -1525,7 +2067,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                           child: IconButton(
                             onPressed: _exitFullscreen,
                             icon: const Icon(
-                              Icons.fullscreen_exit_rounded,
+                              FluentIcons.full_screen_minimize_20_regular,
                               color: Colors.white,
                             ),
                             tooltip: 'Exit Fullscreen',
@@ -1576,7 +2118,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                                   HapticFeedback.lightImpact();
                                 },
                                 icon: const Icon(
-                                  Icons.picture_in_picture_rounded,
+                                  FluentIcons.picture_in_picture_20_regular,
                                   color: Colors.white,
                                 ),
                                 tooltip: 'Picture in Picture',
@@ -1590,14 +2132,19 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                 ),
               ),
 
-              // Gesture detector for swipe to exit
-              Positioned.fill(
+              // Gesture detector for swipe to exit - only in video area, not over controls
+              Positioned(
+                top: 100, // Start below the header controls
+                left: 0,
+                right: 0,
+                bottom: 0,
                 child: GestureDetector(
                   onVerticalDragUpdate: (details) {
                     if (details.primaryDelta! > 10) {
                       _exitFullscreen();
                     }
                   },
+                  behavior: HitTestBehavior.translucent,
                 ),
               ),
             ],

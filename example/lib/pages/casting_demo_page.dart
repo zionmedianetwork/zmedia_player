@@ -350,6 +350,18 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                     ? MediaPlayerWidget(
                         controller: _controller,
                         showControls: true,
+                        customControls: MediaControls(
+                          controller: _controller,
+                          title: _videos[_currentVideoIndex].title,
+                          showCastButton: true,
+                          showPipButton: true,
+                          showSettingsButton: true,
+                          allowFullscreen: true,
+                          showSubtitleControls: true,
+                          showSpeedControls: true,
+                          showVolumeControls: true,
+                          showPlaylistControls: false,
+                        ),
                       )
                     : const Center(
                         child: CircularProgressIndicator(),
