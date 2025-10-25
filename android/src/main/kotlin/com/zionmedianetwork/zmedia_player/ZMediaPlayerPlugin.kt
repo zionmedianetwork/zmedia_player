@@ -725,12 +725,12 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
-        playerManager.dispose()
-        
+        playerManager.shutdown()  // Properly stops Handler runnable + disposes all players
+
         // Dispose all Phase 3 handlers
         notificationHandlers.values.forEach { it.dispose() }
         notificationHandlers.clear()
-        
+
         pipHandlers.values.forEach { it.dispose() }
         pipHandlers.clear()
 

@@ -257,7 +257,8 @@ class MediaPlayerInstance: NSObject {
     private var statusObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
     private var bandwidthTimer: Timer?
-    
+    private var observedPlayerItem: AVPlayerItem?  // Track observed item for safe cleanup
+
     private var currentPlaylist: [[String: Any]]?
     private var currentIndex = 0
     private var currentMediaItem: [String: Any]?
@@ -353,11 +354,15 @@ class MediaPlayerInstance: NSObject {
         }
         
         let playerItem = AVPlayerItem(asset: asset)
-        
-        // Add observers for the player item
+
+        // Remove observers from previous item first (prevents leaks)
+        removePlayerItemObservers()
+
+        // Add observers for the new player item
         playerItem.addObserver(self, forKeyPath: "duration", options: [.new], context: nil)
         playerItem.addObserver(self, forKeyPath: "status", options: [.new], context: nil)
-        
+        observedPlayerItem = playerItem  // Track this item for safe cleanup
+
         // Ensure we're on main thread for player operations
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -548,32 +553,52 @@ class MediaPlayerInstance: NSObject {
             }
         }
     }
-    
+
+    // Safe removal of player item observers
+    private func removePlayerItemObservers() {
+        guard let item = observedPlayerItem else { return }
+
+        // Remove observers with error handling (prevents crashes on double-removal)
+        do {
+            item.removeObserver(self, forKeyPath: "duration")
+        } catch {
+            print("MediaPlayerInstance: Failed to remove duration observer: \(error)")
+        }
+
+        do {
+            item.removeObserver(self, forKeyPath: "status")
+        } catch {
+            print("MediaPlayerInstance: Failed to remove status observer: \(error)")
+        }
+
+        observedPlayerItem = nil
+    }
+
     func dispose() {
         // Stop bandwidth monitoring
         stopBandwidthMonitoring()
-        
-        // Remove AVPlayerItem observers
-        if let currentItem = avPlayer?.currentItem {
-            currentItem.removeObserver(self, forKeyPath: "duration")
-            currentItem.removeObserver(self, forKeyPath: "status")
-        }
-        
+
         // Remove time observer
-        if let timeObserver = timeObserver {
-            avPlayer?.removeTimeObserver(timeObserver)
+        if let observer = timeObserver, let player = avPlayer {
+            player.removeTimeObserver(observer)
+            timeObserver = nil  // Set to nil after removal
         }
-        
+
         // Remove KVO observers
         statusObserver?.invalidate()
+        statusObserver = nil
         rateObserver?.invalidate()
-        
+        rateObserver = nil
+
+        // Remove AVPlayerItem observers with error handling
+        removePlayerItemObservers()
+
         NotificationCenter.default.removeObserver(self)
-        
+
         // Clean up player
         avPlayer?.pause()
         avPlayer?.replaceCurrentItem(with: nil)
-        
+
         // Clear references
         currentMediaItem = nil
         avPlayer = nil

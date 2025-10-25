@@ -8,6 +8,7 @@ import '../models/pip_config.dart';
 import '../models/cast_device.dart';
 import 'media_player.dart';
 import 'media_config.dart';
+import 'exceptions.dart';
 
 /// Controller class that provides a simplified interface for common media player operations
 ///
@@ -553,9 +554,11 @@ class MediaController extends ChangeNotifier {
       if (_operationInProgress) {
         debugPrint(
             'MediaController: Operation in progress, queuing: ${operation.toString()}');
-        // For non-critical operations, just return without throwing
+        // For non-critical operations, throw OperationBusyException
         if (_isNonCriticalOperation(operation)) {
-          return Future.value() as T;
+          throw const OperationBusyException(
+            'Non-critical operation skipped - another operation in progress',
+          );
         }
         // For critical operations, wait a bit more
         await Future.delayed(const Duration(milliseconds: 200));
@@ -802,12 +805,39 @@ class MediaController extends ChangeNotifier {
     await _player.disconnectFromCastDevice();
   }
 
-  /// Clean up all subscriptions
+  /// Clean up all subscriptions with error handling
   void _cleanupSubscriptions() {
-    for (final subscription in _subscriptions) {
-      subscription.cancel();
+    final errors = <int, dynamic>{};
+
+    for (var i = 0; i < _subscriptions.length; i++) {
+      try {
+        _subscriptions[i].cancel();
+      } catch (e, stackTrace) {
+        errors[i] = e.toString();
+        debugPrint('MediaController: Error canceling subscription $i: $e');
+
+        // Report to crash reporter if available (non-fatal)
+        MediaPlayer.crashReporter?.reportError(
+          e,
+          stackTrace,
+          context: {
+            'controller': 'MediaController',
+            'subscriptionIndex': i,
+            'operation': 'subscription_cleanup',
+          },
+          fatal: false,
+        );
+      }
     }
+
     _subscriptions.clear();
+
+    // Log summary if there were errors
+    if (errors.isNotEmpty) {
+      debugPrint(
+        'MediaController: Failed to cancel ${errors.length}/${_subscriptions.length} subscriptions',
+      );
+    }
   }
 
   @override

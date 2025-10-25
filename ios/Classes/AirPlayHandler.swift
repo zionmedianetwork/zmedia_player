@@ -11,7 +11,8 @@ class AirPlayHandler: NSObject {
     private var routePickerView: AVRoutePickerView?
     private var isAirPlayActive: Bool = false
     private var currentRoute: AVAudioSessionRouteDescription?
-    
+    private var isObservingExternalPlayback: Bool = false  // Track KVO observation state
+
     // Configuration
     private var config: [String: Any]?
     
@@ -31,22 +32,30 @@ class AirPlayHandler: NSObject {
     
     func initialize(config: [String: Any], player: AVPlayer?) {
         print("AirPlayHandler: Initializing for player: \(playerId)")
-        
+
         self.config = config
+
+        // Remove observer from previous player
+        if let oldPlayer = self.player, isObservingExternalPlayback {
+            oldPlayer.removeObserver(self, forKeyPath: "externalPlaybackActive")
+            isObservingExternalPlayback = false
+        }
+
         self.player = player
-        
+
         // Enable external playback on the player
         if let player = player {
             player.allowsExternalPlayback = true
             player.usesExternalPlaybackWhileExternalScreenIsActive = true
-            
+
             // Add observer for external playback
             player.addObserver(self, forKeyPath: "externalPlaybackActive", options: [.new, .old], context: nil)
+            isObservingExternalPlayback = true
         }
-        
+
         // Check initial AirPlay availability
         checkAirPlayAvailability()
-        
+
         print("AirPlayHandler: Initialized successfully")
     }
     
@@ -482,14 +491,16 @@ class AirPlayHandler: NSObject {
     
     func dispose() {
         print("AirPlayHandler: Disposing")
-        
-        // Remove observers
+
+        // Remove NotificationCenter observers
         NotificationCenter.default.removeObserver(self)
-        
-        if let player = player {
+
+        // Remove KVO observer safely
+        if let player = player, isObservingExternalPlayback {
             player.removeObserver(self, forKeyPath: "externalPlaybackActive")
+            isObservingExternalPlayback = false
         }
-        
+
         routePickerView = nil
         player = nil
         config = nil

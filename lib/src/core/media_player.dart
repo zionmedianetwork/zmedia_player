@@ -167,26 +167,44 @@ class MediaPlayer {
     );
   }
 
-  /// Clean up stale player instances
+  /// Clean up stale player instances (thread-safe)
   static void _cleanupStaleInstances() {
     final now = DateTime.now();
     const staleThreshold = Duration(minutes: 15);
 
+    // Create defensive copy of entries to avoid concurrent modification
+    final activitySnapshot = Map<String, DateTime>.from(_lastActivity);
     final staleKeys = <String>[];
 
-    for (final entry in _lastActivity.entries) {
+    for (final entry in activitySnapshot.entries) {
       if (now.difference(entry.value) > staleThreshold) {
         staleKeys.add(entry.key);
       }
     }
 
+    // Process stale instances
     for (final key in staleKeys) {
+      // Check instance still exists before cleanup
       final instance = _instances[key];
-      if (instance != null && !instance.isPlaying) {
+      if (instance != null &&
+          !instance.isPlaying &&
+          !instance._isDisposed) {
         debugPrint('MediaPlayer: Auto-cleaning stale instance: $key');
-        instance.dispose();
-        _instances.remove(key);
+
+        // Atomic removal pattern: remove from tracking first
         _lastActivity.remove(key);
+        _instances.remove(key);
+
+        // Then dispose (this may take time)
+        instance.dispose().catchError((e) {
+          debugPrint('Error during auto-cleanup of $key: $e');
+          crashReporter?.reportError(
+            e,
+            StackTrace.current,
+            context: {'playerId': key, 'operation': 'auto_cleanup'},
+            fatal: false,
+          );
+        });
       }
     }
 
@@ -1177,15 +1195,60 @@ class MediaPlayer {
       _notificationActionController,
     ];
 
-    for (final controller in controllers) {
-      if (!controller.isClosed) {
-        try {
+    final errors = <String, dynamic>{};
+
+    for (var i = 0; i < controllers.length; i++) {
+      final controller = controllers[i];
+      try {
+        if (!controller.isClosed) {
           await controller.close();
-        } catch (e) {
-          debugPrint('Error closing controller: $e');
         }
+      } catch (e, stackTrace) {
+        final controllerName = _getControllerName(i);
+        errors[controllerName] = e.toString();
+        debugPrint('Error closing $controllerName: $e');
+
+        // Report to crash reporter if available (non-fatal)
+        crashReporter?.reportError(
+          e,
+          stackTrace,
+          context: {
+            'playerId': playerId,
+            'controller': controllerName,
+            'operation': 'stream_cleanup',
+          },
+          fatal: false,
+        );
       }
     }
+
+    // Log summary if there were errors
+    if (errors.isNotEmpty) {
+      debugPrint(
+        'MediaPlayer($playerId): Failed to close ${errors.length}/${controllers.length} controllers: ${errors.keys.join(", ")}',
+      );
+    }
+  }
+
+  /// Helper method for error reporting in stream cleanup
+  String _getControllerName(int index) {
+    const names = [
+      'stateController',
+      'positionController',
+      'durationController',
+      'volumeController',
+      'speedController',
+      'subtitleTracksController',
+      'qualityTracksController',
+      'audioTracksController',
+      'bandwidthController',
+      'pipStatusController',
+      'castStatusController',
+      'castDevicesController',
+      'drmSessionController',
+      'notificationActionController',
+    ];
+    return index < names.length ? names[index] : 'unknownController';
   }
 
   // Private helper methods
