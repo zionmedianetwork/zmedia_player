@@ -659,14 +659,14 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildVolumeOverlay(MediaControlsTheme theme) {
-    return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(1.5, 0),
-        end: Offset.zero,
-      ).animate(_overlayController),
-      child: Positioned(
-        right: 16,
-        top: 80,
+    return Positioned(
+      right: 16,
+      top: 80,
+      child: SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(1.5, 0),
+          end: Offset.zero,
+        ).animate(_overlayController),
         child: Container(
           height: 180,
           width: 50,
@@ -736,16 +736,16 @@ class _MediaControlsState extends State<MediaControls>
   Widget _buildSpeedMenu(MediaControlsTheme theme) {
     const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
 
-    return FadeTransition(
-      opacity: _overlayAnimation,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(1.5, 0),
-          end: Offset.zero,
-        ).animate(_overlayController),
-        child: Positioned(
-          right: 16,
-          top: 80,
+    return Positioned(
+      right: 16,
+      top: 80,
+      child: FadeTransition(
+        opacity: _overlayAnimation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1.5, 0),
+            end: Offset.zero,
+          ).animate(_overlayController),
           child: Container(
             decoration: BoxDecoration(
               color: Colors.black.withOpacity(0.9),
@@ -808,16 +808,16 @@ class _MediaControlsState extends State<MediaControls>
       ...widget.controller.subtitleTracks,
     ];
 
-    return FadeTransition(
-      opacity: _overlayAnimation,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(1.5, 0),
-          end: Offset.zero,
-        ).animate(_overlayController),
-        child: Positioned(
-          right: 16,
-          top: 80,
+    return Positioned(
+      right: 16,
+      top: 80,
+      child: FadeTransition(
+        opacity: _overlayAnimation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1.5, 0),
+            end: Offset.zero,
+          ).animate(_overlayController),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 200),
             decoration: BoxDecoration(
@@ -892,127 +892,135 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildSettingsMenu(MediaControlsTheme theme) {
-    return FadeTransition(
-      opacity: _overlayAnimation,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(1.5, 0),
-          end: Offset.zero,
-        ).animate(_overlayController),
-        child: Positioned(
-          right: 16,
-          top: 80,
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 250),
-            decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.95),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.white.withOpacity(0.1),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.5),
-                  blurRadius: 20,
-                  offset: const Offset(0, 10),
-                ),
-              ],
+    return Positioned(
+      right: 8,
+      top: 60,
+      child: FadeTransition(
+        opacity: _overlayAnimation,
+        child: ScaleTransition(
+          scale: Tween<double>(
+            begin: 0.0,
+            end: 1.0,
+          ).animate(CurvedAnimation(
+            parent: _overlayController,
+            curve: Curves.easeOutBack,
+          )),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: 250,
+              maxHeight: 400,
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: BorderSide(
-                        color: Colors.white.withOpacity(0.1),
-                        width: 1,
-                      ),
-                    ),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.95),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: Colors.white.withOpacity(0.1),
+                  width: 1,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.5),
+                    blurRadius: 20,
+                    offset: const Offset(0, 10),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(FluentIcons.settings_20_regular,
-                          color: theme.iconColor, size: 20),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Settings',
-                        style: TextStyle(
-                          color: theme.textColor,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  // Header
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                          color: Colors.white.withOpacity(0.1),
+                          width: 1,
                         ),
                       ),
-                    ],
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(FluentIcons.settings_20_regular,
+                            color: theme.iconColor, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Settings',
+                          style: TextStyle(
+                            color: theme.textColor,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
 
-                // Playback Speed
-                if (widget.showSpeedControls)
+                  // Playback Speed
+                  if (widget.showSpeedControls)
+                    _buildSettingsItem(
+                      theme: theme,
+                      icon: FluentIcons.timer_20_regular,
+                      title: 'Playback Speed',
+                      value: '${widget.controller.speed}x',
+                      onTap: () {
+                        _toggleSettingsMenu();
+                        Future.delayed(const Duration(milliseconds: 200), () {
+                          _toggleSpeedMenu();
+                        });
+                      },
+                    ),
+
+                  // Subtitles
+                  if (widget.showSubtitleControls &&
+                      widget.controller.subtitleTracks.isNotEmpty)
+                    _buildSettingsItem(
+                      theme: theme,
+                      icon: FluentIcons.closed_caption_20_regular,
+                      title: 'Subtitles',
+                      value: widget.controller.selectedSubtitleTrack?.title ??
+                          'Off',
+                      onTap: () {
+                        _toggleSettingsMenu();
+                        Future.delayed(const Duration(milliseconds: 200), () {
+                          _toggleSubtitleMenu();
+                        });
+                      },
+                    ),
+
+                  // Volume
+                  if (widget.showVolumeControls)
+                    _buildSettingsItem(
+                      theme: theme,
+                      icon: widget.controller.isMuted
+                          ? FluentIcons.speaker_mute_20_regular
+                          : _getVolumeIcon(widget.controller.volume),
+                      title: 'Volume',
+                      value: widget.controller.isMuted
+                          ? 'Muted'
+                          : '${(widget.controller.volume * 100).round()}%',
+                      onTap: () {
+                        _toggleSettingsMenu();
+                        Future.delayed(const Duration(milliseconds: 200), () {
+                          _toggleVolumeSlider();
+                        });
+                      },
+                    ),
+
+                  // Quality (placeholder - can be implemented later)
                   _buildSettingsItem(
                     theme: theme,
-                    icon: FluentIcons.timer_20_regular,
-                    title: 'Playback Speed',
-                    value: '${widget.controller.speed}x',
+                    icon: FluentIcons.hd_20_regular,
+                    title: 'Quality',
+                    value: 'Auto',
                     onTap: () {
-                      _toggleSettingsMenu();
-                      Future.delayed(const Duration(milliseconds: 200), () {
-                        _toggleSpeedMenu();
-                      });
+                      // TODO: Implement quality selection
+                      HapticFeedback.lightImpact();
                     },
                   ),
-
-                // Subtitles
-                if (widget.showSubtitleControls &&
-                    widget.controller.subtitleTracks.isNotEmpty)
-                  _buildSettingsItem(
-                    theme: theme,
-                    icon: FluentIcons.closed_caption_20_regular,
-                    title: 'Subtitles',
-                    value:
-                        widget.controller.selectedSubtitleTrack?.title ?? 'Off',
-                    onTap: () {
-                      _toggleSettingsMenu();
-                      Future.delayed(const Duration(milliseconds: 200), () {
-                        _toggleSubtitleMenu();
-                      });
-                    },
-                  ),
-
-                // Volume
-                if (widget.showVolumeControls)
-                  _buildSettingsItem(
-                    theme: theme,
-                    icon: widget.controller.isMuted
-                        ? FluentIcons.speaker_mute_20_regular
-                        : _getVolumeIcon(widget.controller.volume),
-                    title: 'Volume',
-                    value: widget.controller.isMuted
-                        ? 'Muted'
-                        : '${(widget.controller.volume * 100).round()}%',
-                    onTap: () {
-                      _toggleSettingsMenu();
-                      Future.delayed(const Duration(milliseconds: 200), () {
-                        _toggleVolumeSlider();
-                      });
-                    },
-                  ),
-
-                // Quality (placeholder - can be implemented later)
-                _buildSettingsItem(
-                  theme: theme,
-                  icon: FluentIcons.hd_20_regular,
-                  title: 'Quality',
-                  value: 'Auto',
-                  onTap: () {
-                    // TODO: Implement quality selection
-                    HapticFeedback.lightImpact();
-                  },
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -1069,16 +1077,16 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildCastMenu(MediaControlsTheme theme) {
-    return FadeTransition(
-      opacity: _overlayAnimation,
-      child: SlideTransition(
-        position: Tween<Offset>(
-          begin: const Offset(1.5, 0),
-          end: Offset.zero,
-        ).animate(_overlayController),
-        child: Positioned(
-          right: 16,
-          top: 80,
+    return Positioned(
+      right: 16,
+      top: 80,
+      child: FadeTransition(
+        opacity: _overlayAnimation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(1.5, 0),
+            end: Offset.zero,
+          ).animate(_overlayController),
           child: Container(
             constraints: const BoxConstraints(maxWidth: 280, maxHeight: 400),
             decoration: BoxDecoration(
@@ -1471,7 +1479,9 @@ class _MediaControlsState extends State<MediaControls>
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>
-            _FullscreenPlayerRoute(controller: widget.controller),
+            _FullscreenPlayerRoute(
+          controller: widget.controller,
+        ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },
@@ -2020,23 +2030,11 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
           position: _slideAnimation,
           child: Stack(
             children: [
-              // Fullscreen video player - truly fullscreen
+              // Fullscreen video player - use the dedicated FullscreenMediaPlayer
               Positioned.fill(
-                child: Container(
-                  color: Colors.black,
-                  child: MediaPlayerWidget(
-                    controller: widget.controller,
-                    showControls: true,
-                    expandToFill: true,
-                    backgroundColor: Colors.black,
-                    onTap: () {
-                      widget.controller.toggleControls();
-                    },
-                    onDoubleTap: () {
-                      widget.controller.togglePlayPause();
-                      HapticFeedback.mediumImpact();
-                    },
-                  ),
+                child: FullscreenMediaPlayer(
+                  controller: widget.controller,
+                  backgroundColor: Colors.black,
                 ),
               ),
 
@@ -2069,7 +2067,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                           child: IconButton(
                             onPressed: _exitFullscreen,
                             icon: const Icon(
-                              FluentIcons.full_screen_maximize_20_regular,
+                              FluentIcons.full_screen_minimize_20_regular,
                               color: Colors.white,
                             ),
                             tooltip: 'Exit Fullscreen',
@@ -2134,14 +2132,19 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                 ),
               ),
 
-              // Gesture detector for swipe to exit
-              Positioned.fill(
+              // Gesture detector for swipe to exit - only in video area, not over controls
+              Positioned(
+                top: 100, // Start below the header controls
+                left: 0,
+                right: 0,
+                bottom: 0,
                 child: GestureDetector(
                   onVerticalDragUpdate: (details) {
                     if (details.primaryDelta! > 10) {
                       _exitFullscreen();
                     }
                   },
+                  behavior: HitTestBehavior.translucent,
                 ),
               ),
             ],
