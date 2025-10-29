@@ -208,6 +208,16 @@ class MediaPlayerManager(
         return playerInstance.getPlayerView()
     }
 
+    fun getBufferHealth(playerId: String): Map<String, Any> {
+        markActivity(playerId)
+        return players[playerId]?.getBufferHealth() ?: mapOf(
+            "bufferedDurationMs" to 0,
+            "currentPositionMs" to 0,
+            "totalDurationMs" to 0,
+            "downloadSpeed" to 0
+        )
+    }
+
     fun disposePlayer(playerId: String) {
         mainHandler.post {
             players[playerId]?.dispose()
@@ -239,6 +249,7 @@ class MediaPlayerInstance(
     private var exoPlayer: ExoPlayer? = null
     private var playerView: MediaPlayerView? = null
     private val dataSourceFactory: DefaultDataSource.Factory
+    private val bufferingHandler: BufferingHandler = BufferingHandler()
     private var currentMediaSource: MediaSource? = null
     private var currentPlaylist: List<Map<String, Any>>? = null
     private var currentIndex = 0
@@ -308,17 +319,22 @@ class MediaPlayerInstance(
     }
 
     private fun initializeExoPlayer() {
+        // Get buffer configuration from config
+        val bufferConfig = config?.get("bufferConfig") as? Map<String, Any>
+        val loadControl = BufferingHandler.createFromDartConfig(bufferConfig)
+
         exoPlayer = ExoPlayer.Builder(context)
+            .setLoadControl(loadControl)
             .build()
             .apply {
                 addListener(playerListener)
                 // Apply initial configuration
                 config?.let { applyConfig(it) }
             }
-        
+
         // Start position updates
         startPositionUpdates()
-        
+
         // Start bandwidth monitoring
         startBandwidthMonitoring()
     }
@@ -522,6 +538,10 @@ class MediaPlayerInstance(
     
     fun isPlaying(): Boolean {
         return exoPlayer?.isPlaying ?: false
+    }
+
+    fun getBufferHealth(): Map<String, Any> {
+        return bufferingHandler.getBufferHealth(exoPlayer)
     }
 
     fun dispose() {

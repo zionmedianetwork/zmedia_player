@@ -10,6 +10,9 @@ import '../models/streaming_config.dart';
 import '../models/pip_config.dart';
 import '../models/cast_device.dart';
 import '../models/drm_config.dart';
+import '../models/buffering_config.dart';
+import '../models/buffer_health.dart';
+import '../services/buffering_service.dart';
 import 'media_config.dart';
 import 'crash_reporter.dart';
 import 'exceptions.dart';
@@ -70,6 +73,11 @@ class MediaPlayer {
       StreamController<String>.broadcast();
   final StreamController<int> _bandwidthController =
       StreamController<int>.broadcast();
+  final StreamController<BufferHealth> _bufferHealthController =
+      StreamController<BufferHealth>.broadcast();
+
+  /// Buffering service for adaptive buffer management
+  late final BufferingService _bufferingService;
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
@@ -133,6 +141,52 @@ class MediaPlayer {
     _markActivity();
     _ensureCleanupTimer();
     _setupMethodCallHandler();
+    _initializeBufferingService();
+  }
+
+  /// Initialize buffering service with configuration
+  void _initializeBufferingService() {
+    // Convert old BufferConfig to new BufferingConfig if provided
+    final bufferingConfig = _config.bufferConfig != null
+        ? BufferingConfig(
+            minBufferMs: _config.bufferConfig!.minBufferDuration.inMilliseconds,
+            maxBufferMs: _config.bufferConfig!.maxBufferDuration.inMilliseconds,
+            targetBufferMs: _config.bufferConfig!.targetBufferDuration.inMilliseconds,
+            rebufferMs: _config.bufferConfig!.rebufferDuration.inMilliseconds,
+          )
+        : const BufferingConfig(); // Use default config
+
+    _bufferingService = BufferingService(
+      config: bufferingConfig,
+      platformBufferStatusCallback: _getPlatformBufferStatus,
+    );
+
+    // Listen to buffer health updates and forward to public stream
+    _bufferingService.bufferHealthStream.listen((health) {
+      if (!_bufferHealthController.isClosed) {
+        _bufferHealthController.add(health);
+      }
+    });
+  }
+
+  /// Get buffer status from platform
+  Future<Map<String, dynamic>> _getPlatformBufferStatus() async {
+    try {
+      final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'getBufferHealth',
+        {'playerId': playerId},
+      );
+
+      if (result == null) {
+        return {};
+      }
+
+      // Convert dynamic map to String map
+      return result.map((key, value) => MapEntry(key.toString(), value));
+    } catch (e) {
+      debugPrint('Error getting buffer status: $e');
+      return {};
+    }
   }
 
   /// Enable crash reporting (call once at app startup)
@@ -314,6 +368,30 @@ class MediaPlayer {
   Stream<int> get bandwidthStream {
     _throwIfDisposed();
     return _bandwidthController.stream;
+  }
+
+  /// Stream of buffer health updates
+  Stream<BufferHealth> get bufferHealthStream {
+    _throwIfDisposed();
+    return _bufferHealthController.stream;
+  }
+
+  /// Current network quality based on bandwidth measurements
+  NetworkQuality get networkQuality {
+    _throwIfDisposed();
+    return _bufferingService.networkQuality;
+  }
+
+  /// Buffer statistics for the current session
+  BufferStatistics get bufferStatistics {
+    _throwIfDisposed();
+    return _bufferingService.statistics;
+  }
+
+  /// Last known buffer health status
+  BufferHealth? get lastBufferHealth {
+    _throwIfDisposed();
+    return _bufferingService.lastBufferHealth;
   }
 
   /// Stream of PiP status updates
@@ -624,6 +702,9 @@ class MediaPlayer {
     try {
       await _channel.invokeMethod('play', {'playerId': playerId});
 
+      // Start buffer health monitoring
+      _bufferingService.startMonitoring();
+
       crashReporter?.log('Playback started', context: {
         'playerId': playerId,
         'mediaId': _currentItem?.id,
@@ -651,6 +732,9 @@ class MediaPlayer {
 
     try {
       await _channel.invokeMethod('pause', {'playerId': playerId});
+
+      // Stop buffer health monitoring when paused
+      _bufferingService.stopMonitoring();
 
       crashReporter?.log('Playback paused', context: {
         'playerId': playerId,
@@ -1170,6 +1254,9 @@ class MediaPlayer {
       }
     }
 
+    // Dispose buffering service
+    _bufferingService.dispose();
+
     // Close stream controllers safely
     await _safeCloseStreams();
 
@@ -1188,6 +1275,7 @@ class MediaPlayer {
       _qualityTracksController,
       _audioTracksController,
       _bandwidthController,
+      _bufferHealthController,
       _pipStatusController,
       _castStatusController,
       _castDevicesController,
@@ -1420,6 +1508,9 @@ class MediaPlayer {
 
     final bandwidth = arguments['bandwidth'] as int? ?? 0;
     _currentBandwidth = bandwidth;
+
+    // Update buffering service with bandwidth measurement
+    _bufferingService.updateFromBandwidth(bandwidth);
 
     if (!_bandwidthController.isClosed) {
       _bandwidthController.add(bandwidth);

@@ -66,7 +66,11 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             handleUpdateConfig(call, result: result)
         case "dispose":
             handleDispose(call, result: result)
-            
+
+        // Phase 1: Buffering handlers
+        case "getBufferHealth":
+            handleGetBufferHealth(call, result: result)
+
         // Phase 3: Notification handlers
         case "initializeNotification":
             handleInitializeNotification(call, result: result)
@@ -410,7 +414,20 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             result(FlutterError(code: "DISPOSE_ERROR", message: error.localizedDescription, details: nil))
         }
     }
-    
+
+    // MARK: - Phase 1: Buffering Handlers
+
+    private func handleGetBufferHealth(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+
+        let bufferHealth = playerManager.getBufferHealth(playerId: playerId)
+        result(bufferHealth)
+    }
+
     // MARK: - Phase 3: Notification Handlers
     
     private func handleInitializeNotification(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

@@ -219,7 +219,20 @@ class MediaPlayerManager {
         print("MediaPlayerManager: getPlayerLayer - playerView exists, returning playerLayer")
         return playerView.playerLayer
     }
-    
+
+    func getBufferHealth(playerId: String) -> [String: Any] {
+        markActivity(playerId: playerId)
+        guard let playerInstance = players[playerId] else {
+            return [
+                "bufferedDurationMs": 0,
+                "currentPositionMs": 0,
+                "totalDurationMs": 0,
+                "downloadSpeed": 0
+            ]
+        }
+        return playerInstance.getBufferHealth()
+    }
+
     func disposePlayer(playerId: String) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
@@ -354,6 +367,11 @@ class MediaPlayerInstance: NSObject {
         }
         
         let playerItem = AVPlayerItem(asset: asset)
+
+        // Apply buffer configuration if available
+        if let bufferConfig = config?["bufferConfig"] as? [String: Any] {
+            playerItem.preferredForwardBufferDuration = TimeInterval((bufferConfig["targetBufferMs"] as? Int ?? 15000)) / 1000.0
+        }
 
         // Clean up previous observers (modern KVO auto-invalidates, no exceptions)
         itemDurationObserver?.invalidate()
@@ -527,7 +545,11 @@ class MediaPlayerInstance: NSObject {
         guard let player = avPlayer else { return false }
         return player.rate > 0
     }
-    
+
+    func getBufferHealth() -> [String: Any] {
+        return BufferingHandler.getBufferHealth(from: avPlayer)
+    }
+
     private func startBandwidthMonitoring() {
         // Start a timer that monitors bandwidth every 2 seconds
         bandwidthTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in

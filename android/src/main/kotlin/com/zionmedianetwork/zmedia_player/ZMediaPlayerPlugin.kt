@@ -63,7 +63,11 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             "skipToIndex" -> handleSkipToIndex(call, result)
             "updateConfig" -> handleUpdateConfig(call, result)
             "dispose" -> handleDispose(call, result)
-            
+
+            // Phase 1: Buffering & Network methods
+            "getBufferHealth" -> handleGetBufferHealth(call, result)
+            "getNetworkStatus" -> handleGetNetworkStatus(call, result)
+
             // Phase 3: Notification methods
             "initializeNotification" -> handleInitializeNotification(call, result)
             "showNotification" -> handleShowNotification(call, result)
@@ -374,6 +378,22 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             }
         } catch (e: Exception) {
             result.error("DISPOSE_ERROR", e.message, null)
+        }
+    }
+
+    // Phase 1: Buffering method handlers
+
+    private fun handleGetBufferHealth(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            if (playerId != null) {
+                val bufferHealth = playerManager.getBufferHealth(playerId)
+                result.success(bufferHealth)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("BUFFER_HEALTH_ERROR", e.message, null)
         }
     }
 
