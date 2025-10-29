@@ -64,9 +64,8 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             "updateConfig" -> handleUpdateConfig(call, result)
             "dispose" -> handleDispose(call, result)
 
-            // Phase 1: Buffering & Network methods
+            // Phase 1: Buffering methods
             "getBufferHealth" -> handleGetBufferHealth(call, result)
-            "getNetworkStatus" -> handleGetNetworkStatus(call, result)
 
             // Phase 3: Notification methods
             "initializeNotification" -> handleInitializeNotification(call, result)

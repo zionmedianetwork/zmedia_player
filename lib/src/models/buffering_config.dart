@@ -5,6 +5,8 @@
 /// iOS (AVPlayer) to configure platform-specific buffering behavior.
 library;
 
+import 'network_status.dart';
+
 /// Configuration for buffering behavior
 class BufferingConfig {
   /// Minimum buffer duration before playback can start (in milliseconds)
@@ -171,28 +173,8 @@ class BufferingConfig {
   }
 }
 
-/// Network quality levels for adaptive buffering
-enum NetworkQuality {
-  /// Excellent network (> 5 Mbps) - can use high quality with large buffers
-  excellent,
-
-  /// Good network (1-5 Mbps) - can use medium-high quality
-  good,
-
-  /// Fair network (500 Kbps - 1 Mbps) - should use medium quality
-  fair,
-
-  /// Poor network (< 500 Kbps) - should use low quality with larger buffers
-  poor,
-
-  /// Offline/no network - cannot stream
-  offline,
-
-  /// Unknown - network quality not yet determined
-  unknown,
-}
-
-extension NetworkQualityExtension on NetworkQuality {
+/// Extension to add buffering-specific methods to NetworkQuality
+extension NetworkQualityBufferingExtension on NetworkQuality {
   /// Gets recommended buffer configuration for this network quality
   BufferingConfig get recommendedBufferConfig {
     switch (this) {

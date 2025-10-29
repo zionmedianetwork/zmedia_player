@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../models/buffering_config.dart';
 import '../models/buffer_health.dart';
+import '../models/network_status.dart';
 
 /// Service for managing adaptive buffering behavior
 class BufferingService {
@@ -89,7 +90,7 @@ class BufferingService {
 
   /// Updates network quality from bandwidth measurement
   void updateFromBandwidth(int bytesPerSecond) {
-    final quality = NetworkQualityExtension.fromBandwidth(bytesPerSecond);
+    final quality = NetworkQuality.fromBandwidth(bytesPerSecond);
     updateNetworkQuality(quality);
   }
 

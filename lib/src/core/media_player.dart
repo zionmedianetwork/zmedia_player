@@ -12,6 +12,7 @@ import '../models/cast_device.dart';
 import '../models/drm_config.dart';
 import '../models/buffering_config.dart';
 import '../models/buffer_health.dart';
+import '../models/network_status.dart';
 import '../services/buffering_service.dart';
 import 'media_config.dart';
 import 'crash_reporter.dart';
