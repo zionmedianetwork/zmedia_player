@@ -20,20 +20,29 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var context: Context
     private lateinit var playerManager: MediaPlayerManager
     private var activity: Activity? = null
-    
+
     // Phase 3: Handler maps
     private val notificationHandlers = mutableMapOf<String, NotificationHandler>()
     private val pipHandlers = mutableMapOf<String, PipHandler>()
     private val castHandlers = mutableMapOf<String, CastHandler>()
 
+    // Phase 1: Secure storage
+    private lateinit var secureStorageChannel: MethodChannel
+    private lateinit var secureStorageHandler: SecureStorageHandler
+
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "zmedia_player")
         channel.setMethodCallHandler(this)
-        
+
         // Initialize player manager
         playerManager = MediaPlayerManager(context, channel)
-        
+
+        // Phase 1: Initialize secure storage channel
+        secureStorageChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "zmedia_player/secure_storage")
+        secureStorageHandler = SecureStorageHandler(context)
+        secureStorageChannel.setMethodCallHandler(secureStorageHandler)
+
         // Register platform view
         flutterPluginBinding
             .platformViewRegistry
@@ -745,6 +754,9 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
         playerManager.shutdown()  // Properly stops Handler runnable + disposes all players
+
+        // Phase 1: Cleanup secure storage channel
+        secureStorageChannel.setMethodCallHandler(null)
 
         // Dispose all Phase 3 handlers
         notificationHandlers.values.forEach { it.dispose() }

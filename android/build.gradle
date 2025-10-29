@@ -69,7 +69,10 @@ android {
         // AndroidX dependencies
         implementation 'androidx.core:core-ktx:1.9.0'
         implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
-        
+
+        // Phase 1: Security - Encrypted storage
+        implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+
         // Phase 3: Media notifications
         implementation 'androidx.media:media:1.7.0'
         
