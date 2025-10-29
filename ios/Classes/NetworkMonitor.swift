@@ -85,15 +85,7 @@ class NetworkMonitor {
      * Gets current network status
      */
     func getCurrentNetworkStatus() -> [String: Any] {
-        guard let path = currentPath ?? monitor.currentPath else {
-            return [
-                "quality": "offline",
-                "downloadSpeed": 0,
-                "isMetered": false,
-                "connectionType": "none"
-            ]
-        }
-
+        let path = currentPath ?? monitor.currentPath
         return getNetworkStatus(from: path)
     }
 
@@ -102,7 +94,7 @@ class NetworkMonitor {
      */
     func isNetworkAvailable() -> Bool {
         let path = currentPath ?? monitor.currentPath
-        return path?.status == .satisfied
+        return path.status == .satisfied
     }
 
     // MARK: - Private Methods
