@@ -7,9 +7,7 @@ import 'package:zmedia_player/zmedia_player.dart';
 /// Demonstrates Phase 1 P1 features:
 /// - Analytics tracking for DRM events
 /// - Secure token storage
-/// - Certificate pinning
-/// - Buffer health monitoring
-/// - Network resilience
+/// - Input validation
 class DrmDemoPage extends StatefulWidget {
   const DrmDemoPage({Key? key}) : super(key: key);
 
@@ -28,10 +26,6 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
 
   // Phase 1 P1: Secure Storage
   late SecureStorage _secureStorage;
-
-  // Phase 1 P0: Buffering Service
-  late BufferingService _bufferingService;
-  BufferHealth? _bufferHealth;
 
   // Analytics metrics tracking
   DateTime? _playbackStartTime;
@@ -97,11 +91,6 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
     // Phase 1 P1: Initialize Secure Storage
     _secureStorage = PlatformSecureStorage();
 
-    // Phase 1 P0: Initialize Buffering Service
-    _bufferingService = BufferingService(
-      config: BufferingConfig.smoothPlayback(), // Optimized for DRM content
-    );
-
     // Create controller
     _controller = MediaController.create(
       config: const MediaConfig(
@@ -129,21 +118,6 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
         _analyticsService.trackError(
           DrmException('DRM Error: ${session.errorMessage}'),
           {'session_state': session.state.name},
-        );
-      }
-    });
-
-    // Phase 1 P0: Listen to buffer health updates
-    _bufferingService.bufferHealthStream.listen((health) {
-      setState(() {
-        _bufferHealth = health;
-      });
-
-      if (!health.isHealthy) {
-        _bufferEventCount++;
-        _analyticsService.trackBufferEvent(
-          BufferEventType.underrun,
-          Duration(milliseconds: health.bufferedDurationMs),
         );
       }
     });
@@ -242,9 +216,6 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
         'demo_secure_token_${DateTime.now().millisecondsSinceEpoch}',
       );
 
-      // Phase 1 P0: Start buffer monitoring
-      _bufferingService.startMonitoring();
-
       // Create media item with DRM config
       final mediaItem = MediaItem(
         id: 'drm_video_$index',
@@ -298,22 +269,18 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
 
   @override
   void dispose() {
-    // Dispose controller
-    _controller.dispose();
-
-    // Phase 1 P0: Stop buffering service
-    _bufferingService.stopMonitoring();
-    _bufferingService.dispose();
-
-    // Phase 1 P1: Flush analytics
-    _analyticsService.flush();
-    _analyticsService.dispose();
-
-    // Track session end
+    // Track session end before disposal
     _analyticsService.trackCustomEvent('drm_demo_closed', {
       'total_errors': _errorCount,
       'total_buffer_events': _bufferEventCount,
     });
+
+    // Dispose controller
+    _controller.dispose();
+
+    // Phase 1 P1: Flush analytics
+    _analyticsService.flush();
+    _analyticsService.dispose();
 
     super.dispose();
   }
@@ -475,46 +442,6 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
                 ),
             ],
           ),
-
-          // Buffer Health
-          if (_bufferHealth != null) ...[
-            const SizedBox(height: 12),
-            const Divider(),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(
-                  _bufferHealth!.isHealthy
-                      ? Icons.check_circle
-                      : Icons.warning,
-                  color: _bufferHealth!.isHealthy ? Colors.green : Colors.orange,
-                  size: 16,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  'Buffer Health: ${_bufferHealth!.status.name.toUpperCase()}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Buffered: ${(_bufferHealth!.bufferedDurationMs / 1000).toStringAsFixed(1)}s',
-              style: TextStyle(fontSize: 11, color: Colors.grey[700]),
-            ),
-            if (_bufferHealth!.warning != null)
-              Text(
-                _bufferHealth!.warning!,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.orange,
-                  fontStyle: FontStyle.italic,
-                ),
-              ),
-          ],
 
           // Security features indicator
           const SizedBox(height: 12),
