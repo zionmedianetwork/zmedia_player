@@ -257,7 +257,10 @@ class MediaPlayerInstance: NSObject {
     private var statusObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
     private var bandwidthTimer: Timer?
-    private var observedPlayerItem: AVPlayerItem?  // Track observed item for safe cleanup
+
+    // Modern KVO observers for player item (auto-cleanup, no exceptions)
+    private var itemDurationObserver: NSKeyValueObservation?
+    private var itemStatusObserver: NSKeyValueObservation?
 
     private var currentPlaylist: [[String: Any]]?
     private var currentIndex = 0
@@ -335,15 +338,12 @@ class MediaPlayerInstance: NSObject {
         
         // Reset access log event counter for new media
         previousAccessLogEventCount = 0
-        
+
         print("MediaPlayerInstance.loadMediaItem(): Loading URL: \(urlString)")
-        
-        // Remove observers from old player item
-        if let oldItem = avPlayer?.currentItem {
-            oldItem.removeObserver(self, forKeyPath: "duration")
-            oldItem.removeObserver(self, forKeyPath: "status")
-        }
-        
+
+        // Note: No need to remove old observers - modern KVO (NSKeyValueObservation)
+        // automatically cleans up when we invalidate or reassign the observer variables
+
         // Create AVURLAsset with custom headers if provided
         var asset: AVURLAsset
         if let httpHeaders = mediaItem["httpHeaders"] as? [String: String] {
@@ -355,13 +355,24 @@ class MediaPlayerInstance: NSObject {
         
         let playerItem = AVPlayerItem(asset: asset)
 
-        // Remove observers from previous item first (prevents leaks)
-        removePlayerItemObservers()
+        // Clean up previous observers (modern KVO auto-invalidates, no exceptions)
+        itemDurationObserver?.invalidate()
+        itemStatusObserver?.invalidate()
 
-        // Add observers for the new player item
-        playerItem.addObserver(self, forKeyPath: "duration", options: [.new], context: nil)
-        playerItem.addObserver(self, forKeyPath: "status", options: [.new], context: nil)
-        observedPlayerItem = playerItem  // Track this item for safe cleanup
+        // Add modern KVO observers (safe, auto-cleanup on dealloc)
+        itemDurationObserver = playerItem.observe(\.duration, options: [.new]) { [weak self] item, _ in
+            guard let self = self else { return }
+            let duration = item.duration
+            if duration.isNumeric && !duration.isIndefinite {
+                let durationMs = Int64(CMTimeGetSeconds(duration) * 1000)
+                self.notifyDurationChanged(duration: durationMs)
+            }
+        }
+
+        itemStatusObserver = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard let self = self else { return }
+            self.handlePlayerItemStatusChange(status: item.status)
+        }
 
         // Ensure we're on main thread for player operations
         DispatchQueue.main.async { [weak self] in
@@ -554,26 +565,6 @@ class MediaPlayerInstance: NSObject {
         }
     }
 
-    // Safe removal of player item observers
-    private func removePlayerItemObservers() {
-        guard let item = observedPlayerItem else { return }
-
-        // Remove observers with error handling (prevents crashes on double-removal)
-        do {
-            item.removeObserver(self, forKeyPath: "duration")
-        } catch {
-            print("MediaPlayerInstance: Failed to remove duration observer: \(error)")
-        }
-
-        do {
-            item.removeObserver(self, forKeyPath: "status")
-        } catch {
-            print("MediaPlayerInstance: Failed to remove status observer: \(error)")
-        }
-
-        observedPlayerItem = nil
-    }
-
     func dispose() {
         // Stop bandwidth monitoring
         stopBandwidthMonitoring()
@@ -590,8 +581,11 @@ class MediaPlayerInstance: NSObject {
         rateObserver?.invalidate()
         rateObserver = nil
 
-        // Remove AVPlayerItem observers with error handling
-        removePlayerItemObservers()
+        // Remove player item observers (modern KVO auto-cleanup)
+        itemDurationObserver?.invalidate()
+        itemDurationObserver = nil
+        itemStatusObserver?.invalidate()
+        itemStatusObserver = nil
 
         NotificationCenter.default.removeObserver(self)
 
@@ -671,16 +665,9 @@ class MediaPlayerInstance: NSObject {
         }
     }
     
-    override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
-        if keyPath == "duration" {
-            notifyDurationChanged()
-        } else if keyPath == "status" {
-            // Handle AVPlayerItem status changes
-            if let playerItem = object as? AVPlayerItem {
-                handlePlayerItemStatusChange(status: playerItem.status)
-            }
-        }
-    }
+    // Note: observeValue is no longer needed - we use modern KVO (NSKeyValueObservation)
+    // which handles observation via closures. The old-style KVO that required this method
+    // has been replaced with modern Swift observers in loadMediaItem().
     
     private func handlePlayerItemStatusChange(status: AVPlayerItem.Status) {
         print("MediaPlayerInstance: PlayerItem status changed to: \(status.rawValue)")
@@ -739,11 +726,17 @@ class MediaPlayerInstance: NSObject {
         methodChannel.invokeMethod("onPositionChanged", arguments: arguments)
     }
     
-    private func notifyDurationChanged() {
-        guard let duration = avPlayer?.currentItem?.duration,
-              duration.isValid && !duration.isIndefinite else { return }
-        
-        let durationMs = Int(duration.seconds * 1000)
+    private func notifyDurationChanged(duration: Int64? = nil) {
+        let durationMs: Int
+
+        if let providedDuration = duration {
+            durationMs = Int(providedDuration)
+        } else {
+            guard let itemDuration = avPlayer?.currentItem?.duration,
+                  itemDuration.isValid && !itemDuration.isIndefinite else { return }
+            durationMs = Int(itemDuration.seconds * 1000)
+        }
+
         let isLive = currentMediaItem?["isLive"] as? Bool ?? false
         let arguments: [String: Any] = [
             "playerId": playerId,
