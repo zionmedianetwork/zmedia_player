@@ -451,19 +451,19 @@ final mediaItem = MediaItem(
 **Goal:** Fix all P0 bugs, stabilize memory and threading
 
 #### Week 1: Memory Leaks
-- [ ] Fix Dart StreamController cleanup (2 days)
-- [ ] Fix Android Handler leaks (2 days)
-- [ ] Fix iOS time observer leaks (1 day)
+- [x] Fix Dart StreamController cleanup (2 days)
+- [x] Fix Android Handler leaks (2 days)
+- [x] Fix iOS time observer leaks (1 day)
 
 #### Week 2: Thread Safety
-- [ ] Add Dart synchronization primitives (2 days)
-- [ ] Fix Android concurrent modification (2 days)
-- [ ] Fix iOS async race conditions (1 day)
+- [x] Add Dart synchronization primitives (2 days)
+- [x] Fix Android concurrent modification (2 days)
+- [x] Fix iOS async race conditions (1 day)
 
 #### Week 3: Lifecycle & Resources
-- [ ] Proper Activity/ViewController lifecycle (2 days)
-- [ ] Resource cleanup validation (2 days)
-- [ ] Stress testing under load (1 day)
+- [x] Proper Activity/ViewController lifecycle (2 days)
+- [x] Resource cleanup validation (2 days)
+- [x] Stress testing under load (1 day)
 
 **Deliverables:**
 - Zero memory leaks under 24hr test
@@ -477,19 +477,19 @@ final mediaItem = MediaItem(
 **Goal:** Add critical missing features for production readiness
 
 #### Week 1-2: Buffering & Network Resilience
-- [ ] Implement adaptive buffering strategy (3 days)
-- [ ] Add network resilience (reconnect/retry) (3 days)
-- [ ] Buffer health monitoring (2 days)
+- [x] Implement adaptive buffering strategy (3 days)
+- [x] Add network resilience (reconnect/retry) (3 days)
+- [x] Buffer health monitoring (2 days)
 
 #### Week 3: Analytics & Monitoring
-- [ ] Playback QoE metrics (2 days)
-- [ ] Detailed error taxonomy (2 days)
-- [ ] Performance instrumentation (2 days)
+- [x] Playback QoE metrics (2 days)
+- [x] Detailed error taxonomy (2 days)
+- [x] Performance instrumentation (2 days)
 
 #### Week 4: Security Hardening
-- [ ] Certificate pinning (2 days)
-- [ ] SecureStorage for tokens (2 days)
-- [ ] Input validation & sanitization (1 day)
+- [x] Certificate pinning (2 days)
+- [x] SecureStorage for tokens (2 days)
+- [x] Input validation & sanitization (1 day)
 
 **Deliverables:**
 - Robust playback under poor network

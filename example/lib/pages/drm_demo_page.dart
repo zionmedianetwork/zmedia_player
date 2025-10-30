@@ -53,8 +53,8 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
       url:
           'https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/master.m3u8',
       drmConfig: DrmConfig.fairplay(
-        licenseUrl: 'YOUR_FAIRPLAY_LICENSE_URL',
-        certificateUrl: 'YOUR_CERTIFICATE_URL',
+        licenseUrl: 'https://YOUR_FAIRPLAY_LICENSE_URL',
+        certificateUrl: 'https://YOUR_CERTIFICATE_URL',
       ),
       platformSupport: 'iOS',
     ),
@@ -91,10 +91,10 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
     // Phase 1 P1: Initialize Secure Storage
     _secureStorage = PlatformSecureStorage();
 
-    // Create controller
+    // Create controller with autoPlay enabled for DRM testing
     _controller = MediaController.create(
       config: const MediaConfig(
-        autoPlay: false,
+        autoPlay: true,
         showControls: true,
       ),
     );
@@ -231,7 +231,12 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
         'platform': Platform.isAndroid ? 'Android' : 'iOS',
       });
 
+      debugPrint('Loading media item: ${mediaItem.toMap()}');
       await _controller.load(mediaItem);
+      debugPrint('Media loaded successfully');
+
+      // Wait a bit to ensure native view is created
+      await Future.delayed(const Duration(milliseconds: 500));
 
       _showMessage('DRM Content Loaded', video.title, Colors.green);
 
@@ -240,6 +245,10 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
         'video_index': index,
         'title': video.title,
       });
+
+      // Auto-play after loading
+      await _controller.play();
+      debugPrint('Playback started');
     } on ConfigurationException catch (e) {
       _errorCount++;
       _showMessage('Configuration Error', e.message, Colors.red);
