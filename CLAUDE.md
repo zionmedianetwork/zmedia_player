@@ -1,6 +1,7 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+a step by step roadmap is available in PLAN.md. Always follow this file for implementation guidance
 
 ## Project Overview
 
@@ -13,6 +14,7 @@ ZMedia Player is a comprehensive Flutter media player package with advanced feat
 ## Development Commands
 
 ### Testing
+
 ```bash
 # Run all tests
 flutter test
