@@ -177,65 +177,6 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
   }
 
   Future<void> _connectToDevice(CastDevice device) async {
-    // Handle iOS system picker
-    if (device.id == 'airplay_system') {
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.airplay, color: Colors.blue),
-              SizedBox(width: 8),
-              Text('How to Use AirPlay'),
-            ],
-          ),
-          content: const SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '🎬 Video is playing above!',
-                  style: TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                      color: Colors.green),
-                ),
-                SizedBox(height: 16),
-                Text(
-                  'To cast to your MacBook or Apple TV:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                SizedBox(height: 12),
-                Text(
-                    '1️⃣ Setup on Mac:\n   • System Settings → General → AirDrop & Handoff\n   • Turn on "AirPlay Receiver"'),
-                SizedBox(height: 12),
-                Text(
-                    '2️⃣ Look for the AirPlay button (📡) in the video player above'),
-                SizedBox(height: 12),
-                Text('3️⃣ Tap it to see available devices'),
-                SizedBox(height: 12),
-                Text('4️⃣ Select your device - video streams!'),
-                SizedBox(height: 16),
-                Text(
-                  '💡 AirPlay button appears when devices are on same Wi-Fi.',
-                  style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Got it!'),
-            ),
-          ],
-        ),
-      );
-      return;
-    }
-
     final success = await _castService?.connect(
       device: device,
       playerId: _controller.playerId,
@@ -617,40 +558,23 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                           final device = _availableDevices[index];
                           final isConnected =
                               device.id == _castStatus?.connectedDevice?.id;
-                          final isSystemPicker = device.id == 'airplay_system';
 
                           return Card(
-                            color: isConnected
-                                ? Colors.purple[50]
-                                : isSystemPicker
-                                    ? Colors.blue[50]
-                                    : null,
+                            color: isConnected ? Colors.purple[50] : null,
                             child: ListTile(
                               leading: Icon(
                                 Platform.isAndroid ? Icons.cast : Icons.airplay,
-                                color: isConnected
-                                    ? Colors.purple
-                                    : isSystemPicker
-                                        ? Colors.blue
-                                        : Colors.grey,
+                                color: isConnected ? Colors.purple : Colors.grey,
                               ),
                               title: Text(device.name),
                               subtitle: Text(
-                                isSystemPicker
-                                    ? '🎬 Video playing! Use AirPlay button (📡) in player above\n\nTap this card for setup instructions'
-                                    : device.type.toString().split('.').last,
-                                style: TextStyle(
-                                  fontSize: isSystemPicker ? 12 : 14,
-                                ),
+                                device.type.toString().split('.').last,
                               ),
                               trailing: isConnected
                                   ? const Icon(Icons.check_circle,
                                       color: Colors.green)
-                                  : isSystemPicker
-                                      ? const Icon(Icons.open_in_new,
-                                          color: Colors.blue)
-                                      : const Icon(Icons.arrow_forward_ios,
-                                          size: 16),
+                                  : const Icon(Icons.arrow_forward_ios,
+                                      size: 16),
                               onTap: isConnected
                                   ? null
                                   : () => _connectToDevice(device),
