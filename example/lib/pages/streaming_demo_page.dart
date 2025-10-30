@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:zmedia_player/zmedia_player.dart';
 
-/// Demonstrates Phase 2 features: HLS/DASH streaming, quality selection,
-/// subtitle tracks, and adaptive bitrate streaming
+/// Demonstrates Phase 1 & Phase 2 features:
+/// - Phase 1: Adaptive buffering, buffer health monitoring, network quality
+/// - Phase 2: HLS/DASH streaming, quality selection, subtitle tracks, ABR
 class StreamingDemoPage extends StatefulWidget {
   const StreamingDemoPage({super.key});
 
@@ -46,6 +47,12 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
   bool _showQualitySettings = false;
   bool _showSubtitleSettings = false;
   String _bandwidthInfo = 'Estimating...';
+
+  // Phase 1: Buffer health monitoring
+  BufferHealth? _bufferHealth;
+  NetworkQuality _networkQuality = NetworkQuality.unknown;
+  BufferStatistics? _bufferStatistics;
+  bool _showBufferDetails = false;
 
   @override
   void initState() {
@@ -106,6 +113,9 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
     // Setup bandwidth listener for native updates
     _setupBandwidthListener();
 
+    // Phase 1: Setup buffer health listener
+    _setupBufferHealthListener();
+
     // Load initial video
     _loadVideo(_selectedVideoIndex);
   }
@@ -127,6 +137,19 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       if (mounted) {
         setState(() {
           // Quality tracks updated - UI will rebuild
+        });
+      }
+    });
+  }
+
+  // Phase 1: Listen to buffer health updates
+  void _setupBufferHealthListener() {
+    _controller.player.bufferHealthStream.listen((health) {
+      if (mounted) {
+        setState(() {
+          _bufferHealth = health;
+          _networkQuality = _controller.player.networkQuality;
+          _bufferStatistics = _controller.player.bufferStatistics;
         });
       }
     });
@@ -184,7 +207,7 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Streaming Demo (Phase 2)'),
+        title: const Text('Streaming Demo (Phase 1 & 2)'),
         backgroundColor: Colors.deepPurple,
       ),
       body: Column(
@@ -238,6 +261,9 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
               ],
             ),
           ),
+
+          // Phase 1: Buffer Health Panel
+          _buildBufferHealthPanel(),
 
           // Control Buttons
           Padding(
@@ -367,6 +393,246 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
         ),
       ],
     );
+  }
+
+  // Phase 1: Build buffer health monitoring panel
+  Widget _buildBufferHealthPanel() {
+    if (_bufferHealth == null) {
+      return const SizedBox.shrink();
+    }
+
+    final health = _bufferHealth!;
+    final statusColor = _getBufferStatusColor(health.status);
+    final networkQualityText = _networkQuality.name.toUpperCase();
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.blue[900],
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: statusColor, width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header with toggle
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.analytics, color: statusColor, size: 20),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Buffer Health (Phase 1)',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              IconButton(
+                icon: Icon(
+                  _showBufferDetails ? Icons.expand_less : Icons.expand_more,
+                  color: Colors.white70,
+                ),
+                onPressed: () => setState(() => _showBufferDetails = !_showBufferDetails),
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          // Main metrics row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildBufferMetric(
+                'Buffer',
+                '${(health.bufferedDurationMs / 1000).toStringAsFixed(1)}s',
+                statusColor,
+              ),
+              _buildBufferMetric(
+                'Status',
+                health.status.name.toUpperCase(),
+                statusColor,
+              ),
+              _buildBufferMetric(
+                'Network',
+                networkQualityText,
+                _getNetworkQualityColor(_networkQuality),
+              ),
+              _buildBufferMetric(
+                'Ratio',
+                '${(health.bufferRatio * 100).toStringAsFixed(0)}%',
+                statusColor,
+              ),
+            ],
+          ),
+
+          // Detailed stats (expandable)
+          if (_showBufferDetails) ...[
+            const Divider(color: Colors.white24, height: 16),
+            _buildDetailedStats(health),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBufferMetric(String label, String value, Color color) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 10,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildDetailedStats(BufferHealth health) {
+    final stats = _bufferStatistics;
+    if (stats == null) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Session Statistics',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 16,
+          runSpacing: 8,
+          children: [
+            _buildStatItem('Events', stats.totalBufferEvents.toString()),
+            _buildStatItem('Underruns', stats.underrunCount.toString()),
+            _buildStatItem(
+              'Avg Buffer',
+              '${(stats.averageBufferDuration.inMilliseconds / 1000).toStringAsFixed(1)}s',
+            ),
+            _buildStatItem(
+              'Min Buffer',
+              '${(stats.minBufferDuration.inMilliseconds / 1000).toStringAsFixed(1)}s',
+            ),
+            _buildStatItem(
+              'Max Buffer',
+              '${(stats.maxBufferDuration.inMilliseconds / 1000).toStringAsFixed(1)}s',
+            ),
+            _buildStatItem(
+              'Rebuffer %',
+              '${(stats.rebufferRatio * 100).toStringAsFixed(2)}%',
+            ),
+          ],
+        ),
+        if (health.shouldReduceQuality) ...[
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.orange.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: Colors.orange),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.warning, color: Colors.orange, size: 16),
+                const SizedBox(width: 4),
+                Text(
+                  health.warning ?? 'Consider reducing quality',
+                  style: const TextStyle(
+                    color: Colors.orange,
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildStatItem(String label, String value) {
+    return SizedBox(
+      width: 80,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white54,
+              fontSize: 10,
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getBufferStatusColor(BufferStatus status) {
+    switch (status) {
+      case BufferStatus.healthy:
+        return Colors.green;
+      case BufferStatus.warning:
+        return Colors.amber;
+      case BufferStatus.critical:
+        return Colors.orange;
+      case BufferStatus.underrun:
+        return Colors.red;
+    }
+  }
+
+  Color _getNetworkQualityColor(NetworkQuality quality) {
+    switch (quality) {
+      case NetworkQuality.excellent:
+        return Colors.green;
+      case NetworkQuality.good:
+        return Colors.lightGreen;
+      case NetworkQuality.fair:
+        return Colors.amber;
+      case NetworkQuality.poor:
+        return Colors.orange;
+      case NetworkQuality.offline:
+        return Colors.red;
+      case NetworkQuality.unknown:
+        return Colors.grey;
+    }
   }
 
   Widget _buildQualitySettingsSheet() {

@@ -3,6 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:zmedia_player/zmedia_player.dart';
 
 /// Demo page for DRM (Digital Rights Management) content playback
+///
+/// Demonstrates Phase 1 P1 features:
+/// - Analytics tracking for DRM events
+/// - Secure token storage
+/// - Input validation
 class DrmDemoPage extends StatefulWidget {
   const DrmDemoPage({Key? key}) : super(key: key);
 
@@ -15,6 +20,17 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
   DrmSession? _drmSession;
   bool _isDrmSupported = false;
   Map<String, dynamic>? _drmSystemInfo;
+
+  // Phase 1 P1: Analytics Service
+  late AnalyticsService _analyticsService;
+
+  // Phase 1 P1: Secure Storage
+  late SecureStorage _secureStorage;
+
+  // Analytics metrics tracking
+  DateTime? _playbackStartTime;
+  int _bufferEventCount = 0;
+  int _errorCount = 0;
 
   // Sample DRM videos (replace with your own test content)
   final List<_DrmVideo> _videos = [
@@ -37,8 +53,8 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
       url:
           'https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_adv_example_hevc/master.m3u8',
       drmConfig: DrmConfig.fairplay(
-        licenseUrl: 'YOUR_FAIRPLAY_LICENSE_URL',
-        certificateUrl: 'YOUR_CERTIFICATE_URL',
+        licenseUrl: 'https://YOUR_FAIRPLAY_LICENSE_URL',
+        certificateUrl: 'https://YOUR_CERTIFICATE_URL',
       ),
       platformSupport: 'iOS',
     ),
@@ -65,10 +81,20 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
   }
 
   Future<void> _initializePlayer() async {
-    // Create controller
+    // Phase 1 P1: Initialize Analytics Service
+    _analyticsService = ConsoleAnalyticsService(verbose: true);
+    _analyticsService.trackCustomEvent('drm_demo_initialized', {
+      'platform': Platform.isAndroid ? 'Android' : 'iOS',
+      'timestamp': DateTime.now().toIso8601String(),
+    });
+
+    // Phase 1 P1: Initialize Secure Storage
+    _secureStorage = PlatformSecureStorage();
+
+    // Create controller with autoPlay enabled for DRM testing
     _controller = MediaController.create(
       config: const MediaConfig(
-        autoPlay: false,
+        autoPlay: true,
         showControls: true,
       ),
     );
@@ -80,6 +106,52 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
       setState(() {
         _drmSession = session;
       });
+
+      // Track DRM session state changes
+      _analyticsService.trackCustomEvent('drm_session_state_changed', {
+        'state': session.state.name,
+        'hasError': session.errorMessage != null,
+      });
+
+      if (session.errorMessage != null) {
+        _errorCount++;
+        _analyticsService.trackError(
+          DrmException('DRM Error: ${session.errorMessage}'),
+          {'session_state': session.state.name},
+        );
+      }
+    });
+
+    // Listen to playback state for analytics
+    _controller.player.stateStream.listen((state) {
+      if (state.state == PlayerState.playing && _playbackStartTime == null) {
+        _playbackStartTime = DateTime.now();
+        final currentVideo = _videos[_currentVideoIndex];
+        _analyticsService.trackPlaybackStart(
+          currentVideo.url,
+          MediaConfig(autoPlay: false, showControls: true),
+          metadata: {
+            'drm_scheme': currentVideo.drmConfig.scheme.name,
+            'platform': Platform.isAndroid ? 'Android' : 'iOS',
+            'title': currentVideo.title,
+          },
+        );
+      } else if (state.state == PlayerState.completed) {
+        if (_playbackStartTime != null) {
+          final watchTime = DateTime.now().difference(_playbackStartTime!);
+          _analyticsService.trackPlaybackEnd(
+            watchTime,
+            PlaybackEndReason.completed,
+            metadata: {
+              'buffer_events': _bufferEventCount,
+              'errors': _errorCount,
+            },
+          );
+          _playbackStartTime = null;
+          _bufferEventCount = 0;
+          _errorCount = 0;
+        }
+      }
     });
 
     // Check DRM support
@@ -111,6 +183,9 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
 
     setState(() {
       _currentVideoIndex = index;
+      _playbackStartTime = null;
+      _bufferEventCount = 0;
+      _errorCount = 0;
     });
 
     // Check if DRM is supported on current platform
@@ -129,19 +204,65 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
       }
     }
 
-    // Create media item with DRM config
-    final mediaItem = MediaItem(
-      id: 'drm_video_$index',
-      title: video.title,
-      url: video.url,
-      drmConfig: video.drmConfig,
-    );
-
     try {
+      // Phase 1 P1: Validate DRM configuration
+      InputValidator.validateDrmConfig(video.drmConfig);
+      InputValidator.validateUrl(video.url, requireHttps: true);
+
+      // Phase 1 P1: Demonstrate secure token storage
+      // In production, you'd store auth tokens securely
+      await _secureStorage.write(
+        'drm_token_${video.drmConfig.scheme.name}',
+        'demo_secure_token_${DateTime.now().millisecondsSinceEpoch}',
+      );
+
+      // Create media item with DRM config
+      final mediaItem = MediaItem(
+        id: 'drm_video_$index',
+        title: video.title,
+        url: video.url,
+        drmConfig: video.drmConfig,
+      );
+
+      // Track loading attempt
+      _analyticsService.trackCustomEvent('drm_content_loading', {
+        'video_index': index,
+        'drm_scheme': video.drmConfig.scheme.name,
+        'platform': Platform.isAndroid ? 'Android' : 'iOS',
+      });
+
+      debugPrint('Loading media item: ${mediaItem.toMap()}');
       await _controller.load(mediaItem);
+      debugPrint('Media loaded successfully');
+
+      // Wait a bit to ensure native view is created
+      await Future.delayed(const Duration(milliseconds: 500));
+
       _showMessage('DRM Content Loaded', video.title, Colors.green);
+
+      // Track successful load
+      _analyticsService.trackCustomEvent('drm_content_loaded', {
+        'video_index': index,
+        'title': video.title,
+      });
+
+      // Auto-play after loading
+      await _controller.play();
+      debugPrint('Playback started');
+    } on ConfigurationException catch (e) {
+      _errorCount++;
+      _showMessage('Configuration Error', e.message, Colors.red);
+      _analyticsService.trackError(e, {
+        'video_index': index,
+        'validation_type': 'drm_config',
+      });
     } catch (e) {
+      _errorCount++;
       _showMessage('Error', 'Failed to load DRM content: $e', Colors.red);
+      _analyticsService.trackError(
+        DrmException('Load failed: $e'),
+        {'video_index': index},
+      );
     }
   }
 
@@ -157,7 +278,19 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
 
   @override
   void dispose() {
+    // Track session end before disposal
+    _analyticsService.trackCustomEvent('drm_demo_closed', {
+      'total_errors': _errorCount,
+      'total_buffer_events': _bufferEventCount,
+    });
+
+    // Dispose controller
     _controller.dispose();
+
+    // Phase 1 P1: Flush analytics
+    _analyticsService.flush();
+    _analyticsService.dispose();
+
     super.dispose();
   }
 
@@ -185,6 +318,9 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
 
           // DRM Info Section
           _buildDrmInfoSection(),
+
+          // Phase 1 Metrics Section
+          _buildPhase1MetricsSection(),
 
           // Video List
           Expanded(
@@ -256,6 +392,119 @@ class _DrmDemoPageState extends State<DrmDemoPage> {
                 ],
               ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhase1MetricsSection() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.blue[50],
+        border: Border(
+          top: BorderSide(color: Colors.blue[200]!),
+          bottom: BorderSide(color: Colors.blue[200]!),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.analytics, color: Colors.blue[700]),
+              const SizedBox(width: 8),
+              Text(
+                'Phase 1 P1: Analytics & Monitoring',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue[900],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Analytics metrics
+          Wrap(
+            spacing: 16,
+            runSpacing: 8,
+            children: [
+              _buildMetricChip(
+                Icons.error_outline,
+                'Errors',
+                _errorCount.toString(),
+                _errorCount > 0 ? Colors.red : Colors.green,
+              ),
+              _buildMetricChip(
+                Icons.hourglass_empty,
+                'Buffer Events',
+                _bufferEventCount.toString(),
+                _bufferEventCount > 2 ? Colors.orange : Colors.green,
+              ),
+              if (_playbackStartTime != null)
+                _buildMetricChip(
+                  Icons.play_circle,
+                  'Watch Time',
+                  '${DateTime.now().difference(_playbackStartTime!).inSeconds}s',
+                  Colors.blue,
+                ),
+            ],
+          ),
+
+          // Security features indicator
+          const SizedBox(height: 12),
+          const Divider(),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.security, color: Colors.green[700], size: 16),
+              const SizedBox(width: 4),
+              const Text(
+                'Security: ',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+              const Text(
+                'Input Validation ✓  Secure Storage ✓',
+                style: TextStyle(fontSize: 11),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetricChip(
+    IconData icon,
+    String label,
+    String value,
+    Color color,
+  ) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.3)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Text(
+            '$label: ',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(fontSize: 11, color: color),
+          ),
         ],
       ),
     );

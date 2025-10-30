@@ -229,9 +229,21 @@ class PipHandler: NSObject {
             if let playerLayer = playerLayer {
                 print("PipHandler: Creating PiP controller...")
                 setupPipController(with: playerLayer)
-                
-                // Wait a moment for controller to be ready
-                Thread.sleep(forTimeInterval: 0.2)
+
+                // Schedule retry instead of blocking sleep
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                    guard let self = self else { return }
+                    _ = self.enterPip(config: config)
+                }
+
+                notifyPipStatusChanged(
+                    state: "pending",
+                    isSupported: true,
+                    isActive: false,
+                    errorMessage: "Initializing PiP controller..."
+                )
+
+                return false
             } else {
                 print("PipHandler: Cannot enter PiP - no player layer available")
                 notifyPipStatusChanged(
@@ -257,16 +269,22 @@ class PipHandler: NSObject {
         
         // Check if player layer is ready for display
         if let layer = playerLayer, !layer.isReadyForDisplay {
-            print("PipHandler: Player layer not ready for display yet, waiting...")
-            
-            // Wait briefly for the layer to be ready
-            var attempts = 0
-            while !layer.isReadyForDisplay && attempts < 20 {
-                Thread.sleep(forTimeInterval: 0.1)
-                attempts += 1
+            print("PipHandler: Player layer not ready for display yet, will retry asynchronously")
+
+            // Schedule async retry instead of blocking
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self = self else { return }
+                _ = self.enterPip(config: config)
             }
-            
-            print("PipHandler: After waiting - isReadyForDisplay: \(layer.isReadyForDisplay), attempts: \(attempts)")
+
+            notifyPipStatusChanged(
+                state: "pending",
+                isSupported: true,
+                isActive: false,
+                errorMessage: "Waiting for video to render..."
+            )
+
+            return false
         }
         
         // Re-check if PiP is possible after waiting

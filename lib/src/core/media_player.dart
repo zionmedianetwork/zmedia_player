@@ -10,6 +10,10 @@ import '../models/streaming_config.dart';
 import '../models/pip_config.dart';
 import '../models/cast_device.dart';
 import '../models/drm_config.dart';
+import '../models/buffering_config.dart';
+import '../models/buffer_health.dart';
+import '../models/network_status.dart';
+import '../services/buffering_service.dart';
 import 'media_config.dart';
 import 'crash_reporter.dart';
 import 'exceptions.dart';
@@ -70,6 +74,11 @@ class MediaPlayer {
       StreamController<String>.broadcast();
   final StreamController<int> _bandwidthController =
       StreamController<int>.broadcast();
+  final StreamController<BufferHealth> _bufferHealthController =
+      StreamController<BufferHealth>.broadcast();
+
+  /// Buffering service for adaptive buffer management
+  late final BufferingService _bufferingService;
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
@@ -133,6 +142,52 @@ class MediaPlayer {
     _markActivity();
     _ensureCleanupTimer();
     _setupMethodCallHandler();
+    _initializeBufferingService();
+  }
+
+  /// Initialize buffering service with configuration
+  void _initializeBufferingService() {
+    // Convert old BufferConfig to new BufferingConfig if provided
+    final bufferingConfig = _config.bufferConfig != null
+        ? BufferingConfig(
+            minBufferMs: _config.bufferConfig!.minBufferDuration.inMilliseconds,
+            maxBufferMs: _config.bufferConfig!.maxBufferDuration.inMilliseconds,
+            targetBufferMs: _config.bufferConfig!.targetBufferDuration.inMilliseconds,
+            rebufferMs: _config.bufferConfig!.rebufferDuration.inMilliseconds,
+          )
+        : const BufferingConfig(); // Use default config
+
+    _bufferingService = BufferingService(
+      config: bufferingConfig,
+      platformBufferStatusCallback: _getPlatformBufferStatus,
+    );
+
+    // Listen to buffer health updates and forward to public stream
+    _bufferingService.bufferHealthStream.listen((health) {
+      if (!_bufferHealthController.isClosed) {
+        _bufferHealthController.add(health);
+      }
+    });
+  }
+
+  /// Get buffer status from platform
+  Future<Map<String, dynamic>> _getPlatformBufferStatus() async {
+    try {
+      final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'getBufferHealth',
+        {'playerId': playerId},
+      );
+
+      if (result == null) {
+        return {};
+      }
+
+      // Convert dynamic map to String map
+      return result.map((key, value) => MapEntry(key.toString(), value));
+    } catch (e) {
+      debugPrint('Error getting buffer status: $e');
+      return {};
+    }
   }
 
   /// Enable crash reporting (call once at app startup)
@@ -167,26 +222,44 @@ class MediaPlayer {
     );
   }
 
-  /// Clean up stale player instances
+  /// Clean up stale player instances (thread-safe)
   static void _cleanupStaleInstances() {
     final now = DateTime.now();
     const staleThreshold = Duration(minutes: 15);
 
+    // Create defensive copy of entries to avoid concurrent modification
+    final activitySnapshot = Map<String, DateTime>.from(_lastActivity);
     final staleKeys = <String>[];
 
-    for (final entry in _lastActivity.entries) {
+    for (final entry in activitySnapshot.entries) {
       if (now.difference(entry.value) > staleThreshold) {
         staleKeys.add(entry.key);
       }
     }
 
+    // Process stale instances
     for (final key in staleKeys) {
+      // Check instance still exists before cleanup
       final instance = _instances[key];
-      if (instance != null && !instance.isPlaying) {
+      if (instance != null &&
+          !instance.isPlaying &&
+          !instance._isDisposed) {
         debugPrint('MediaPlayer: Auto-cleaning stale instance: $key');
-        instance.dispose();
-        _instances.remove(key);
+
+        // Atomic removal pattern: remove from tracking first
         _lastActivity.remove(key);
+        _instances.remove(key);
+
+        // Then dispose (this may take time)
+        instance.dispose().catchError((e) {
+          debugPrint('Error during auto-cleanup of $key: $e');
+          crashReporter?.reportError(
+            e,
+            StackTrace.current,
+            context: {'playerId': key, 'operation': 'auto_cleanup'},
+            fatal: false,
+          );
+        });
       }
     }
 
@@ -296,6 +369,30 @@ class MediaPlayer {
   Stream<int> get bandwidthStream {
     _throwIfDisposed();
     return _bandwidthController.stream;
+  }
+
+  /// Stream of buffer health updates
+  Stream<BufferHealth> get bufferHealthStream {
+    _throwIfDisposed();
+    return _bufferHealthController.stream;
+  }
+
+  /// Current network quality based on bandwidth measurements
+  NetworkQuality get networkQuality {
+    _throwIfDisposed();
+    return _bufferingService.networkQuality;
+  }
+
+  /// Buffer statistics for the current session
+  BufferStatistics get bufferStatistics {
+    _throwIfDisposed();
+    return _bufferingService.statistics;
+  }
+
+  /// Last known buffer health status
+  BufferHealth? get lastBufferHealth {
+    _throwIfDisposed();
+    return _bufferingService.lastBufferHealth;
   }
 
   /// Stream of PiP status updates
@@ -606,6 +703,9 @@ class MediaPlayer {
     try {
       await _channel.invokeMethod('play', {'playerId': playerId});
 
+      // Start buffer health monitoring
+      _bufferingService.startMonitoring();
+
       crashReporter?.log('Playback started', context: {
         'playerId': playerId,
         'mediaId': _currentItem?.id,
@@ -633,6 +733,9 @@ class MediaPlayer {
 
     try {
       await _channel.invokeMethod('pause', {'playerId': playerId});
+
+      // Stop buffer health monitoring when paused
+      _bufferingService.stopMonitoring();
 
       crashReporter?.log('Playback paused', context: {
         'playerId': playerId,
@@ -1152,6 +1255,9 @@ class MediaPlayer {
       }
     }
 
+    // Dispose buffering service
+    _bufferingService.dispose();
+
     // Close stream controllers safely
     await _safeCloseStreams();
 
@@ -1170,6 +1276,7 @@ class MediaPlayer {
       _qualityTracksController,
       _audioTracksController,
       _bandwidthController,
+      _bufferHealthController,
       _pipStatusController,
       _castStatusController,
       _castDevicesController,
@@ -1177,15 +1284,60 @@ class MediaPlayer {
       _notificationActionController,
     ];
 
-    for (final controller in controllers) {
-      if (!controller.isClosed) {
-        try {
+    final errors = <String, dynamic>{};
+
+    for (var i = 0; i < controllers.length; i++) {
+      final controller = controllers[i];
+      try {
+        if (!controller.isClosed) {
           await controller.close();
-        } catch (e) {
-          debugPrint('Error closing controller: $e');
         }
+      } catch (e, stackTrace) {
+        final controllerName = _getControllerName(i);
+        errors[controllerName] = e.toString();
+        debugPrint('Error closing $controllerName: $e');
+
+        // Report to crash reporter if available (non-fatal)
+        crashReporter?.reportError(
+          e,
+          stackTrace,
+          context: {
+            'playerId': playerId,
+            'controller': controllerName,
+            'operation': 'stream_cleanup',
+          },
+          fatal: false,
+        );
       }
     }
+
+    // Log summary if there were errors
+    if (errors.isNotEmpty) {
+      debugPrint(
+        'MediaPlayer($playerId): Failed to close ${errors.length}/${controllers.length} controllers: ${errors.keys.join(", ")}',
+      );
+    }
+  }
+
+  /// Helper method for error reporting in stream cleanup
+  String _getControllerName(int index) {
+    const names = [
+      'stateController',
+      'positionController',
+      'durationController',
+      'volumeController',
+      'speedController',
+      'subtitleTracksController',
+      'qualityTracksController',
+      'audioTracksController',
+      'bandwidthController',
+      'pipStatusController',
+      'castStatusController',
+      'castDevicesController',
+      'drmSessionController',
+      'notificationActionController',
+    ];
+    return index < names.length ? names[index] : 'unknownController';
   }
 
   // Private helper methods
@@ -1357,6 +1509,9 @@ class MediaPlayer {
 
     final bandwidth = arguments['bandwidth'] as int? ?? 0;
     _currentBandwidth = bandwidth;
+
+    // Update buffering service with bandwidth measurement
+    _bufferingService.updateFromBandwidth(bandwidth);
 
     if (!_bandwidthController.isClosed) {
       _bandwidthController.add(bandwidth);

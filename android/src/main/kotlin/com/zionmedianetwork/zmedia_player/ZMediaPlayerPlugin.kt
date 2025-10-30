@@ -20,20 +20,29 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var context: Context
     private lateinit var playerManager: MediaPlayerManager
     private var activity: Activity? = null
-    
+
     // Phase 3: Handler maps
     private val notificationHandlers = mutableMapOf<String, NotificationHandler>()
     private val pipHandlers = mutableMapOf<String, PipHandler>()
     private val castHandlers = mutableMapOf<String, CastHandler>()
 
+    // Phase 1: Secure storage
+    private lateinit var secureStorageChannel: MethodChannel
+    private lateinit var secureStorageHandler: SecureStorageHandler
+
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "zmedia_player")
         channel.setMethodCallHandler(this)
-        
+
         // Initialize player manager
         playerManager = MediaPlayerManager(context, channel)
-        
+
+        // Phase 1: Initialize secure storage channel
+        secureStorageChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "zmedia_player/secure_storage")
+        secureStorageHandler = SecureStorageHandler(context)
+        secureStorageChannel.setMethodCallHandler(secureStorageHandler)
+
         // Register platform view
         flutterPluginBinding
             .platformViewRegistry
@@ -63,7 +72,10 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             "skipToIndex" -> handleSkipToIndex(call, result)
             "updateConfig" -> handleUpdateConfig(call, result)
             "dispose" -> handleDispose(call, result)
-            
+
+            // Phase 1: Buffering methods
+            "getBufferHealth" -> handleGetBufferHealth(call, result)
+
             // Phase 3: Notification methods
             "initializeNotification" -> handleInitializeNotification(call, result)
             "showNotification" -> handleShowNotification(call, result)
@@ -374,6 +386,22 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             }
         } catch (e: Exception) {
             result.error("DISPOSE_ERROR", e.message, null)
+        }
+    }
+
+    // Phase 1: Buffering method handlers
+
+    private fun handleGetBufferHealth(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            if (playerId != null) {
+                val bufferHealth = playerManager.getBufferHealth(playerId)
+                result.success(bufferHealth)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            result.error("BUFFER_HEALTH_ERROR", e.message, null)
         }
     }
 
@@ -725,12 +753,15 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
 
     override fun onDetachedFromEngine(@NonNull binding: FlutterPlugin.FlutterPluginBinding) {
         channel.setMethodCallHandler(null)
-        playerManager.dispose()
-        
+        playerManager.shutdown()  // Properly stops Handler runnable + disposes all players
+
+        // Phase 1: Cleanup secure storage channel
+        secureStorageChannel.setMethodCallHandler(null)
+
         // Dispose all Phase 3 handlers
         notificationHandlers.values.forEach { it.dispose() }
         notificationHandlers.clear()
-        
+
         pipHandlers.values.forEach { it.dispose() }
         pipHandlers.clear()
 

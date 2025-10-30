@@ -5,22 +5,35 @@ import AVFoundation
 public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
     private var playerManager: MediaPlayerManager!
     private var methodChannel: FlutterMethodChannel!
-    
+
     // Phase 3: Handler maps
     private var notificationHandlers: [String: NotificationHandler] = [:]
     private var pipHandlers: [String: PipHandler] = [:]
     private var airPlayHandlers: [String: AirPlayHandler] = [:]
-    
+
+    // Phase 1: Secure storage
+    private var secureStorageChannel: FlutterMethodChannel!
+    private var secureStorageHandler: SecureStorageHandler!
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "zmedia_player", binaryMessenger: registrar.messenger())
         let instance = ZMediaPlayerPlugin()
-        
+
         // Initialize player manager
         instance.methodChannel = channel
         instance.playerManager = MediaPlayerManager(methodChannel: channel)
-        
+
         registrar.addMethodCallDelegate(instance, channel: channel)
-        
+
+        // Phase 1: Initialize secure storage channel
+        let secureStorageChannel = FlutterMethodChannel(
+            name: "zmedia_player/secure_storage",
+            binaryMessenger: registrar.messenger()
+        )
+        instance.secureStorageChannel = secureStorageChannel
+        instance.secureStorageHandler = SecureStorageHandler()
+        registrar.addMethodCallDelegate(instance.secureStorageHandler, channel: secureStorageChannel)
+
         // Register platform view factory
         registrar.register(
             MediaPlayerViewFactory(playerManager: instance.playerManager),
@@ -66,7 +79,11 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             handleUpdateConfig(call, result: result)
         case "dispose":
             handleDispose(call, result: result)
-            
+
+        // Phase 1: Buffering handlers
+        case "getBufferHealth":
+            handleGetBufferHealth(call, result: result)
+
         // Phase 3: Notification handlers
         case "initializeNotification":
             handleInitializeNotification(call, result: result)
@@ -410,7 +427,20 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             result(FlutterError(code: "DISPOSE_ERROR", message: error.localizedDescription, details: nil))
         }
     }
-    
+
+    // MARK: - Phase 1: Buffering Handlers
+
+    private func handleGetBufferHealth(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+
+        let bufferHealth = playerManager.getBufferHealth(playerId: playerId)
+        result(bufferHealth)
+    }
+
     // MARK: - Phase 3: Notification Handlers
     
     private func handleInitializeNotification(_ call: FlutterMethodCall, result: @escaping FlutterResult) {

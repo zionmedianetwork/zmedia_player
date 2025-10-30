@@ -224,3 +224,17 @@ class PlatformOperationException extends MediaPlayerException {
   String toString() =>
       'PlatformOperationException ($platform): $message (Code: $code)';
 }
+
+/// Operation skipped due to another operation in progress
+///
+/// Thrown when a non-critical operation cannot be executed because
+/// another operation is currently in progress. This allows callers
+/// to decide whether to retry, ignore, or handle differently.
+class OperationBusyException extends MediaPlayerException {
+  const OperationBusyException([
+    super.message = 'Operation skipped - another operation in progress',
+  ]);
+
+  @override
+  String toString() => 'OperationBusyException: $message';
+}
