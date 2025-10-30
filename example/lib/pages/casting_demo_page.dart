@@ -402,7 +402,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                     ),
                     const SizedBox(height: 32),
                     Text(
-                      _videos[_currentVideoIndex].title ?? 'Unknown',
+                      _videos[_currentVideoIndex].title,
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -519,7 +519,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                                 padding:
                                     const EdgeInsets.symmetric(horizontal: 8),
                                 child: Text(
-                                  video.title ?? 'Unknown',
+                                  video.title,
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontWeight: isSelected
