@@ -396,11 +396,11 @@ Transform ZMedia Player from a feature-rich package into an enterprise-grade, pr
   - [ ] Test caption rendering
 
 ### Week 4: Casting Improvements
-- [ ] **Real Chromecast discovery** (3 days)
-  - [ ] Remove fake discovery delay
-  - [ ] Implement actual device discovery
-  - [ ] Add device filtering
-  - [ ] Test discovery on various networks
+- [x] **Real Chromecast discovery** (3 days)
+  - [x] Remove fake discovery delay
+  - [x] Implement actual device discovery
+  - [x] Add device filtering
+  - [x] Test discovery on various networks
 
 - [ ] **Queue management** (2 days)
   - [ ] Implement cast queue
