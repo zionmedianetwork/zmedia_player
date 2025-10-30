@@ -362,6 +362,10 @@ class _MediaControlsState extends State<MediaControls>
   Widget _buildTopControls(MediaControlsTheme theme) {
     final isCasting = widget.controller.isCasting;
     final hasCastDevices = _castDevices.isNotEmpty || isCasting;
+    // On iOS, always show AirPlay button (discovery happens through native button)
+    // On Android, only show when devices are available or casting
+    final showCastButton = widget.showCastButton &&
+        (Platform.isIOS || hasCastDevices);
 
     return Positioned(
       top: 0,
@@ -412,7 +416,7 @@ class _MediaControlsState extends State<MediaControls>
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   // Cast button (Android) or AirPlay button (iOS)
-                  if (widget.showCastButton && hasCastDevices)
+                  if (showCastButton)
                     Platform.isIOS
                         ? const AirPlayButton(
                             size: 24,
@@ -426,7 +430,7 @@ class _MediaControlsState extends State<MediaControls>
                             tooltip: isCasting ? 'Connected' : 'Cast',
                           ),
 
-                  if (widget.showCastButton && hasCastDevices)
+                  if (showCastButton)
                     const SizedBox(width: 12),
 
                   // PiP button
