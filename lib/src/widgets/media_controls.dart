@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -5,6 +6,7 @@ import '../core/media_controller.dart';
 import '../models/player_state.dart';
 import '../models/cast_device.dart';
 import 'media_player_widget.dart';
+import 'airplay_button.dart';
 
 /// Modern media controls widget with enhanced UX and smooth animations
 class MediaControls extends StatefulWidget {
@@ -409,16 +411,20 @@ class _MediaControlsState extends State<MediaControls>
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Cast button
+                  // Cast button (Android) or AirPlay button (iOS)
                   if (widget.showCastButton && hasCastDevices)
-                    _buildTopActionButton(
-                      icon: isCasting
-                          ? FluentIcons.cast_20_filled
-                          : FluentIcons.cast_20_regular,
-                      isActive: isCasting,
-                      onTap: _toggleCastMenu,
-                      tooltip: isCasting ? 'Connected' : 'Cast',
-                    ),
+                    Platform.isIOS
+                        ? const AirPlayButton(
+                            size: 24,
+                          )
+                        : _buildTopActionButton(
+                            icon: isCasting
+                                ? FluentIcons.cast_20_filled
+                                : FluentIcons.cast_20_regular,
+                            isActive: isCasting,
+                            onTap: _toggleCastMenu,
+                            tooltip: isCasting ? 'Connected' : 'Cast',
+                          ),
 
                   if (widget.showCastButton && hasCastDevices)
                     const SizedBox(width: 12),

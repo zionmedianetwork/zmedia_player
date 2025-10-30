@@ -54,6 +54,7 @@ export 'src/widgets/subtitle_view.dart';
 
 // Phase 3 Widgets
 export 'src/widgets/media_list_player.dart';
+export 'src/widgets/airplay_button.dart';
 
 // Security (Phase 1 - P1)
 export 'src/security/certificate_pinning.dart';
