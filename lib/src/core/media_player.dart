@@ -1145,6 +1145,64 @@ class MediaPlayer {
     }
   }
 
+  /// Load media on cast device
+  Future<void> loadMediaOnCastDevice(MediaItem mediaItem) async {
+    await _ensureInitialized();
+
+    try {
+      await _channel.invokeMethod('loadMediaOnCastDevice', {
+        'playerId': playerId,
+        'mediaItem': {
+          'id': mediaItem.id,
+          'title': mediaItem.title,
+          'url': mediaItem.url,
+          'artworkUrl': mediaItem.artworkUrl,
+          'duration': mediaItem.duration?.inMilliseconds,
+        },
+      });
+    } on PlatformException catch (e) {
+      throw PlatformOperationException(
+        'Failed to load media on cast device: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
+    }
+  }
+
+  /// Play on cast device
+  Future<void> castPlay() async {
+    await _ensureInitialized();
+
+    try {
+      await _channel.invokeMethod('castPlay', {
+        'playerId': playerId,
+      });
+    } on PlatformException catch (e) {
+      throw PlatformOperationException(
+        'Failed to play on cast device: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
+    }
+  }
+
+  /// Pause on cast device
+  Future<void> castPause() async {
+    await _ensureInitialized();
+
+    try {
+      await _channel.invokeMethod('castPause', {
+        'playerId': playerId,
+      });
+    } on PlatformException catch (e) {
+      throw PlatformOperationException(
+        'Failed to pause on cast device: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
+    }
+  }
+
   /// Skip to next item in playlist
   Future<void> skipToNext() async {
     _validatePlaylistOperation();

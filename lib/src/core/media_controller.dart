@@ -800,6 +800,53 @@ class MediaController extends ChangeNotifier {
     await _player.connectToCastDevice(device);
   }
 
+  /// Connect to a cast device and automatically load current media
+  Future<void> connectAndLoadMedia(CastDevice device) async {
+    debugPrint('=== MediaController: Connecting and loading media ===');
+
+    // Store current playback position before pausing
+    final currentPosition = position;
+    final wasPlaying = isPlaying;
+
+    debugPrint('Current position: ${currentPosition.inSeconds}s, was playing: $wasPlaying');
+
+    // Pause local playback before casting
+    if (wasPlaying) {
+      debugPrint('Pausing local playback...');
+      await pause();
+    }
+
+    // Connect to the device
+    debugPrint('Connecting to Cast device: ${device.name}');
+    await _player.connectToCastDevice(device);
+
+    // Load and play current media if available
+    if (currentItem != null) {
+      try {
+        // Wait for Cast session to fully establish (session connects asynchronously)
+        debugPrint('Waiting for Cast session to establish...');
+        await Future.delayed(const Duration(milliseconds: 2000));
+
+        debugPrint('Loading media on Cast device: ${currentItem!.title}');
+        // Native code will wait for remote media client to be ready
+        // Autoplay is enabled, so no need to call castPlay()
+        await _player.loadMediaOnCastDevice(currentItem!);
+
+        debugPrint('✓ Media successfully cast to ${device.name}');
+      } catch (e) {
+        debugPrint('✗ Failed to load media on Cast device: $e');
+        // Resume local playback if casting fails
+        if (wasPlaying) {
+          await play();
+        }
+      }
+    } else {
+      debugPrint('No media item to cast');
+    }
+
+    debugPrint('=== Cast connection completed ===');
+  }
+
   /// Disconnect from cast device
   Future<void> disconnectFromCastDevice() async {
     await _player.disconnectFromCastDevice();

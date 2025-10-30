@@ -361,11 +361,10 @@ class _MediaControlsState extends State<MediaControls>
 
   Widget _buildTopControls(MediaControlsTheme theme) {
     final isCasting = widget.controller.isCasting;
-    final hasCastDevices = _castDevices.isNotEmpty || isCasting;
-    // On iOS, always show AirPlay button (discovery happens through native button)
-    // On Android, only show when devices are available or casting
-    final showCastButton = widget.showCastButton &&
-        (Platform.isIOS || hasCastDevices);
+    // Always show cast button when enabled
+    // iOS: Native AirPlay button (discovery through system UI)
+    // Android: Opens cast menu that starts discovery automatically
+    final showCastButton = widget.showCastButton;
 
     return Positioned(
       top: 0,
@@ -1189,7 +1188,9 @@ class _MediaControlsState extends State<MediaControls>
                               try {
                                 await widget.controller
                                     .disconnectFromCastDevice();
-                                _toggleCastMenu();
+                                if (mounted) {
+                                  _toggleCastMenu();
+                                }
                               } catch (e) {
                                 debugPrint('Failed to disconnect: $e');
                               }
@@ -1210,10 +1211,14 @@ class _MediaControlsState extends State<MediaControls>
                             onTap: () async {
                               HapticFeedback.lightImpact();
                               try {
+                                // Connect to the device and load current media
                                 await widget.controller
-                                    .connectToCastDevice(device);
-                                _toggleCastMenu();
+                                    .connectAndLoadMedia(device);
+                                if (mounted) {
+                                  _toggleCastMenu();
+                                }
                               } catch (e) {
+                                debugPrint('Failed to connect or load media: $e');
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(

@@ -23,6 +23,8 @@ class CastHandler(
     companion object {
         private const val TAG = "CastHandler"
         private const val CAST_NAMESPACE = "urn:x-cast:com.google.cast.media"
+        // Must match the receiver app ID in CastOptionsProvider
+        private const val RECEIVER_APP_ID = "CC1AD845"
     }
 
     private var castContext: CastContext? = null
@@ -123,9 +125,7 @@ class CastHandler(
             // Initialize MediaRouter for device discovery
             mediaRouter = MediaRouter.getInstance(context)
             mediaRouteSelector = MediaRouteSelector.Builder()
-                .addControlCategory(CastMediaControlIntent.categoryForCast(
-                    CastMediaControlIntent.DEFAULT_MEDIA_RECEIVER_APPLICATION_ID
-                ))
+                .addControlCategory(CastMediaControlIntent.categoryForCast(RECEIVER_APP_ID))
                 .build()
 
             // Register session listener
@@ -152,6 +152,7 @@ class CastHandler(
      */
     fun startDiscovery() {
         android.util.Log.d(TAG, "Starting cast device discovery")
+        android.util.Log.d(TAG, "Using receiver app ID: $RECEIVER_APP_ID")
 
         isDiscovering = true
         notifyCastStatusChanged("discovering", null, false)
@@ -163,6 +164,12 @@ class CastHandler(
                 mediaRouterCallback,
                 MediaRouter.CALLBACK_FLAG_REQUEST_DISCOVERY
             )
+
+            android.util.Log.d(TAG, "MediaRouter callback registered with discovery flag")
+
+            // Log current route count
+            val currentRouteCount = mediaRouter?.routes?.size ?: 0
+            android.util.Log.d(TAG, "Current MediaRouter routes: $currentRouteCount")
 
             // Immediately notify with currently available devices
             notifyDevicesChanged()
@@ -195,17 +202,49 @@ class CastHandler(
      * Connect to a cast device
      */
     fun connect(deviceId: String): Boolean {
+        android.util.Log.d(TAG, "========================================")
         android.util.Log.d(TAG, "Connecting to cast device: $deviceId")
-        
-        // The Cast SDK handles connection through the Cast button/dialog
-        // This method can be used to programmatically trigger the Cast dialog
-        
+
+        // Check if already connected
         val currentSession = sessionManager?.currentCastSession
         if (currentSession != null && currentSession.isConnected) {
-            android.util.Log.d(TAG, "Already connected to a cast device")
-            return true
+            val currentDeviceId = currentSession.castDevice?.deviceId
+            if (currentDeviceId == deviceId) {
+                android.util.Log.d(TAG, "Already connected to this device")
+                android.util.Log.d(TAG, "========================================")
+                return true
+            }
         }
-        
+
+        // Find the route with the matching deviceId
+        val router = mediaRouter
+        if (router == null) {
+            android.util.Log.e(TAG, "MediaRouter is null, cannot connect")
+            android.util.Log.e(TAG, "========================================")
+            return false
+        }
+
+        val routes = router.routes
+        for (route in routes) {
+            if (route.id == deviceId) {
+                android.util.Log.d(TAG, "Found route for device: ${route.name}")
+                try {
+                    // Select the route to initiate connection
+                    // This is async - the session will connect via callbacks
+                    router.selectRoute(route)
+                    android.util.Log.d(TAG, "✓ Route selected - Cast session will connect asynchronously")
+                    android.util.Log.d(TAG, "========================================")
+                    return true
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "Failed to select route: ${e.message}", e)
+                    android.util.Log.e(TAG, "========================================")
+                    return false
+                }
+            }
+        }
+
+        android.util.Log.e(TAG, "No route found for device ID: $deviceId")
+        android.util.Log.e(TAG, "========================================")
         return false
     }
 
@@ -226,26 +265,60 @@ class CastHandler(
      * Load media on cast device
      */
     fun loadMedia(mediaItem: Map<String, Any>) {
+        android.util.Log.d(TAG, "========================================")
         android.util.Log.d(TAG, "Loading media on cast device")
-        
-        val client = remoteMediaClient
+        android.util.Log.d(TAG, "Media title: ${mediaItem["title"]}")
+        android.util.Log.d(TAG, "Media URL: ${mediaItem["url"]}")
+
+        // Wait for remote media client to be available (with timeout)
+        var client = remoteMediaClient
+        var attempts = 0
+        val maxAttempts = 20 // 20 attempts * 100ms = 2 seconds max wait
+
+        while (client == null && attempts < maxAttempts) {
+            android.util.Log.d(TAG, "Waiting for remote media client... (attempt ${attempts + 1}/$maxAttempts)")
+            Thread.sleep(100)
+            client = remoteMediaClient ?: sessionManager?.currentCastSession?.remoteMediaClient
+            attempts++
+        }
+
         if (client == null) {
-            android.util.Log.w(TAG, "Cannot load media: No remote media client")
+            android.util.Log.e(TAG, "Cannot load media: No remote media client available after ${maxAttempts * 100}ms!")
+            android.util.Log.e(TAG, "SessionManager: $sessionManager")
+            android.util.Log.e(TAG, "Current session: ${sessionManager?.currentCastSession}")
+            android.util.Log.e(TAG, "Session connected: ${sessionManager?.currentCastSession?.isConnected}")
+            android.util.Log.e(TAG, "========================================")
             return
         }
-        
+
+        android.util.Log.d(TAG, "✓ Remote media client available after ${attempts * 100}ms: $client")
+        // Update our reference
+        remoteMediaClient = client
+
         try {
             val mediaInfo = buildMediaInfo(mediaItem)
+            android.util.Log.d(TAG, "MediaInfo built - Content ID: ${mediaInfo.contentId}")
+
             val request = MediaLoadRequestData.Builder()
                 .setMediaInfo(mediaInfo)
                 .setAutoplay(true)
                 .build()
-            
-            client.load(request)
-            
-            android.util.Log.d(TAG, "Media loaded on cast device")
+
+            android.util.Log.d(TAG, "Sending load request to Cast device...")
+            val result = client.load(request)
+
+            result.setResultCallback { mediaChannelResult ->
+                if (mediaChannelResult.status.isSuccess) {
+                    android.util.Log.d(TAG, "✓✓✓ Media successfully loaded on Cast device!")
+                } else {
+                    android.util.Log.e(TAG, "✗✗✗ Failed to load media on Cast device: ${mediaChannelResult.status}")
+                }
+            }
+
+            android.util.Log.d(TAG, "========================================")
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error loading media on cast: ${e.message}", e)
+            android.util.Log.e(TAG, "========================================")
         }
     }
 
@@ -311,17 +384,29 @@ class CastHandler(
         val title = mediaItem["title"] as? String ?: "Unknown Title"
         val artworkUrl = mediaItem["artworkUrl"] as? String
         val duration = (mediaItem["duration"] as? Number)?.toLong() ?: MediaInfo.UNKNOWN_DURATION
-        
+
+        // Detect content type from URL
+        val contentType = when {
+            contentId.contains(".m3u8") || contentId.contains("/hls/") -> "application/x-mpegurl" // HLS
+            contentId.contains(".mpd") -> "application/dash+xml" // DASH
+            contentId.contains(".mp4") -> "video/mp4" // MP4
+            contentId.contains(".webm") -> "video/webm" // WebM
+            contentId.contains(".mkv") -> "video/x-matroska" // MKV
+            else -> "video/mp4" // Default to MP4
+        }
+
+        android.util.Log.d(TAG, "Content type detected: $contentType for URL: $contentId")
+
         val metadata = MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE).apply {
             putString(MediaMetadata.KEY_TITLE, title)
             if (artworkUrl != null) {
                 addImage(WebImage(android.net.Uri.parse(artworkUrl)))
             }
         }
-        
+
         return MediaInfo.Builder(contentId)
             .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
-            .setContentType("application/x-mpegurl") // For HLS
+            .setContentType(contentType)
             .setMetadata(metadata)
             .setStreamDuration(duration)
             .build()
@@ -379,14 +464,27 @@ class CastHandler(
         val devices = mutableListOf<Map<String, Any>>()
 
         try {
-            val router = mediaRouter ?: return devices
-            val selector = mediaRouteSelector ?: return devices
+            val router = mediaRouter ?: run {
+                android.util.Log.w(TAG, "MediaRouter is null, cannot get devices")
+                return devices
+            }
+            val selector = mediaRouteSelector ?: run {
+                android.util.Log.w(TAG, "MediaRouteSelector is null, cannot get devices")
+                return devices
+            }
 
-            // Get all routes matching the selector
+            // Get all routes
             val routes = router.routes
+            android.util.Log.d(TAG, "Scanning ${routes.size} total routes")
+
             for (route in routes) {
-                // Check if this route matches our Cast selector
-                if (route.matchesSelector(selector) && !route.isDefault) {
+                val matchesSelector = route.matchesSelector(selector)
+                val isDefault = route.isDefault
+
+                android.util.Log.d(TAG, "Route: ${route.name}, matches=$matchesSelector, isDefault=$isDefault, enabled=${route.isEnabled}")
+
+                // Check if this route matches our Cast selector and is not the default route
+                if (matchesSelector && !isDefault) {
                     val device = mapOf(
                         "id" to route.id,
                         "name" to route.name,
@@ -397,7 +495,7 @@ class CastHandler(
                         "isAvailable" to route.isEnabled
                     )
                     devices.add(device)
-                    android.util.Log.d(TAG, "Found Cast device: ${route.name} (${route.id})")
+                    android.util.Log.d(TAG, "✓ Found Cast device: ${route.name} (${route.id})")
                 }
             }
 
