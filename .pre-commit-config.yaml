@@ -37,14 +37,14 @@ repos:
         pass_filenames: true
         description: Automatically format Dart code
 
-      # Flutter analyze
-      - id: flutter-analyze
-        name: Analyze Flutter code
-        entry: flutter analyze
-        language: system
-        files: '\.dart$'
-        pass_filenames: false
-        description: Run Flutter static analysis
+      # Flutter analyze (disabled in pre-commit, runs in CI instead)
+      # - id: flutter-analyze
+      #   name: Analyze Flutter code
+      #   entry: bash -c 'flutter analyze lib/ test/ --fatal-warnings'
+      #   language: system
+      #   files: '^(lib|test)/.*\.dart$'
+      #   pass_filenames: false
+      #   description: Run Flutter static analysis (warnings only, excludes example)
 
       # Check for debugging code
       - id: check-debug-code

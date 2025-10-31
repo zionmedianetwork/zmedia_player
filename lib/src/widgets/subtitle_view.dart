@@ -98,7 +98,7 @@ class _SubtitleViewState extends State<SubtitleView> {
         try {
           await widget.subtitleService.setActiveTrack(_selectedTrack!);
         } catch (e) {
-          print('Note: Using sample subtitles for demonstration');
+          // Using sample subtitles for demonstration
           // The service will handle this gracefully now
         }
       }

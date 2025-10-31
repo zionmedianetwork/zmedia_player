@@ -985,7 +985,7 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, result) {
         if (didPop && !_isDisposed) {
           _exitFullscreen();
         }

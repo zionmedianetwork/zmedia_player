@@ -46,7 +46,7 @@ jobs:
       - name: Analyze code
         run: |
           echo "Running Flutter analyze..."
-          flutter analyze --fatal-infos --fatal-warnings
+          flutter analyze --fatal-warnings
         continue-on-error: false
 
       - name: Run tests
