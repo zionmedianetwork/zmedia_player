@@ -370,7 +370,7 @@ class _PipDemoPageState extends State<PipDemoPage> with WidgetsBindingObserver {
                                 padding:
                                     const EdgeInsets.symmetric(horizontal: 8),
                                 child: Text(
-                                  video.title ?? 'Unknown',
+                                  video.title,
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontWeight: isSelected

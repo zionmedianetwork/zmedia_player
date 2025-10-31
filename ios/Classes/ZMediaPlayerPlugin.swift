@@ -34,10 +34,16 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         instance.secureStorageHandler = SecureStorageHandler()
         registrar.addMethodCallDelegate(instance.secureStorageHandler, channel: secureStorageChannel)
 
-        // Register platform view factory
+        // Register platform view factories
         registrar.register(
             MediaPlayerViewFactory(playerManager: instance.playerManager),
             withId: "zmedia_player_view"
+        )
+
+        // Register AirPlay button factory
+        registrar.register(
+            AirPlayButtonFactory(messenger: registrar.messenger()),
+            withId: "zmedia_player/airplay_button"
         )
     }
 

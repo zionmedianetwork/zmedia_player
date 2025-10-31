@@ -380,27 +380,16 @@ class AirPlayHandler: NSObject {
     
     private func getAvailableDevices() -> [[String: Any]] {
         var devices: [[String: Any]] = []
-        
+
         // In iOS, we can't enumerate AirPlay devices programmatically
-        // They're discovered and shown by the system's AVRoutePickerView
-        
-        // If AirPlay is active, return current device
+        // They're discovered and shown by the system's AVRoutePickerView (native button)
+
+        // Only return the currently connected device (if any)
+        // The native AirPlayButton in MediaControls handles device discovery
         if let currentDevice = getCurrentDevice() {
             devices.append(currentDevice)
-        } else {
-            // Always indicate that AirPlay is available (requires user to tap route picker)
-            // For AirPlay, we always show it as available since discovery happens
-            // through the system UI (AVRoutePickerView)
-            devices.append([
-                "id": "airplay_system",
-                "name": "AirPlay & Bluetooth",
-                "type": "airplay",
-                "isConnected": false,
-                "requiresUserInteraction": true,
-                "description": "Tap to select AirPlay or Bluetooth device"
-            ])
         }
-        
+
         return devices
     }
     

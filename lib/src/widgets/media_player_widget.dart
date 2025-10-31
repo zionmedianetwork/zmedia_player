@@ -86,9 +86,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// The native view widget
   Widget? _nativeView;
 
-  /// Platform view ID for cleanup
-  int? _platformViewId;
-
   /// Whether the widget is disposed
   bool _isDisposed = false;
 
@@ -103,9 +100,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
   /// Cache service for media caching
   late final CacheService _cacheService;
-
-  /// Whether we're currently in fullscreen mode
-  bool _isInFullscreen = false;
 
   /// Keep alive for performance
   @override
@@ -124,7 +118,7 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     // Initialize services
     _subtitleService = SubtitleService();
     _cacheService = CacheService(
-        widget.controller.config?.cacheConfig ?? const CacheConfig());
+        widget.controller.config.cacheConfig ?? const CacheConfig());
 
     // Listen to app lifecycle changes
     WidgetsBinding.instance.addObserver(this);
@@ -359,7 +353,7 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
         Positioned.fill(child: content),
 
         // Subtitle overlay - show when subtitles are enabled
-        if (widget.controller.config?.enableSubtitles == true)
+        if (widget.controller.config.enableSubtitles == true)
           _buildSubtitleOverlay(),
 
         // Controls overlay - only show when needed
@@ -405,8 +399,8 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       subtitleService: _subtitleService,
       position: widget.controller.state.position,
       config:
-          widget.controller.config?.subtitleConfig ?? const SubtitleConfig(),
-      enabled: widget.controller.config?.enableSubtitles ?? true,
+          widget.controller.config.subtitleConfig ?? const SubtitleConfig(),
+      enabled: widget.controller.config.enableSubtitles,
       onTrackChanged: (track) {
         // Handle subtitle track change
         debugPrint('Subtitle track changed to: ${track.title}');
@@ -556,19 +550,16 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       setState(() {
         _hasNativeView = false;
         _nativeView = null;
-        _platformViewId = null;
       });
     } else {
       _hasNativeView = false;
       _nativeView = null;
-      _platformViewId = null;
     }
   }
 
   void _onPlatformViewCreated(int viewId) {
     if (_isDisposed) return;
 
-    _platformViewId = viewId;
     debugPrint('Platform view created with ID: $viewId');
 
     // Platform view is ready - trigger a rebuild to ensure it's displayed
@@ -792,7 +783,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   double _getVideoAspectRatio() {
     // Try to get actual video aspect ratio from controller state
     try {
-      final state = widget.controller.state;
       // Check if we have video dimensions in the state
       // Note: This would need to be added to PlaybackState if video dimensions are needed
       // For now, we'll use a reasonable default based on the media type or duration
@@ -922,8 +912,6 @@ class FullscreenMediaPlayer extends StatefulWidget {
 
 class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
     with WidgetsBindingObserver {
-  List<DeviceOrientation>? _previousOrientations;
-  SystemUiMode? _previousSystemUiMode;
   bool _isDisposed = false;
 
   @override
@@ -953,9 +941,6 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
     if (_isDisposed) return;
 
     try {
-      // Store previous settings for restoration
-      _previousSystemUiMode = null; // Cannot retrieve current mode
-
       // Set fullscreen mode
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:fluentui_system_icons/fluentui_system_icons.dart';
@@ -5,6 +6,7 @@ import '../core/media_controller.dart';
 import '../models/player_state.dart';
 import '../models/cast_device.dart';
 import 'media_player_widget.dart';
+import 'airplay_button.dart';
 
 /// Modern media controls widget with enhanced UX and smooth animations
 class MediaControls extends StatefulWidget {
@@ -359,7 +361,10 @@ class _MediaControlsState extends State<MediaControls>
 
   Widget _buildTopControls(MediaControlsTheme theme) {
     final isCasting = widget.controller.isCasting;
-    final hasCastDevices = _castDevices.isNotEmpty || isCasting;
+    // Always show cast button when enabled
+    // iOS: Native AirPlay button (discovery through system UI)
+    // Android: Opens cast menu that starts discovery automatically
+    final showCastButton = widget.showCastButton;
 
     return Positioned(
       top: 0,
@@ -409,18 +414,22 @@ class _MediaControlsState extends State<MediaControls>
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Cast button
-                  if (widget.showCastButton && hasCastDevices)
-                    _buildTopActionButton(
-                      icon: isCasting
-                          ? FluentIcons.cast_20_filled
-                          : FluentIcons.cast_20_regular,
-                      isActive: isCasting,
-                      onTap: _toggleCastMenu,
-                      tooltip: isCasting ? 'Connected' : 'Cast',
-                    ),
+                  // Cast button (Android) or AirPlay button (iOS)
+                  if (showCastButton)
+                    Platform.isIOS
+                        ? const AirPlayButton(
+                            size: 24,
+                          )
+                        : _buildTopActionButton(
+                            icon: isCasting
+                                ? FluentIcons.cast_20_filled
+                                : FluentIcons.cast_20_regular,
+                            isActive: isCasting,
+                            onTap: _toggleCastMenu,
+                            tooltip: isCasting ? 'Connected' : 'Cast',
+                          ),
 
-                  if (widget.showCastButton && hasCastDevices)
+                  if (showCastButton)
                     const SizedBox(width: 12),
 
                   // PiP button
@@ -1179,7 +1188,9 @@ class _MediaControlsState extends State<MediaControls>
                               try {
                                 await widget.controller
                                     .disconnectFromCastDevice();
-                                _toggleCastMenu();
+                                if (mounted) {
+                                  _toggleCastMenu();
+                                }
                               } catch (e) {
                                 debugPrint('Failed to disconnect: $e');
                               }
@@ -1200,10 +1211,14 @@ class _MediaControlsState extends State<MediaControls>
                             onTap: () async {
                               HapticFeedback.lightImpact();
                               try {
+                                // Connect to the device and load current media
                                 await widget.controller
-                                    .connectToCastDevice(device);
-                                _toggleCastMenu();
+                                    .connectAndLoadMedia(device);
+                                if (mounted) {
+                                  _toggleCastMenu();
+                                }
                               } catch (e) {
+                                debugPrint('Failed to connect or load media: $e');
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(

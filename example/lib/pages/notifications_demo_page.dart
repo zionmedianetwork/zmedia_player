@@ -278,7 +278,7 @@ class _NotificationsDemoPageState extends State<NotificationsDemoPage> {
                     ),
                   ),
                   title: Text(
-                    item.title ?? 'Unknown',
+                    item.title,
                     style: TextStyle(
                       fontWeight:
                           isCurrentItem ? FontWeight.bold : FontWeight.normal,

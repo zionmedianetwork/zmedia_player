@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import '../core/media_controller.dart';
-import '../models/player_state.dart';
 import 'media_player_widget.dart';
 
 /// Configuration for media player behavior in lists
@@ -112,7 +110,6 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
 
   void _handleVisibilityChanged(VisibilityInfo info) {
     final previouslyVisible = _isVisible;
-    final previousVisibility = _visibilityFraction;
 
     _visibilityFraction = info.visibleFraction;
     _isVisible = _visibilityFraction >= widget.config.visibilityThreshold;
@@ -188,15 +185,14 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
 /// A simple visibility detector widget
 /// Note: In production, consider using the visibility_detector package
 class VisibilityDetector extends StatefulWidget {
-  final Key key;
   final Widget child;
   final Function(VisibilityInfo) onVisibilityChanged;
 
   const VisibilityDetector({
-    required this.key,
+    required super.key,
     required this.child,
     required this.onVisibilityChanged,
-  }) : super(key: key);
+  });
 
   @override
   State<VisibilityDetector> createState() => _VisibilityDetectorState();
@@ -248,7 +244,7 @@ class _VisibilityDetectorState extends State<VisibilityDetector> {
     final double visibleFraction = visibleHeight / size.height;
 
     widget.onVisibilityChanged(VisibilityInfo(
-      key: widget.key,
+      key: widget.key!,
       size: size,
       visibleBounds: Rect.fromLTWH(
           0, top.clamp(0, screenHeight), size.width, visibleHeight),
