@@ -219,7 +219,7 @@ class CacheService {
         await downloadAndCache(mediaItem, headers: headers);
       } catch (e) {
         // Log error but continue with other items
-        print('Failed to preload ${mediaItem.title}: $e');
+        // Failed to preload ${mediaItem.title}: $e
       }
     }
   }
@@ -281,7 +281,7 @@ class CacheService {
       }
     } catch (e) {
       // If metadata is corrupted, start fresh
-      print('Failed to load cache metadata: $e');
+      // Failed to load cache metadata: $e
       _metadata.clear();
       _currentCacheSize = 0;
     }

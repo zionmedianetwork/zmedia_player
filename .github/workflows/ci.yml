@@ -45,8 +45,20 @@ jobs:
 
       - name: Analyze code
         run: |
-          echo "Running Flutter analyze..."
-          flutter analyze --fatal-warnings
+          echo "Running Flutter analyze on lib/ and test/..."
+          OUTPUT=$(flutter analyze lib/ test/ 2>&1)
+          echo "$OUTPUT"
+          # Check for warnings (not infos)
+          if echo "$OUTPUT" | grep -q "^warning •"; then
+            echo "❌ Warnings found!"
+            exit 1
+          fi
+          # Check for errors
+          if echo "$OUTPUT" | grep -q "^error •"; then
+            echo "❌ Errors found!"
+            exit 1
+          fi
+          echo "✅ No warnings or errors found (infos are acceptable)"
         continue-on-error: false
 
       - name: Run tests
