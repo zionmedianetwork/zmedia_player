@@ -1,0 +1,83 @@
+# Pre-commit hooks for ZMedia Player
+# Install: pip install pre-commit && pre-commit install
+# Run manually: pre-commit run --all-files
+
+repos:
+  # General hooks for all files
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        name: Trim trailing whitespace
+        exclude: '^(\.snap$|\.dart_tool/)'
+      - id: end-of-file-fixer
+        name: Fix end of files
+        exclude: '^(\.snap$|\.dart_tool/)'
+      - id: check-yaml
+        name: Check YAML syntax
+        args: ['--unsafe']  # Allow custom tags in pubspec.yaml
+      - id: check-added-large-files
+        name: Check for large files
+        args: ['--maxkb=1000']
+      - id: check-merge-conflict
+        name: Check for merge conflicts
+      - id: mixed-line-ending
+        name: Check line endings
+        args: ['--fix=lf']
+
+  # Dart/Flutter specific hooks
+  - repo: local
+    hooks:
+      # Dart format
+      - id: dart-format
+        name: Format Dart code
+        entry: dart format
+        language: system
+        files: '\.dart$'
+        pass_filenames: true
+        description: Automatically format Dart code
+
+      # Flutter analyze
+      - id: flutter-analyze
+        name: Analyze Flutter code
+        entry: bash -c 'OUTPUT=$(flutter analyze lib/ test/ 2>&1); echo "$OUTPUT"; if echo "$OUTPUT" | grep -qE "^(warning|error) •"; then exit 1; fi; exit 0'
+        language: system
+        files: '^(lib|test)/.*\.dart$'
+        pass_filenames: false
+        description: Run Flutter static analysis (warnings/errors only, excludes example)
+
+      # Check for debugging code (excludes test files)
+      - id: check-debug-code
+        name: Check for debugging statements
+        entry: bash -c 'if git diff --cached --name-only | grep -E "^lib/.*\.dart$" | xargs grep -n "print\(" 2>/dev/null; then echo "Error Found print() statements in lib/"; exit 1; fi; exit 0'
+        language: system
+        files: '^lib/.*\.dart$'
+        pass_filenames: false
+        description: Prevent committing debug print statements in production code
+        verbose: true
+        stages: [commit]
+
+      # Ensure pubspec.yaml and pubspec.lock are in sync
+      - id: flutter-pub-get
+        name: Run flutter pub get
+        entry: bash -c 'if git diff --cached --name-only | grep -q "pubspec.yaml"; then flutter pub get; fi; exit 0'
+        language: system
+        files: 'pubspec.yaml'
+        pass_filenames: false
+        description: Ensure dependencies are resolved
+
+  # Optional: Run tests before commit (can be slow, so commented out by default)
+  # Uncomment if you want to run tests on every commit
+  # - repo: local
+  #   hooks:
+  #     - id: flutter-test
+  #       name: Run Flutter tests
+  #       entry: flutter test
+  #       language: system
+  #       files: '\.dart$'
+  #       pass_filenames: false
+  #       description: Run all Flutter tests
+
+# Configuration
+default_stages: [commit]
+fail_fast: false  # Continue running hooks even if one fails

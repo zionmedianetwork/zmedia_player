@@ -544,7 +544,6 @@ For users migrating from better_player, the API mapping is straightforward:
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: October 19, 2025  
+**Document Version**: 1.0
+**Last Updated**: October 19, 2025
 **Status**: Ready for Review
-

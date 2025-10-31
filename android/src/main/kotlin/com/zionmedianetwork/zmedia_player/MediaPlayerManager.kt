@@ -24,7 +24,7 @@ class MediaPlayerManager(
     private val players = ConcurrentHashMap<String, MediaPlayerInstance>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val crashHandler = CrashHandler(methodChannel)
-    
+
     // Activity tracking for memory leak prevention
     private val lastActivity = ConcurrentHashMap<String, Long>()
     private val cleanupRunnable = object : Runnable {
@@ -33,24 +33,24 @@ class MediaPlayerManager(
             mainHandler.postDelayed(this, CLEANUP_INTERVAL_MS)
         }
     }
-    
+
     companion object {
         private const val CLEANUP_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
         private const val STALE_THRESHOLD_MS = 15 * 60 * 1000L // 15 minutes
     }
-    
+
     init {
         mainHandler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS)
     }
-    
+
     private fun markActivity(playerId: String) {
         lastActivity[playerId] = System.currentTimeMillis()
     }
-    
+
     private fun cleanupStaleInstances() {
         val now = System.currentTimeMillis()
         val stalePlayers = mutableListOf<String>()
-        
+
         lastActivity.forEach { (playerId, lastUsed) ->
             if (now - lastUsed > STALE_THRESHOLD_MS) {
                 players[playerId]?.let { instance ->
@@ -60,7 +60,7 @@ class MediaPlayerManager(
                 }
             }
         }
-        
+
         stalePlayers.forEach { playerId ->
             android.util.Log.d("MediaPlayerManager", "Auto-cleaning stale instance: $playerId")
             players[playerId]?.dispose()
@@ -72,7 +72,7 @@ class MediaPlayerManager(
     fun initializePlayer(playerId: String, config: Map<String, Any>?) {
         android.util.Log.d("MediaPlayerManager", "initializePlayer called for playerId: $playerId")
         markActivity(playerId)
-        
+
         // Initialize synchronously on main thread to avoid timing issues with platform view creation
         if (Looper.myLooper() == Looper.getMainLooper()) {
             val playerInstance = MediaPlayerInstance(context, playerId, methodChannel, config)
@@ -197,14 +197,14 @@ class MediaPlayerManager(
 
     fun getPlayerView(playerId: String): MediaPlayerView? {
         android.util.Log.d("MediaPlayerManager", "getPlayerView called for playerId: $playerId, player exists: ${players.containsKey(playerId)}")
-        
+
         // If player doesn't exist yet, wait for it to be initialized
         val playerInstance = players[playerId]
         if (playerInstance == null) {
             android.util.Log.e("MediaPlayerManager", "Player instance not found for $playerId - ensure initialize() was called first")
             return null
         }
-        
+
         return playerInstance.getPlayerView()
     }
 
@@ -233,7 +233,7 @@ class MediaPlayerManager(
             lastActivity.clear()
         }
     }
-    
+
     fun shutdown() {
         mainHandler.removeCallbacks(cleanupRunnable)
         dispose()
@@ -259,7 +259,7 @@ class MediaPlayerInstance(
     private var bandwidthUpdateRunnable: Runnable? = null
     private var originalVolume: Float = 1f
     private var currentMediaItem: Map<String, Any>? = null
-    
+
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             val stateName = when (playbackState) {
@@ -270,7 +270,7 @@ class MediaPlayerInstance(
                 else -> "UNKNOWN"
             }
             android.util.Log.d("MediaPlayerInstance", "ExoPlayer state: $stateName, playWhenReady: ${exoPlayer?.playWhenReady}")
-            
+
             val state = when (playbackState) {
                 Player.STATE_IDLE -> "idle"
                 Player.STATE_BUFFERING -> "buffering"
@@ -278,9 +278,9 @@ class MediaPlayerInstance(
                 Player.STATE_ENDED -> "completed"
                 else -> "idle"
             }
-            
+
             notifyStateChanged(state, playbackState == Player.STATE_BUFFERING)
-            
+
             // Notify duration when player is ready
             if (playbackState == Player.STATE_READY) {
                 notifyDurationChanged()
@@ -314,7 +314,7 @@ class MediaPlayerInstance(
         val httpDataSourceFactory = DefaultHttpDataSource.Factory()
             .setUserAgent("Flutter Media Player")
         dataSourceFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
-        
+
         initializeExoPlayer()
     }
 
@@ -342,46 +342,46 @@ class MediaPlayerInstance(
     fun loadMediaItem(mediaItem: Map<String, Any>) {
         val url = mediaItem["url"] as? String ?: return
         val httpHeaders = mediaItem["httpHeaders"] as? Map<String, String>
-        
+
         // Store current media item (for live stream detection)
         currentMediaItem = mediaItem
-        
+
         android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
-        
+
         val uri = Uri.parse(url)
         val mediaSource: MediaSource
-        
+
         // Create media source with custom headers if provided
         if (httpHeaders != null && httpHeaders.isNotEmpty()) {
             val customHttpDataSourceFactory = DefaultHttpDataSource.Factory()
                 .setUserAgent("Flutter Media Player")
-            
+
             // Set custom headers
             httpHeaders.forEach { (key, value) ->
                 customHttpDataSourceFactory.setDefaultRequestProperties(mapOf(key to value))
             }
-            
+
             val customDataSourceFactory = DefaultDataSource.Factory(context, customHttpDataSourceFactory)
             mediaSource = createMediaSource(uri, customDataSourceFactory)
         } else {
             mediaSource = createMediaSource(uri, dataSourceFactory)
         }
-        
+
         exoPlayer?.apply {
             // Stop current playback if any
             stop()
             clearMediaItems()
-            
+
             // Set new media source
             setMediaSource(mediaSource)
             prepare()
-            
+
             android.util.Log.d("MediaPlayerInstance", "Media prepared, autoPlay: ${config?.get("autoPlay")}")
-            
+
             // Set playWhenReady based on autoPlay - explicitly set false if not auto-playing
             playWhenReady = config?.get("autoPlay") as? Boolean ?: false
         }
-        
+
         currentMediaSource = mediaSource
     }
 
@@ -389,7 +389,7 @@ class MediaPlayerInstance(
         val items = playlist["items"] as? List<Map<String, Any>> ?: return
         currentPlaylist = items
         currentIndex = startIndex.coerceIn(0, items.size - 1)
-        
+
         if (items.isNotEmpty()) {
             loadMediaItem(items[currentIndex])
         }
@@ -438,7 +438,7 @@ class MediaPlayerInstance(
             "scaledown" -> AspectRatioFrameLayout.RESIZE_MODE_FIT
             else -> AspectRatioFrameLayout.RESIZE_MODE_FIT // "contain" and default
         }
-        
+
         playerView?.setResizeMode(resizeMode)
     }
 
@@ -450,12 +450,12 @@ class MediaPlayerInstance(
     fun setQualityTrack(qualityTrack: Map<String, Any>) {
         val trackId = qualityTrack["id"] as? String ?: return
         android.util.Log.d("MediaPlayerInstance", "Setting quality track: ${qualityTrack["name"]}, id: $trackId")
-        
+
         exoPlayer?.let { player ->
             val currentTracks = player.currentTracks
             var targetGroup: Tracks.Group? = null
             var targetTrackIndex = -1
-            
+
             // Find the video track group and index matching the requested quality
             for (group in currentTracks.groups) {
                 if (group.type == C.TRACK_TYPE_VIDEO) {
@@ -471,19 +471,19 @@ class MediaPlayerInstance(
                     if (targetGroup != null) break
                 }
             }
-            
+
             if (targetGroup != null && targetTrackIndex >= 0) {
                 // Override track selection to the specific quality
                 val override = TrackSelectionOverride(
                     targetGroup.mediaTrackGroup,
                     listOf(targetTrackIndex)
                 )
-                
+
                 player.trackSelectionParameters = player.trackSelectionParameters
                     .buildUpon()
                     .setOverrideForType(override)
                     .build()
-                    
+
                 android.util.Log.d("MediaPlayerInstance", "Quality track override applied")
             } else {
                 android.util.Log.w("MediaPlayerInstance", "Quality track not found: $trackId")
@@ -499,14 +499,14 @@ class MediaPlayerInstance(
 
     fun enableAutoQuality() {
         android.util.Log.d("MediaPlayerInstance", "Enabling auto quality (ABR)")
-        
+
         exoPlayer?.let { player ->
             // Clear all track overrides to enable adaptive bitrate selection
             player.trackSelectionParameters = player.trackSelectionParameters
                 .buildUpon()
                 .clearOverridesOfType(C.TRACK_TYPE_VIDEO)
                 .build()
-                
+
             android.util.Log.d("MediaPlayerInstance", "Auto quality enabled - track overrides cleared")
         }
     }
@@ -535,7 +535,7 @@ class MediaPlayerInstance(
         }
         return playerView
     }
-    
+
     fun isPlaying(): Boolean {
         return exoPlayer?.isPlaying ?: false
     }
@@ -547,10 +547,10 @@ class MediaPlayerInstance(
     fun dispose() {
         // Stop position updates
         stopPositionUpdates()
-        
+
         // Stop bandwidth monitoring
         stopBandwidthMonitoring()
-        
+
         exoPlayer?.apply {
             removeListener(playerListener)
             release()
@@ -580,33 +580,33 @@ class MediaPlayerInstance(
     private fun applyConfig(config: Map<String, Any>) {
         exoPlayer?.apply {
             // Apply volume
-            (config["volume"] as? Double)?.let { 
+            (config["volume"] as? Double)?.let {
                 val vol = it.toFloat()
                 originalVolume = vol
                 volume = vol
             }
-            
+
             // Apply playback speed
             (config["speed"] as? Double)?.let { setPlaybackSpeed(it.toFloat()) }
-            
+
             // Apply muted state
-            (config["startMuted"] as? Boolean)?.let { 
-                if (it) volume = 0f 
+            (config["startMuted"] as? Boolean)?.let {
+                if (it) volume = 0f
             }
-            
+
             // Apply looping
             (config["looping"] as? Boolean)?.let {
                 repeatMode = if (it) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
             }
         }
-        
+
         // Apply BoxFit
         (config["boxFit"] as? String)?.let { setBoxFit(it) }
     }
 
     private fun startPositionUpdates() {
         stopPositionUpdates() // Ensure we don't have multiple runnables
-        
+
         positionUpdateHandler = Handler(Looper.getMainLooper())
         positionUpdateRunnable = object : Runnable {
             override fun run() {
@@ -620,7 +620,7 @@ class MediaPlayerInstance(
         }
         positionUpdateHandler?.post(positionUpdateRunnable!!)
     }
-    
+
     private fun stopPositionUpdates() {
         positionUpdateRunnable?.let { runnable ->
             positionUpdateHandler?.removeCallbacks(runnable)
@@ -631,7 +631,7 @@ class MediaPlayerInstance(
 
     private fun startBandwidthMonitoring() {
         stopBandwidthMonitoring() // Ensure we don't have multiple runnables
-        
+
         bandwidthUpdateHandler = Handler(Looper.getMainLooper())
         bandwidthUpdateRunnable = object : Runnable {
             override fun run() {
@@ -648,7 +648,7 @@ class MediaPlayerInstance(
         }
         bandwidthUpdateHandler?.post(bandwidthUpdateRunnable!!)
     }
-    
+
     private fun stopBandwidthMonitoring() {
         bandwidthUpdateRunnable?.let { runnable ->
             bandwidthUpdateHandler?.removeCallbacks(runnable)
@@ -656,7 +656,7 @@ class MediaPlayerInstance(
         bandwidthUpdateRunnable = null
         bandwidthUpdateHandler = null
     }
-    
+
     private fun getCurrentBandwidthEstimate(player: ExoPlayer): Long {
         // ExoPlayer's bandwidth estimate is available through the LoadControl
         // We can access it via the player's current tracks selection
@@ -666,7 +666,7 @@ class MediaPlayerInstance(
             // ExoPlayer internally maintains bandwidth estimates
             // For now, we'll use a workaround by checking video/audio bitrate
             var estimatedBandwidth: Long = 0
-            
+
             for (trackGroup in trackSelector.groups) {
                 if (trackGroup.isSelected) {
                     val format = trackGroup.getTrackFormat(0)
@@ -675,7 +675,7 @@ class MediaPlayerInstance(
                     }
                 }
             }
-            
+
             // If we have a valid estimate, return it; otherwise return 0
             return if (estimatedBandwidth > 0) estimatedBandwidth else 0
         } catch (e: Exception) {
@@ -746,21 +746,21 @@ class MediaPlayerInstance(
         exoPlayer?.let { player ->
             val qualityTracks = mutableListOf<Map<String, Any>>()
             val currentTracks = player.currentTracks
-            
+
             // Extract video tracks
             for (group in currentTracks.groups) {
                 if (group.type == C.TRACK_TYPE_VIDEO && group.length > 0) {
                     for (i in 0 until group.length) {
                         val format = group.getTrackFormat(i)
-                        
+
                         // Skip if format doesn't have valid dimensions or bitrate
                         if (format.width <= 0 || format.height <= 0 || format.bitrate <= 0) {
                             continue
                         }
-                        
+
                         val trackId = "${format.width}x${format.height}_${format.bitrate}"
                         val trackName = "${format.height}p (${(format.bitrate / 1000)}kbps)"
-                        
+
                         qualityTracks.add(mapOf(
                             "id" to trackId,
                             "name" to trackName,
@@ -775,10 +775,10 @@ class MediaPlayerInstance(
                     }
                 }
             }
-            
+
             // Sort by bitrate (highest first for better UX)
             qualityTracks.sortByDescending { it["bitrate"] as Int }
-            
+
             if (qualityTracks.isNotEmpty()) {
                 android.util.Log.d("MediaPlayerInstance", "Found ${qualityTracks.size} quality tracks")
                 notifyQualityTracksChanged(qualityTracks)

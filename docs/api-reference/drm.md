@@ -4,7 +4,7 @@
 
 ZMedia Player provides comprehensive DRM support for protected content playback on both iOS and Android platforms.
 
-**Current Status:** ✅ **Online DRM Fully Supported**  
+**Current Status:** ✅ **Online DRM Fully Supported**
 **Offline DRM:** 📅 **Planned for v0.2.0** (see [Roadmap](#offline-drm-roadmap))
 
 ---
@@ -114,7 +114,7 @@ final drmConfig = DrmConfig.widevine(
 ```dart
 controller.player.drmSessionStream.listen((session) {
   print('DRM State: ${session.state}');
-  
+
   switch (session.state) {
     case DrmSessionState.acquiringLicense:
       showLoading('Acquiring license...');
@@ -158,7 +158,7 @@ try {
     // Other DRM errors
     showError('DRM error: ${e.message}');
   }
-  
+
   // Log for debugging
   print('DRM Type: ${e.drmType}');
   print('Error Code: ${e.errorCode}');
@@ -246,7 +246,7 @@ Offline DRM (download and offline playback of DRM-protected content) is **not cu
 
 ### 📅 Planned for v0.2.0 (Q1 2026)
 
-**Estimated Timeline:** 4-6 weeks development  
+**Estimated Timeline:** 4-6 weeks development
 **Target Release:** January-February 2026
 
 #### Planned Features

@@ -398,8 +398,7 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     return SubtitleView(
       subtitleService: _subtitleService,
       position: widget.controller.state.position,
-      config:
-          widget.controller.config.subtitleConfig ?? const SubtitleConfig(),
+      config: widget.controller.config.subtitleConfig ?? const SubtitleConfig(),
       enabled: widget.controller.config.enableSubtitles,
       onTrackChanged: (track) {
         // Handle subtitle track change
@@ -986,7 +985,7 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      onPopInvoked: (didPop) {
+      onPopInvokedWithResult: (didPop, result) {
         if (didPop && !_isDisposed) {
           _exitFullscreen();
         }

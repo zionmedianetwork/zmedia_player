@@ -152,7 +152,8 @@ class MediaPlayer {
         ? BufferingConfig(
             minBufferMs: _config.bufferConfig!.minBufferDuration.inMilliseconds,
             maxBufferMs: _config.bufferConfig!.maxBufferDuration.inMilliseconds,
-            targetBufferMs: _config.bufferConfig!.targetBufferDuration.inMilliseconds,
+            targetBufferMs:
+                _config.bufferConfig!.targetBufferDuration.inMilliseconds,
             rebufferMs: _config.bufferConfig!.rebufferDuration.inMilliseconds,
           )
         : const BufferingConfig(); // Use default config
@@ -241,9 +242,7 @@ class MediaPlayer {
     for (final key in staleKeys) {
       // Check instance still exists before cleanup
       final instance = _instances[key];
-      if (instance != null &&
-          !instance.isPlaying &&
-          !instance._isDisposed) {
+      if (instance != null && !instance.isPlaying && !instance._isDisposed) {
         debugPrint('MediaPlayer: Auto-cleaning stale instance: $key');
 
         // Atomic removal pattern: remove from tracking first

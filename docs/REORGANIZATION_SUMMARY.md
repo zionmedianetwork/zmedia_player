@@ -264,7 +264,6 @@ If you have questions about the new documentation structure:
 
 ---
 
-**Reorganized:** October 19, 2025  
-**Structure Version:** 1.0  
+**Reorganized:** October 19, 2025
+**Structure Version:** 1.0
 **Total Documents:** 15 files in `docs/` + 19 archived
-

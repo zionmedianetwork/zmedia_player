@@ -72,8 +72,8 @@ class RetryConfig {
   Duration calculateDelay(int attemptNumber) {
     if (attemptNumber <= 0) return Duration.zero;
 
-    final delayMs = initialDelay.inMilliseconds *
-        (backoffMultiplier * (attemptNumber - 1));
+    final delayMs =
+        initialDelay.inMilliseconds * (backoffMultiplier * (attemptNumber - 1));
     final delay = Duration(milliseconds: delayMs.toInt());
 
     return delay > maxDelay ? maxDelay : delay;
@@ -197,7 +197,8 @@ class NetworkResilienceService {
     String? operationId,
   }) async {
     final retryConfig = config ?? _config;
-    final opId = operationId ?? DateTime.now().millisecondsSinceEpoch.toString();
+    final opId =
+        operationId ?? DateTime.now().millisecondsSinceEpoch.toString();
 
     // Create retry operation tracker
     final retryOp = _RetryOperation(
@@ -227,7 +228,8 @@ class NetworkResilienceService {
 
     // If still appears online, might be temporary glitch
     if (_networkStatus.isAvailable) {
-      debugPrint('NetworkResilienceService: Network appears available, might be temporary issue');
+      debugPrint(
+          'NetworkResilienceService: Network appears available, might be temporary issue');
     }
   }
 
@@ -289,7 +291,8 @@ class NetworkResilienceService {
       final status = NetworkStatus.fromPlatform(platformData);
       updateNetworkStatus(status);
     } catch (e) {
-      debugPrint('NetworkResilienceService: Error checking network status - $e');
+      debugPrint(
+          'NetworkResilienceService: Error checking network status - $e');
       updateNetworkStatus(NetworkStatus.unknown());
     }
   }
@@ -339,7 +342,8 @@ class NetworkResilienceService {
   }
 
   void _handleConnectionRestored() {
-    debugPrint('NetworkResilienceService: Connection restored, checking pending operations');
+    debugPrint(
+        'NetworkResilienceService: Connection restored, checking pending operations');
 
     // Active retries will automatically continue
     // This is just for logging/tracking

@@ -42,7 +42,8 @@ class InputValidator {
     }
 
     // Validate scheme
-    final validSchemes = requireHttps ? ['https'] : ['http', 'https', 'rtmp', 'rtsp'];
+    final validSchemes =
+        requireHttps ? ['https'] : ['http', 'https', 'rtmp', 'rtsp'];
     if (!validSchemes.contains(uri.scheme.toLowerCase())) {
       throw ConfigurationException(
         requireHttps
@@ -224,7 +225,8 @@ class InputValidator {
   }
 
   /// Validates a duration
-  static void validateDuration(Duration duration, {Duration? min, Duration? max}) {
+  static void validateDuration(Duration duration,
+      {Duration? min, Duration? max}) {
     if (min != null && duration < min) {
       throw ConfigurationException(
         'Duration is below minimum: ${duration.inMilliseconds}ms < ${min.inMilliseconds}ms',

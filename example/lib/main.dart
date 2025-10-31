@@ -97,7 +97,7 @@ class ZMediaPlayerExampleApp extends StatelessWidget {
           activeTrackColor: const Color(0xFF6366F1),
           inactiveTrackColor: Colors.white24,
           thumbColor: const Color(0xFF6366F1),
-          overlayColor: const Color(0xFF6366F1).withOpacity(0.2),
+          overlayColor: const Color(0xFF6366F1).withValues(alpha: 0.2),
         ),
       ),
       home: const HomePage(),

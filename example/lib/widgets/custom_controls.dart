@@ -70,9 +70,9 @@ class _CustomControlsState extends State<CustomControls> {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withOpacity(0.7),
+                Colors.black.withValues(alpha: 0.7),
                 Colors.transparent,
-                Colors.black.withOpacity(0.7),
+                Colors.black.withValues(alpha: 0.7),
               ],
               stops: const [0.0, 0.5, 1.0],
             ),
@@ -127,7 +127,7 @@ class _CustomControlsState extends State<CustomControls> {
                     return Container(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.black.withOpacity(0.5),
+                        color: Colors.black.withValues(alpha: 0.5),
                       ),
                       child: IconButton(
                         icon: Icon(
@@ -188,8 +188,8 @@ class _CustomControlsState extends State<CustomControls> {
                                 activeTrackColor: const Color(0xFF6366F1),
                                 inactiveTrackColor: Colors.white30,
                                 thumbColor: const Color(0xFF6366F1),
-                                overlayColor:
-                                    const Color(0xFF6366F1).withOpacity(0.2),
+                                overlayColor: const Color(0xFF6366F1)
+                                    .withValues(alpha: 0.2),
                               ),
                               child: Slider(
                                 value: widget.controller.position.inMilliseconds

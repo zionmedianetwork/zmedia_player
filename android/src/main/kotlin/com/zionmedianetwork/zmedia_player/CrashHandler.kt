@@ -5,7 +5,7 @@ import io.flutter.plugin.common.MethodChannel
 
 /**
  * Native crash handler for Android
- * 
+ *
  * Catches and reports native-layer crashes to the Flutter layer,
  * which can then forward them to the configured crash reporter.
  */
@@ -15,7 +15,7 @@ class CrashHandler(
     companion object {
         private const val TAG = "ZMediaCrashHandler"
     }
-    
+
     /**
      * Wrap a potentially failing operation with crash reporting
      */
@@ -37,7 +37,7 @@ class CrashHandler(
             throw e
         }
     }
-    
+
     /**
      * Wrap a suspend operation with crash reporting
      */
@@ -59,7 +59,7 @@ class CrashHandler(
             throw e
         }
     }
-    
+
     /**
      * Report a native error to Flutter layer
      */
@@ -70,7 +70,7 @@ class CrashHandler(
         context: Map<String, Any>
     ) {
         Log.e(TAG, "Native error in $operation for player $playerId: ${error.message}", error)
-        
+
         try {
             val errorData = buildMap<String, Any?> {
                 put("operation", operation)
@@ -81,14 +81,14 @@ class CrashHandler(
                 put("timestamp", System.currentTimeMillis())
                 putAll(context)
             }
-            
+
             methodChannel.invokeMethod("onNativeError", errorData)
         } catch (e: Exception) {
             // Fallback logging if method channel fails
             Log.e(TAG, "Failed to report native error to Flutter: ${e.message}")
         }
     }
-    
+
     /**
      * Report a non-fatal issue
      */
@@ -99,7 +99,7 @@ class CrashHandler(
         context: Map<String, Any> = emptyMap()
     ) {
         Log.w(TAG, "Warning in $operation for player $playerId: $message")
-        
+
         try {
             val warningData = buildMap<String, Any?> {
                 put("operation", operation)
@@ -109,13 +109,13 @@ class CrashHandler(
                 put("timestamp", System.currentTimeMillis())
                 putAll(context)
             }
-            
+
             methodChannel.invokeMethod("onNativeWarning", warningData)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to report warning to Flutter: ${e.message}")
         }
     }
-    
+
     /**
      * Log a debug message
      */
@@ -123,4 +123,3 @@ class CrashHandler(
         Log.d(TAG, "[$playerId] $operation: $message")
     }
 }
-

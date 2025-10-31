@@ -77,6 +77,7 @@ class _MediaControlsState extends State<MediaControls>
   late AnimationController _scaleController;
   late AnimationController _overlayController;
   late Animation<double> _fadeAnimation;
+  // ignore: unused_field
   late Animation<double> _scaleAnimation;
   late Animation<double> _overlayAnimation;
 
@@ -154,8 +155,8 @@ class _MediaControlsState extends State<MediaControls>
                 radius: 1.5,
                 colors: [
                   Colors.transparent,
-                  Colors.black.withOpacity(0.1),
-                  Colors.black.withOpacity(0.6),
+                  Colors.black.withValues(alpha: 0.1),
+                  Colors.black.withValues(alpha: 0.6),
                 ],
               ),
             ),
@@ -272,7 +273,7 @@ class _MediaControlsState extends State<MediaControls>
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.3),
+          color: Colors.black.withValues(alpha: 0.3),
           borderRadius: BorderRadius.circular(24),
         ),
         child: Icon(
@@ -295,7 +296,7 @@ class _MediaControlsState extends State<MediaControls>
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(32),
             ),
             child: Icon(
@@ -316,7 +317,7 @@ class _MediaControlsState extends State<MediaControls>
           child: Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.3),
+              color: Colors.black.withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(32),
             ),
             child: Icon(
@@ -330,7 +331,7 @@ class _MediaControlsState extends State<MediaControls>
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(32),
           ),
           child: SizedBox(
@@ -347,12 +348,12 @@ class _MediaControlsState extends State<MediaControls>
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.3),
+            color: Colors.black.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(32),
           ),
           child: Icon(
             FluentIcons.play_24_regular,
-            color: Colors.white.withOpacity(0.5),
+            color: Colors.white.withValues(alpha: 0.5),
             size: 32,
           ),
         );
@@ -378,8 +379,8 @@ class _MediaControlsState extends State<MediaControls>
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                Colors.black.withOpacity(0.8),
-                Colors.black.withOpacity(0.4),
+                Colors.black.withValues(alpha: 0.8),
+                Colors.black.withValues(alpha: 0.4),
                 Colors.transparent,
               ],
               stops: const [0.0, 0.6, 1.0],
@@ -397,7 +398,7 @@ class _MediaControlsState extends State<MediaControls>
                 child: Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.3),
+                    color: Colors.black.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: Icon(
@@ -429,8 +430,7 @@ class _MediaControlsState extends State<MediaControls>
                             tooltip: isCasting ? 'Connected' : 'Cast',
                           ),
 
-                  if (showCastButton)
-                    const SizedBox(width: 12),
+                  if (showCastButton) const SizedBox(width: 12),
 
                   // PiP button
                   if (widget.showPipButton && widget.controller.isPipAvailable)
@@ -472,11 +472,12 @@ class _MediaControlsState extends State<MediaControls>
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: isActive
-              ? Colors.orange.withOpacity(0.2)
-              : Colors.black.withOpacity(0.3),
+              ? Colors.orange.withValues(alpha: 0.2)
+              : Colors.black.withValues(alpha: 0.3),
           borderRadius: BorderRadius.circular(20),
           border: isActive
-              ? Border.all(color: Colors.orange.withOpacity(0.5), width: 1)
+              ? Border.all(
+                  color: Colors.orange.withValues(alpha: 0.5), width: 1)
               : null,
         ),
         child: Icon(
@@ -510,7 +511,7 @@ class _MediaControlsState extends State<MediaControls>
               end: Alignment.bottomCenter,
               colors: [
                 Colors.transparent,
-                Colors.black.withOpacity(0.8),
+                Colors.black.withValues(alpha: 0.8),
               ],
             ),
           ),
@@ -559,7 +560,7 @@ class _MediaControlsState extends State<MediaControls>
                           child: Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.3),
+                              color: Colors.black.withValues(alpha: 0.3),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Icon(
@@ -587,11 +588,11 @@ class _MediaControlsState extends State<MediaControls>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.red.withOpacity(0.9),
+          color: Colors.red.withValues(alpha: 0.9),
           borderRadius: BorderRadius.circular(4),
           boxShadow: [
             BoxShadow(
-              color: Colors.red.withOpacity(0.5),
+              color: Colors.red.withValues(alpha: 0.5),
               blurRadius: 8,
               spreadRadius: 1,
             ),
@@ -639,8 +640,8 @@ class _MediaControlsState extends State<MediaControls>
           ),
           overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
           activeTrackColor: Colors.orange, // Orange as per template
-          inactiveTrackColor: Colors.white.withOpacity(0.3),
-          overlayColor: Colors.orange.withOpacity(0.2),
+          inactiveTrackColor: Colors.white.withValues(alpha: 0.3),
+          overlayColor: Colors.orange.withValues(alpha: 0.2),
           thumbColor: Colors.orange,
         ),
         child: Slider(
@@ -680,11 +681,11 @@ class _MediaControlsState extends State<MediaControls>
           height: 180,
           width: 50,
           decoration: BoxDecoration(
-            color: Colors.black.withOpacity(0.8),
+            color: Colors.black.withValues(alpha: 0.8),
             borderRadius: BorderRadius.circular(12),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.3),
+                color: Colors.black.withValues(alpha: 0.3),
                 blurRadius: 15,
                 offset: const Offset(0, 5),
               ),
@@ -757,11 +758,11 @@ class _MediaControlsState extends State<MediaControls>
           ).animate(_overlayController),
           child: Container(
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.9),
+              color: Colors.black.withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
+                  color: Colors.black.withValues(alpha: 0.3),
                   blurRadius: 15,
                   offset: const Offset(0, 5),
                 ),
@@ -785,7 +786,8 @@ class _MediaControlsState extends State<MediaControls>
                           horizontal: 20, vertical: 12),
                       decoration: isSelected
                           ? BoxDecoration(
-                              color: theme.activeIconColor.withOpacity(0.2),
+                              color:
+                                  theme.activeIconColor.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(8),
                             )
                           : null,
@@ -830,11 +832,11 @@ class _MediaControlsState extends State<MediaControls>
           child: Container(
             constraints: const BoxConstraints(maxWidth: 200),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.9),
+              color: Colors.black.withValues(alpha: 0.9),
               borderRadius: BorderRadius.circular(12),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.3),
+                  color: Colors.black.withValues(alpha: 0.3),
                   blurRadius: 15,
                   offset: const Offset(0, 5),
                 ),
@@ -861,7 +863,8 @@ class _MediaControlsState extends State<MediaControls>
                           horizontal: 20, vertical: 12),
                       decoration: isSelected
                           ? BoxDecoration(
-                              color: theme.activeIconColor.withOpacity(0.2),
+                              color:
+                                  theme.activeIconColor.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(8),
                             )
                           : null,
@@ -921,15 +924,15 @@ class _MediaControlsState extends State<MediaControls>
             ),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.95),
+                color: Colors.black.withValues(alpha: 0.95),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: Colors.white.withOpacity(0.1),
+                  color: Colors.white.withValues(alpha: 0.1),
                   width: 1,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.5),
+                    color: Colors.black.withValues(alpha: 0.5),
                     blurRadius: 20,
                     offset: const Offset(0, 10),
                   ),
@@ -944,7 +947,7 @@ class _MediaControlsState extends State<MediaControls>
                     decoration: BoxDecoration(
                       border: Border(
                         bottom: BorderSide(
-                          color: Colors.white.withOpacity(0.1),
+                          color: Colors.white.withValues(alpha: 0.1),
                           width: 1,
                         ),
                       ),
@@ -1052,7 +1055,8 @@ class _MediaControlsState extends State<MediaControls>
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Row(
             children: [
-              Icon(icon, color: theme.iconColor.withOpacity(0.8), size: 20),
+              Icon(icon,
+                  color: theme.iconColor.withValues(alpha: 0.8), size: 20),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -1075,7 +1079,7 @@ class _MediaControlsState extends State<MediaControls>
               const SizedBox(width: 8),
               Icon(
                 FluentIcons.chevron_right_20_regular,
-                color: theme.iconColor.withOpacity(0.5),
+                color: theme.iconColor.withValues(alpha: 0.5),
                 size: 20,
               ),
             ],
@@ -1099,15 +1103,15 @@ class _MediaControlsState extends State<MediaControls>
           child: Container(
             constraints: const BoxConstraints(maxWidth: 280, maxHeight: 400),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.95),
+              color: Colors.black.withValues(alpha: 0.95),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: Colors.white.withOpacity(0.1),
+                color: Colors.white.withValues(alpha: 0.1),
                 width: 1,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withOpacity(0.5),
+                  color: Colors.black.withValues(alpha: 0.5),
                   blurRadius: 20,
                   offset: const Offset(0, 10),
                 ),
@@ -1122,7 +1126,7 @@ class _MediaControlsState extends State<MediaControls>
                   decoration: BoxDecoration(
                     border: Border(
                       bottom: BorderSide(
-                        color: Colors.white.withOpacity(0.1),
+                        color: Colors.white.withValues(alpha: 0.1),
                         width: 1,
                       ),
                     ),
@@ -1165,7 +1169,7 @@ class _MediaControlsState extends State<MediaControls>
                         Text(
                           'Looking for devices...',
                           style: TextStyle(
-                            color: theme.textColor.withOpacity(0.7),
+                            color: theme.textColor.withValues(alpha: 0.7),
                             fontSize: 13,
                           ),
                         ),
@@ -1218,7 +1222,8 @@ class _MediaControlsState extends State<MediaControls>
                                   _toggleCastMenu();
                                 }
                               } catch (e) {
-                                debugPrint('Failed to connect or load media: $e');
+                                debugPrint(
+                                    'Failed to connect or load media: $e');
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
@@ -1257,7 +1262,7 @@ class _MediaControlsState extends State<MediaControls>
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: isConnected
               ? BoxDecoration(
-                  color: theme.activeIconColor.withOpacity(0.15),
+                  color: theme.activeIconColor.withValues(alpha: 0.15),
                 )
               : null,
           child: Row(
@@ -1304,7 +1309,7 @@ class _MediaControlsState extends State<MediaControls>
               else
                 Icon(
                   FluentIcons.chevron_right_20_regular,
-                  color: theme.iconColor.withOpacity(0.5),
+                  color: theme.iconColor.withValues(alpha: 0.5),
                   size: 20,
                 ),
             ],
@@ -1332,7 +1337,7 @@ class _MediaControlsState extends State<MediaControls>
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.6),
+          color: Colors.black.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -1530,6 +1535,7 @@ class _AnimatedIconButton extends StatefulWidget {
     required this.icon,
     required this.color,
     required this.size,
+    // ignore: unused_element_parameter
     this.tooltip,
   });
 
@@ -1598,9 +1604,13 @@ class _ModernIconButton extends StatefulWidget {
     required this.icon,
     required this.color,
     required this.backgroundColor,
+    // ignore: unused_element_parameter
     this.size = 24,
+    // ignore: unused_element_parameter
     this.tooltip,
+    // ignore: unused_element_parameter
     this.isActive = false,
+    // ignore: unused_element_parameter
     this.badge,
   });
 
@@ -1651,18 +1661,19 @@ class _ModernIconButtonState extends State<_ModernIconButton>
                 shape: BoxShape.circle,
                 color: widget.backgroundColor,
                 border: widget.isActive
-                    ? Border.all(color: widget.color.withOpacity(0.5), width: 2)
+                    ? Border.all(
+                        color: widget.color.withValues(alpha: 0.5), width: 2)
                     : null,
                 boxShadow: [
                   if (widget.isActive)
                     BoxShadow(
-                      color: widget.color.withOpacity(0.3),
+                      color: widget.color.withValues(alpha: 0.3),
                       blurRadius: 8,
                       spreadRadius: 2,
                     ),
                   BoxShadow(
                     color: Colors.black
-                        .withOpacity(0.2 + _glowAnimation.value * 0.1),
+                        .withValues(alpha: 0.2 + _glowAnimation.value * 0.1),
                     blurRadius: 8,
                     offset: const Offset(0, 2),
                   ),
@@ -1747,7 +1758,7 @@ class CustomSliderThumbShape extends SliderComponentShape {
 
     // Draw shadow
     final shadowPaint = Paint()
-      ..color = Colors.black.withOpacity(0.3)
+      ..color = Colors.black.withValues(alpha: 0.3)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 3);
 
     canvas.drawCircle(
@@ -1765,7 +1776,7 @@ class CustomSliderThumbShape extends SliderComponentShape {
 
     // Draw inner circle
     final innerPaint = Paint()
-      ..color = Colors.white.withOpacity(0.3)
+      ..color = Colors.white.withValues(alpha: 0.3)
       ..style = PaintingStyle.fill;
 
     canvas.drawCircle(center, enabledThumbRadius * 0.4, innerPaint);
@@ -1805,7 +1816,7 @@ class CustomTrackShape extends RoundedRectSliderTrackShape {
       ..style = PaintingStyle.fill;
 
     final shadowPaint = Paint()
-      ..color = Colors.black.withOpacity(0.1)
+      ..color = Colors.black.withValues(alpha: 0.1)
       ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2);
 
     final inactiveRRect = RRect.fromRectAndRadius(
@@ -1830,7 +1841,7 @@ class CustomTrackShape extends RoundedRectSliderTrackShape {
     final gradient = LinearGradient(
       colors: [
         sliderTheme.activeTrackColor ?? Colors.blue,
-        (sliderTheme.activeTrackColor ?? Colors.blue).withOpacity(0.8),
+        (sliderTheme.activeTrackColor ?? Colors.blue).withValues(alpha: 0.8),
       ],
     );
 
@@ -2034,10 +2045,12 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: () async {
-        await _exitFullscreen();
-        return false;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop) {
+          await _exitFullscreen();
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -2065,7 +2078,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Colors.black.withOpacity(0.7),
+                        Colors.black.withValues(alpha: 0.7),
                         Colors.transparent,
                       ],
                     ),
@@ -2076,7 +2089,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                         // Modern exit button
                         Container(
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.5),
+                            color: Colors.black.withValues(alpha: 0.5),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: IconButton(
@@ -2108,7 +2121,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                                 Text(
                                   widget.controller.currentMediaTitle!,
                                   style: TextStyle(
-                                    color: Colors.white.withOpacity(0.8),
+                                    color: Colors.white.withValues(alpha: 0.8),
                                     fontSize: 14,
                                   ),
                                   maxLines: 1,
@@ -2124,7 +2137,7 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
                             // Picture-in-picture button (if supported)
                             Container(
                               decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.5),
+                                color: Colors.black.withValues(alpha: 0.5),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: IconButton(

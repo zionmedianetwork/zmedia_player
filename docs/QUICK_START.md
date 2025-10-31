@@ -171,8 +171,8 @@ await controller.load(drmItem);
 
 ## 📝 Documentation Status
 
-**Status:** ✅ Complete and up-to-date  
-**Last Updated:** October 19, 2025  
+**Status:** ✅ Complete and up-to-date
+**Last Updated:** October 19, 2025
 **Version:** 0.1.0
 
 ### Coverage
@@ -230,4 +230,3 @@ await controller.load(drmItem);
 For questions or issues:
 - [GitHub Issues](https://github.com/zionmedianetwork/zmedia_player/issues)
 - [Discussions](https://github.com/zionmedianetwork/zmedia_player/discussions)
-

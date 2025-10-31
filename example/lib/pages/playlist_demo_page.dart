@@ -426,7 +426,7 @@ class _PlaylistDemoPageState extends State<PlaylistDemoPage> {
 
             return Container(
               color: isCurrentItem
-                  ? const Color(0xFF6366F1).withOpacity(0.1)
+                  ? const Color(0xFF6366F1).withValues(alpha: 0.1)
                   : null,
               child: ListTile(
                 leading: Container(

@@ -82,13 +82,13 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             "updateNotificationState" -> handleUpdateNotificationState(call, result)
             "updateNotificationPosition" -> handleUpdateNotificationPosition(call, result)
             "dismissNotification" -> handleDismissNotification(call, result)
-            
+
             // Phase 3: PiP methods
             "checkPipAvailability" -> handleCheckPipAvailability(call, result)
             "enterPictureInPicture" -> handleEnterPictureInPicture(call, result)
             "exitPictureInPicture" -> handleExitPictureInPicture(call, result)
             "onPipModeChanged" -> handlePipModeChanged(call, result)
-            
+
             // Phase 3: Cast methods
             "initializeCast" -> handleInitializeCast(call, result)
             "startCastDiscovery" -> handleStartCastDiscovery(call, result)
@@ -100,7 +100,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             "castPause" -> handleCastPause(call, result)
             "castSeekTo" -> handleCastSeekTo(call, result)
             "castSetVolume" -> handleCastSetVolume(call, result)
-            
+
             else -> result.notImplemented()
         }
     }
@@ -109,7 +109,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val config = call.argument<Map<String, Any>>("config")
-            
+
             if (playerId != null) {
                 playerManager.initializePlayer(playerId, config)
                 result.success(null)
@@ -125,7 +125,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val mediaItem = call.argument<Map<String, Any>>("mediaItem")
-            
+
             if (playerId != null && mediaItem != null) {
                 playerManager.loadMediaItem(playerId, mediaItem)
                 result.success(null)
@@ -142,7 +142,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             val playerId = call.argument<String>("playerId")
             val playlist = call.argument<Map<String, Any>>("playlist")
             val startIndex = call.argument<Int>("startIndex") ?: 0
-            
+
             if (playerId != null && playlist != null) {
                 playerManager.setPlaylist(playerId, playlist, startIndex)
                 result.success(null)
@@ -200,7 +200,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val position = call.argument<Int>("position")
-            
+
             if (playerId != null && position != null) {
                 playerManager.seekTo(playerId, position)
                 result.success(null)
@@ -216,7 +216,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val volume = call.argument<Double>("volume")
-            
+
             if (playerId != null && volume != null) {
                 playerManager.setVolume(playerId, volume.toFloat())
                 result.success(null)
@@ -232,7 +232,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val speed = call.argument<Double>("speed")
-            
+
             if (playerId != null && speed != null) {
                 playerManager.setPlaybackSpeed(playerId, speed.toFloat())
                 result.success(null)
@@ -248,7 +248,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val muted = call.argument<Boolean>("muted")
-            
+
             if (playerId != null && muted != null) {
                 playerManager.setMuted(playerId, muted)
                 result.success(null)
@@ -264,7 +264,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val boxFit = call.argument<String>("boxFit")
-            
+
             if (playerId != null && boxFit != null) {
                 playerManager.setBoxFit(playerId, boxFit)
                 result.success(null)
@@ -280,7 +280,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val subtitleTrack = call.argument<Map<String, Any>?>("subtitleTrack")
-            
+
             if (playerId != null) {
                 playerManager.setSubtitleTrack(playerId, subtitleTrack)
                 result.success(null)
@@ -296,7 +296,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val qualityTrack = call.argument<Map<String, Any>>("qualityTrack")
-            
+
             if (playerId != null && qualityTrack != null) {
                 playerManager.setQualityTrack(playerId, qualityTrack)
                 result.success(null)
@@ -312,7 +312,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val audioTrack = call.argument<Map<String, Any>>("audioTrack")
-            
+
             if (playerId != null && audioTrack != null) {
                 playerManager.setAudioTrack(playerId, audioTrack)
                 result.success(null)
@@ -327,7 +327,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleEnableAutoQuality(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 playerManager.enableAutoQuality(playerId)
                 result.success(null)
@@ -343,7 +343,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val index = call.argument<Int>("index")
-            
+
             if (playerId != null && index != null) {
                 playerManager.skipToIndex(playerId, index)
                 result.success(null)
@@ -359,7 +359,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val config = call.argument<Map<String, Any>>("config")
-            
+
             if (playerId != null && config != null) {
                 playerManager.updateConfig(playerId, config)
                 result.success(null)
@@ -406,12 +406,12 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     // Phase 3: Notification method handlers
-    
+
     private fun handleInitializeNotification(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
             val config = call.argument<Map<String, Any>>("config")
-            
+
             if (playerId != null && config != null) {
                 val handler = NotificationHandler(context, playerId, channel)
                 handler.initialize(config)
@@ -430,7 +430,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             val playerId = call.argument<String>("playerId")
             val mediaItem = call.argument<Map<String, Any>>("mediaItem")
             val state = call.argument<Map<String, Any>>("state")
-            
+
             if (playerId != null && mediaItem != null && state != null) {
                 val handler = notificationHandlers[playerId]
                 if (handler != null) {
@@ -451,7 +451,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val state = call.argument<Map<String, Any>>("state")
-            
+
             if (playerId != null && state != null) {
                 val handler = notificationHandlers[playerId]
                 handler?.updateState(state)
@@ -468,7 +468,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val position = call.argument<Number>("position")
-            
+
             if (playerId != null && position != null) {
                 val handler = notificationHandlers[playerId]
                 handler?.updatePosition(position.toLong())
@@ -484,7 +484,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleDismissNotification(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 val handler = notificationHandlers[playerId]
                 handler?.dismiss()
@@ -498,11 +498,11 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     // Phase 3: PiP method handlers
-    
+
     private fun handleCheckPipAvailability(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 // Use the actual activity from ActivityAware
                 val handler = PipHandler(activity, playerId, channel)
@@ -522,7 +522,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleEnterPictureInPicture(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 val handler = pipHandlers[playerId]
                 if (handler != null) {
@@ -548,7 +548,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleExitPictureInPicture(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 val handler = pipHandlers[playerId]
                 handler?.exitPip()
@@ -560,18 +560,18 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             result.error("PIP_EXIT_ERROR", e.message, null)
         }
     }
-    
+
     private fun handlePipModeChanged(call: MethodCall, result: Result) {
         try {
             val isInPictureInPictureMode = call.argument<Boolean>("isInPictureInPictureMode") ?: false
-            
+
             android.util.Log.d("ZMediaPlayerPlugin", "PiP mode changed from MainActivity: $isInPictureInPictureMode")
-            
+
             // Notify all active PiP handlers
             pipHandlers.values.forEach { handler ->
                 handler.onPictureInPictureModeChanged(isInPictureInPictureMode)
             }
-            
+
             result.success(null)
         } catch (e: Exception) {
             android.util.Log.e("ZMediaPlayerPlugin", "Error handling PiP mode change: ${e.message}", e)
@@ -580,12 +580,12 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     }
 
     // Phase 3: Cast method handlers
-    
+
     private fun handleInitializeCast(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
             val config = call.argument<Map<String, Any>>("config")
-            
+
             if (playerId != null && config != null) {
                 val handler = CastHandler(context, playerId, channel)
                 handler.initialize(config)
@@ -602,7 +602,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleStartCastDiscovery(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 val handler = castHandlers[playerId]
                 handler?.startDiscovery()
@@ -618,7 +618,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleStopCastDiscovery(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 val handler = castHandlers[playerId]
                 handler?.stopDiscovery()
@@ -635,7 +635,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val deviceId = call.argument<String>("deviceId")
-            
+
             if (playerId != null && deviceId != null) {
                 val handler = castHandlers[playerId]
                 if (handler != null) {
@@ -655,7 +655,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleDisconnectFromCastDevice(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 val handler = castHandlers[playerId]
                 handler?.disconnect()
@@ -672,7 +672,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val mediaItem = call.argument<Map<String, Any>>("mediaItem")
-            
+
             if (playerId != null && mediaItem != null) {
                 val handler = castHandlers[playerId]
                 handler?.loadMedia(mediaItem)
@@ -688,7 +688,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleCastPlay(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 val handler = castHandlers[playerId]
                 handler?.play()
@@ -704,7 +704,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleCastPause(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
-            
+
             if (playerId != null) {
                 val handler = castHandlers[playerId]
                 handler?.pause()
@@ -721,7 +721,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val position = call.argument<Number>("position")
-            
+
             if (playerId != null && position != null) {
                 val handler = castHandlers[playerId]
                 handler?.seekTo(position.toLong())
@@ -738,7 +738,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val volume = call.argument<Double>("volume")
-            
+
             if (playerId != null && volume != null) {
                 val handler = castHandlers[playerId]
                 handler?.setVolume(volume)
@@ -768,23 +768,23 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         castHandlers.values.forEach { it.dispose() }
         castHandlers.clear()
     }
-    
+
     // ActivityAware implementation
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
         android.util.Log.d("ZMediaPlayerPlugin", "Activity attached: ${activity != null}")
     }
-    
+
     override fun onDetachedFromActivityForConfigChanges() {
         // Keep activity reference during config changes
         android.util.Log.d("ZMediaPlayerPlugin", "Activity detached for config changes")
     }
-    
+
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
         android.util.Log.d("ZMediaPlayerPlugin", "Activity reattached after config changes")
     }
-    
+
     override fun onDetachedFromActivity() {
         activity = null
         android.util.Log.d("ZMediaPlayerPlugin", "Activity detached")

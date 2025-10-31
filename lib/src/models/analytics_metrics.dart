@@ -117,10 +117,12 @@ class QoEMetrics {
       startupTime: (map['startupTime'] as num).toDouble(),
       rebufferRatio: (map['rebufferRatio'] as num).toDouble(),
       seekCount: map['seekCount'] as int? ?? 0,
-      averageSeekLatency: (map['averageSeekLatency'] as num?)?.toDouble() ?? 0.0,
+      averageSeekLatency:
+          (map['averageSeekLatency'] as num?)?.toDouble() ?? 0.0,
       completionRate: (map['completionRate'] as num?)?.toDouble() ?? 0.0,
       errorCount: map['errorCount'] as int? ?? 0,
-      sessionStart: DateTime.fromMillisecondsSinceEpoch(map['sessionStart'] as int),
+      sessionStart:
+          DateTime.fromMillisecondsSinceEpoch(map['sessionStart'] as int),
       sessionEnd: map['sessionEnd'] != null
           ? DateTime.fromMillisecondsSinceEpoch(map['sessionEnd'] as int)
           : null,

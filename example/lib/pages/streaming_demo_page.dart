@@ -439,7 +439,8 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
                   _showBufferDetails ? Icons.expand_less : Icons.expand_more,
                   color: Colors.white70,
                 ),
-                onPressed: () => setState(() => _showBufferDetails = !_showBufferDetails),
+                onPressed: () =>
+                    setState(() => _showBufferDetails = !_showBufferDetails),
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
               ),
@@ -845,7 +846,7 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
     // NOTE: Download would work with proper progressive download URLs
     // HLS/DASH streams need special handling for offline storage
     // Current URLs are streaming manifests, not single files
-    /* 
+    /*
     try {
       final currentVideo = _streamingVideos[_selectedVideoIndex];
       await _cacheService.downloadAndCache(currentVideo);

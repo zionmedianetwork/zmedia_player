@@ -50,7 +50,7 @@ class SubtitleService {
       return cues;
     } catch (e) {
       // If loading fails, return empty cues instead of throwing
-      print('Warning: Failed to load subtitle track ${track.id}: $e');
+      // Warning: Failed to load subtitle track ${track.id}: $e
       return [];
     }
   }
@@ -64,12 +64,10 @@ class SubtitleService {
       _activeTrack = track;
       _activeContent = content;
 
-      // Log the track change for debugging
-      print(
-          'Subtitle track changed to: ${track.title} (${content.length} cues)');
+      // Subtitle track changed to: ${track.title} (${content.length} cues)
     } catch (e) {
       // If setting track fails, still set the track but with empty content
-      print('Warning: Failed to set subtitle track ${track.id}: $e');
+      // Warning: Failed to set subtitle track ${track.id}: $e
       _activeTrack = track;
       _activeContent = [];
     }

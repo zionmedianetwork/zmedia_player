@@ -44,8 +44,7 @@ class BufferingService {
         _platformBufferStatusCallback = platformBufferStatusCallback;
 
   /// Stream of buffer health updates
-  Stream<BufferHealth> get bufferHealthStream =>
-      _bufferHealthController.stream;
+  Stream<BufferHealth> get bufferHealthStream => _bufferHealthController.stream;
 
   /// Current buffering configuration
   BufferingConfig get config => _config;
@@ -95,7 +94,8 @@ class BufferingService {
   }
 
   /// Starts monitoring buffer health
-  void startMonitoring({Duration interval = const Duration(milliseconds: 500)}) {
+  void startMonitoring(
+      {Duration interval = const Duration(milliseconds: 500)}) {
     if (_isMonitoring) {
       debugPrint('BufferingService: Monitoring already active');
       return;

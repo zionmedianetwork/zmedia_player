@@ -41,7 +41,8 @@ enum NetworkQuality {
   bool get isAvailable => this != NetworkQuality.offline;
 
   /// Checks if quality is adequate for streaming
-  bool get canStream => this != NetworkQuality.offline && this != NetworkQuality.poor;
+  bool get canStream =>
+      this != NetworkQuality.offline && this != NetworkQuality.poor;
 
   /// Gets minimum bitrate recommendation for this quality (in bps)
   int get recommendedMinBitrate {

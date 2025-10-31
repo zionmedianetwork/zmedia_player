@@ -328,7 +328,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                     Text(
                       'Casting to',
                       style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
+                        color: Colors.white.withValues(alpha: 0.7),
                         fontSize: 16,
                       ),
                     ),
@@ -528,7 +528,8 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                         child: ElevatedButton.icon(
                           onPressed:
                               _isDiscovering ? _stopDiscovery : _startDiscovery,
-                          icon: Icon(_isDiscovering ? Icons.stop : Icons.search),
+                          icon:
+                              Icon(_isDiscovering ? Icons.stop : Icons.search),
                           label: Text(_isDiscovering
                               ? 'Stop Discovery'
                               : 'Discover Devices'),
@@ -557,7 +558,8 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                           children: [
                             const Row(
                               children: [
-                                Icon(Icons.airplay, color: Colors.blue, size: 28),
+                                Icon(Icons.airplay,
+                                    color: Colors.blue, size: 28),
                                 SizedBox(width: 12),
                                 Expanded(
                                   child: Text(
@@ -601,7 +603,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                               child: Row(
                                 children: [
                                   const Icon(Icons.info_outline,
-                                    color: Colors.blue, size: 20),
+                                      color: Colors.blue, size: 20),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
@@ -643,7 +645,8 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                             child: ListTile(
                               leading: Icon(
                                 Platform.isAndroid ? Icons.cast : Icons.airplay,
-                                color: isConnected ? Colors.purple : Colors.grey,
+                                color:
+                                    isConnected ? Colors.purple : Colors.grey,
                               ),
                               title: Text(device.name),
                               subtitle: Text(

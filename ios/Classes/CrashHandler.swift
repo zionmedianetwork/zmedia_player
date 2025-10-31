@@ -7,11 +7,11 @@ import Flutter
 /// which can then forward them to the configured crash reporter.
 class CrashHandler {
     private let methodChannel: FlutterMethodChannel
-    
+
     init(methodChannel: FlutterMethodChannel) {
         self.methodChannel = methodChannel
     }
-    
+
     /// Wrap a potentially failing operation with crash reporting
     func wrapOperation<T>(
         operation: String,
@@ -31,7 +31,7 @@ class CrashHandler {
             throw error
         }
     }
-    
+
     /// Wrap an async operation with crash reporting
     func wrapAsyncOperation<T>(
         operation: String,
@@ -51,7 +51,7 @@ class CrashHandler {
             throw error
         }
     }
-    
+
     /// Report a native error to Flutter layer
     private func reportNativeError(
         operation: String,
@@ -60,7 +60,7 @@ class CrashHandler {
         context: [String: Any]
     ) {
         print("CrashHandler: Native error in \(operation) for player \(playerId): \(error.localizedDescription)")
-        
+
         var errorData: [String: Any] = [
             "operation": operation,
             "playerId": playerId,
@@ -68,10 +68,10 @@ class CrashHandler {
             "errorType": String(describing: type(of: error)),
             "timestamp": Date().timeIntervalSince1970 * 1000
         ]
-        
+
         // Add context
         errorData.merge(context) { (_, new) in new }
-        
+
         // Invoke method on Flutter side
         methodChannel.invokeMethod("onNativeError", arguments: errorData) { result in
             if let error = result as? FlutterError {
@@ -79,7 +79,7 @@ class CrashHandler {
             }
         }
     }
-    
+
     /// Report a non-fatal warning
     func reportWarning(
         operation: String,
@@ -88,7 +88,7 @@ class CrashHandler {
         context: [String: Any] = [:]
     ) {
         print("CrashHandler: Warning in \(operation) for player \(playerId): \(message)")
-        
+
         var warningData: [String: Any] = [
             "operation": operation,
             "playerId": playerId,
@@ -96,19 +96,18 @@ class CrashHandler {
             "level": "warning",
             "timestamp": Date().timeIntervalSince1970 * 1000
         ]
-        
+
         warningData.merge(context) { (_, new) in new }
-        
+
         methodChannel.invokeMethod("onNativeWarning", arguments: warningData) { result in
             if let error = result as? FlutterError {
                 print("CrashHandler: Failed to report warning: \(error.message ?? "Unknown")")
             }
         }
     }
-    
+
     /// Log a debug message
     func logDebug(operation: String, playerId: String, message: String) {
         print("CrashHandler: [\(playerId)] \(operation): \(message)")
     }
 }
-

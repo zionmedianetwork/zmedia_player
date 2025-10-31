@@ -148,7 +148,7 @@ final llDashConfig = DashConfig(
 ### Live Stream Flags
 
 #### `enableLiveStream` (bool)
-**Default:** `false`  
+**Default:** `false`
 **Purpose:** Main flag to enable live streaming mode
 
 ```dart
@@ -162,7 +162,7 @@ HlsConfig(enableLiveStream: true)  // Enable live mode
 - Enables manifest refresh for live updates
 
 #### `enableDvr` (bool)
-**Default:** `false`  
+**Default:** `false`
 **Purpose:** Enable DVR/time-shifting functionality
 
 ```dart
@@ -183,7 +183,7 @@ HlsConfig(
 - ❌ Interactive live content
 
 #### `liveLatency` (Duration?)
-**Default:** `null` (auto)  
+**Default:** `null` (auto)
 **Purpose:** Target latency from live edge
 
 ```dart
@@ -241,7 +241,7 @@ await controller.seekTo(duration);
 controller.player.positionStream.listen((position) {
   final duration = controller.duration;
   final isAtLiveEdge = (duration - position).inSeconds < 5;
-  
+
   if (isAtLiveEdge) {
     print('Playing at live edge');
   } else {
@@ -317,7 +317,7 @@ final streamingService = StreamingService(
 
 streamingService.bandwidthStream.listen((bandwidth) {
   print('Bandwidth: ${streamingService.getFormattedBandwidth()}');
-  
+
   // Adjust latency based on bandwidth
   if (bandwidth < 1000000) { // < 1 Mbps
     // Consider increasing latency for stability
@@ -373,13 +373,13 @@ class LiveStreamPage extends StatefulWidget {
 class _LiveStreamPageState extends State<LiveStreamPage> {
   late MediaController _controller;
   bool _isAtLiveEdge = true;
-  
+
   @override
   void initState() {
     super.initState();
     _initializePlayer();
   }
-  
+
   void _initializePlayer() {
     _controller = MediaController.create(
       config: MediaConfig(
@@ -393,37 +393,37 @@ class _LiveStreamPageState extends State<LiveStreamPage> {
         ),
       ),
     );
-    
+
     _loadLiveStream();
     _listenToPosition();
   }
-  
+
   Future<void> _loadLiveStream() async {
     final liveStream = MediaItem(
       id: 'live_event',
       title: 'Live Event',
       url: 'https://your-cdn.com/live/stream.m3u8',
     );
-    
+
     await _controller.load(liveStream);
     await _controller.play();
   }
-  
+
   void _listenToPosition() {
     _controller.player.positionStream.listen((position) {
       final duration = _controller.duration;
       final behindLive = (duration - position).inSeconds;
-      
+
       setState(() {
         _isAtLiveEdge = behindLive < 5;
       });
     });
   }
-  
+
   Future<void> _jumpToLive() async {
     await _controller.seekTo(_controller.duration);
   }
-  
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -452,7 +452,7 @@ class _LiveStreamPageState extends State<LiveStreamPage> {
       ),
     );
   }
-  
+
   @override
   void dispose() {
     _controller.dispose();
@@ -542,7 +542,6 @@ HlsConfig(
 
 ---
 
-**Version:** 0.1.0  
-**Last Updated:** October 19, 2025  
+**Version:** 0.1.0
+**Last Updated:** October 19, 2025
 **Status:** Production Ready
-

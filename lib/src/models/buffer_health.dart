@@ -66,9 +66,8 @@ class BufferHealth {
     final downloadSpeed = data['downloadSpeed'] as int?;
 
     // Calculate buffer ratio relative to target
-    final bufferRatio = config.targetBufferMs > 0
-        ? bufferedMs / config.targetBufferMs
-        : 0.0;
+    final bufferRatio =
+        config.targetBufferMs > 0 ? bufferedMs / config.targetBufferMs : 0.0;
 
     // Determine status based on buffer ratio
     final status = _determineStatus(bufferRatio, bufferedMs, config);

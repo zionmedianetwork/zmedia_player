@@ -174,13 +174,13 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
                       decoration: BoxDecoration(
                         gradient: LinearGradient(
                           colors: [
-                            const Color(0xFF6366F1).withOpacity(0.1),
-                            const Color(0xFF8B5CF6).withOpacity(0.1),
+                            const Color(0xFF6366F1).withValues(alpha: 0.1),
+                            const Color(0xFF8B5CF6).withValues(alpha: 0.1),
                           ],
                         ),
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: const Color(0xFF6366F1).withOpacity(0.3),
+                          color: const Color(0xFF6366F1).withValues(alpha: 0.3),
                         ),
                       ),
                       child: Column(

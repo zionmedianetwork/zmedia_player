@@ -16,7 +16,6 @@ class NotificationService {
 
   bool _isShowing = false;
   MediaItem? _currentMedia;
-  PlaybackState? _currentState;
   StreamSubscription<String>? _notificationActionSubscription;
 
   NotificationService(this._config);
@@ -62,7 +61,6 @@ class NotificationService {
     if (!_config.enabled) return;
 
     _currentMedia = mediaItem;
-    _currentState = state;
 
     // Don't show notification when paused if configured
     if (!_config.showWhenPaused && state.state == PlayerState.paused) {
@@ -103,8 +101,6 @@ class NotificationService {
     required String playerId,
   }) async {
     if (!_isShowing || !_config.enabled || _currentMedia == null) return;
-
-    _currentState = state;
 
     // Hide notification if paused and configured to do so
     if (!_config.showWhenPaused && state.state == PlayerState.paused) {

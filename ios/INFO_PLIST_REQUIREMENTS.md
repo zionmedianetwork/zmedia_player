@@ -59,25 +59,25 @@ Add these keys to your iOS app's `Info.plist` file:
 <plist version="1.0">
 <dict>
     <!-- Existing keys... -->
-    
+
     <!-- Phase 3: Background audio/video playback -->
     <key>UIBackgroundModes</key>
     <array>
         <string>audio</string>
         <string>video</string>
     </array>
-    
+
     <!-- Phase 3: Local network for AirPlay discovery (iOS 14+) -->
     <key>NSLocalNetworkUsageDescription</key>
     <string>This app uses the local network to discover and connect to AirPlay devices for media streaming.</string>
-    
+
     <!-- Optional: Bonjour services for AirPlay -->
     <key>NSBonjourServices</key>
     <array>
         <string>_airplay._tcp</string>
         <string>_raop._tcp</string>
     </array>
-    
+
 </dict>
 </plist>
 ```
@@ -132,4 +132,3 @@ After adding these permissions:
 - PiP on iPad is available from iOS 9.0+
 - Local network permission prompt will appear first time app tries to discover AirPlay devices on iOS 14+
 - Background audio/video is essential for notifications and AirPlay to work properly
-
