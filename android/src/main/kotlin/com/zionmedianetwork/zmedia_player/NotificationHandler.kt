@@ -34,7 +34,7 @@ class NotificationHandler(
     private var mediaSession: MediaSessionCompat? = null
     private var notification: Notification? = null
     private var isShowing = false
-    
+
     // Configuration
     private var channelId: String = "media_playback"
     private var channelName: String = "Media Playback"
@@ -45,7 +45,7 @@ class NotificationHandler(
     private var showSeekForward: Boolean = false
     private var showSeekBackward: Boolean = false
     private var seekInterval: Int = 10
-    
+
     // Current media info
     private var currentTitle: String? = null
     private var currentArtist: String? = null
@@ -60,7 +60,7 @@ class NotificationHandler(
      */
     fun initialize(config: Map<String, Any>) {
         android.util.Log.d(TAG, "Initializing notification handler for player: $playerId")
-        
+
         // Parse configuration
         channelId = config["channelId"] as? String ?: channelId
         channelName = config["channelName"] as? String ?: channelName
@@ -71,10 +71,10 @@ class NotificationHandler(
         showSeekForward = config["showSeekForward"] as? Boolean ?: showSeekForward
         showSeekBackward = config["showSeekBackward"] as? Boolean ?: showSeekBackward
         seekInterval = (config["seekInterval"] as? Number)?.toInt() ?: seekInterval
-        
+
         // Initialize notification manager
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        
+
         // Create notification channel for Android O and above
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -88,7 +88,7 @@ class NotificationHandler(
             }
             notificationManager?.createNotificationChannel(channel)
         }
-        
+
         // Create media session
         mediaSession = MediaSessionCompat(context, "FlutterMediaPlayer_$playerId").apply {
             setFlags(MediaSessionCompat.FLAG_HANDLES_MEDIA_BUTTONS or MediaSessionCompat.FLAG_HANDLES_TRANSPORT_CONTROLS)
@@ -97,27 +97,27 @@ class NotificationHandler(
                     android.util.Log.d(TAG, "MediaSession: onPlay")
                     sendActionToFlutter("play")
                 }
-                
+
                 override fun onPause() {
                     android.util.Log.d(TAG, "MediaSession: onPause")
                     sendActionToFlutter("pause")
                 }
-                
+
                 override fun onSkipToNext() {
                     android.util.Log.d(TAG, "MediaSession: onSkipToNext")
                     sendActionToFlutter("next")
                 }
-                
+
                 override fun onSkipToPrevious() {
                     android.util.Log.d(TAG, "MediaSession: onSkipToPrevious")
                     sendActionToFlutter("previous")
                 }
-                
+
                 override fun onStop() {
                     android.util.Log.d(TAG, "MediaSession: onStop")
                     sendActionToFlutter("stop")
                 }
-                
+
                 override fun onSeekTo(pos: Long) {
                     android.util.Log.d(TAG, "MediaSession: onSeekTo $pos")
                     // Handle seek if needed
@@ -125,7 +125,7 @@ class NotificationHandler(
             })
             isActive = true
         }
-        
+
         android.util.Log.d(TAG, "Notification handler initialized successfully")
     }
 
@@ -134,31 +134,31 @@ class NotificationHandler(
      */
     fun showNotification(mediaItem: Map<String, Any>, state: Map<String, Any>) {
         android.util.Log.d(TAG, "Showing notification")
-        
+
         // Update media info
         currentTitle = mediaItem["title"] as? String ?: "Unknown Title"
         currentArtist = mediaItem["artist"] as? String ?: "Unknown Artist"
         currentArtworkUrl = mediaItem["artworkUrl"] as? String
-        
+
         // Update playback state
         isPlaying = state["isPlaying"] as? Boolean ?: false
         position = (state["position"] as? Number)?.toLong() ?: 0
         duration = (state["duration"] as? Number)?.toLong() ?: 0
-        
+
         // Update media session metadata
         updateMediaSessionMetadata()
-        
+
         // Update playback state
         updateMediaSessionPlaybackState()
-        
+
         // Load artwork if needed
         if (currentArtworkUrl != null && currentArtworkBitmap == null) {
             loadArtwork(currentArtworkUrl!!)
         }
-        
+
         // Build and show notification
         buildAndShowNotification()
-        
+
         isShowing = true
     }
 
@@ -167,13 +167,13 @@ class NotificationHandler(
      */
     fun updateState(state: Map<String, Any>) {
         if (!isShowing) return
-        
+
         android.util.Log.d(TAG, "Updating notification state")
-        
+
         isPlaying = state["isPlaying"] as? Boolean ?: false
         position = (state["position"] as? Number)?.toLong() ?: 0
         duration = (state["duration"] as? Number)?.toLong() ?: 0
-        
+
         updateMediaSessionPlaybackState()
         buildAndShowNotification()
     }
@@ -183,7 +183,7 @@ class NotificationHandler(
      */
     fun updatePosition(position: Long) {
         if (!isShowing) return
-        
+
         this.position = position
         updateMediaSessionPlaybackState()
     }
@@ -193,7 +193,7 @@ class NotificationHandler(
      */
     fun dismiss() {
         android.util.Log.d(TAG, "Dismissing notification")
-        
+
         notificationManager?.cancel(NOTIFICATION_ID)
         mediaSession?.isActive = false
         isShowing = false
@@ -205,7 +205,7 @@ class NotificationHandler(
      */
     fun dispose() {
         android.util.Log.d(TAG, "Disposing notification handler")
-        
+
         dismiss()
         mediaSession?.release()
         mediaSession = null
@@ -232,12 +232,12 @@ class NotificationHandler(
             .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
                 .setMediaSession(mediaSession?.sessionToken)
                 .setShowActionsInCompactView(0, 1, 2))
-        
+
         // Add artwork if available
         currentArtworkBitmap?.let {
             builder.setLargeIcon(it)
         }
-        
+
         // Add actions
         if (showPrevious) {
             builder.addAction(createAction(
@@ -246,7 +246,7 @@ class NotificationHandler(
                 "previous"
             ))
         }
-        
+
         if (showPlayPause) {
             if (isPlaying) {
                 builder.addAction(createAction(
@@ -262,7 +262,7 @@ class NotificationHandler(
                 ))
             }
         }
-        
+
         if (showNext) {
             builder.addAction(createAction(
                 android.R.drawable.ic_media_next,
@@ -270,7 +270,7 @@ class NotificationHandler(
                 "next"
             ))
         }
-        
+
         if (showStop) {
             builder.addAction(createAction(
                 android.R.drawable.ic_delete,
@@ -278,7 +278,7 @@ class NotificationHandler(
                 "stop"
             ))
         }
-        
+
         return builder.build()
     }
 
@@ -287,7 +287,7 @@ class NotificationHandler(
             putExtra("action", action)
             putExtra("playerId", playerId)
         }
-        
+
         val pendingIntent = PendingIntent.getBroadcast(
             context,
             action.hashCode(),
@@ -298,7 +298,7 @@ class NotificationHandler(
                 PendingIntent.FLAG_UPDATE_CURRENT
             }
         )
-        
+
         return NotificationCompat.Action.Builder(icon, title, pendingIntent).build()
     }
 
@@ -307,11 +307,11 @@ class NotificationHandler(
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
-        
+
         currentArtworkBitmap?.let {
             metadata.putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it)
         }
-        
+
         mediaSession?.setMetadata(metadata.build())
     }
 
@@ -331,7 +331,7 @@ class NotificationHandler(
                 PlaybackStateCompat.ACTION_SEEK_TO
             )
             .build()
-        
+
         mediaSession?.setPlaybackState(state)
     }
 
@@ -344,7 +344,7 @@ class NotificationHandler(
                 val input = connection.getInputStream()
                 val bitmap = android.graphics.BitmapFactory.decodeStream(input)
                 input.close()
-                
+
                 withContext(Dispatchers.Main) {
                     currentArtworkBitmap = bitmap
                     if (isShowing) {
@@ -367,4 +367,3 @@ class NotificationHandler(
         }
     }
 }
-

@@ -460,8 +460,8 @@ class BatchingAnalyticsService implements AnalyticsService {
   void _checkFlush({bool force = false}) {
     final now = DateTime.now();
     final shouldFlushSize = _eventQueue.length >= _batchSize;
-    final shouldFlushTime = _lastFlush == null ||
-        now.difference(_lastFlush!) >= _flushInterval;
+    final shouldFlushTime =
+        _lastFlush == null || now.difference(_lastFlush!) >= _flushInterval;
 
     if (force || shouldFlushSize || shouldFlushTime) {
       flush();

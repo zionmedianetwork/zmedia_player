@@ -107,7 +107,8 @@ class BufferingConfig {
       rebufferMs: rebufferMs ?? this.rebufferMs,
       enableAdaptiveBuffering:
           enableAdaptiveBuffering ?? this.enableAdaptiveBuffering,
-      prioritizeFastStartup: prioritizeFastStartup ?? this.prioritizeFastStartup,
+      prioritizeFastStartup:
+          prioritizeFastStartup ?? this.prioritizeFastStartup,
     );
   }
 
@@ -130,8 +131,7 @@ class BufferingConfig {
       maxBufferMs: map['maxBufferMs'] as int? ?? 50000,
       targetBufferMs: map['targetBufferMs'] as int? ?? 15000,
       rebufferMs: map['rebufferMs'] as int? ?? 5000,
-      enableAdaptiveBuffering:
-          map['enableAdaptiveBuffering'] as bool? ?? true,
+      enableAdaptiveBuffering: map['enableAdaptiveBuffering'] as bool? ?? true,
       prioritizeFastStartup: map['prioritizeFastStartup'] as bool? ?? false,
     );
   }

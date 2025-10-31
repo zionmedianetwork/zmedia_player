@@ -198,7 +198,7 @@ void memoryLeakTest() async {
     final controller = MediaController.create();
     await controller.initialize();
     await controller.dispose();
-    
+
     if (i % 100 == 0) {
       print('Completed $i cycles');
     }
@@ -213,22 +213,22 @@ void memoryLeakTest() async {
 // Concurrent operations
 void stressTest() async {
   final controllers = <MediaController>[];
-  
+
   // Create 50 controllers
   for (int i = 0; i < 50; i++) {
     controllers.add(MediaController.create());
   }
-  
+
   // Initialize all concurrently
   await Future.wait(
     controllers.map((c) => c.initialize())
   );
-  
+
   // Dispose all concurrently
   await Future.wait(
     controllers.map((c) => c.dispose())
   );
-  
+
   print('Stress test complete');
 }
 ```
@@ -242,13 +242,13 @@ test('Description of what is being tested', () async {
   // Setup
   final controller = MediaController.create();
   await controller.initialize();
-  
+
   // Exercise
   // ... perform operations
-  
+
   // Verify
   expect(/* condition */, /* expected */);
-  
+
   // Cleanup
   await controller.dispose();
 });
@@ -288,7 +288,7 @@ jobs:
 
 ### Tests Timing Out
 
-**Cause:** Platform methods not mocked  
+**Cause:** Platform methods not mocked
 **Solution:** Mock platform channel responses
 
 ```dart
@@ -306,12 +306,12 @@ setUp(() {
 
 ### Memory Not Released
 
-**Cause:** Strong references retained  
+**Cause:** Strong references retained
 **Solution:** Verify all controllers disposed
 
 ### Performance Tests Failing
 
-**Cause:** CI environment slower than expected  
+**Cause:** CI environment slower than expected
 **Solution:** Adjust targets for CI or skip benchmarks
 
 ```dart
@@ -328,17 +328,17 @@ test('Benchmark', () async {
 class MediaPlayerTelemetry {
   static int _createCount = 0;
   static int _disposeCount = 0;
-  
+
   static void logCreate() {
     _createCount++;
     analytics.log('player_create', {'count': _createCount});
   }
-  
+
   static void logDispose() {
     _disposeCount++;
     analytics.log('player_dispose', {'count': _disposeCount});
   }
-  
+
   static int get activeCount => _createCount - _disposeCount;
 }
 ```
@@ -377,7 +377,6 @@ If tests fail:
 
 ---
 
-**Last Updated:** October 21, 2025  
-**Test Coverage:** 50+ test cases  
+**Last Updated:** October 21, 2025
+**Test Coverage:** 50+ test cases
 **Status:** ✅ All tests passing
-

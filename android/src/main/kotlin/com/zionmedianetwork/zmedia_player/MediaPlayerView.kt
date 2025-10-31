@@ -11,7 +11,7 @@ class MediaPlayerView(
     private val context: Context,
     private val exoPlayer: ExoPlayer?
 ) : PlatformView {
-    
+
     private val playerView: PlayerView = PlayerView(context).apply {
         // Only attach player if it's not null
         if (exoPlayer != null) {
@@ -20,20 +20,20 @@ class MediaPlayerView(
         } else {
             android.util.Log.e("MediaPlayerView", "WARNING: PlayerView created with null ExoPlayer!")
         }
-        
+
         useController = false // We handle controls in Flutter
         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-        
+
         // Ensure view is visible and properly configured
         setBackgroundColor(android.graphics.Color.BLACK)
         setKeepScreenOn(true)
-        
+
         // Force the video surface to be visible
         useArtwork = false
         defaultArtwork = null
         controllerShowTimeoutMs = 0
         controllerHideOnTouch = false
-        
+
         // Post a delayed task to ensure the surface is created
         post {
             android.util.Log.d("MediaPlayerView", "PlayerView posted - requesting layout, player: ${player != null}")
@@ -41,7 +41,7 @@ class MediaPlayerView(
             invalidate()
         }
     }
-    
+
     // Allow setting the player later if it was null during construction
     fun setPlayer(player: ExoPlayer?) {
         android.util.Log.d("MediaPlayerView", "setPlayer called, player: ${player != null}")
@@ -64,12 +64,12 @@ class MediaPlayerView(
             }
         }
     }
-    
+
     private fun disposeInternal() {
         try {
             // First, detach the player to stop rendering
             playerView.player = null
-            
+
             // Give the BufferQueue time to clean up
             android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                 try {
@@ -79,7 +79,7 @@ class MediaPlayerView(
                     android.util.Log.e("MediaPlayerView", "Error during final cleanup: ${e.message}")
                 }
             }, 100)
-            
+
             android.util.Log.d("MediaPlayerView", "MediaPlayerView disposed successfully")
         } catch (e: Exception) {
             android.util.Log.e("MediaPlayerView", "Error disposing MediaPlayerView: ${e.message}")

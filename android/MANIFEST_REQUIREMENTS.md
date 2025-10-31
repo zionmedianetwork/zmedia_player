@@ -34,9 +34,9 @@ Update your `<application>` tag to include:
 <application
     ...
     android:usesCleartextTraffic="true">
-    
+
     <!-- Your existing activities... -->
-    
+
     <!-- Phase 3: PiP Support -->
     <!-- Add to your main activity: -->
     <activity
@@ -46,7 +46,7 @@ Update your `<application>` tag to include:
         android:resizeableActivity="true">
         <!-- Your existing intent filters... -->
     </activity>
-    
+
 </application>
 ```
 
@@ -78,7 +78,7 @@ Declare the features your app uses:
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    
+
     <!-- Phase 3: Optional Features -->
     <uses-feature
         android:name="android.software.picture_in_picture"
@@ -92,7 +92,7 @@ Declare the features your app uses:
         android:icon="@mipmap/ic_launcher"
         android:label="Flutter Media Player Example"
         android:usesCleartextTraffic="true">
-        
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -103,26 +103,26 @@ Declare the features your app uses:
             android:windowSoftInputMode="adjustResize"
             android:supportsPictureInPicture="true"
             android:resizeableActivity="true">
-            
+
             <meta-data
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme" />
-            
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        
+
         <!-- Phase 3: Google Cast Options Provider (if using Chromecast) -->
         <meta-data
             android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
             android:value="com.zionmedianetwork.zmedia_player.CastOptionsProvider" />
-        
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
-            
+
     </application>
 </manifest>
 ```
@@ -171,4 +171,3 @@ After adding these permissions:
 - Foreground service permission is required for persistent media notifications
 - PiP requires `resizeableActivity="true"` on Android 7.0+
 - Google Cast Framework requires Google Play Services
-

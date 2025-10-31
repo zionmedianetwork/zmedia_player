@@ -5,7 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
-    
+
     <!-- Phase 3: Optional Features -->
     <uses-feature
         android:name="android.software.picture_in_picture"
@@ -13,7 +13,7 @@
     <uses-feature
         android:name="com.google.android.gms.cast.framework"
         android:required="false" />
-    
+
     <application
         android:label="zmedia_player_example"
         android:name="${applicationName}"

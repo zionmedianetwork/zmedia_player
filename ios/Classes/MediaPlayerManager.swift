@@ -7,27 +7,27 @@ class MediaPlayerManager {
     private var players: [String: MediaPlayerInstance] = [:]
     private let methodChannel: FlutterMethodChannel
     private let crashHandler: CrashHandler
-    
+
     // Activity tracking for memory leak prevention
     private var lastActivity: [String: Date] = [:]
     private var cleanupTimer: Timer?
-    
+
     // Cleanup configuration
     private static let cleanupInterval: TimeInterval = 5 * 60 // 5 minutes
     private static let staleThreshold: TimeInterval = 15 * 60 // 15 minutes
-    
+
     init(methodChannel: FlutterMethodChannel) {
         self.methodChannel = methodChannel
         self.crashHandler = CrashHandler(methodChannel: methodChannel)
         startCleanupTimer()
     }
-    
+
     // MARK: - Activity Tracking
-    
+
     private func markActivity(playerId: String) {
         lastActivity[playerId] = Date()
     }
-    
+
     private func startCleanupTimer() {
         cleanupTimer = Timer.scheduledTimer(
             withTimeInterval: MediaPlayerManager.cleanupInterval,
@@ -36,11 +36,11 @@ class MediaPlayerManager {
             self?.cleanupStaleInstances()
         }
     }
-    
+
     private func cleanupStaleInstances() {
         let now = Date()
         var stalePlayers: [String] = []
-        
+
         for (playerId, lastUsed) in lastActivity {
             if now.timeIntervalSince(lastUsed) > MediaPlayerManager.staleThreshold {
                 if let instance = players[playerId], !instance.isPlaying() {
@@ -48,7 +48,7 @@ class MediaPlayerManager {
                 }
             }
         }
-        
+
         for playerId in stalePlayers {
             print("MediaPlayerManager: Auto-cleaning stale instance: \(playerId)")
             players[playerId]?.dispose()
@@ -56,13 +56,13 @@ class MediaPlayerManager {
             lastActivity.removeValue(forKey: playerId)
         }
     }
-    
+
     func initializePlayer(playerId: String, config: [String: Any]?) throws {
         markActivity(playerId: playerId)
         let playerInstance = MediaPlayerInstance(playerId: playerId, methodChannel: methodChannel, config: config)
         players[playerId] = playerInstance
     }
-    
+
     func loadMediaItem(playerId: String, mediaItem: [String: Any]) throws {
         markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
@@ -76,7 +76,7 @@ class MediaPlayerManager {
             playerInstance.loadMediaItem(mediaItem: mediaItem)
         }
     }
-    
+
     func setPlaylist(playerId: String, playlist: [String: Any], startIndex: Int) throws {
         markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
@@ -84,7 +84,7 @@ class MediaPlayerManager {
         }
         playerInstance.setPlaylist(playlist: playlist, startIndex: startIndex)
     }
-    
+
     func play(playerId: String) throws {
         markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
@@ -97,7 +97,7 @@ class MediaPlayerManager {
             playerInstance.play()
         }
     }
-    
+
     func pause(playerId: String) throws {
         markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
@@ -110,7 +110,7 @@ class MediaPlayerManager {
             playerInstance.pause()
         }
     }
-    
+
     func stop(playerId: String) throws {
         markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
@@ -118,7 +118,7 @@ class MediaPlayerManager {
         }
         playerInstance.stop()
     }
-    
+
     func seekTo(playerId: String, position: Int64) throws {
         markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
@@ -126,81 +126,81 @@ class MediaPlayerManager {
         }
         playerInstance.seekTo(position: position)
     }
-    
+
     func setVolume(playerId: String, volume: Float) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.setVolume(volume: volume)
     }
-    
+
     func setPlaybackSpeed(playerId: String, speed: Float) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.setPlaybackSpeed(speed: speed)
     }
-    
+
     func setMuted(playerId: String, muted: Bool) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.setMuted(muted: muted)
     }
-    
+
     func setBoxFit(playerId: String, boxFit: String) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.setBoxFit(boxFit: boxFit)
     }
-    
+
     func setSubtitleTrack(playerId: String, subtitleTrack: [String: Any]?) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.setSubtitleTrack(subtitleTrack: subtitleTrack)
     }
-    
+
     func setQualityTrack(playerId: String, qualityTrack: [String: Any]) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.setQualityTrack(qualityTrack: qualityTrack)
     }
-    
+
     func setAudioTrack(playerId: String, audioTrack: [String: Any]) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.setAudioTrack(audioTrack: audioTrack)
     }
-    
+
     func enableAutoQuality(playerId: String) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.enableAutoQuality()
     }
-    
+
     func skipToIndex(playerId: String, index: Int) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.skipToIndex(index: index)
     }
-    
+
     func updateConfig(playerId: String, config: [String: Any]) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
         playerInstance.updateConfig(config: config)
     }
-    
+
     func getPlayerView(playerId: String) -> MediaPlayerView? {
         return players[playerId]?.getPlayerView()
     }
-    
+
     // Phase 3: Helper methods for PiP and AirPlay handlers
     func getPlayer(playerId: String) throws -> AVPlayer? {
         guard let playerInstance = players[playerId] else {
@@ -208,13 +208,13 @@ class MediaPlayerManager {
         }
         return playerInstance.getAVPlayer()
     }
-    
+
     func getPlayerLayer(playerId: String) throws -> AVPlayerLayer? {
         guard let playerInstance = players[playerId] else {
             print("MediaPlayerManager: Player instance not found for \(playerId)")
             throw MediaPlayerError.playerNotFound
         }
-        
+
         let playerView = playerInstance.getPlayerView()
         print("MediaPlayerManager: getPlayerLayer - playerView exists, returning playerLayer")
         return playerView.playerLayer
@@ -241,19 +241,19 @@ class MediaPlayerManager {
         players.removeValue(forKey: playerId)
         lastActivity.removeValue(forKey: playerId)
     }
-    
+
     func dispose() {
         players.values.forEach { $0.dispose() }
         players.removeAll()
         lastActivity.removeAll()
     }
-    
+
     func shutdown() {
         cleanupTimer?.invalidate()
         cleanupTimer = nil
         dispose()
     }
-    
+
     deinit {
         shutdown()
     }
@@ -263,7 +263,7 @@ class MediaPlayerInstance: NSObject {
     private let playerId: String
     private let methodChannel: FlutterMethodChannel
     private var config: [String: Any]?
-    
+
     private var avPlayer: AVPlayer?
     private var playerView: MediaPlayerView?
     private var timeObserver: Any?
@@ -279,32 +279,32 @@ class MediaPlayerInstance: NSObject {
     private var currentIndex = 0
     private var currentMediaItem: [String: Any]?
     private var previousAccessLogEventCount = 0
-    
+
     init(playerId: String, methodChannel: FlutterMethodChannel, config: [String: Any]?) {
         self.playerId = playerId
         self.methodChannel = methodChannel
         self.config = config
-        
+
         super.init()
         initializeAVPlayer()
     }
-    
+
     private func initializeAVPlayer() {
         avPlayer = AVPlayer()
-        
+
         // Configure player for PiP and external playback
         avPlayer?.allowsExternalPlayback = true
         avPlayer?.usesExternalPlaybackWhileExternalScreenIsActive = false
         avPlayer?.preventsDisplaySleepDuringVideoPlayback = true
-        
+
         setupObservers()
         applyConfig()
         startBandwidthMonitoring()
     }
-    
+
     private func setupObservers() {
         guard let player = avPlayer else { return }
-        
+
         // Time observer for position updates
         timeObserver = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC)),
@@ -312,17 +312,17 @@ class MediaPlayerInstance: NSObject {
         ) { [weak self] time in
             self?.notifyPositionChanged(position: Int64(time.seconds * 1000))
         }
-        
+
         // Status observer
         statusObserver = player.observe(\.status, options: [.new]) { [weak self] player, _ in
             self?.handleStatusChange(status: player.status)
         }
-        
+
         // Rate observer for play/pause state
         rateObserver = player.observe(\.rate, options: [.new]) { [weak self] player, _ in
             self?.handleRateChange(rate: player.rate)
         }
-        
+
         // Notification observers
         NotificationCenter.default.addObserver(
             self,
@@ -330,7 +330,7 @@ class MediaPlayerInstance: NSObject {
             name: .AVPlayerItemDidPlayToEndTime,
             object: nil
         )
-        
+
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(playerDidFailWithError),
@@ -338,17 +338,17 @@ class MediaPlayerInstance: NSObject {
             object: nil
         )
     }
-    
+
     func loadMediaItem(mediaItem: [String: Any]) {
         guard let urlString = mediaItem["url"] as? String,
               let url = URL(string: urlString) else {
             notifyError(error: "Invalid media URL")
             return
         }
-        
+
         // Store current media item (for live stream detection)
         currentMediaItem = mediaItem
-        
+
         // Reset access log event counter for new media
         previousAccessLogEventCount = 0
 
@@ -365,7 +365,7 @@ class MediaPlayerInstance: NSObject {
         } else {
             asset = AVURLAsset(url: url)
         }
-        
+
         let playerItem = AVPlayerItem(asset: asset)
 
         // Apply buffer configuration if available
@@ -395,14 +395,14 @@ class MediaPlayerInstance: NSObject {
         // Ensure we're on main thread for player operations
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            
+
             // Notify buffering state when starting to load
             self.notifyStateChanged(state: "buffering", isBuffering: true)
-            
+
             self.avPlayer?.replaceCurrentItem(with: playerItem)
-            
+
             print("MediaPlayerInstance.loadMediaItem(): Item replaced, player: \(self.avPlayer != nil)")
-            
+
             // Force update the player view with the current player
             if let playerView = self.playerView {
                 print("MediaPlayerInstance.loadMediaItem(): Updating existing player view")
@@ -410,7 +410,7 @@ class MediaPlayerInstance: NSObject {
             } else {
                 print("MediaPlayerInstance.loadMediaItem(): No player view exists yet")
             }
-            
+
             // Auto play if configured
             if self.config?["autoPlay"] as? Bool == true {
                 print("MediaPlayerInstance.loadMediaItem(): Auto-playing")
@@ -418,74 +418,74 @@ class MediaPlayerInstance: NSObject {
             }
         }
     }
-    
+
     func setPlaylist(playlist: [String: Any], startIndex: Int) {
         guard let items = playlist["items"] as? [[String: Any]] else { return }
-        
+
         currentPlaylist = items
         currentIndex = max(0, min(startIndex, items.count - 1))
-        
+
         if !items.isEmpty {
             loadMediaItem(mediaItem: items[currentIndex])
         }
     }
-    
+
     func play() {
         avPlayer?.play()
     }
-    
+
     func pause() {
         avPlayer?.pause()
     }
-    
+
     func stop() {
         avPlayer?.pause()
         avPlayer?.seek(to: .zero)
     }
-    
+
     func seekTo(position: Int64) {
         let time = CMTime(value: position, timescale: 1000) // position in milliseconds
         avPlayer?.seek(to: time)
     }
-    
+
     func setVolume(volume: Float) {
         avPlayer?.volume = max(0.0, min(1.0, volume))
     }
-    
+
     func setPlaybackSpeed(speed: Float) {
         let clampedSpeed = max(0.25, min(4.0, speed))
         avPlayer?.rate = clampedSpeed
     }
-    
+
     func setMuted(muted: Bool) {
         avPlayer?.isMuted = muted
     }
-    
+
     func setBoxFit(boxFit: String) {
         playerView?.setVideoGravity(boxFit: boxFit)
     }
-    
+
     func setSubtitleTrack(subtitleTrack: [String: Any]?) {
         // Subtitle track selection will be implemented in Phase 2
         // For now, just acknowledge the call
     }
-    
+
     func setQualityTrack(qualityTrack: [String: Any]) {
         guard let bitrate = qualityTrack["bitrate"] as? Int,
               let name = qualityTrack["name"] as? String else {
             print("MediaPlayerInstance: Invalid quality track data")
             return
         }
-        
+
         print("MediaPlayerInstance: Setting quality track: \(name), bitrate: \(bitrate)")
-        
+
         // Set preferred peak bitrate to limit maximum quality
         // AVPlayer will select the best track that doesn't exceed this bitrate
         avPlayer?.currentItem?.preferredPeakBitRate = Double(bitrate)
-        
+
         print("MediaPlayerInstance: Quality track set with preferredPeakBitRate: \(bitrate)")
     }
-    
+
     func setAudioTrack(audioTrack: [String: Any]) {
         // Audio track selection - Phase 2 stub
         // In a full implementation, this would select a specific audio track
@@ -493,34 +493,34 @@ class MediaPlayerInstance: NSObject {
             print("MediaPlayerInstance: Audio track set: \(name)")
         }
     }
-    
+
     func enableAutoQuality() {
         print("MediaPlayerInstance: Enabling auto quality (ABR)")
-        
+
         // Clear preferred peak bitrate to enable full adaptive bitrate
         avPlayer?.currentItem?.preferredPeakBitRate = 0
-        
+
         print("MediaPlayerInstance: Auto quality enabled - preferredPeakBitRate cleared")
     }
-    
+
     func skipToIndex(index: Int) {
         guard let playlist = currentPlaylist,
               index >= 0 && index < playlist.count else { return }
-        
+
         currentIndex = index
         loadMediaItem(mediaItem: playlist[index])
     }
-    
+
     func updateConfig(config: [String: Any]) {
         self.config = config
         applyConfig()
     }
-    
+
     func getPlayerView() -> MediaPlayerView {
         if playerView == nil {
             print("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil), has item: \(avPlayer?.currentItem != nil)")
             playerView = MediaPlayerView(player: avPlayer)
-            
+
             // If the player already has a current item, ensure the view is updated
             if avPlayer?.currentItem != nil {
                 print("MediaPlayerInstance.getPlayerView(): Player already has item, forcing update")
@@ -535,12 +535,12 @@ class MediaPlayerInstance: NSObject {
         }
         return playerView!
     }
-    
+
     // Phase 3: Helper to expose AVPlayer for PiP and AirPlay
     func getAVPlayer() -> AVPlayer? {
         return avPlayer
     }
-    
+
     func isPlaying() -> Bool {
         guard let player = avPlayer else { return false }
         return player.rate > 0
@@ -556,28 +556,28 @@ class MediaPlayerInstance: NSObject {
             self?.updateBandwidth()
         }
     }
-    
+
     private func stopBandwidthMonitoring() {
         bandwidthTimer?.invalidate()
         bandwidthTimer = nil
     }
-    
+
     private func updateBandwidth() {
         guard let playerItem = avPlayer?.currentItem,
               let accessLog = playerItem.accessLog() else { return }
-        
+
         let currentEventCount = accessLog.events.count
-        
+
         // Get the most recent access log event
         if let lastEvent = accessLog.events.last {
             // observedBitrate is in bits per second
             let bandwidth = Int64(lastEvent.observedBitrate)
-            
+
             // Only report if we have a valid bandwidth estimate
             if bandwidth > 0 {
                 notifyBandwidthChanged(bandwidth: bandwidth)
             }
-            
+
             // If new events were added (indicates bitrate switch), re-extract quality tracks
             if currentEventCount > previousAccessLogEventCount {
                 print("MediaPlayerInstance: New access log events detected (\(previousAccessLogEventCount) -> \(currentEventCount)), re-extracting quality tracks")
@@ -620,31 +620,31 @@ class MediaPlayerInstance: NSObject {
         avPlayer = nil
         playerView = nil
     }
-    
+
     private func applyConfig() {
         guard let player = avPlayer, let config = config else { return }
-        
+
         // Apply volume
         if let volume = config["volume"] as? Double {
             player.volume = Float(volume)
         }
-        
+
         // Apply muted state
         if let startMuted = config["startMuted"] as? Bool {
             player.isMuted = startMuted
         }
-        
+
         // Apply playback speed
         if let speed = config["speed"] as? Double {
             player.rate = Float(speed)
         }
-        
+
         // Apply BoxFit
         if let boxFit = config["boxFit"] as? String {
             playerView?.setVideoGravity(boxFit: boxFit)
         }
     }
-    
+
     private func handleStatusChange(status: AVPlayer.Status) {
         switch status {
         case .unknown:
@@ -653,7 +653,7 @@ class MediaPlayerInstance: NSObject {
             print("MediaPlayerInstance: Player status changed to readyToPlay")
             notifyStateChanged(state: "ready", isBuffering: false)
             notifyDurationChanged()
-            
+
             // Force player view to update when ready
             if let playerView = self.playerView {
                 print("MediaPlayerInstance: Forcing player view update on ready state")
@@ -668,7 +668,7 @@ class MediaPlayerInstance: NSObject {
             break
         }
     }
-    
+
     private func handleRateChange(rate: Float) {
         if rate > 0 {
             notifyStateChanged(state: "playing", isBuffering: false)
@@ -676,24 +676,24 @@ class MediaPlayerInstance: NSObject {
             notifyStateChanged(state: "paused", isBuffering: false)
         }
     }
-    
+
     @objc private func playerDidFinishPlaying() {
         notifyStateChanged(state: "completed", isBuffering: false)
     }
-    
+
     @objc private func playerDidFailWithError(notification: Notification) {
         if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
             notifyError(error: error.localizedDescription)
         }
     }
-    
+
     // Note: observeValue is no longer needed - we use modern KVO (NSKeyValueObservation)
     // which handles observation via closures. The old-style KVO that required this method
     // has been replaced with modern Swift observers in loadMediaItem().
-    
+
     private func handlePlayerItemStatusChange(status: AVPlayerItem.Status) {
         print("MediaPlayerInstance: PlayerItem status changed to: \(status.rawValue)")
-        
+
         switch status {
         case .unknown:
             print("MediaPlayerInstance: PlayerItem status = unknown")
@@ -709,10 +709,10 @@ class MediaPlayerInstance: NSObject {
                 notifyStateChanged(state: "ready", isBuffering: false)
             }
             notifyDurationChanged()
-            
+
             // Extract and notify quality tracks immediately
             extractAndNotifyQualityTracks()
-            
+
             // Retry after a delay to catch variants that load asynchronously
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.extractAndNotifyQualityTracks()
@@ -729,7 +729,7 @@ class MediaPlayerInstance: NSObject {
             break
         }
     }
-    
+
     private func notifyStateChanged(state: String, isBuffering: Bool) {
         let arguments: [String: Any] = [
             "playerId": playerId,
@@ -739,7 +739,7 @@ class MediaPlayerInstance: NSObject {
         ]
         methodChannel.invokeMethod("onStateChanged", arguments: arguments)
     }
-    
+
     private func notifyPositionChanged(position: Int64) {
         let arguments: [String: Any] = [
             "playerId": playerId,
@@ -747,7 +747,7 @@ class MediaPlayerInstance: NSObject {
         ]
         methodChannel.invokeMethod("onPositionChanged", arguments: arguments)
     }
-    
+
     private func notifyDurationChanged(duration: Int64? = nil) {
         let durationMs: Int
 
@@ -767,7 +767,7 @@ class MediaPlayerInstance: NSObject {
         ]
         methodChannel.invokeMethod("onDurationChanged", arguments: arguments)
     }
-    
+
     private func notifyBandwidthChanged(bandwidth: Int64) {
         let arguments: [String: Any] = [
             "playerId": playerId,
@@ -775,52 +775,52 @@ class MediaPlayerInstance: NSObject {
         ]
         methodChannel.invokeMethod("onBandwidthChanged", arguments: arguments)
     }
-    
+
     private func extractAndNotifyQualityTracks() {
         guard let playerItem = avPlayer?.currentItem,
               let asset = playerItem.asset as? AVURLAsset else {
             print("MediaPlayerInstance: Cannot extract tracks - no player item or not AVURLAsset")
             return
         }
-        
+
         var qualityTracks: [[String: Any]] = []
         var seenBitrates = Set<Int>()
-        
+
         // Try to parse HLS manifest directly for the most accurate results
         parseHLSManifest(url: asset.url) { [weak self] manifestTracks in
             guard let self = self else { return }
-            
+
             if !manifestTracks.isEmpty {
                 print("MediaPlayerInstance: Parsed \(manifestTracks.count) quality tracks from HLS manifest")
                 self.notifyQualityTracksChanged(tracks: manifestTracks)
                 return
             }
-            
+
             // Fallback: For iOS 15+, use AVAssetVariant API
             if #available(iOS 15.0, *) {
                 if let variants = asset.variants as? [AVAssetVariant] {
                     print("MediaPlayerInstance: Found \(variants.count) variants from AVAsset")
-                    
+
                     for (index, variant) in variants.enumerated() {
                         let peakBitRateValue = variant.peakBitRate ?? 0.0
                         let bitrate = Int(peakBitRateValue)
-                        
+
                         if bitrate > 0 && !seenBitrates.contains(bitrate) {
                             seenBitrates.insert(bitrate)
-                            
+
                             let videoAttributes = variant.videoAttributes
                             let widthValue = videoAttributes?.presentationSize.width ?? 0.0
                             let heightValue = videoAttributes?.presentationSize.height ?? 0.0
-                            
+
                             let (finalWidth, finalHeight) = (widthValue > 0 && heightValue > 0)
                                 ? (Int(widthValue), Int(heightValue))
                                 : self.estimateResolutionFromBitrate(bitrate: bitrate)
-                            
+
                             let trackId = "\(finalWidth)x\(finalHeight)_\(bitrate)"
                             let trackName = "\(finalHeight)p (\(bitrate / 1000)kbps)"
-                            
+
                             let frameRateValue = videoAttributes?.nominalFrameRate ?? 30.0
-                            
+
                             // Get codec type - CMVideoCodecType is UInt32, not an enum
                             var codecValue = "unknown"
                             if let codecTypes = videoAttributes?.codecTypes, let firstCodec = codecTypes.first {
@@ -830,7 +830,7 @@ class MediaPlayerInstance: NSObject {
                                     (firstCodec >> 8) & 0xFF,
                                     firstCodec & 0xFF)
                             }
-                            
+
                             qualityTracks.append([
                                 "id": trackId,
                                 "name": trackName,
@@ -846,20 +846,20 @@ class MediaPlayerInstance: NSObject {
                     }
                 }
             }
-            
+
             // Last resort: access log (only shows tracks used during playback)
             if qualityTracks.isEmpty {
                 print("MediaPlayerInstance: Trying access log fallback")
-                
+
                 if let accessLog = playerItem.accessLog() {
                     for event in accessLog.events {
                         let bitrate = max(Int(event.indicatedBitrate), Int(event.switchBitrate))
-                        
+
                         if bitrate > 0 && !seenBitrates.contains(bitrate) {
                             seenBitrates.insert(bitrate)
-                            
+
                             let (finalWidth, finalHeight) = self.estimateResolutionFromBitrate(bitrate: bitrate)
-                            
+
                             qualityTracks.append([
                                 "id": "\(finalWidth)x\(finalHeight)_\(bitrate)",
                                 "name": "\(finalHeight)p (\(bitrate / 1000)kbps)",
@@ -875,9 +875,9 @@ class MediaPlayerInstance: NSObject {
                     }
                 }
             }
-            
+
             qualityTracks.sort { ($0["bitrate"] as? Int ?? 0) > ($1["bitrate"] as? Int ?? 0) }
-            
+
             if !qualityTracks.isEmpty {
                 print("MediaPlayerInstance: Notifying \(qualityTracks.count) quality tracks")
                 self.notifyQualityTracksChanged(tracks: qualityTracks)
@@ -886,7 +886,7 @@ class MediaPlayerInstance: NSObject {
             }
         }
     }
-    
+
     private func parseHLSManifest(url: URL, completion: @escaping ([[String: Any]]) -> Void) {
         // Only parse if it's an HLS URL (.m3u8)
         guard url.absoluteString.contains(".m3u8") else {
@@ -894,67 +894,67 @@ class MediaPlayerInstance: NSObject {
             completion([])
             return
         }
-        
+
         print("MediaPlayerInstance: Fetching HLS manifest from: \(url)")
-        
+
         // Parse HLS master playlist to extract all variant streams
         var request = URLRequest(url: url)
         request.timeoutInterval = 5.0
-        
+
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
                 print("MediaPlayerInstance: Failed to fetch HLS manifest: \(error.localizedDescription)")
                 completion([])
                 return
             }
-            
+
             guard let data = data,
                   let manifestString = String(data: data, encoding: .utf8) else {
                 print("MediaPlayerInstance: Failed to decode HLS manifest data")
                 completion([])
                 return
             }
-            
+
             print("MediaPlayerInstance: Fetched HLS manifest (\(manifestString.count) chars), parsing...")
             var tracks: [[String: Any]] = []
             var seenBitrates = Set<Int>()
-            
+
             // Parse #EXT-X-STREAM-INF lines
             let lines = manifestString.components(separatedBy: .newlines)
-            
+
             for (lineNum, line) in lines.enumerated() {
                 if line.hasPrefix("#EXT-X-STREAM-INF:") {
                     print("MediaPlayerInstance: Found STREAM-INF at line \(lineNum): \(line)")
-                    
+
                     // Extract BANDWIDTH using regex
                     let bandwidthPattern = "BANDWIDTH=(\\d+)"
                     if let regex = try? NSRegularExpression(pattern: bandwidthPattern),
                        let match = regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)),
                        let range = Range(match.range(at: 1), in: line) {
-                        
+
                         if let bandwidth = Int(line[range]) {
                             if !seenBitrates.contains(bandwidth) {
                                 seenBitrates.insert(bandwidth)
-                                
+
                                 // Try to extract RESOLUTION
                                 var width = 0
                                 var height = 0
-                                
+
                                 let resPattern = "RESOLUTION=(\\d+)x(\\d+)"
                                 if let resRegex = try? NSRegularExpression(pattern: resPattern),
                                    let resMatch = resRegex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) {
-                                    
+
                                     if let widthRange = Range(resMatch.range(at: 1), in: line),
                                        let heightRange = Range(resMatch.range(at: 2), in: line) {
                                         width = Int(line[widthRange]) ?? 0
                                         height = Int(line[heightRange]) ?? 0
                                     }
                                 }
-                                
+
                                 let (finalWidth, finalHeight) = (width > 0 && height > 0)
                                     ? (width, height)
                                     : self.estimateResolutionFromBitrate(bitrate: bandwidth)
-                                
+
                                 tracks.append([
                                     "id": "\(finalWidth)x\(finalHeight)_\(bandwidth)",
                                     "name": "\(finalHeight)p (\(bandwidth / 1000)kbps)",
@@ -966,21 +966,21 @@ class MediaPlayerInstance: NSObject {
                                     "isAvailable": true,
                                     "codec": "unknown"
                                 ])
-                                
+
                                 print("MediaPlayerInstance: Parsed variant: \(finalHeight)p @ \(bandwidth / 1000)kbps, resolution: \(finalWidth)x\(finalHeight)")
                             }
                         }
                     }
                 }
             }
-            
+
             print("MediaPlayerInstance: Parsed \(tracks.count) tracks from manifest")
             DispatchQueue.main.async {
                 completion(tracks)
             }
         }.resume()
     }
-    
+
     private func estimateResolutionFromBitrate(bitrate: Int) -> (Int, Int) {
         // Rough estimation of resolution based on bitrate
         switch bitrate {
@@ -992,7 +992,7 @@ class MediaPlayerInstance: NSObject {
         default:                     return (3840, 2160) // 4K
         }
     }
-    
+
     private func notifyQualityTracksChanged(tracks: [[String: Any]]) {
         let arguments: [String: Any] = [
             "playerId": playerId,
@@ -1000,7 +1000,7 @@ class MediaPlayerInstance: NSObject {
         ]
         methodChannel.invokeMethod("onQualityTracksChanged", arguments: arguments)
     }
-    
+
     private func notifyError(error: String) {
         let arguments: [String: Any] = [
             "playerId": playerId,

@@ -36,7 +36,7 @@ class CastHandler(
     private var mediaRouter: MediaRouter? = null
     private var mediaRouteSelector: MediaRouteSelector? = null
     private var isDiscovering = false
-    
+
     private val sessionManagerListener = object : SessionManagerListener<CastSession> {
         override fun onSessionStarting(session: CastSession) {
             android.util.Log.d(TAG, "Cast session starting")
@@ -253,7 +253,7 @@ class CastHandler(
      */
     fun disconnect() {
         android.util.Log.d(TAG, "Disconnecting from cast device")
-        
+
         try {
             sessionManager?.endCurrentSession(true)
         } catch (e: Exception) {
@@ -414,7 +414,7 @@ class CastHandler(
 
     private fun setupRemoteMediaClientListeners() {
         val client = remoteMediaClient ?: return
-        
+
         client.registerCallback(object : RemoteMediaClient.Callback() {
             override fun onStatusUpdated() {
                 val mediaStatus = client.mediaStatus
@@ -521,10 +521,9 @@ class CastHandler(
             "isCasting" to isCasting,
             "errorMessage" to errorMessage
         )
-        
+
         CoroutineScope(Dispatchers.Main).launch {
             methodChannel.invokeMethod("onCastStatusChanged", statusMap)
         }
     }
 }
-

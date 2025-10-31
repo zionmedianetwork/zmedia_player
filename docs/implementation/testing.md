@@ -72,7 +72,7 @@ test('creates Widevine config correctly', () {
   final config = DrmConfig.widevine(
     licenseUrl: 'https://example.com/license',
   );
-  
+
   expect(config.scheme, DrmScheme.widevine);
   expect(config.licenseUrl, 'https://example.com/license');
 });
@@ -94,7 +94,7 @@ testWidgets('DRM demo page shows license status', (tester) async {
   await tester.pumpWidget(MyApp());
   await tester.tap(find.text('DRM Content Protection'));
   await tester.pumpAndSettle();
-  
+
   expect(find.text('DRM Status:'), findsOneWidget);
 });
 ```
@@ -247,12 +247,12 @@ group('DrmConfig Validation', () {
       throwsArgumentError,
     );
   });
-  
+
   test('accepts valid configuration', () {
     final config = DrmConfig.widevine(
       licenseUrl: 'https://valid-url.com/license',
     );
-    
+
     expect(TestHelpers.isValidDrmConfig(config), true);
   });
 });
@@ -268,17 +268,17 @@ group('License Lifecycle', () {
       keyData: 'data',
       expirationTime: DateTime.now().subtract(Duration(hours: 1)),
     );
-    
+
     expect(license.isExpired, true);
   });
-  
+
   test('warns when license expiring soon', () {
     final license = DrmLicense(
       id: 'test',
       keyData: 'data',
       expirationTime: DateTime.now().add(Duration(minutes: 30)),
     );
-    
+
     expect(license.isExpiringSoon, true);
   });
 });
@@ -295,10 +295,10 @@ group('Serialization Round-Trip', () {
       url: 'https://example.com/video.mp4',
       drmConfig: MockDrmConfigs.widevine,
     );
-    
+
     final map = original.toMap();
     final deserialized = MediaItem.fromMap(map);
-    
+
     expect(deserialized.id, original.id);
     expect(deserialized.drmConfig?.scheme, original.drmConfig?.scheme);
   });
@@ -317,19 +317,19 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v3
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.16.0'
-      
+
       - name: Install dependencies
         run: flutter pub get
-      
+
       - name: Run tests
         run: flutter test --coverage
-      
+
       - name: Upload coverage
         uses: codecov/codecov-action@v3
         with:
@@ -501,7 +501,6 @@ For questions about testing:
 
 ---
 
-**Last Updated:** October 19, 2025  
-**Test Coverage:** 95% (Models), TBD (Overall)  
+**Last Updated:** October 19, 2025
+**Test Coverage:** 95% (Models), TBD (Overall)
 **Status:** ✅ Production Ready
-

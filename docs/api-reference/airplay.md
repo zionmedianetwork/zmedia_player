@@ -77,7 +77,7 @@ Tap the AirPlay button → Select MacBook from system picker
 ```swift
 private func getAvailableDevices() -> [[String: Any]] {
     var devices: [[String: Any]] = []
-    
+
     // If AirPlay is active, return current device
     if let currentDevice = getCurrentDevice() {
         devices.append(currentDevice)
@@ -92,7 +92,7 @@ private func getAvailableDevices() -> [[String: Any]] {
             "description": "Tap to select AirPlay or Bluetooth device"
         ])
     }
-    
+
     return devices
 }
 ```
@@ -145,7 +145,7 @@ class AirPlayButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!Platform.isIOS) return SizedBox.shrink();
-    
+
     return SizedBox(
       width: 40,
       height: 40,
@@ -170,12 +170,12 @@ class AVRoutePickerViewFactory: NSObject, FlutterPlatformViewFactory {
 
 class AVRoutePickerViewController: NSObject, FlutterPlatformView {
     private let routePicker: AVRoutePickerView
-    
+
     init(frame: CGRect) {
         routePicker = AVRoutePickerView(frame: frame)
         routePicker.tintColor = .systemBlue
     }
-    
+
     func view() -> UIView {
         return routePicker
     }
@@ -227,4 +227,3 @@ iOS AirPlay is **fundamentally different** from Android Chromecast. The current 
 ❌ Cannot programmatically trigger picker (Apple limitation)
 
 This is **not a bug** - it's how Apple designed AirPlay to work for all iOS apps.
-

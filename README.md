@@ -98,7 +98,7 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
       url: 'https://example.com/video.mp4',
       mediaType: MediaType.video,
     );
-    
+
     await _controller.load(mediaItem);
   }
 
@@ -412,7 +412,7 @@ ListView.builder(
   itemBuilder: (context, index) {
     final controller = MediaController.create();
     controller.load(videos[index]);
-    
+
     return MediaListPlayer(
       controller: controller,
       config: MediaListPlayerConfig(
@@ -542,7 +542,7 @@ Listen to DRM session state changes:
 ```dart
 controller.player.drmSessionStream.listen((session) {
   print('DRM State: ${session.state}');
-  
+
   switch (session.state) {
     case DrmSessionState.acquiringLicense:
       showLoadingIndicator();
@@ -759,7 +759,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ✅ **All Phases Complete - Production Ready**
 
 - **Phase 1** ✅ - Core playback features
-- **Phase 2** ✅ - Streaming and subtitles  
+- **Phase 2** ✅ - Streaming and subtitles
 - **Phase 3** ✅ - Advanced features (Notifications, PiP, Casting)
 - **Phase 4** ✅ - DRM and enterprise features
 

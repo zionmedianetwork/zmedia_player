@@ -10,7 +10,7 @@ The ZMedia Player exposes events through a comprehensive stream-based API. This 
 
 ### 1. State Stream (`stateStream`)
 
-**Type**: `Stream<PlaybackState>`  
+**Type**: `Stream<PlaybackState>`
 **Access**: `player.stateStream`
 
 The primary event stream that emits comprehensive playback state updates.
@@ -28,7 +28,7 @@ class PlaybackState {
   final double bufferPercentage;      // Buffer percentage (0.0 - 1.0)
   final Duration bufferedPosition;    // Buffered position
   final String? errorMessage;         // Error message if any
-  
+
   // Computed properties
   double get progress;                // Progress percentage (0.0 - 1.0)
   bool get canPlay;                   // Can start playback
@@ -62,7 +62,7 @@ player.stateStream.listen((PlaybackState state) {
   print('Speed: ${state.speed}');
   print('Muted: ${state.isMuted}');
   print('Progress: ${state.progress}');
-  
+
   if (state.state == PlayerState.error) {
     print('Error: ${state.errorMessage}');
   }
@@ -73,7 +73,7 @@ player.stateStream.listen((PlaybackState state) {
 
 ### 2. Position Stream (`positionStream`)
 
-**Type**: `Stream<Duration>`  
+**Type**: `Stream<Duration>`
 **Access**: `player.positionStream`
 
 Emits periodic updates of the current playback position. Updates approximately every 500ms during playback.
@@ -99,7 +99,7 @@ player.positionStream.listen((Duration position) {
 
 ### 3. Duration Stream (`durationStream`)
 
-**Type**: `Stream<Duration>`  
+**Type**: `Stream<Duration>`
 **Access**: `player.durationStream`
 
 Emits the total duration when media is loaded or duration changes.
@@ -124,7 +124,7 @@ player.durationStream.listen((Duration duration) {
 
 ### 4. Volume Stream (`volumeStream`)
 
-**Type**: `Stream<double>`  
+**Type**: `Stream<double>`
 **Access**: `player.volumeStream`
 
 Emits volume level changes (0.0 to 1.0).
@@ -149,7 +149,7 @@ player.volumeStream.listen((double volume) {
 
 ### 5. Speed Stream (`speedStream`)
 
-**Type**: `Stream<double>`  
+**Type**: `Stream<double>`
 **Access**: `player.speedStream`
 
 Emits playback speed changes (0.25x to 4.0x).
@@ -174,7 +174,7 @@ player.speedStream.listen((double speed) {
 
 ### 6. Subtitle Tracks Stream (`subtitleTracksStream`)
 
-**Type**: `Stream<List<SubtitleTrack>>`  
+**Type**: `Stream<List<SubtitleTrack>>`
 **Access**: `player.subtitleTracksStream`
 
 Emits when available subtitle tracks change or selection changes.
@@ -197,14 +197,14 @@ class SubtitleTrack {
 ```dart
 player.subtitleTracksStream.listen((List<SubtitleTrack> tracks) {
   print('Available subtitles: ${tracks.length}');
-  
+
   for (final track in tracks) {
     print('  - ${track.name} (${track.language})');
     if (track.isSelected) {
       print('    [SELECTED]');
     }
   }
-  
+
   setState(() {
     _availableSubtitles = tracks;
     _selectedSubtitle = tracks.firstWhere(
@@ -225,7 +225,7 @@ player.subtitleTracksStream.listen((List<SubtitleTrack> tracks) {
 
 ### 7. Quality Tracks Stream (`qualityTracksStream`)
 
-**Type**: `Stream<List<QualityTrack>>`  
+**Type**: `Stream<List<QualityTrack>>`
 **Access**: `player.qualityTracksStream`
 
 Emits when available quality/resolution tracks change (HLS/DASH adaptive streaming).
@@ -249,7 +249,7 @@ class QualityTrack {
 ```dart
 player.qualityTracksStream.listen((List<QualityTrack> tracks) {
   print('Available qualities: ${tracks.length}');
-  
+
   for (final track in tracks) {
     String label = track.name;
     if (track.height != null) {
@@ -260,7 +260,7 @@ player.qualityTracksStream.listen((List<QualityTrack> tracks) {
       print('    [SELECTED]');
     }
   }
-  
+
   setState(() {
     _availableQualities = tracks;
     _selectedQuality = tracks.firstWhere(
@@ -282,7 +282,7 @@ player.qualityTracksStream.listen((List<QualityTrack> tracks) {
 
 ### 8. Audio Tracks Stream (`audioTracksStream`)
 
-**Type**: `Stream<List<AudioTrack>>`  
+**Type**: `Stream<List<AudioTrack>>`
 **Access**: `player.audioTracksStream`
 
 Emits when available audio tracks change (multi-language audio).
@@ -305,7 +305,7 @@ class AudioTrack {
 ```dart
 player.audioTracksStream.listen((List<AudioTrack> tracks) {
   print('Available audio tracks: ${tracks.length}');
-  
+
   for (final track in tracks) {
     String label = track.name;
     if (track.language != null) {
@@ -319,7 +319,7 @@ player.audioTracksStream.listen((List<AudioTrack> tracks) {
       print('    [SELECTED]');
     }
   }
-  
+
   setState(() {
     _availableAudioTracks = tracks;
     _selectedAudioTrack = tracks.firstWhere(
@@ -447,7 +447,7 @@ class _PlayerEventsDemoState extends State<PlayerEventsDemo> {
               showControls: true,
             ),
           ),
-          
+
           // State information
           Padding(
             padding: const EdgeInsets.all(16.0),
@@ -511,7 +511,7 @@ StreamBuilder<PlaybackState>(
     if (!snapshot.hasData) {
       return CircularProgressIndicator();
     }
-    
+
     final state = snapshot.data!;
     return Text('State: ${state.state}');
   },
@@ -657,7 +657,6 @@ All streams follow Flutter's reactive programming model and are broadcast stream
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: October 19, 2025  
+**Document Version**: 1.0
+**Last Updated**: October 19, 2025
 **Status**: Complete
-

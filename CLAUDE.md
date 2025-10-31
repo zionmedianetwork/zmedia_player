@@ -68,6 +68,39 @@ flutter pub get && flutter analyze
 cd example && flutter run -d <device-id>
 ```
 
+### Pre-commit Hooks
+
+This project uses pre-commit hooks to automatically format code, run analysis, and perform checks before committing.
+
+```bash
+# Install pre-commit (one-time setup)
+pip install pre-commit
+
+# Install the git hooks
+pre-commit install
+
+# Run hooks manually on all files
+pre-commit run --all-files
+
+# Run hooks on staged files only
+pre-commit run
+
+# Skip hooks (not recommended, use only when necessary)
+git commit --no-verify -m "message"
+```
+
+**Hooks included:**
+- Dart code formatting (`dart format`)
+- Flutter static analysis (`flutter analyze`)
+- Trailing whitespace removal
+- End of file fixes
+- YAML syntax validation
+- Large file detection
+- Merge conflict detection
+- Debug statement detection (prevents `print()` statements)
+
+**Note:** The hooks will automatically format your Dart code before each commit, ensuring consistency with CI requirements.
+
 ## Architecture Overview
 
 ### High-Level Structure

@@ -25,12 +25,12 @@ class DrmHandler(
 ) {
     companion object {
         private const val TAG = "DrmHandler"
-        
+
         // DRM scheme UUIDs
         val WIDEVINE_UUID: UUID = C.WIDEVINE_UUID
         val PLAYREADY_UUID: UUID = C.PLAYREADY_UUID
         val CLEARKEY_UUID: UUID = C.CLEARKEY_UUID
-        
+
         private const val USER_AGENT = "FlutterMediaPlayer"
     }
 
@@ -80,7 +80,7 @@ class DrmHandler(
 
             Log.d(TAG, "DRM session manager created successfully for scheme: $scheme")
             notifyDrmSessionState("idle")
-            
+
             return drmSessionManager
 
         } catch (e: Exception) {
@@ -227,7 +227,7 @@ class DrmHandler(
                 "state" to state,
                 "timestamp" to System.currentTimeMillis()
             )
-            
+
             if (license != null) {
                 args["license"] = license
             }
@@ -243,15 +243,15 @@ class DrmHandler(
      */
     fun getDrmSystemInfo(): Map<String, Any> {
         val info = mutableMapOf<String, Any>()
-        
+
         info["widevineSupported"] = isWidevineSupported()
         if (info["widevineSupported"] as Boolean) {
             info["widevineSecurity"] = getWidevineSecurityLevel()
         }
-        
+
         info["playreadySupported"] = isPlayReadySupported()
         info["clearkeySupported"] = isClearKeySupported()
-        
+
         // Add device info
         info["deviceManufacturer"] = android.os.Build.MANUFACTURER
         info["deviceModel"] = android.os.Build.MODEL

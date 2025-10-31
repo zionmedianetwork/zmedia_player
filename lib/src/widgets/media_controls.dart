@@ -429,8 +429,7 @@ class _MediaControlsState extends State<MediaControls>
                             tooltip: isCasting ? 'Connected' : 'Cast',
                           ),
 
-                  if (showCastButton)
-                    const SizedBox(width: 12),
+                  if (showCastButton) const SizedBox(width: 12),
 
                   // PiP button
                   if (widget.showPipButton && widget.controller.isPipAvailable)
@@ -1218,7 +1217,8 @@ class _MediaControlsState extends State<MediaControls>
                                   _toggleCastMenu();
                                 }
                               } catch (e) {
-                                debugPrint('Failed to connect or load media: $e');
+                                debugPrint(
+                                    'Failed to connect or load media: $e');
                                 if (mounted) {
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(

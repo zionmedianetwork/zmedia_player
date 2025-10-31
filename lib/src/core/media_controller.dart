@@ -808,7 +808,8 @@ class MediaController extends ChangeNotifier {
     final currentPosition = position;
     final wasPlaying = isPlaying;
 
-    debugPrint('Current position: ${currentPosition.inSeconds}s, was playing: $wasPlaying');
+    debugPrint(
+        'Current position: ${currentPosition.inSeconds}s, was playing: $wasPlaying');
 
     // Pause local playback before casting
     if (wasPlaying) {

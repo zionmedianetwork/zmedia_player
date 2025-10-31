@@ -14,7 +14,7 @@ class CastOptionsProvider : OptionsProvider {
     override fun getCastOptions(context: Context): CastOptions {
         // Default Cast Receiver App ID (use your own for production)
         val receiverApplicationId = DEFAULT_APP_ID
-        
+
         // Build notification options
         val notificationOptions = NotificationOptions.Builder()
             .setActions(
@@ -26,29 +26,29 @@ class CastOptionsProvider : OptionsProvider {
             )
             .setTargetActivityClassName(expandedControllerActivityClassName)
             .build()
-        
+
         // Build cast media options
         val mediaOptions = CastMediaOptions.Builder()
             .setNotificationOptions(notificationOptions)
             .setExpandedControllerActivityClassName(expandedControllerActivityClassName)
             .build()
-        
+
         // Build and return cast options
         return CastOptions.Builder()
             .setReceiverApplicationId(receiverApplicationId)
             .setCastMediaOptions(mediaOptions)
             .build()
     }
-    
+
     override fun getAdditionalSessionProviders(context: Context): List<SessionProvider>? {
         return null
     }
-    
+
     companion object {
         // Default Google Cast Receiver App ID
         // For production, register your own at: https://cast.google.com/publish/
         private const val DEFAULT_APP_ID = "CC1AD845"
-        
+
         // Activity to be launched when notification is tapped
         private const val expandedControllerActivityClassName =
             "com.google.android.gms.cast.framework.media.widget.ExpandedControllerActivity"
@@ -64,4 +64,3 @@ class MediaIntentReceiver {
         const val ACTION_STOP_CASTING = "action_stop_casting"
     }
 }
-

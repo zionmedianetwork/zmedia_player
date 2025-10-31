@@ -44,14 +44,14 @@ echo ""
 if [ $TEST_EXIT_CODE -eq 0 ]; then
     echo -e "${GREEN}✅ All memory leak tests PASSED!${NC}"
     echo ""
-    
+
     # Optional: Run with coverage
     read -p "Generate coverage report? (y/N) " -n 1 -r
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         echo "📊 Generating coverage report..."
         flutter test test/memory/ --coverage
-        
+
         if command -v lcov &> /dev/null; then
             lcov --list coverage/lcov.info
             echo ""
@@ -60,7 +60,7 @@ if [ $TEST_EXIT_CODE -eq 0 ]; then
             echo -e "${YELLOW}⚠${NC}  lcov not installed. Install with: brew install lcov"
         fi
     fi
-    
+
     # Optional: Run benchmarks only
     echo ""
     read -p "Run performance benchmarks only? (y/N) " -n 1 -r
@@ -69,7 +69,7 @@ if [ $TEST_EXIT_CODE -eq 0 ]; then
         echo "⏱️  Running performance benchmarks..."
         flutter test test/memory/memory_leak_test.dart --name "Performance Benchmarks" --reporter expanded
     fi
-    
+
 else
     echo -e "${RED}❌ Some tests FAILED${NC}"
     echo ""
@@ -87,4 +87,3 @@ echo "  Test run complete!"
 echo "================================================"
 
 exit 0
-

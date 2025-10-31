@@ -37,7 +37,7 @@ class PipHandler(
             )
             return false
         }
-        
+
         if (activity == null) {
             android.util.Log.d(TAG, "PiP not available: No activity context")
             notifyPipStatusChanged(
@@ -48,20 +48,20 @@ class PipHandler(
             )
             return false
         }
-        
+
         val hasPipFeature = activity.packageManager.hasSystemFeature(
             PackageManager.FEATURE_PICTURE_IN_PICTURE
         )
-        
+
         android.util.Log.d(TAG, "PiP availability check: SDK=${Build.VERSION.SDK_INT}, hasFeature=$hasPipFeature, activity=${activity != null}")
-        
+
         // Notify status
         notifyPipStatusChanged(
             state = if (hasPipFeature) "available" else "unavailable",
             isSupported = hasPipFeature,
             isActive = isInPipMode
         )
-        
+
         return hasPipFeature
     }
 
@@ -70,7 +70,7 @@ class PipHandler(
      */
     fun enterPip(config: Map<String, Any>?): Boolean {
         android.util.Log.d(TAG, "Attempting to enter PiP mode")
-        
+
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             android.util.Log.w(TAG, "PiP not supported on Android version < O")
             notifyPipStatusChanged(
@@ -81,7 +81,7 @@ class PipHandler(
             )
             return false
         }
-        
+
         if (activity == null) {
             android.util.Log.w(TAG, "Cannot enter PiP: No activity context")
             notifyPipStatusChanged(
@@ -92,19 +92,19 @@ class PipHandler(
             )
             return false
         }
-        
+
         this.config = config
-        
+
         return try {
             val params = buildPipParams(config)
             android.util.Log.d(TAG, "Built PiP params, entering PiP mode...")
-            
+
             val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 activity.enterPictureInPictureMode(params)
             } else {
                 false
             }
-            
+
             if (result) {
                 isInPipMode = true
                 notifyPipStatusChanged(
@@ -122,7 +122,7 @@ class PipHandler(
                     errorMessage = "Failed to enter PiP mode"
                 )
             }
-            
+
             result
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Error entering PiP mode: ${e.message}", e)
@@ -143,11 +143,11 @@ class PipHandler(
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return
         }
-        
+
         if (activity == null || !isInPipMode) {
             return
         }
-        
+
         // The activity will automatically exit PiP when we request it
         // We can't programmatically exit PiP, but we can notify the state change
         isInPipMode = false
@@ -156,7 +156,7 @@ class PipHandler(
             isSupported = true,
             isActive = false
         )
-        
+
         android.util.Log.d(TAG, "Exited PiP mode")
     }
 
@@ -165,9 +165,9 @@ class PipHandler(
      */
     fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean) {
         android.util.Log.d(TAG, "PiP mode changed: $isInPictureInPictureMode")
-        
+
         isInPipMode = isInPictureInPictureMode
-        
+
         notifyPipStatusChanged(
             state = if (isInPictureInPictureMode) "active" else "available",
             isSupported = true,
@@ -181,7 +181,7 @@ class PipHandler(
     @RequiresApi(Build.VERSION_CODES.O)
     private fun buildPipParams(config: Map<String, Any>?): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder()
-        
+
         // Set aspect ratio
         val aspectRatio = config?.get("aspectRatio") as? Double ?: (16.0 / 9.0)
         val rational = Rational(
@@ -189,17 +189,17 @@ class PipHandler(
             100
         )
         builder.setAspectRatio(rational)
-        
+
         // For Android 12+, we can add additional features
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             // Set auto-enter enabled
             val autoEnter = config?.get("autoEnterOnBackground") as? Boolean ?: false
             builder.setAutoEnterEnabled(autoEnter)
-            
+
             // Set seamless resize enabled for smoother transitions
             builder.setSeamlessResizeEnabled(true)
         }
-        
+
         return builder.build()
     }
 
@@ -219,7 +219,7 @@ class PipHandler(
             "isActive" to isActive,
             "errorMessage" to errorMessage
         )
-        
+
         activity?.runOnUiThread {
             methodChannel.invokeMethod("onPipStatusChanged", statusMap)
         }
@@ -245,4 +245,3 @@ class PipHandler(
         isInPipMode = false
     }
 }
-

@@ -29,7 +29,7 @@ test('DRM endpoints use HTTPS', () {
 });
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -59,7 +59,7 @@ final config = DrmConfig.token(
 );
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -80,13 +80,13 @@ test('License keyData is not exposed in logs', () {
     id: 'test',
     keyData: 'sensitive-encrypted-data',
   );
-  
+
   final debugString = license.toString();
   expect(debugString, isNot(contains('sensitive-encrypted-data')));
 });
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -109,7 +109,7 @@ print('License acquisition failed: $licenseKeyData');
 debugPrint('DRM: License acquisition failed');
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -139,7 +139,7 @@ debugPrint('DRM: License acquisition failed');
 -keep class com.zionmedianetwork.zmedia_player.DrmHandler { *; }
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -165,7 +165,7 @@ debugPrint('DRM: License acquisition failed');
 </dict>
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -185,7 +185,7 @@ debugPrint('DRM: License acquisition failed');
 // iOS: isExternalPlaybackActive monitoring
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -210,7 +210,7 @@ for i in {1..100}; do
 done
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -238,7 +238,7 @@ final customerId = await secureStorage.read(key: 'ezdrm_customer_id');
 final apiKey = await secureStorage.read(key: 'ezdrm_api_key');
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -262,7 +262,7 @@ final customData = {
 };
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -286,7 +286,7 @@ flutter pub audit  # Future Flutter feature
 flutter pub deps
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -307,7 +307,7 @@ flutter build apk --release --obfuscate --split-debug-info=build/debug-info
 flutter build ios --release --obfuscate --split-debug-info=build/debug-info
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -330,7 +330,7 @@ group('Security Tests', () {
 });
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -349,7 +349,7 @@ group('Security Tests', () {
 - Security contact: ________________
 - Last audit date: ________________
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -369,7 +369,7 @@ group('Security Tests', () {
 - [ ] Regional content restrictions
 - [ ] Export control compliance
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -390,7 +390,7 @@ group('Security Tests', () {
 - [ ] Privacy Policy
 - [ ] Terms of Service
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A  
+**Status:** ☐ Pass ☐ Fail ☐ N/A
 **Notes:**
 
 ---
@@ -399,10 +399,10 @@ group('Security Tests', () {
 
 ### Summary
 
-**Total Items:** 15 sections  
-**Passed:** _____  
-**Failed:** _____  
-**N/A:** _____  
+**Total Items:** 15 sections
+**Passed:** _____
+**Failed:** _____
+**N/A:** _____
 
 **Overall Status:** ☐ Ready for Production ☐ Needs Improvement ☐ Not Ready
 
@@ -432,16 +432,16 @@ Priority recommendations for improving security:
 
 ### Sign-Off
 
-**Security Auditor:** _____________________  
-**Date:** _____________________  
+**Security Auditor:** _____________________
+**Date:** _____________________
 **Signature:** _____________________
 
-**Engineering Lead:** _____________________  
-**Date:** _____________________  
+**Engineering Lead:** _____________________
+**Date:** _____________________
 **Signature:** _____________________
 
-**Product Manager:** _____________________  
-**Date:** _____________________  
+**Product Manager:** _____________________
+**Date:** _____________________
 **Signature:** _____________________
 
 ---
@@ -456,7 +456,6 @@ Priority recommendations for improving security:
 
 ---
 
-**Last Updated:** October 19, 2025  
-**Version:** 1.0  
+**Last Updated:** October 19, 2025
+**Version:** 1.0
 **Next Audit Due:** _______________
-
