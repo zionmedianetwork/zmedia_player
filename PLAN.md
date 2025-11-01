@@ -289,6 +289,7 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 
 **Key Goals:**
 - Complete control system (quality, audio tracks, subtitles, speed)
+- Animated settings bottom sheet with comprehensive configuration options
 - Material Design 3 and Cupertino widget variants
 - Reusable component library
 - Comprehensive design system
@@ -341,17 +342,55 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
   - [ ] Current speed indicator
   - [ ] Pitch correction toggle
 
-- [ ] **Settings panel consolidation** (2 days)
-  - [ ] Create `SettingsPanel` widget
-    - [ ] Quality settings section
-    - [ ] Audio settings section
-    - [ ] Subtitle settings section
-    - [ ] Playback settings section
-    - [ ] Network settings section
-    - [ ] Advanced settings (buffer, DRM)
-  - [ ] Persistent settings support
-  - [ ] Reset to defaults option
-  - [ ] Settings categories with icons
+- [ ] **Settings bottom sheet with animations** (3 days)
+  - [ ] Create `SettingsBottomSheet` widget
+    - [ ] Material bottom sheet for Android (slide-up animation)
+    - [ ] Cupertino modal sheet for iOS (slide-up animation)
+    - [ ] Smooth expand/collapse animations
+    - [ ] Drag-to-dismiss gesture support
+    - [ ] Backdrop blur/dim effect
+  - [ ] Comprehensive configuration sections:
+    - [ ] **Quality Settings**
+      - [ ] Default quality preference
+      - [ ] Auto quality toggle
+      - [ ] Quality switching behavior (smooth/immediate)
+      - [ ] Bandwidth limit settings
+    - [ ] **Audio Settings**
+      - [ ] Default audio track selection (language preference)
+      - [ ] Audio normalization toggle
+      - [ ] Channel preference (stereo/5.1/7.1)
+      - [ ] Audio boost/attenuation
+    - [ ] **Subtitle Settings**
+      - [ ] Default subtitle language
+      - [ ] Auto-enable subtitles toggle
+      - [ ] Font size (slider: 8pt - 32pt)
+      - [ ] Font color picker
+      - [ ] Background color/opacity
+      - [ ] Text outline/shadow options
+      - [ ] Position adjustment (vertical offset)
+    - [ ] **Playback Settings**
+      - [ ] Default playback speed
+      - [ ] Auto-play next toggle
+      - [ ] Repeat mode default
+      - [ ] Skip intro/outro duration
+      - [ ] Double-tap seek increment (5s/10s/15s)
+    - [ ] **Network Settings**
+      - [ ] WiFi-only download toggle
+      - [ ] Cellular data limit
+      - [ ] Buffering strategy (fast/balanced/smooth)
+      - [ ] Pre-buffering amount
+    - [ ] **Advanced Settings**
+      - [ ] Hardware acceleration toggle
+      - [ ] DRM configuration (debugging)
+      - [ ] Analytics opt-in/out
+      - [ ] Cache size limit
+      - [ ] Clear cache button
+      - [ ] Reset all settings to defaults
+  - [ ] Persistent settings support (save/load)
+  - [ ] Live settings preview (where applicable)
+  - [ ] Settings categories with icons and dividers
+  - [ ] Search/filter for settings (optional)
+  - [ ] Haptic feedback on interactions
 
 - [ ] **Reusable component extraction** (2 days)
   - [ ] Extract `SeekBar` component from MediaControls
@@ -564,6 +603,7 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 
 ### Deliverables 🎯
 - [x] Complete control system with quality/audio/subtitle/speed selection
+- [x] Animated settings bottom sheet with comprehensive configuration options
 - [x] Material Design 3 controls widget
 - [x] Cupertino controls widget
 - [x] Adaptive widget system (auto Material/Cupertino)
@@ -575,12 +615,14 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - [x] Platform-specific fullscreen variants
 - [x] Visual feedback system (toasts, overlays)
 
-**Files Created:** ~20 new files
+**Files Created:** ~22 new files
 - `lib/src/widgets/menus/quality_menu.dart`
 - `lib/src/widgets/menus/audio_track_menu.dart`
 - `lib/src/widgets/menus/subtitle_menu.dart`
 - `lib/src/widgets/menus/speed_menu.dart`
-- `lib/src/widgets/menus/settings_panel.dart`
+- `lib/src/widgets/menus/settings_bottom_sheet.dart`
+- `lib/src/widgets/menus/material_settings_sheet.dart`
+- `lib/src/widgets/menus/cupertino_settings_sheet.dart`
 - `lib/src/widgets/controls/material_controls.dart`
 - `lib/src/widgets/controls/cupertino_controls.dart`
 - `lib/src/widgets/controls/adaptive_controls.dart`
