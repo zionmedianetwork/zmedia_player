@@ -360,3 +360,101 @@ MediaItem(drmConfig) → MediaPlayer.load()
 - Main branch: (not specified - check repository)
 - Feature branches: Use descriptive names (e.g., `feat/bandwidth-monitoring-livestreaming`)
 - Chore branches: Use `chore/` prefix (e.g., `chore/refactor-and-more`)
+
+## Release Workflow
+
+ZMedia Player uses automated semantic versioning with customizable release notes generation.
+
+### Creating a Release
+
+#### Option 1: GitHub Actions UI (Recommended)
+1. Go to **Actions** → **Release** workflow
+2. Click **Run workflow**
+3. Select options:
+   - **Version bump**: `auto` (detect from commits) or `major`/`minor`/`patch`
+   - **Pre-release**: `none` (stable) or `alpha`/`beta`/`rc`
+   - **Dry run**: Test without creating actual release
+4. Click **Run workflow**
+
+#### Option 2: GitHub CLI
+```bash
+# Stable release (auto-detect version)
+gh workflow run release.yml --ref main -f version_bump=auto -f pre_release=none
+
+# Pre-release (beta)
+gh workflow run release.yml --ref main -f version_bump=minor -f pre_release=beta
+
+# Dry run (test only)
+gh workflow run release.yml --ref main -f version_bump=auto -f dry_run=true
+```
+
+### Semantic Versioning
+
+The workflow uses **conventional commits** to automatically determine version bumps:
+
+- `feat:` → MINOR version bump (new features)
+- `fix:` → PATCH version bump (bug fixes)
+- `perf:` → PATCH version bump (performance)
+- `BREAKING CHANGE:` → MAJOR version bump (breaking changes)
+- `docs:`, `style:`, `test:`, `chore:` → No version bump
+
+**Example commits:**
+```bash
+# Feature (bumps MINOR)
+git commit -m "feat: Add Chromecast support for Android"
+
+# Bug fix (bumps PATCH)
+git commit -m "fix: Resolve memory leak in MediaController"
+
+# Breaking change (bumps MAJOR)
+git commit -m "refactor!: Remove deprecated autoLoop parameter
+
+BREAKING CHANGE: The autoLoop parameter has been removed.
+Use repeatMode: RepeatMode.all instead."
+```
+
+### Release Process
+
+1. **Commit Analysis**: Analyzes commits since last release
+2. **Version Calculation**: Determines new version using semantic versioning
+3. **Changelog Generation**: Auto-generates categorized changelog
+4. **Version Bump**: Updates `pubspec.yaml` and `CHANGELOG.md`
+5. **Git Tag**: Creates annotated tag `v{version}`
+6. **GitHub Release**: Creates release with generated notes
+
+### Pre-releases
+
+Create pre-release versions for testing:
+
+```bash
+# Alpha (early development)
+gh workflow run release.yml --ref main -f pre_release=alpha
+
+# Beta (feature complete)
+gh workflow run release.yml --ref main -f pre_release=beta
+
+# Release Candidate (final testing)
+gh workflow run release.yml --ref main -f pre_release=rc
+```
+
+Pre-release versions: `v1.2.0-alpha.1`, `v1.2.0-beta.1`, `v1.2.0-rc.1`
+
+### Version History
+
+All versions are preserved:
+- ✅ Git tags (never deleted)
+- ✅ GitHub releases (permanent)
+- ✅ CHANGELOG.md (complete history)
+- ✅ Git repository (install any version via Git reference)
+
+> **Note**: Package is currently distributed via GitHub releases. pub.dev publishing is planned for future releases.
+
+### Customizing Release Notes
+
+Edit `.github/workflows/release.yml` to customize:
+- Changelog format
+- Sections and categories
+- Commit filtering
+- Release body template
+
+See `.github/RELEASE_PLAN.md` for comprehensive release documentation.
