@@ -33,6 +33,11 @@ permissions:
   contents: write
   pull-requests: write
 
+# Prevent concurrent releases
+concurrency:
+  group: release-workflow
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Create Release
@@ -62,22 +67,57 @@ jobs:
       - name: Get current version
         id: current_version
         run: |
+          set -e  # Exit on error
           CURRENT_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+
+          # Validate version format (MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-prerelease)
+          if ! echo "$CURRENT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "❌ Error: Invalid version format in pubspec.yaml: $CURRENT_VERSION"
+            echo "Expected format: MAJOR.MINOR.PATCH (e.g., 1.2.3 or 1.2.3-beta.1)"
+            exit 1
+          fi
+
           echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
           echo "Current version: $CURRENT_VERSION"
 
       - name: Get latest tag
         id: latest_tag
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          # Check if any tags exist
+          if git describe --tags --abbrev=0 2>/dev/null; then
+            LATEST_TAG=$(git describe --tags --abbrev=0)
+            HAS_TAGS="true"
+          else
+            LATEST_TAG=""
+            HAS_TAGS="false"
+            echo "No previous tags found - this will be the first release"
+          fi
+
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "Latest tag: $LATEST_TAG"
+          echo "has_tags=$HAS_TAGS" >> $GITHUB_OUTPUT
+          echo "Latest tag: ${LATEST_TAG:-none}"
 
       - name: Analyze commits for version bump
         id: version_bump_analysis
         run: |
-          # Get commits since last tag
-          COMMITS=$(git log ${{ steps.latest_tag.outputs.tag }}..HEAD --pretty=format:"%s")
+          set -e  # Exit on error
+
+          # Get commits since last tag (or all commits if no tag)
+          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
+            echo "Analyzing commits since ${{ steps.latest_tag.outputs.tag }}"
+            COMMIT_COUNT=$(git rev-list --count ${{ steps.latest_tag.outputs.tag }}..HEAD)
+
+            if [ "$COMMIT_COUNT" = "0" ]; then
+              echo "⚠️ Warning: No new commits since last tag ${{ steps.latest_tag.outputs.tag }}"
+              echo "Cannot create release without new commits. Exiting."
+              exit 1
+            fi
+
+            COMMITS=$(git log ${{ steps.latest_tag.outputs.tag }}..HEAD --pretty=format:"%s")
+          else
+            echo "Analyzing all commits (first release)"
+            COMMITS=$(git log --pretty=format:"%s")
+          fi
 
           # Detect version bump type
           BUMP_TYPE="patch"
@@ -148,7 +188,16 @@ jobs:
       - name: Generate Changelog
         id: changelog
         run: |
-          LATEST_TAG="${{ steps.latest_tag.outputs.tag }}"
+          set -e  # Exit on error
+
+          # Get commit range based on whether previous tags exist
+          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
+            COMMIT_RANGE="${{ steps.latest_tag.outputs.tag }}..HEAD"
+            echo "Generating changelog from ${{ steps.latest_tag.outputs.tag }} to HEAD"
+          else
+            COMMIT_RANGE="HEAD"
+            echo "Generating changelog from all commits (first release)"
+          fi
 
           # Create changelog header
           cat > RELEASE_CHANGELOG.md << 'EOF'
@@ -156,8 +205,8 @@ jobs:
 
           EOF
 
-          # Get commits and categorize
-          git log ${LATEST_TAG}..HEAD --pretty=format:"%s|%an|%h" | while IFS='|' read -r subject author hash; do
+          # Get commits and categorize (using process substitution to avoid subshell)
+          while IFS='|' read -r subject author hash; do
             # Categorize commit
             if echo "$subject" | grep -qi "^feat"; then
               echo "- 🚀 $subject (@$author) ($hash)" >> feat.txt
@@ -176,7 +225,7 @@ jobs:
             else
               echo "- $subject (@$author) ($hash)" >> other.txt
             fi
-          done
+          done < <(git log ${COMMIT_RANGE} --pretty=format:"%s|%an|%h")
 
           # Build changelog
           [ -f breaking.txt ] && echo -e "\n### 💥 Breaking Changes\n" >> RELEASE_CHANGELOG.md && cat breaking.txt >> RELEASE_CHANGELOG.md
@@ -188,8 +237,12 @@ jobs:
           [ -f test.txt ] && echo -e "\n### ✅ Tests\n" >> RELEASE_CHANGELOG.md && cat test.txt >> RELEASE_CHANGELOG.md
           [ -f other.txt ] && echo -e "\n### Other Changes\n" >> RELEASE_CHANGELOG.md && cat other.txt >> RELEASE_CHANGELOG.md
 
-          # Add comparison link
-          echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
+          # Add comparison link (only if previous tags exist)
+          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
+            echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.latest_tag.outputs.tag }}...v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
+          else
+            echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/commits/v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
+          fi
 
           # Clean up temp files
           rm -f feat.txt fix.txt perf.txt docs.txt refactor.txt test.txt breaking.txt other.txt
@@ -213,6 +266,7 @@ jobs:
       - name: Update CHANGELOG.md
         if: ${{ !github.event.inputs.dry_run }}
         run: |
+          set -e  # Exit on error
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           TODAY=$(date +%Y-%m-%d)
 
@@ -230,14 +284,19 @@ jobs:
             cat RELEASE_CHANGELOG.md | tail -n +3  # Skip the "What's Changed" header
             echo ""
 
-            # Append existing changelog if it exists
+            # Append existing changelog if it exists and has content beyond header
             if [ -f CHANGELOG.md ]; then
-              tail -n +8 CHANGELOG.md  # Skip existing header
+              # Count lines in existing changelog
+              LINE_COUNT=$(wc -l < CHANGELOG.md)
+              if [ "$LINE_COUNT" -gt 8 ]; then
+                # Append old changelog content (skip header)
+                tail -n +8 CHANGELOG.md
+              fi
             fi
           } > CHANGELOG.new.md
 
           mv CHANGELOG.new.md CHANGELOG.md
-          echo "Updated CHANGELOG.md"
+          echo "✅ Updated CHANGELOG.md"
 
       - name: Commit version bump
         if: ${{ !github.event.inputs.dry_run }}
@@ -253,25 +312,26 @@ jobs:
       - name: Create and push tag
         if: ${{ !github.event.inputs.dry_run }}
         run: |
+          set -e  # Exit on error
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
 
           # Create annotated tag
           git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
 
-          # Push commit and tag
-          git push origin HEAD:main
+          # Push commit and tag (use current branch, not hardcoded "main")
+          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+          echo "Pushing to branch: $CURRENT_BRANCH"
+          git push origin HEAD:"$CURRENT_BRANCH"
           git push origin "v$NEW_VERSION"
 
-          echo "Created and pushed tag v$NEW_VERSION"
+          echo "✅ Created and pushed tag v$NEW_VERSION"
 
       - name: Create GitHub Release
         if: ${{ !github.event.inputs.dry_run }}
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.new_version }}
-          release_name: ZMedia Player v${{ steps.version.outputs.new_version }}
+          name: ZMedia Player v${{ steps.version.outputs.new_version }}
           body: |
             ## ZMedia Player v${{ steps.version.outputs.new_version }}
 
@@ -300,6 +360,7 @@ jobs:
             > **Note**: This package is currently distributed via GitHub releases only. pub.dev publishing is planned for a future release.
           draft: false
           prerelease: ${{ github.event.inputs.pre_release != 'none' }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Dry run summary
         if: ${{ github.event.inputs.dry_run }}
