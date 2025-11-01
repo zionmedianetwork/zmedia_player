@@ -69,15 +69,31 @@ jobs:
       - name: Get latest tag
         id: latest_tag
         run: |
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          # Check if any tags exist
+          if git describe --tags --abbrev=0 2>/dev/null; then
+            LATEST_TAG=$(git describe --tags --abbrev=0)
+            HAS_TAGS="true"
+          else
+            LATEST_TAG=""
+            HAS_TAGS="false"
+            echo "No previous tags found - this will be the first release"
+          fi
+
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "Latest tag: $LATEST_TAG"
+          echo "has_tags=$HAS_TAGS" >> $GITHUB_OUTPUT
+          echo "Latest tag: ${LATEST_TAG:-none}"
 
       - name: Analyze commits for version bump
         id: version_bump_analysis
         run: |
-          # Get commits since last tag
-          COMMITS=$(git log ${{ steps.latest_tag.outputs.tag }}..HEAD --pretty=format:"%s")
+          # Get commits since last tag (or all commits if no tag)
+          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
+            echo "Analyzing commits since ${{ steps.latest_tag.outputs.tag }}"
+            COMMITS=$(git log ${{ steps.latest_tag.outputs.tag }}..HEAD --pretty=format:"%s")
+          else
+            echo "Analyzing all commits (first release)"
+            COMMITS=$(git log --pretty=format:"%s")
+          fi
 
           # Detect version bump type
           BUMP_TYPE="patch"
@@ -148,7 +164,14 @@ jobs:
       - name: Generate Changelog
         id: changelog
         run: |
-          LATEST_TAG="${{ steps.latest_tag.outputs.tag }}"
+          # Get commit range based on whether previous tags exist
+          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
+            COMMIT_RANGE="${{ steps.latest_tag.outputs.tag }}..HEAD"
+            echo "Generating changelog from ${{ steps.latest_tag.outputs.tag }} to HEAD"
+          else
+            COMMIT_RANGE="HEAD"
+            echo "Generating changelog from all commits (first release)"
+          fi
 
           # Create changelog header
           cat > RELEASE_CHANGELOG.md << 'EOF'
@@ -157,7 +180,7 @@ jobs:
           EOF
 
           # Get commits and categorize
-          git log ${LATEST_TAG}..HEAD --pretty=format:"%s|%an|%h" | while IFS='|' read -r subject author hash; do
+          git log ${COMMIT_RANGE} --pretty=format:"%s|%an|%h" | while IFS='|' read -r subject author hash; do
             # Categorize commit
             if echo "$subject" | grep -qi "^feat"; then
               echo "- 🚀 $subject (@$author) ($hash)" >> feat.txt
@@ -188,8 +211,12 @@ jobs:
           [ -f test.txt ] && echo -e "\n### ✅ Tests\n" >> RELEASE_CHANGELOG.md && cat test.txt >> RELEASE_CHANGELOG.md
           [ -f other.txt ] && echo -e "\n### Other Changes\n" >> RELEASE_CHANGELOG.md && cat other.txt >> RELEASE_CHANGELOG.md
 
-          # Add comparison link
-          echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
+          # Add comparison link (only if previous tags exist)
+          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
+            echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.latest_tag.outputs.tag }}...v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
+          else
+            echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/commits/v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
+          fi
 
           # Clean up temp files
           rm -f feat.txt fix.txt perf.txt docs.txt refactor.txt test.txt breaking.txt other.txt
