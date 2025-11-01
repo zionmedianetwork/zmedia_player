@@ -357,9 +357,380 @@ MediaItem(drmConfig) → MediaPlayer.load()
 
 ## Branching Strategy
 
-- Main branch: (not specified - check repository)
-- Feature branches: Use descriptive names (e.g., `feat/bandwidth-monitoring-livestreaming`)
-- Chore branches: Use `chore/` prefix (e.g., `chore/refactor-and-more`)
+### Main Branch
+- **main** - Production-ready code (protected)
+- All feature branches are created from and merged back to main
+- Requires passing CI checks and code review before merge
+
+### Git Configuration (CRITICAL)
+
+**⚠️ IMPORTANT: Commit Ownership**
+
+All commits MUST be owned by the local GitHub user, never by automated tools or AI assistants.
+
+#### First-Time Setup
+
+```bash
+# Set your GitHub username and email (one-time setup)
+git config --global user.name "Your Name"
+git config --global user.email "your.email@example.com"
+
+# Verify configuration
+git config --global user.name
+git config --global user.email
+
+# Ensure commits are signed (recommended)
+git config --global commit.gpgsign true  # if you have GPG key
+```
+
+#### Verify Before Every Commit
+
+```bash
+# Check current Git identity
+git config user.name
+git config user.email
+
+# If these show incorrect values, fix them:
+git config user.name "Your Name"
+git config user.email "your.email@example.com"
+```
+
+**❌ NEVER commit as:**
+- Claude <noreply@anthropic.com>
+- Any automated user
+- Generic/placeholder names
+
+**✅ ALWAYS commit as:**
+- Your actual GitHub username and email
+- The account that will push to the repository
+
+### Automated Branch Creation for PLAN.md Tasks
+
+For each task in PLAN.md, create a feature branch from main following this workflow:
+
+#### Branch Naming Convention
+
+**Format:** `feat/<ticket-title>` (kebab-case, lowercase)
+
+**Examples:**
+- "Material Design 3 controls" → `feat/material-design-3-controls`
+- "Quality/Resolution selection UI" → `feat/quality-resolution-selection-ui`
+- "Settings bottom sheet with animations" → `feat/settings-bottom-sheet-animations`
+
+**Prefix by Type:**
+- `feat/` - New features from PLAN.md
+- `fix/` - Bug fixes
+- `docs/` - Documentation updates
+- `chore/` - Refactoring, maintenance
+- `test/` - Test additions
+
+#### Creating Branch for a PLAN.md Task
+
+```bash
+# 1. Ensure you're on main and up to date
+git checkout main
+git pull origin main
+
+# 2. Create branch for task (example: Phase 2 Material Design 3 controls)
+git checkout -b feat/material-design-3-controls
+
+# 3. Push branch to remote
+git push -u origin feat/material-design-3-controls
+
+# 4. Verify your Git identity before making commits
+git config user.name   # Should show YOUR name
+git config user.email  # Should show YOUR email
+```
+
+#### Batch Branch Creation Script
+
+Create `scripts/create_plan_branches.sh` for creating multiple branches:
+
+```bash
+#!/bin/bash
+# Create all branches for a PLAN.md phase
+# Usage: ./scripts/create_plan_branches.sh 2
+
+PHASE=$1
+
+# Verify Git identity first
+echo "Git User: $(git config user.name) <$(git config user.email)>"
+read -p "Is this correct? (y/n) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+  echo "Please configure Git with your credentials first:"
+  echo "  git config user.name 'Your Name'"
+  echo "  git config user.email 'your.email@example.com'"
+  exit 1
+fi
+
+# Ensure on main
+git checkout main
+git pull origin main
+
+# Phase 2 UI/UX Enhancement tasks
+if [ "$PHASE" = "2" ]; then
+  branches=(
+    "feat/quality-resolution-selection-ui"
+    "feat/audio-track-selection-ui"
+    "feat/subtitle-controls-enhancement"
+    "feat/speed-controls-enhancement"
+    "feat/settings-bottom-sheet-animations"
+    "feat/reusable-component-extraction"
+    "feat/material-design-3-controls"
+    "feat/cupertino-controls"
+    "feat/adaptive-widget-selection"
+    "feat/fullscreen-widget-variants"
+    "feat/custom-controls-base-class"
+    "feat/buffering-indicator-enhancement"
+    "feat/error-overlay-enhancement"
+    "feat/status-badges-indicators"
+    "feat/visual-feedback-enhancements"
+    "feat/media-theme-design-system"
+    "feat/typography-scale"
+    "feat/spacing-layout-tokens"
+    "feat/animation-library"
+    "feat/icon-set-standardization"
+    "feat/accessibility-features-basic"
+  )
+
+  for branch in "${branches[@]}"; do
+    echo "Creating branch: $branch"
+    git checkout -b "$branch" main
+    git push -u origin "$branch"
+    git checkout main
+  done
+
+  echo "✅ Created ${#branches[@]} branches for Phase $PHASE"
+fi
+```
+
+#### Development Workflow for PLAN.md Tasks
+
+```bash
+# 1. Pick a task from PLAN.md
+# Example: Phase 2, Week 3-4: "Material Design 3 controls"
+
+# 2. Verify your Git identity (CRITICAL)
+git config user.name   # Must show YOUR name
+git config user.email  # Must show YOUR email
+
+# 3. Create and switch to feature branch
+git checkout -b feat/material-design-3-controls main
+
+# 4. Implement the task following PLAN.md specifications
+# (Write code, create files, etc.)
+
+# 5. Stage changes
+git add lib/src/widgets/controls/material_controls.dart
+git add lib/src/widgets/components/
+
+# 6. YOU create the commit (not automated tools)
+git commit -m "feat: implement Material Design 3 controls
+
+- Create MaterialMediaControls widget with M3 design language
+- Implement Material 3 components (seek bar, buttons, sheets)
+- Add Material color scheme integration
+- Add elevation and shadows per M3 spec
+- Integrate with Material ThemeData
+
+Implements: Phase 2, Week 3-4 task from PLAN.md"
+
+# 7. Verify commit author BEFORE pushing
+git log -1 --format="%an <%ae>"
+# Should show YOUR name and email, NOT Claude's
+
+# 8. If commit author is wrong, amend it:
+git commit --amend --reset-author
+
+# 9. Push to remote
+git push -u origin feat/material-design-3-controls
+
+# 10. Create pull request (YOU create it, not automated)
+gh pr create --title "feat: Material Design 3 controls" \
+  --body "## Summary
+Implements Material Design 3 controls widget from Phase 2, Week 3-4 of PLAN.md.
+
+## Changes
+- MaterialMediaControls widget with M3 design
+- Material-specific components
+- Theme integration
+- Accessibility compliance
+
+## Testing
+- Tested on Android devices
+- Material theme switching verified
+- Accessibility with TalkBack tested
+
+Closes #[issue-number] (if applicable)"
+
+# 11. After merge, clean up
+git checkout main
+git pull origin main
+git branch -d feat/material-design-3-controls
+```
+
+### Commit Authorship Rules
+
+**✅ CORRECT Commit Process:**
+1. Developer writes code locally
+2. Developer stages changes: `git add .`
+3. Developer creates commit: `git commit -m "..."`
+4. Developer verifies authorship: `git log -1 --format="%an <%ae>"`
+5. Developer pushes: `git push`
+
+**❌ INCORRECT - DO NOT DO THIS:**
+1. ~~AI assistant creates commit automatically~~
+2. ~~Commits with Claude's email~~
+3. ~~Automated commits without user verification~~
+4. ~~Co-authored-by Claude in commit message~~ (unless explicitly requested by user)
+
+**Exception:**
+The ONLY time "Co-Authored-By: Claude" should appear is in the automated release workflow (`.github/workflows/release.yml`) which is explicitly designed for that purpose.
+
+### Branch Protection Rules
+
+Configure on GitHub repository settings:
+
+- ✅ Require pull request before merging
+- ✅ Require status checks (CI tests, linting, analysis)
+- ✅ Require code review (minimum 1 approval)
+- ✅ Require branches up to date before merge
+- ✅ Require signed commits (recommended)
+- ❌ No force push to main
+- ❌ No direct commits to main
+- ❌ No deletion of main
+
+### Tips for Branch Management
+
+1. **One task = one branch** - Each branch corresponds to one PLAN.md task
+2. **Keep branches short-lived** - Merge within 1-3 days
+3. **Sync with main regularly** - Rebase/merge main frequently to avoid conflicts
+4. **Delete merged branches** - Clean up after PR merge
+5. **Verify authorship always** - Check `git log` before pushing
+6. **Use conventional commits** - Follow format: `type: description`
+
+### Branch Naming Reference
+
+```bash
+# Phase 2 UI/UX Enhancement Examples
+feat/quality-resolution-selection-ui      # Week 1-2
+feat/audio-track-selection-ui             # Week 1-2
+feat/subtitle-controls-enhancement        # Week 1-2
+feat/speed-controls-enhancement           # Week 1-2
+feat/settings-bottom-sheet-animations     # Week 1-2
+feat/reusable-component-extraction        # Week 1-2
+feat/material-design-3-controls           # Week 3-4
+feat/cupertino-controls                   # Week 3-4
+feat/adaptive-widget-selection            # Week 3-4
+feat/fullscreen-widget-variants           # Week 3-4
+feat/custom-controls-base-class           # Week 3-4
+feat/buffering-indicator-enhancement      # Week 5
+feat/error-overlay-enhancement            # Week 5
+feat/status-badges-indicators             # Week 5
+feat/visual-feedback-enhancements         # Week 5
+feat/media-theme-design-system            # Week 6
+feat/typography-scale                     # Week 6
+feat/spacing-layout-tokens                # Week 6
+feat/animation-library                    # Week 6
+feat/icon-set-standardization             # Week 6
+feat/accessibility-features-basic         # Week 6
+```
+
+## Commit Verification and Best Practices
+
+### Pre-Commit Checklist
+
+Before EVERY commit, verify:
+
+```bash
+# 1. Check Git identity
+git config user.name && git config user.email
+
+# 2. Review staged changes
+git status
+git diff --cached
+
+# 3. Run pre-commit hooks manually (if needed)
+pre-commit run
+
+# 4. Run tests
+flutter test
+
+# 5. Run analysis
+flutter analyze
+
+# 6. Create commit with YOUR credentials
+git commit -m "feat: your feature description"
+
+# 7. Verify commit author
+git log -1 --format="Author: %an <%ae>"
+
+# 8. If author is wrong, fix immediately
+git commit --amend --reset-author
+```
+
+### Fixing Incorrect Commit Authorship
+
+If you accidentally commit with wrong author:
+
+```bash
+# For the last commit (not yet pushed)
+git commit --amend --reset-author
+
+# For multiple commits (not yet pushed)
+git rebase -i HEAD~3  # Replace 3 with number of commits
+# Mark commits as 'edit', then for each:
+git commit --amend --reset-author
+git rebase --continue
+
+# For already pushed commits (AVOID if possible)
+# Contact repository maintainer for guidance
+```
+
+### Conventional Commit Format
+
+All commits should follow this format:
+
+```
+<type>: <description>
+
+[optional body]
+
+[optional footer]
+```
+
+**Types:**
+- `feat:` New feature
+- `fix:` Bug fix
+- `docs:` Documentation changes
+- `style:` Code style (formatting, no logic change)
+- `refactor:` Code refactoring
+- `perf:` Performance improvement
+- `test:` Test additions/changes
+- `chore:` Maintenance tasks
+
+**Examples:**
+
+```bash
+# Simple feature
+git commit -m "feat: add quality selection menu"
+
+# With body
+git commit -m "feat: implement Material Design 3 controls
+
+- Add MaterialMediaControls widget
+- Implement M3 design language
+- Add theme integration
+
+Implements Phase 2, Week 3-4 from PLAN.md"
+
+# Breaking change
+git commit -m "feat!: refactor MediaControls API
+
+BREAKING CHANGE: MediaControls now requires theme parameter
+See migration guide for details"
+```
 
 ## Release Workflow
 
