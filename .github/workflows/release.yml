@@ -1,0 +1,325 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Version bump type'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+          - auto
+          - major
+          - minor
+          - patch
+      pre_release:
+        description: 'Pre-release type (leave empty for stable)'
+        required: false
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - alpha
+          - beta
+          - rc
+      dry_run:
+        description: 'Dry run (no actual release)'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    outputs:
+      version: ${{ steps.version.outputs.new_version }}
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch all history for changelog generation
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Get current version
+        id: current_version
+        run: |
+          CURRENT_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+
+      - name: Get latest tag
+        id: latest_tag
+        run: |
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Latest tag: $LATEST_TAG"
+
+      - name: Analyze commits for version bump
+        id: version_bump_analysis
+        run: |
+          # Get commits since last tag
+          COMMITS=$(git log ${{ steps.latest_tag.outputs.tag }}..HEAD --pretty=format:"%s")
+
+          # Detect version bump type
+          BUMP_TYPE="patch"
+
+          # Check for breaking changes
+          if echo "$COMMITS" | grep -qi "BREAKING CHANGE:"; then
+            BUMP_TYPE="major"
+          # Check for features
+          elif echo "$COMMITS" | grep -qi "^feat"; then
+            BUMP_TYPE="minor"
+          # Check for fixes/perf/refactor
+          elif echo "$COMMITS" | grep -qiE "^(fix|perf|refactor)"; then
+            BUMP_TYPE="patch"
+          fi
+
+          echo "detected_bump=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "Detected bump type: $BUMP_TYPE"
+
+      - name: Determine new version
+        id: version
+        run: |
+          CURRENT="${{ steps.current_version.outputs.version }}"
+
+          # Remove any existing pre-release suffix
+          BASE_VERSION=$(echo "$CURRENT" | sed 's/-.*$//')
+
+          # Parse version
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+
+          # Determine bump type
+          if [ "${{ github.event.inputs.version_bump }}" = "auto" ]; then
+            BUMP="${{ steps.version_bump_analysis.outputs.detected_bump }}"
+          else
+            BUMP="${{ github.event.inputs.version_bump }}"
+          fi
+
+          # Apply version bump
+          case "$BUMP" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+          # Add pre-release suffix if specified
+          PRE_RELEASE="${{ github.event.inputs.pre_release }}"
+          if [ "$PRE_RELEASE" != "none" ] && [ -n "$PRE_RELEASE" ]; then
+            # Get pre-release number
+            PRE_NUM=$(git tag -l "v${NEW_VERSION}-${PRE_RELEASE}.*" | wc -l | tr -d ' ')
+            PRE_NUM=$((PRE_NUM + 1))
+            NEW_VERSION="${NEW_VERSION}-${PRE_RELEASE}.${PRE_NUM}"
+          fi
+
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "bump_type=$BUMP" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION (bump: $BUMP)"
+
+      - name: Generate Changelog
+        id: changelog
+        run: |
+          LATEST_TAG="${{ steps.latest_tag.outputs.tag }}"
+
+          # Create changelog header
+          cat > RELEASE_CHANGELOG.md << 'EOF'
+          ## What's Changed
+
+          EOF
+
+          # Get commits and categorize
+          git log ${LATEST_TAG}..HEAD --pretty=format:"%s|%an|%h" | while IFS='|' read -r subject author hash; do
+            # Categorize commit
+            if echo "$subject" | grep -qi "^feat"; then
+              echo "- 🚀 $subject (@$author) ($hash)" >> feat.txt
+            elif echo "$subject" | grep -qi "^fix"; then
+              echo "- 🐛 $subject (@$author) ($hash)" >> fix.txt
+            elif echo "$subject" | grep -qi "^perf"; then
+              echo "- ⚡ $subject (@$author) ($hash)" >> perf.txt
+            elif echo "$subject" | grep -qi "^docs"; then
+              echo "- 📚 $subject (@$author) ($hash)" >> docs.txt
+            elif echo "$subject" | grep -qi "^refactor"; then
+              echo "- 🔧 $subject (@$author) ($hash)" >> refactor.txt
+            elif echo "$subject" | grep -qi "^test"; then
+              echo "- ✅ $subject (@$author) ($hash)" >> test.txt
+            elif echo "$subject" | grep -qi "BREAKING CHANGE"; then
+              echo "- 💥 $subject (@$author) ($hash)" >> breaking.txt
+            else
+              echo "- $subject (@$author) ($hash)" >> other.txt
+            fi
+          done
+
+          # Build changelog
+          [ -f breaking.txt ] && echo -e "\n### 💥 Breaking Changes\n" >> RELEASE_CHANGELOG.md && cat breaking.txt >> RELEASE_CHANGELOG.md
+          [ -f feat.txt ] && echo -e "\n### 🚀 Features\n" >> RELEASE_CHANGELOG.md && cat feat.txt >> RELEASE_CHANGELOG.md
+          [ -f fix.txt ] && echo -e "\n### 🐛 Bug Fixes\n" >> RELEASE_CHANGELOG.md && cat fix.txt >> RELEASE_CHANGELOG.md
+          [ -f perf.txt ] && echo -e "\n### ⚡ Performance Improvements\n" >> RELEASE_CHANGELOG.md && cat perf.txt >> RELEASE_CHANGELOG.md
+          [ -f refactor.txt ] && echo -e "\n### 🔧 Refactoring\n" >> RELEASE_CHANGELOG.md && cat refactor.txt >> RELEASE_CHANGELOG.md
+          [ -f docs.txt ] && echo -e "\n### 📚 Documentation\n" >> RELEASE_CHANGELOG.md && cat docs.txt >> RELEASE_CHANGELOG.md
+          [ -f test.txt ] && echo -e "\n### ✅ Tests\n" >> RELEASE_CHANGELOG.md && cat test.txt >> RELEASE_CHANGELOG.md
+          [ -f other.txt ] && echo -e "\n### Other Changes\n" >> RELEASE_CHANGELOG.md && cat other.txt >> RELEASE_CHANGELOG.md
+
+          # Add comparison link
+          echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${LATEST_TAG}...v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
+
+          # Clean up temp files
+          rm -f feat.txt fix.txt perf.txt docs.txt refactor.txt test.txt breaking.txt other.txt
+
+          # Output changelog
+          CHANGELOG=$(cat RELEASE_CHANGELOG.md)
+          echo "changelog<<EOF" >> $GITHUB_OUTPUT
+          echo "$CHANGELOG" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+          echo "Generated changelog:"
+          cat RELEASE_CHANGELOG.md
+
+      - name: Update pubspec.yaml
+        if: ${{ !github.event.inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          sed -i "s/^version: .*/version: $NEW_VERSION/" pubspec.yaml
+          echo "Updated pubspec.yaml to version $NEW_VERSION"
+
+      - name: Update CHANGELOG.md
+        if: ${{ !github.event.inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          TODAY=$(date +%Y-%m-%d)
+
+          # Create new changelog entry
+          {
+            echo "# Changelog"
+            echo ""
+            echo "All notable changes to this project will be documented in this file."
+            echo ""
+            echo "The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),"
+            echo "and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)."
+            echo ""
+            echo "## [$NEW_VERSION] - $TODAY"
+            echo ""
+            cat RELEASE_CHANGELOG.md | tail -n +3  # Skip the "What's Changed" header
+            echo ""
+
+            # Append existing changelog if it exists
+            if [ -f CHANGELOG.md ]; then
+              tail -n +8 CHANGELOG.md  # Skip existing header
+            fi
+          } > CHANGELOG.new.md
+
+          mv CHANGELOG.new.md CHANGELOG.md
+          echo "Updated CHANGELOG.md"
+
+      - name: Commit version bump
+        if: ${{ !github.event.inputs.dry_run }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add pubspec.yaml CHANGELOG.md
+          git commit -m "chore(release): bump version to ${{ steps.version.outputs.new_version }}"
+
+          echo "Committed version bump"
+
+      - name: Create and push tag
+        if: ${{ !github.event.inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+
+          # Create annotated tag
+          git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
+
+          # Push commit and tag
+          git push origin HEAD:main
+          git push origin "v$NEW_VERSION"
+
+          echo "Created and pushed tag v$NEW_VERSION"
+
+      - name: Create GitHub Release
+        if: ${{ !github.event.inputs.dry_run }}
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ steps.version.outputs.new_version }}
+          release_name: ZMedia Player v${{ steps.version.outputs.new_version }}
+          body: |
+            ## ZMedia Player v${{ steps.version.outputs.new_version }}
+
+            ${{ steps.changelog.outputs.changelog }}
+
+            ### Installation
+
+            Add to your `pubspec.yaml`:
+            ```yaml
+            dependencies:
+              zmedia_player:
+                git:
+                  url: https://github.com/${{ github.repository }}.git
+                  ref: v${{ steps.version.outputs.new_version }}
+            ```
+
+            Then run:
+            ```bash
+            flutter pub get
+            ```
+
+            ### Documentation
+            - [API Reference](https://github.com/${{ github.repository }}/tree/main/docs/api-reference)
+            - [Examples](https://github.com/${{ github.repository }}/tree/main/example)
+
+            > **Note**: This package is currently distributed via GitHub releases only. pub.dev publishing is planned for a future release.
+          draft: false
+          prerelease: ${{ github.event.inputs.pre_release != 'none' }}
+
+      - name: Dry run summary
+        if: ${{ github.event.inputs.dry_run }}
+        run: |
+          echo "=== DRY RUN SUMMARY ==="
+          echo "New version would be: ${{ steps.version.outputs.new_version }}"
+          echo "Bump type: ${{ steps.version.outputs.bump_type }}"
+          echo "Pre-release: ${{ github.event.inputs.pre_release }}"
+          echo ""
+          echo "Changelog:"
+          cat RELEASE_CHANGELOG.md
+          echo ""
+          echo "No changes were made (dry run mode)"
+
+      - name: Release summary
+        if: ${{ !github.event.inputs.dry_run }}
+        run: |
+          echo "=== RELEASE SUMMARY ==="
+          echo "✅ Released version: ${{ steps.version.outputs.new_version }}"
+          echo "✅ Tag created: v${{ steps.version.outputs.new_version }}"
+          echo "✅ GitHub release created"
+          echo ""
+          echo "View release: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.new_version }}"
