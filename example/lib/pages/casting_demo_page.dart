@@ -245,18 +245,14 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
     }
   }
 
-  void _showQualityMenu() {
+  void _showSettingsMenu() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      isScrollControlled: true,
       builder: (context) {
-        return QualitySelectionMenu(
+        return SettingsMenu(
           controller: _controller,
           isAutoQualityEnabled: false,
-          showBitrate: true,
-          showCodec: false,
-          showFrameRate: false,
           onQualitySelected: (track) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -272,6 +268,32 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                 content: Text(
                   enabled ? 'Auto quality enabled' : 'Auto quality disabled',
                 ),
+                backgroundColor: Colors.purple,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+          onAudioTrackSelected: (track) {
+            final languageMap = {
+              'en': 'English',
+              'es': 'Spanish',
+              'fr': 'French',
+              'de': 'German',
+              'it': 'Italian',
+              'pt': 'Portuguese',
+              'ru': 'Russian',
+              'ja': 'Japanese',
+              'ko': 'Korean',
+              'zh': 'Chinese',
+            };
+            final language = track.language != null
+                ? languageMap[track.language!.toLowerCase()] ??
+                    track.language!.toUpperCase()
+                : 'Unknown';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Audio track changed to $language'),
                 backgroundColor: Colors.purple,
                 duration: const Duration(seconds: 2),
               ),
@@ -301,11 +323,11 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
         title: Text('$castType Demo'),
         backgroundColor: Colors.purple,
         actions: [
-          // Quality selection button
+          // Settings menu button
           IconButton(
-            icon: const Icon(Icons.high_quality),
-            onPressed: _showQualityMenu,
-            tooltip: 'Quality',
+            icon: const Icon(Icons.settings),
+            onPressed: _showSettingsMenu,
+            tooltip: 'Settings',
           ),
           if (_castStatus?.isCasting == true)
             IconButton(
