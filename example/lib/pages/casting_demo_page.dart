@@ -254,7 +254,7 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
         return QualitySelectionMenu(
           controller: _controller,
           isAutoQualityEnabled: false,
-          showBitrate: false,
+          showBitrate: true,
           showCodec: false,
           showFrameRate: false,
           onQualitySelected: (track) {
