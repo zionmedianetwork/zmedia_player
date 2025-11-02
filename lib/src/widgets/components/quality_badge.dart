@@ -116,15 +116,14 @@ class _QualityBadgeState extends State<QualityBadge>
 
     final track = widget.qualityTrack!;
 
-    // Get resolution label
+    // Get quality abbreviation
     if (track.height != null) {
       final height = track.height!;
       if (height >= 2160) return '4K';
       if (height >= 1440) return '2K';
-      if (height >= 1080) return '1080p';
-      if (height >= 720) return '720p';
-      if (height >= 480) return '480p';
-      if (height >= 360) return '360p';
+      if (height >= 1080) return 'FHD';
+      if (height >= 720) return 'HD';
+      if (height >= 360) return 'SD';
       return '${height}p';
     }
 

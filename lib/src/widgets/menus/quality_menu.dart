@@ -228,18 +228,22 @@ class _QualityTrackTile extends StatelessWidget {
     this.onTap,
   });
 
-  String _getResolutionLabel() {
+  String _getQualityAbbreviation() {
     if (track.height != null) {
       final height = track.height!;
       if (height >= 2160) return '4K';
       if (height >= 1440) return '2K';
-      if (height >= 1080) return '1080p';
-      if (height >= 720) return '720p';
-      if (height >= 480) return '480p';
-      if (height >= 360) return '360p';
+      if (height >= 1080) return 'FHD';
+      if (height >= 720) return 'HD';
+      if (height >= 360) return 'SD';
       return '${height}p';
     }
-    return track.name;
+    return 'N/A';
+  }
+
+  String _getCleanTrackName() {
+    // Remove bitrate in parentheses (e.g., "720p (2119Kbs)" -> "720p")
+    return track.name.replaceAll(RegExp(r'\s*\(.*?\)'), '').trim();
   }
 
   String _getBitrateLabel() {
@@ -294,7 +298,7 @@ class _QualityTrackTile extends StatelessWidget {
         ),
         child: Center(
           child: Text(
-            _getResolutionLabel(),
+            _getQualityAbbreviation(),
             style: theme.textTheme.labelMedium?.copyWith(
               fontWeight: FontWeight.bold,
               color: isSelected
@@ -305,7 +309,7 @@ class _QualityTrackTile extends StatelessWidget {
         ),
       ),
       title: Text(
-        track.name,
+        _getCleanTrackName(),
         style: theme.textTheme.bodyLarge?.copyWith(
           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
         ),
