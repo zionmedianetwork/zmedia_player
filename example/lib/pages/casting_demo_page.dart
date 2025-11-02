@@ -245,6 +245,40 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
     }
   }
 
+  void _showQualityMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return QualitySelectionMenu(
+          controller: _controller,
+          isAutoQualityEnabled: false,
+          onQualitySelected: (track) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Quality changed to ${track.name}'),
+                backgroundColor: Colors.purple,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+          onAutoQualityToggled: (enabled) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  enabled ? 'Auto quality enabled' : 'Auto quality disabled',
+                ),
+                backgroundColor: Colors.purple,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     if (_castStatus?.isCasting == true) {
@@ -264,6 +298,12 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
         title: Text('$castType Demo'),
         backgroundColor: Colors.purple,
         actions: [
+          // Quality selection button
+          IconButton(
+            icon: const Icon(Icons.high_quality),
+            onPressed: _showQualityMenu,
+            tooltip: 'Quality',
+          ),
           if (_castStatus?.isCasting == true)
             IconButton(
               icon: const Icon(Icons.cast_connected),
@@ -288,21 +328,43 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
               child: Container(
                 color: Colors.black,
                 child: _controller.isInitialized
-                    ? MediaPlayerWidget(
-                        controller: _controller,
-                        showControls: true,
-                        customControls: MediaControls(
-                          controller: _controller,
-                          title: _videos[_currentVideoIndex].title,
-                          showCastButton: true,
-                          showPipButton: true,
-                          showSettingsButton: true,
-                          allowFullscreen: true,
-                          showSubtitleControls: true,
-                          showSpeedControls: true,
-                          showVolumeControls: true,
-                          showPlaylistControls: false,
-                        ),
+                    ? Stack(
+                        children: [
+                          MediaPlayerWidget(
+                            controller: _controller,
+                            showControls: true,
+                            customControls: MediaControls(
+                              controller: _controller,
+                              title: _videos[_currentVideoIndex].title,
+                              showCastButton: true,
+                              showPipButton: true,
+                              showSettingsButton: true,
+                              allowFullscreen: true,
+                              showSubtitleControls: true,
+                              showSpeedControls: true,
+                              showVolumeControls: true,
+                              showPlaylistControls: false,
+                            ),
+                          ),
+                          // Quality badge overlay
+                          Positioned(
+                            top: 16,
+                            right: 16,
+                            child: StreamBuilder<List<QualityTrack>>(
+                              stream: _controller.player.qualityTracksStream,
+                              builder: (context, snapshot) {
+                                final tracks = snapshot.data ?? [];
+                                final selectedTrack = tracks
+                                    .where((t) => t.isSelected)
+                                    .firstOrNull;
+                                return QualityBadge(
+                                  qualityTrack: selectedTrack,
+                                  isAuto: selectedTrack == null,
+                                );
+                              },
+                            ),
+                          ),
+                        ],
                       )
                     : const Center(
                         child: CircularProgressIndicator(),

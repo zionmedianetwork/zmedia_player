@@ -52,6 +52,10 @@ export 'src/widgets/media_player_widget.dart';
 export 'src/widgets/media_controls.dart';
 export 'src/widgets/subtitle_view.dart';
 
+// Phase 2 Widgets - UI/UX Enhancement
+export 'src/widgets/menus/quality_menu.dart';
+export 'src/widgets/components/quality_badge.dart';
+
 // Phase 3 Widgets
 export 'src/widgets/media_list_player.dart';
 export 'src/widgets/airplay_button.dart';
