@@ -505,6 +505,7 @@ if [ "$PHASE" = "2" ]; then
 fi
 ```
 
+
 #### Development Workflow for PLAN.md Tasks
 
 ```bash
@@ -569,6 +570,10 @@ git checkout main
 git pull origin main
 git branch -d feat/material-design-3-controls
 ```
+
+### Tasks and Plan
+
+For each completed tasks in PLAN.md check the box next the task and its sub-tasks to mark them as completed in PLAN.md.
 
 ### Commit Authorship Rules
 

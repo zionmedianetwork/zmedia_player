@@ -17,6 +17,9 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
   List<CastDevice> _availableDevices = [];
   bool _isDiscovering = false;
 
+  // NOTE: To test subtitle functionality, use an HLS stream with embedded subtitle tracks
+  // The native players (ExoPlayer/AVPlayer) will automatically detect and expose them
+  // Example: HLS manifest with WebVTT subtitle tracks in #EXT-X-MEDIA entries
   final List<MediaItem> _videos = [
     MediaItem(
       id: '1',
@@ -47,6 +50,12 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
       artworkUrl:
           'https://durian.blender.org/wp-content/uploads/2010/06/05.8a_comp_000272.jpg',
       duration: const Duration(minutes: 14, seconds: 48),
+    ),
+    MediaItem(
+      id: '4',
+      title: 'TV5',
+      url:
+          'https://devstreaming-cdn.apple.com/videos/streaming/examples/adv_dv_atmos/main.m3u8?ref=developerinsider.com',
     ),
   ];
 
@@ -245,18 +254,14 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
     }
   }
 
-  void _showQualityMenu() {
+  void _showSettingsMenu() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      isScrollControlled: true,
       builder: (context) {
-        return QualitySelectionMenu(
+        return SettingsMenu(
           controller: _controller,
           isAutoQualityEnabled: false,
-          showBitrate: true,
-          showCodec: false,
-          showFrameRate: false,
           onQualitySelected: (track) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -276,6 +281,74 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
                 duration: const Duration(seconds: 2),
               ),
             );
+          },
+          onAudioTrackSelected: (track) {
+            final languageMap = {
+              'en': 'English',
+              'es': 'Spanish',
+              'fr': 'French',
+              'de': 'German',
+              'it': 'Italian',
+              'pt': 'Portuguese',
+              'ru': 'Russian',
+              'ja': 'Japanese',
+              'ko': 'Korean',
+              'zh': 'Chinese',
+            };
+            final language = track.language != null
+                ? languageMap[track.language!.toLowerCase()] ??
+                    track.language!.toUpperCase()
+                : 'Unknown';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Audio track changed to $language'),
+                backgroundColor: Colors.purple,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+          onSubtitleSelected: (track) {
+            final languageMap = {
+              'en': 'English',
+              'es': 'Spanish',
+              'fr': 'French',
+              'de': 'German',
+              'it': 'Italian',
+              'pt': 'Portuguese',
+              'ru': 'Russian',
+              'ja': 'Japanese',
+              'ko': 'Korean',
+              'zh': 'Chinese',
+              'ar': 'Arabic',
+              'hi': 'Hindi',
+              'tr': 'Turkish',
+              'nl': 'Dutch',
+              'pl': 'Polish',
+            };
+
+            if (track == null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Subtitles disabled'),
+                  backgroundColor: Colors.purple,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            } else {
+              final language = track.language != null
+                  ? languageMap[track.language!.toLowerCase()] ??
+                      track.language!.toUpperCase()
+                  : 'Unknown';
+
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Subtitle changed to $language'),
+                  backgroundColor: Colors.purple,
+                  duration: const Duration(seconds: 2),
+                ),
+              );
+            }
           },
         );
       },
@@ -301,11 +374,11 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
         title: Text('$castType Demo'),
         backgroundColor: Colors.purple,
         actions: [
-          // Quality selection button
+          // Settings menu button
           IconButton(
-            icon: const Icon(Icons.high_quality),
-            onPressed: _showQualityMenu,
-            tooltip: 'Quality',
+            icon: const Icon(Icons.settings),
+            onPressed: _showSettingsMenu,
+            tooltip: 'Settings',
           ),
           if (_castStatus?.isCasting == true)
             IconButton(
