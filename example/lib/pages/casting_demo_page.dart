@@ -245,18 +245,14 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
     }
   }
 
-  void _showQualityMenu() {
+  void _showSettingsMenu() {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      isScrollControlled: true,
       builder: (context) {
-        return QualitySelectionMenu(
+        return SettingsMenu(
           controller: _controller,
           isAutoQualityEnabled: false,
-          showBitrate: true,
-          showCodec: false,
-          showFrameRate: false,
           onQualitySelected: (track) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
@@ -277,22 +273,6 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
               ),
             );
           },
-        );
-      },
-    );
-  }
-
-  void _showAudioTrackMenu() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return AudioTrackMenu(
-          controller: _controller,
-          showCodec: false,
-          showChannels: true,
-          showSampleRate: false,
           onAudioTrackSelected: (track) {
             final languageMap = {
               'en': 'English',
@@ -343,17 +323,11 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
         title: Text('$castType Demo'),
         backgroundColor: Colors.purple,
         actions: [
-          // Quality selection button
+          // Settings menu button
           IconButton(
-            icon: const Icon(Icons.high_quality),
-            onPressed: _showQualityMenu,
-            tooltip: 'Quality',
-          ),
-          // Audio track selection button
-          IconButton(
-            icon: const Icon(Icons.audiotrack),
-            onPressed: _showAudioTrackMenu,
-            tooltip: 'Audio Track',
+            icon: const Icon(Icons.settings),
+            onPressed: _showSettingsMenu,
+            tooltip: 'Settings',
           ),
           if (_castStatus?.isCasting == true)
             IconButton(
