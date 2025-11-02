@@ -504,6 +504,9 @@ if [ "$PHASE" = "2" ]; then
   echo "✅ Created ${#branches[@]} branches for Phase $PHASE"
 fi
 ```
+#### Tasks and Plan
+For each completed tasks in PLAN.md check the task and its sub-tasks to mark them as completed.
+
 
 #### Development Workflow for PLAN.md Tasks
 

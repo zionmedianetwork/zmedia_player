@@ -282,6 +282,48 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
     );
   }
 
+  void _showAudioTrackMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return AudioTrackMenu(
+          controller: _controller,
+          showCodec: false,
+          showChannels: true,
+          showSampleRate: false,
+          onAudioTrackSelected: (track) {
+            final languageMap = {
+              'en': 'English',
+              'es': 'Spanish',
+              'fr': 'French',
+              'de': 'German',
+              'it': 'Italian',
+              'pt': 'Portuguese',
+              'ru': 'Russian',
+              'ja': 'Japanese',
+              'ko': 'Korean',
+              'zh': 'Chinese',
+            };
+            final language = track.language != null
+                ? languageMap[track.language!.toLowerCase()] ??
+                    track.language!.toUpperCase()
+                : 'Unknown';
+
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Audio track changed to $language'),
+                backgroundColor: Colors.purple,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     if (_castStatus?.isCasting == true) {
@@ -306,6 +348,12 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
             icon: const Icon(Icons.high_quality),
             onPressed: _showQualityMenu,
             tooltip: 'Quality',
+          ),
+          // Audio track selection button
+          IconButton(
+            icon: const Icon(Icons.audiotrack),
+            onPressed: _showAudioTrackMenu,
+            tooltip: 'Audio Track',
           ),
           if (_castStatus?.isCasting == true)
             IconButton(
