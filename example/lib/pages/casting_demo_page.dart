@@ -245,6 +245,43 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
     }
   }
 
+  void _showQualityMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return QualitySelectionMenu(
+          controller: _controller,
+          isAutoQualityEnabled: false,
+          showBitrate: true,
+          showCodec: false,
+          showFrameRate: false,
+          onQualitySelected: (track) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Quality changed to ${track.name}'),
+                backgroundColor: Colors.purple,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+          onAutoQualityToggled: (enabled) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  enabled ? 'Auto quality enabled' : 'Auto quality disabled',
+                ),
+                backgroundColor: Colors.purple,
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     if (_castStatus?.isCasting == true) {
@@ -264,6 +301,12 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
         title: Text('$castType Demo'),
         backgroundColor: Colors.purple,
         actions: [
+          // Quality selection button
+          IconButton(
+            icon: const Icon(Icons.high_quality),
+            onPressed: _showQualityMenu,
+            tooltip: 'Quality',
+          ),
           if (_castStatus?.isCasting == true)
             IconButton(
               icon: const Icon(Icons.cast_connected),
