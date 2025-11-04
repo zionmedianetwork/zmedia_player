@@ -65,10 +65,31 @@ class _QualitySelectionMenuState extends State<QualitySelectionMenu> {
     _isAutoQualityEnabled = widget.isAutoQualityEnabled;
   }
 
+  /// Deduplicate quality tracks by height to avoid showing duplicates
+  List<QualityTrack> _deduplicateQualityTracks(List<QualityTrack> tracks) {
+    final seen = <int>{};
+    final deduplicated = <QualityTrack>[];
+
+    for (final track in tracks) {
+      if (track.height != null) {
+        if (!seen.contains(track.height)) {
+          seen.add(track.height!);
+          deduplicated.add(track);
+        }
+      } else {
+        // Keep tracks without height info
+        deduplicated.add(track);
+      }
+    }
+
+    return deduplicated;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final qualityTracks = widget.controller.player.qualityTracks;
+    final allQualityTracks = widget.controller.player.qualityTracks;
+    final qualityTracks = _deduplicateQualityTracks(allQualityTracks);
 
     return Container(
       decoration: BoxDecoration(

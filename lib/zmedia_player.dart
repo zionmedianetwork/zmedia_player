@@ -56,6 +56,8 @@ export 'src/widgets/subtitle_view.dart';
 export 'src/widgets/menus/settings_menu.dart';
 export 'src/widgets/menus/quality_menu.dart';
 export 'src/widgets/menus/audio_track_menu.dart';
+export 'src/widgets/menus/subtitle_menu.dart';
+export 'src/widgets/menus/subtitle_styling_menu.dart';
 export 'src/widgets/components/quality_badge.dart';
 
 // Phase 3 Widgets
