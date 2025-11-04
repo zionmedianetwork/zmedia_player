@@ -17,7 +17,7 @@ Transform ZMedia Player from a feature-rich package into an enterprise-grade, pr
 |-------|--------|----------|------------|
 | Phase 0: Critical Bug Fixes | ✅ Complete | 3 weeks | 100% |
 | Phase 1: Essential Features | ✅ Complete | 4 weeks | 100% |
-| Phase 2: UI/UX Enhancement | ⏳ Planned | 6 weeks | 0% |
+| Phase 2: UI/UX Enhancement | ⏳ In Progress | 6 weeks | 18% |
 | Phase 3: Offline & DRM | ⏳ Planned | 3 weeks | 0% |
 | Phase 4: Advanced Features | ⏳ Planned | 4 weeks | 0% |
 | Phase 5: Testing & QA | ⏳ Planned | 3 weeks | 0% |
@@ -277,7 +277,7 @@ Transform ZMedia Player from a feature-rich package into an enterprise-grade, pr
 
 ## 🔄 PHASE 2: UI/UX Enhancement & Widget Library (IN PROGRESS)
 
-**Status:** ⏳ 14% Complete (3/21 main tasks)
+**Status:** ⏳ 18% Complete (4/22 main tasks)
 **Duration:** 6 weeks
 **Team:** 2 Flutter engineers + 1 UI/UX designer
 **Dependencies:** Phase 1 complete
@@ -323,17 +323,40 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
   - [x] Integrate with MediaController audio track streams
   - [x] Test with multi-audio content
 
-- [ ] **Extract and enhance subtitle controls** (2 days)
-  - [ ] Extract `SubtitleMenu` from MediaControls
-  - [ ] Enhance with subtitle styling options
-    - [ ] Font size slider
-    - [ ] Font color picker
-    - [ ] Background color/opacity
-    - [ ] Text outline options
-    - [ ] Position adjustment
-  - [ ] Add subtitle preview
-  - [ ] Create `SubtitleConfig` UI
-  - [ ] Test subtitle customization
+- [x] **Extract and enhance subtitle controls** (2 days)
+  - [x] Extract `SubtitleMenu` from MediaControls
+  - [x] Enhance with subtitle styling options
+    - [x] Font size slider
+    - [x] Font color picker
+    - [x] Background color/opacity
+    - [x] Text outline options
+    - [x] Position adjustment
+  - [x] Add subtitle preview
+  - [x] Create `SubtitleConfig` UI
+  - [x] Integrated as Subtitles tab in SettingsMenu
+  - [x] Added StreamBuilder for reactive track updates
+  - ⚠️ Note: Requires native platform implementation to expose subtitle tracks
+
+- [ ] **Fix native audio/subtitle track exposure** (3 days) - CRITICAL
+  - [ ] **Android (ExoPlayer)** (1.5 days)
+    - [ ] Fix subtitle track detection and exposure via `subtitleTracksStream`
+    - [ ] Ensure `setSubtitleTrack()` properly communicates with ExoPlayer
+    - [ ] Verify audio track stream updates when HLS/DASH manifest loads
+    - [ ] Test with multi-audio/subtitle HLS streams
+    - [ ] Add track metadata (language, format, codec) to streams
+  - [ ] **iOS (AVPlayer)** (1.5 days)
+    - [ ] Fix subtitle track detection from AVMediaSelectionGroup
+    - [ ] Ensure `setSubtitleTrack()` properly updates AVPlayer subtitle selection
+    - [ ] Verify audio track stream updates when HLS manifest loads
+    - [ ] Test with multi-audio/subtitle HLS streams
+    - [ ] Add track metadata (language, format, codec) to streams
+  - [ ] **Verification**
+    - [ ] Confirm tracks appear in SettingsMenu Audio/Subtitle tabs
+    - [ ] Verify selection state updates reactively in UI
+    - [ ] Test track switching on video playback
+    - [ ] Validate with Apple test streams and custom HLS content
+  - **Priority:** P0 - Blocks audio/subtitle UI functionality
+  - **Files:** `android/.../MediaPlayerManager.kt`, `ios/.../MediaPlayerManager.swift`
 
 - [ ] **Extract and enhance speed controls** (1 day)
   - [ ] Extract `SpeedMenu` from MediaControls
