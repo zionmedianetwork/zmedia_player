@@ -573,6 +573,20 @@ class MediaPlayer {
       // Initialize isLive flag from the media item
       _isLive = item.isLive;
 
+      // Clear previous track data immediately to prevent stale UI
+      _subtitleTracks = [];
+      _audioTracks = [];
+      _qualityTracks = [];
+      if (!_subtitleTracksController.isClosed) {
+        _subtitleTracksController.add(_subtitleTracks);
+      }
+      if (!_audioTracksController.isClosed) {
+        _audioTracksController.add(_audioTracks);
+      }
+      if (!_qualityTracksController.isClosed) {
+        _qualityTracksController.add(_qualityTracks);
+      }
+
       await _channel.invokeMethod('load', {
         'playerId': playerId,
         'mediaItem': item.toMap(),
@@ -663,6 +677,20 @@ class MediaPlayer {
 
     try {
       _currentPlaylist = playlist.copyWith(currentIndex: index);
+
+      // Clear previous track data immediately to prevent stale UI
+      _subtitleTracks = [];
+      _audioTracks = [];
+      _qualityTracks = [];
+      if (!_subtitleTracksController.isClosed) {
+        _subtitleTracksController.add(_subtitleTracks);
+      }
+      if (!_audioTracksController.isClosed) {
+        _audioTracksController.add(_audioTracks);
+      }
+      if (!_qualityTracksController.isClosed) {
+        _qualityTracksController.add(_qualityTracks);
+      }
 
       await _channel.invokeMethod('setPlaylist', {
         'playerId': playerId,
