@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../models/streaming_config.dart';
 import '../../models/subtitle_track.dart';
 import '../../core/media_controller.dart';
+import 'speed_menu.dart';
 
 /// A unified settings menu with tabs for all player configurations
 ///
@@ -40,6 +41,9 @@ class SettingsMenu extends StatefulWidget {
   /// Callback when a subtitle track is selected
   final ValueChanged<SubtitleTrack?>? onSubtitleSelected;
 
+  /// Callback when playback speed is changed
+  final ValueChanged<double>? onSpeedChanged;
+
   const SettingsMenu({
     super.key,
     required this.controller,
@@ -48,6 +52,7 @@ class SettingsMenu extends StatefulWidget {
     this.onAutoQualityToggled,
     this.onAudioTrackSelected,
     this.onSubtitleSelected,
+    this.onSpeedChanged,
   });
 
   @override
@@ -62,7 +67,7 @@ class _SettingsMenuState extends State<SettingsMenu>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
     _isAutoQualityEnabled = widget.isAutoQualityEnabled;
   }
 
@@ -133,6 +138,7 @@ class _SettingsMenuState extends State<SettingsMenu>
               Tab(
                   text: 'Subtitles',
                   icon: Icon(Icons.closed_caption, size: 20)),
+              Tab(text: 'Speed', icon: Icon(Icons.speed, size: 20)),
             ],
           ),
 
@@ -144,6 +150,7 @@ class _SettingsMenuState extends State<SettingsMenu>
                 _buildQualityTab(theme),
                 _buildAudioTab(theme),
                 _buildSubtitlesTab(theme),
+                _buildSpeedTab(theme),
               ],
             ),
           ),
@@ -413,6 +420,18 @@ class _SettingsMenuState extends State<SettingsMenu>
               ),
           ],
         );
+      },
+    );
+  }
+
+  Widget _buildSpeedTab(ThemeData theme) {
+    return SpeedMenu(
+      controller: widget.controller,
+      onSpeedSelected: (speed) {
+        widget.onSpeedChanged?.call(speed);
+      },
+      onPitchCorrectionToggled: (enabled) {
+        // Placeholder - pitch correction not yet implemented in native layer
       },
     );
   }

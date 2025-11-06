@@ -306,6 +306,8 @@ class MediaPlayerInstance(
         override fun onTracksChanged(tracks: Tracks) {
             android.util.Log.d("MediaPlayerInstance", "Tracks changed")
             extractAndNotifyQualityTracks()
+            extractAndNotifyAudioTracks()
+            extractAndNotifySubtitleTracks()
         }
     }
 
@@ -347,6 +349,11 @@ class MediaPlayerInstance(
         currentMediaItem = mediaItem
 
         android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
+
+        // Clear previous track data immediately to prevent stale UI
+        notifyQualityTracksChanged(emptyList())
+        notifyAudioTracksChanged(emptyList())
+        notifySubtitleTracksChanged(emptyList())
 
         val uri = Uri.parse(url)
         val mediaSource: MediaSource
@@ -443,8 +450,59 @@ class MediaPlayerInstance(
     }
 
     fun setSubtitleTrack(subtitleTrack: Map<String, Any>?) {
-        // Subtitle track selection will be implemented in Phase 2
-        // For now, just acknowledge the call
+        if (subtitleTrack == null) {
+            // Disable subtitles
+            exoPlayer?.let { player ->
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon()
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .build()
+                android.util.Log.d("MediaPlayerInstance", "Subtitles disabled")
+            }
+            return
+        }
+
+        val trackId = subtitleTrack["id"] as? String ?: return
+        android.util.Log.d("MediaPlayerInstance", "Setting subtitle track: ${subtitleTrack["title"]}, id: $trackId")
+
+        exoPlayer?.let { player ->
+            val currentTracks = player.currentTracks
+            var targetGroup: Tracks.Group? = null
+            var targetTrackIndex = -1
+
+            // Find the text track group and index matching the requested subtitle
+            for (group in currentTracks.groups) {
+                if (group.type == C.TRACK_TYPE_TEXT) {
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        val formatId = format.id ?: "subtitle_$i"
+                        if (formatId == trackId) {
+                            targetGroup = group
+                            targetTrackIndex = i
+                            break
+                        }
+                    }
+                    if (targetGroup != null) break
+                }
+            }
+
+            if (targetGroup != null && targetTrackIndex >= 0) {
+                // Override track selection to the specific subtitle
+                val override = TrackSelectionOverride(
+                    targetGroup.mediaTrackGroup,
+                    listOf(targetTrackIndex)
+                )
+
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon()
+                    .setOverrideForType(override)
+                    .build()
+
+                android.util.Log.d("MediaPlayerInstance", "Subtitle track override applied")
+            } else {
+                android.util.Log.w("MediaPlayerInstance", "Subtitle track not found: $trackId")
+            }
+        }
     }
 
     fun setQualityTrack(qualityTrack: Map<String, Any>) {
@@ -492,9 +550,47 @@ class MediaPlayerInstance(
     }
 
     fun setAudioTrack(audioTrack: Map<String, Any>) {
-        // Audio track selection - Phase 2 stub
-        // In a full implementation, this would select a specific audio track
-        android.util.Log.d("MediaPlayerInstance", "Audio track set: ${audioTrack["name"]}")
+        val trackId = audioTrack["id"] as? String ?: return
+        android.util.Log.d("MediaPlayerInstance", "Setting audio track: ${audioTrack["name"]}, id: $trackId")
+
+        exoPlayer?.let { player ->
+            val currentTracks = player.currentTracks
+            var targetGroup: Tracks.Group? = null
+            var targetTrackIndex = -1
+
+            // Find the audio track group and index matching the requested audio track
+            for (group in currentTracks.groups) {
+                if (group.type == C.TRACK_TYPE_AUDIO) {
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+                        val formatId = format.id ?: "audio_$i"
+                        if (formatId == trackId) {
+                            targetGroup = group
+                            targetTrackIndex = i
+                            break
+                        }
+                    }
+                    if (targetGroup != null) break
+                }
+            }
+
+            if (targetGroup != null && targetTrackIndex >= 0) {
+                // Override track selection to the specific audio track
+                val override = TrackSelectionOverride(
+                    targetGroup.mediaTrackGroup,
+                    listOf(targetTrackIndex)
+                )
+
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon()
+                    .setOverrideForType(override)
+                    .build()
+
+                android.util.Log.d("MediaPlayerInstance", "Audio track override applied")
+            } else {
+                android.util.Log.w("MediaPlayerInstance", "Audio track not found: $trackId")
+            }
+        }
     }
 
     fun enableAutoQuality() {
@@ -795,6 +891,143 @@ class MediaPlayerInstance(
             methodChannel.invokeMethod("onQualityTracksChanged", arguments)
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    private fun extractAndNotifyAudioTracks() {
+        exoPlayer?.let { player ->
+            val audioTracks = mutableListOf<Map<String, Any>>()
+            val currentTracks = player.currentTracks
+
+            // Extract audio tracks
+            for (group in currentTracks.groups) {
+                if (group.type == C.TRACK_TYPE_AUDIO && group.length > 0) {
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+
+                        // Build track ID
+                        val trackId = format.id ?: "audio_$i"
+
+                        // Build track name from label or language
+                        val trackName = format.label
+                            ?: format.language?.let { getLanguageName(it) }
+                            ?: "Audio Track ${i + 1}"
+
+                        audioTracks.add(mapOf(
+                            "id" to trackId,
+                            "name" to trackName,
+                            "language" to (format.language ?: ""),
+                            "codec" to (format.codecs ?: "unknown"),
+                            "channels" to (format.channelCount.takeIf { it > 0 } ?: 2),
+                            "sampleRate" to (format.sampleRate.takeIf { it > 0 } ?: 48000),
+                            "bitrate" to format.bitrate,
+                            "isSelected" to group.isTrackSelected(i),
+                            "isAvailable" to true
+                        ))
+                    }
+                }
+            }
+
+            // ALWAYS notify, even with empty list (to clear UI when switching videos)
+            android.util.Log.d("MediaPlayerInstance", "Found ${audioTracks.size} audio tracks")
+            notifyAudioTracksChanged(audioTracks)
+        }
+    }
+
+    private fun notifyAudioTracksChanged(tracks: List<Map<String, Any>>) {
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "tracks" to tracks
+            )
+            methodChannel.invokeMethod("onAudioTracksChanged", arguments)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun extractAndNotifySubtitleTracks() {
+        exoPlayer?.let { player ->
+            val subtitleTracks = mutableListOf<Map<String, Any>>()
+            val currentTracks = player.currentTracks
+
+            // Extract text/subtitle tracks
+            for (group in currentTracks.groups) {
+                if (group.type == C.TRACK_TYPE_TEXT && group.length > 0) {
+                    for (i in 0 until group.length) {
+                        val format = group.getTrackFormat(i)
+
+                        // Build track ID
+                        val trackId = format.id ?: "subtitle_$i"
+
+                        // Build track title from label or language
+                        val trackTitle = format.label
+                            ?: format.language?.let { getLanguageName(it) }
+                            ?: "Subtitle ${i + 1}"
+
+                        // Detect subtitle format from MIME type
+                        val subtitleFormat = when (format.sampleMimeType) {
+                            "application/x-subrip", "text/x-ssa" -> "srt"
+                            "text/vtt" -> "webvtt"
+                            "text/x-ass" -> "ass"
+                            "text/x-ssa" -> "ssa"
+                            "application/ttml+xml" -> "ttml"
+                            else -> "srt"
+                        }
+
+                        subtitleTracks.add(mapOf(
+                            "id" to trackId,
+                            "title" to trackTitle,
+                            "language" to (format.language ?: ""),
+                            "format" to subtitleFormat,
+                            "isSelected" to group.isTrackSelected(i),
+                            "isDefault" to ((format.selectionFlags and C.SELECTION_FLAG_DEFAULT) != 0)
+                        ))
+                    }
+                }
+            }
+
+            // ALWAYS notify, even with empty list (to clear UI when switching to video without subtitles)
+            android.util.Log.d("MediaPlayerInstance", "Found ${subtitleTracks.size} subtitle tracks")
+            notifySubtitleTracksChanged(subtitleTracks)
+        }
+    }
+
+    private fun notifySubtitleTracksChanged(tracks: List<Map<String, Any>>) {
+        try {
+            val arguments = mapOf(
+                "playerId" to playerId,
+                "tracks" to tracks
+            )
+            methodChannel.invokeMethod("onSubtitleTracksChanged", arguments)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun getLanguageName(languageCode: String): String {
+        return when (languageCode.lowercase()) {
+            "en" -> "English"
+            "es" -> "Spanish"
+            "fr" -> "French"
+            "de" -> "German"
+            "it" -> "Italian"
+            "pt" -> "Portuguese"
+            "ru" -> "Russian"
+            "ja" -> "Japanese"
+            "ko" -> "Korean"
+            "zh" -> "Chinese"
+            "ar" -> "Arabic"
+            "hi" -> "Hindi"
+            "tr" -> "Turkish"
+            "nl" -> "Dutch"
+            "pl" -> "Polish"
+            "sv" -> "Swedish"
+            "da" -> "Danish"
+            "fi" -> "Finnish"
+            "no" -> "Norwegian"
+            "cs" -> "Czech"
+            else -> languageCode.uppercase()
         }
     }
 
