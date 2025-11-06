@@ -354,6 +354,11 @@ class MediaPlayerInstance: NSObject {
 
         print("MediaPlayerInstance.loadMediaItem(): Loading URL: \(urlString)")
 
+        // Clear previous track data immediately to prevent stale UI
+        notifyQualityTracksChanged(tracks: [])
+        notifyAudioTracksChanged(tracks: [])
+        notifySubtitleTracksChanged(tracks: [])
+
         // Note: No need to remove old observers - modern KVO (NSKeyValueObservation)
         // automatically cleans up when we invalidate or reassign the observer variables
 
@@ -466,8 +471,49 @@ class MediaPlayerInstance: NSObject {
     }
 
     func setSubtitleTrack(subtitleTrack: [String: Any]?) {
-        // Subtitle track selection will be implemented in Phase 2
-        // For now, just acknowledge the call
+        guard let playerItem = avPlayer?.currentItem,
+              let asset = playerItem.asset as? AVURLAsset else {
+            print("MediaPlayerInstance: Cannot set subtitle track - no player item or not AVURLAsset")
+            return
+        }
+
+        // Get subtitle selection group
+        guard let subtitleGroup = asset.mediaSelectionGroup(forMediaCharacteristic: .legible) else {
+            print("MediaPlayerInstance: No subtitle selection group found")
+            return
+        }
+
+        // If nil, disable subtitles
+        if subtitleTrack == nil {
+            print("MediaPlayerInstance: Disabling subtitles")
+            playerItem.select(nil, in: subtitleGroup)
+            return
+        }
+
+        guard let trackId = subtitleTrack?["id"] as? String else {
+            print("MediaPlayerInstance: Invalid subtitle track data - no id")
+            return
+        }
+
+        print("MediaPlayerInstance: Setting subtitle track: \(subtitleTrack?["title"] ?? "unknown"), id: \(trackId)")
+
+        // Find the matching option
+        var targetOption: AVMediaSelectionOption?
+
+        for option in subtitleGroup.options {
+            let optionId = option.displayName.isEmpty ? "subtitle_\(subtitleGroup.options.firstIndex(of: option) ?? 0)" : option.displayName
+            if optionId == trackId {
+                targetOption = option
+                break
+            }
+        }
+
+        if let option = targetOption {
+            print("MediaPlayerInstance: Subtitle track found, selecting")
+            playerItem.select(option, in: subtitleGroup)
+        } else {
+            print("MediaPlayerInstance: Subtitle track not found: \(trackId)")
+        }
     }
 
     func setQualityTrack(qualityTrack: [String: Any]) {
@@ -487,10 +533,41 @@ class MediaPlayerInstance: NSObject {
     }
 
     func setAudioTrack(audioTrack: [String: Any]) {
-        // Audio track selection - Phase 2 stub
-        // In a full implementation, this would select a specific audio track
-        if let name = audioTrack["name"] as? String {
-            print("MediaPlayerInstance: Audio track set: \(name)")
+        guard let playerItem = avPlayer?.currentItem,
+              let asset = playerItem.asset as? AVURLAsset else {
+            print("MediaPlayerInstance: Cannot set audio track - no player item or not AVURLAsset")
+            return
+        }
+
+        // Get audio selection group
+        guard let audioGroup = asset.mediaSelectionGroup(forMediaCharacteristic: .audible) else {
+            print("MediaPlayerInstance: No audio selection group found")
+            return
+        }
+
+        guard let trackId = audioTrack["id"] as? String else {
+            print("MediaPlayerInstance: Invalid audio track data - no id")
+            return
+        }
+
+        print("MediaPlayerInstance: Setting audio track: \(audioTrack["name"] ?? "unknown"), id: \(trackId)")
+
+        // Find the matching option
+        var targetOption: AVMediaSelectionOption?
+
+        for option in audioGroup.options {
+            let optionId = option.displayName.isEmpty ? "audio_\(audioGroup.options.firstIndex(of: option) ?? 0)" : option.displayName
+            if optionId == trackId {
+                targetOption = option
+                break
+            }
+        }
+
+        if let option = targetOption {
+            print("MediaPlayerInstance: Audio track found, selecting")
+            playerItem.select(option, in: audioGroup)
+        } else {
+            print("MediaPlayerInstance: Audio track not found: \(trackId)")
         }
     }
 
@@ -710,12 +787,16 @@ class MediaPlayerInstance: NSObject {
             }
             notifyDurationChanged()
 
-            // Extract and notify quality tracks immediately
+            // Extract and notify all tracks immediately
             extractAndNotifyQualityTracks()
+            extractAndNotifyAudioTracks()
+            extractAndNotifySubtitleTracks()
 
             // Retry after a delay to catch variants that load asynchronously
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
                 self?.extractAndNotifyQualityTracks()
+                self?.extractAndNotifyAudioTracks()
+                self?.extractAndNotifySubtitleTracks()
             }
         case .failed:
             print("MediaPlayerInstance: PlayerItem status = failed")
@@ -999,6 +1080,142 @@ class MediaPlayerInstance: NSObject {
             "tracks": tracks
         ]
         methodChannel.invokeMethod("onQualityTracksChanged", arguments: arguments)
+    }
+
+    private func extractAndNotifyAudioTracks() {
+        guard let playerItem = avPlayer?.currentItem,
+              let asset = playerItem.asset as? AVURLAsset else {
+            print("MediaPlayerInstance: Cannot extract audio tracks - no player item or not AVURLAsset")
+            return
+        }
+
+        var audioTracks: [[String: Any]] = []
+
+        // Get audio media selection group
+        if let audioGroup = asset.mediaSelectionGroup(forMediaCharacteristic: .audible) {
+            print("MediaPlayerInstance: Found \(audioGroup.options.count) audio options")
+
+            // Extract all audio tracks
+            for (index, option) in audioGroup.options.enumerated() {
+                let trackId = option.displayName.isEmpty ? "audio_\(index)" : option.displayName
+                let language = option.extendedLanguageTag ?? option.locale?.languageCode ?? ""
+                let trackName = option.displayName.isEmpty
+                    ? (language.isEmpty ? "Audio Track \(index + 1)" : getLanguageName(languageCode: language))
+                    : option.displayName
+
+                // Determine if this track is currently selected
+                let isSelected = playerItem.currentMediaSelection.selectedMediaOption(in: audioGroup) == option
+
+                audioTracks.append([
+                    "id": trackId,
+                    "name": trackName,
+                    "language": language,
+                    "codec": "unknown", // iOS doesn't expose codec easily
+                    "channels": 2, // Default, iOS doesn't expose channel count easily
+                    "sampleRate": 48000, // Default, iOS doesn't expose sample rate easily
+                    "bitrate": 0, // iOS doesn't expose audio bitrate easily
+                    "isSelected": isSelected,
+                    "isAvailable": true
+                ])
+            }
+        } else {
+            print("MediaPlayerInstance: No audio selection group found")
+        }
+
+        // ALWAYS notify, even with empty list (to clear UI when switching videos)
+        print("MediaPlayerInstance: Found \(audioTracks.count) audio tracks")
+        notifyAudioTracksChanged(tracks: audioTracks)
+    }
+
+    private func notifyAudioTracksChanged(tracks: [[String: Any]]) {
+        let arguments: [String: Any] = [
+            "playerId": playerId,
+            "tracks": tracks
+        ]
+        methodChannel.invokeMethod("onAudioTracksChanged", arguments: arguments)
+    }
+
+    private func extractAndNotifySubtitleTracks() {
+        guard let playerItem = avPlayer?.currentItem,
+              let asset = playerItem.asset as? AVURLAsset else {
+            print("MediaPlayerInstance: Cannot extract subtitle tracks - no player item or not AVURLAsset")
+            return
+        }
+
+        var subtitleTracks: [[String: Any]] = []
+
+        // Get legible (subtitle/caption) media selection group
+        if let subtitleGroup = asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
+            print("MediaPlayerInstance: Found \(subtitleGroup.options.count) subtitle options")
+
+            // Extract all subtitle tracks
+            for (index, option) in subtitleGroup.options.enumerated() {
+                let trackId = option.displayName.isEmpty ? "subtitle_\(index)" : option.displayName
+                let language = option.extendedLanguageTag ?? option.locale?.languageCode ?? ""
+                let trackTitle = option.displayName.isEmpty
+                    ? (language.isEmpty ? "Subtitle \(index + 1)" : getLanguageName(languageCode: language))
+                    : option.displayName
+
+                // Determine if this track is currently selected
+                let isSelected = playerItem.currentMediaSelection.selectedMediaOption(in: subtitleGroup) == option
+
+                // Check if this is a default/forced subtitle
+                let isDefault = option.hasMediaCharacteristic(.isMainProgramContent)
+
+                // Determine format (iOS doesn't easily expose this, assume WebVTT for HLS)
+                let format = "webvtt"
+
+                subtitleTracks.append([
+                    "id": trackId,
+                    "title": trackTitle,
+                    "language": language,
+                    "format": format,
+                    "isSelected": isSelected,
+                    "isDefault": isDefault
+                ])
+            }
+        } else {
+            print("MediaPlayerInstance: No subtitle selection group found")
+        }
+
+        // ALWAYS notify, even with empty list (to clear UI when switching to video without subtitles)
+        print("MediaPlayerInstance: Found \(subtitleTracks.count) subtitle tracks")
+        notifySubtitleTracksChanged(tracks: subtitleTracks)
+    }
+
+    private func notifySubtitleTracksChanged(tracks: [[String: Any]]) {
+        let arguments: [String: Any] = [
+            "playerId": playerId,
+            "tracks": tracks
+        ]
+        methodChannel.invokeMethod("onSubtitleTracksChanged", arguments: arguments)
+    }
+
+    private func getLanguageName(languageCode: String) -> String {
+        let code = languageCode.lowercased()
+        switch code {
+        case "en": return "English"
+        case "es": return "Spanish"
+        case "fr": return "French"
+        case "de": return "German"
+        case "it": return "Italian"
+        case "pt": return "Portuguese"
+        case "ru": return "Russian"
+        case "ja": return "Japanese"
+        case "ko": return "Korean"
+        case "zh": return "Chinese"
+        case "ar": return "Arabic"
+        case "hi": return "Hindi"
+        case "tr": return "Turkish"
+        case "nl": return "Dutch"
+        case "pl": return "Polish"
+        case "sv": return "Swedish"
+        case "da": return "Danish"
+        case "fi": return "Finnish"
+        case "no": return "Norwegian"
+        case "cs": return "Czech"
+        default: return code.uppercased()
+        }
     }
 
     private func notifyError(error: String) {

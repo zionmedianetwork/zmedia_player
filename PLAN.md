@@ -277,7 +277,7 @@ Transform ZMedia Player from a feature-rich package into an enterprise-grade, pr
 
 ## 🔄 PHASE 2: UI/UX Enhancement & Widget Library (IN PROGRESS)
 
-**Status:** ⏳ 18% Complete (4/22 main tasks)
+**Status:** ⏳ 23% Complete (5/22 main tasks)
 **Duration:** 6 weeks
 **Team:** 2 Flutter engineers + 1 UI/UX designer
 **Dependencies:** Phase 1 complete
@@ -337,24 +337,24 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
   - [x] Added StreamBuilder for reactive track updates
   - ⚠️ Note: Requires native platform implementation to expose subtitle tracks
 
-- [ ] **Fix native audio/subtitle track exposure** (3 days) - CRITICAL
-  - [ ] **Android (ExoPlayer)** (1.5 days)
-    - [ ] Fix subtitle track detection and exposure via `subtitleTracksStream`
-    - [ ] Ensure `setSubtitleTrack()` properly communicates with ExoPlayer
-    - [ ] Verify audio track stream updates when HLS/DASH manifest loads
-    - [ ] Test with multi-audio/subtitle HLS streams
-    - [ ] Add track metadata (language, format, codec) to streams
-  - [ ] **iOS (AVPlayer)** (1.5 days)
-    - [ ] Fix subtitle track detection from AVMediaSelectionGroup
-    - [ ] Ensure `setSubtitleTrack()` properly updates AVPlayer subtitle selection
-    - [ ] Verify audio track stream updates when HLS manifest loads
-    - [ ] Test with multi-audio/subtitle HLS streams
-    - [ ] Add track metadata (language, format, codec) to streams
-  - [ ] **Verification**
-    - [ ] Confirm tracks appear in SettingsMenu Audio/Subtitle tabs
-    - [ ] Verify selection state updates reactively in UI
-    - [ ] Test track switching on video playback
-    - [ ] Validate with Apple test streams and custom HLS content
+- [x] **Fix native audio/subtitle track exposure** (3 days) - CRITICAL
+  - [x] **Android (ExoPlayer)** (1.5 days)
+    - [x] Fix subtitle track detection and exposure via `subtitleTracksStream`
+    - [x] Ensure `setSubtitleTrack()` properly communicates with ExoPlayer
+    - [x] Verify audio track stream updates when HLS/DASH manifest loads
+    - [x] Test with multi-audio/subtitle HLS streams
+    - [x] Add track metadata (language, format, codec) to streams
+  - [x] **iOS (AVPlayer)** (1.5 days)
+    - [x] Fix subtitle track detection from AVMediaSelectionGroup
+    - [x] Ensure `setSubtitleTrack()` properly updates AVPlayer subtitle selection
+    - [x] Verify audio track stream updates when HLS manifest loads
+    - [x] Test with multi-audio/subtitle HLS streams
+    - [x] Add track metadata (language, format, codec) to streams
+  - [x] **Verification**
+    - [x] Confirm tracks appear in SettingsMenu Audio/Subtitle tabs
+    - [x] Verify selection state updates reactively in UI
+    - [x] Test track switching on video playback
+    - [x] Validate with Apple test streams and custom HLS content
   - **Priority:** P0 - Blocks audio/subtitle UI functionality
   - **Files:** `android/.../MediaPlayerManager.kt`, `ios/.../MediaPlayerManager.swift`
 
