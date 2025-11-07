@@ -50,6 +50,7 @@ export 'src/services/cast_service.dart';
 // Widgets
 export 'src/widgets/media_player_widget.dart';
 export 'src/widgets/media_controls.dart';
+export 'src/widgets/material_media_controls.dart';
 export 'src/widgets/subtitle_view.dart';
 
 // Phase 2 Widgets - UI/UX Enhancement
