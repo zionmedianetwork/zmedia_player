@@ -54,6 +54,9 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
   BufferStatistics? _bufferStatistics;
   bool _showBufferDetails = false;
 
+  // Phase 2: Material Design 3 toggle
+  bool _useMaterialDesign3 = true;
+
   @override
   void initState() {
     super.initState();
@@ -209,6 +212,34 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
       appBar: AppBar(
         title: const Text('Streaming Demo (Phase 1 & 2)'),
         backgroundColor: Colors.deepPurple,
+        actions: [
+          // Phase 2: Material Design 3 toggle
+          Tooltip(
+            message: _useMaterialDesign3
+                ? 'Switch to Classic Controls'
+                : 'Switch to Material Design 3',
+            child: IconButton(
+              icon: Icon(
+                  _useMaterialDesign3 ? Icons.design_services : Icons.widgets),
+              onPressed: () {
+                setState(() {
+                  _useMaterialDesign3 = !_useMaterialDesign3;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      _useMaterialDesign3
+                          ? 'Switched to Material Design 3 Controls'
+                          : 'Switched to Classic Controls',
+                    ),
+                    duration: const Duration(seconds: 2),
+                    backgroundColor: Colors.deepPurple,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -220,18 +251,26 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
               child: MediaPlayerWidget(
                 controller: _controller,
                 showControls: true,
-                customControls: MediaControls(
-                  controller: _controller,
-                  title: _streamingVideos[_selectedVideoIndex].title,
-                  showCastButton: true,
-                  showPipButton: true,
-                  showSettingsButton: true,
-                  allowFullscreen: true,
-                  showSubtitleControls: true,
-                  showSpeedControls: true,
-                  showVolumeControls: true,
-                  showPlaylistControls: false,
-                ),
+                customControls: _useMaterialDesign3
+                    ? MaterialMediaControls(
+                        controller: _controller,
+                        title: _streamingVideos[_selectedVideoIndex].title,
+                        showFullscreen: true,
+                        showSettings: true,
+                        showPip: true,
+                      )
+                    : MediaControls(
+                        controller: _controller,
+                        title: _streamingVideos[_selectedVideoIndex].title,
+                        showCastButton: true,
+                        showPipButton: true,
+                        showSettingsButton: true,
+                        allowFullscreen: true,
+                        showSubtitleControls: true,
+                        showSpeedControls: true,
+                        showVolumeControls: true,
+                        showPlaylistControls: false,
+                      ),
               ),
             ),
           ),
@@ -257,6 +296,11 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
                   Icons.subtitles,
                   'Subtitles',
                   _controller.player.selectedSubtitleTrack?.title ?? 'Off',
+                ),
+                _buildInfoItem(
+                  _useMaterialDesign3 ? Icons.design_services : Icons.widgets,
+                  'UI Style',
+                  _useMaterialDesign3 ? 'M3' : 'Classic',
                 ),
               ],
             ),
