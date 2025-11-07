@@ -342,7 +342,8 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
 
                     // Total duration
                     TimeDisplay(
-                      position: duration,
+                      position: Duration.zero,
+                      duration: duration,
                       format: TimeDisplayFormat.totalOnly,
                       style: textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurface,
