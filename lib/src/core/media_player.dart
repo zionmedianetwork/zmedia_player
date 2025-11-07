@@ -587,6 +587,14 @@ class MediaPlayer {
         _qualityTracksController.add(_qualityTracks);
       }
 
+      // Reset playback speed to normal (1.0x) when loading new media
+      try {
+        await setSpeed(1.0);
+      } catch (e) {
+        // Ignore errors from speed reset - don't block media loading
+        debugPrint('Failed to reset speed: $e');
+      }
+
       await _channel.invokeMethod('load', {
         'playerId': playerId,
         'mediaItem': item.toMap(),
@@ -690,6 +698,14 @@ class MediaPlayer {
       }
       if (!_qualityTracksController.isClosed) {
         _qualityTracksController.add(_qualityTracks);
+      }
+
+      // Reset playback speed to normal (1.0x) when loading new playlist
+      try {
+        await setSpeed(1.0);
+      } catch (e) {
+        // Ignore errors from speed reset - don't block playlist loading
+        debugPrint('Failed to reset speed: $e');
       }
 
       await _channel.invokeMethod('setPlaylist', {
