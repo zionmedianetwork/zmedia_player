@@ -277,7 +277,7 @@ Transform ZMedia Player from a feature-rich package into an enterprise-grade, pr
 
 ## 🔄 PHASE 2: UI/UX Enhancement & Widget Library (IN PROGRESS)
 
-**Status:** ⏳ 23% Complete (5/22 main tasks)
+**Status:** ⏳ 27% Complete (6/22 main tasks)
 **Duration:** 6 weeks
 **Team:** 2 Flutter engineers + 1 UI/UX designer
 **Dependencies:** Phase 1 complete
@@ -358,12 +358,12 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
   - **Priority:** P0 - Blocks audio/subtitle UI functionality
   - **Files:** `android/.../MediaPlayerManager.kt`, `ios/.../MediaPlayerManager.swift`
 
-- [ ] **Extract and enhance speed controls** (1 day)
-  - [ ] Extract `SpeedMenu` from MediaControls
-  - [ ] Add custom speed input (0.1x - 4.0x)
-  - [ ] Add speed presets (0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 2.0x)
-  - [ ] Current speed indicator
-  - [ ] Pitch correction toggle
+- [x] **Extract and enhance speed controls** (1 day)
+  - [x] Extract `SpeedMenu` from MediaControls
+  - [x] Add custom speed input (0.1x - 4.0x)
+  - [x] Add speed presets (0.25x, 0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 1.75x, 2.0x)
+  - [x] Current speed indicator
+  - [x] Pitch correction toggle (placeholder - native implementation pending)
 
 - [x] **Settings bottom sheet with animations** (3 days)
   - [x] Create `SettingsBottomSheet` widget (implemented as `SettingsMenu`)
