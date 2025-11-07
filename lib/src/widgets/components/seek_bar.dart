@@ -197,7 +197,7 @@ class _SeekBarState extends State<SeekBar> {
         clipBehavior: Clip.none,
         children: [
           // Main seek bar
-          Container(
+          SizedBox(
             height: widget.trackHeight + (widget.thumbRadius * 2),
             child: CustomPaint(
               painter: _SeekBarPainter(

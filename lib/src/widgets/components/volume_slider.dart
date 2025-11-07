@@ -100,7 +100,6 @@ class VolumeSlider extends StatefulWidget {
 
 class _VolumeSliderState extends State<VolumeSlider> {
   double? _dragValue;
-  bool _isDragging = false;
 
   double get currentValue => _dragValue ?? widget.value;
 
@@ -117,7 +116,6 @@ class _VolumeSliderState extends State<VolumeSlider> {
 
   void _handleChangeEnd(double value) {
     setState(() {
-      _isDragging = false;
       _dragValue = null;
     });
 
