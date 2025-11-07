@@ -60,6 +60,10 @@ export 'src/widgets/menus/subtitle_menu.dart';
 export 'src/widgets/menus/subtitle_styling_menu.dart';
 export 'src/widgets/menus/speed_menu.dart';
 export 'src/widgets/components/quality_badge.dart';
+export 'src/widgets/components/time_display.dart';
+export 'src/widgets/components/control_button.dart';
+export 'src/widgets/components/seek_bar.dart';
+export 'src/widgets/components/volume_slider.dart';
 
 // Phase 3 Widgets
 export 'src/widgets/media_list_player.dart';
