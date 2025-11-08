@@ -217,15 +217,24 @@ class CustomControlsBaseState extends State<CustomControlsBase>
       controller: widget.controller,
     );
 
-    return GestureDetector(
-      onTap: _handleTap,
-      behavior: HitTestBehavior.opaque,
-      child: AnimatedBuilder(
-        animation: _fadeAnimation,
-        builder: (context, child) {
-          return widget.buildControls(context, state);
-        },
-      ),
+    return Stack(
+      children: [
+        // Background tap detector (for toggling controls)
+        Positioned.fill(
+          child: GestureDetector(
+            onTap: _handleTap,
+            behavior: HitTestBehavior.translucent,
+            child: Container(color: const Color(0x00000000)),
+          ),
+        ),
+        // Controls layer (allows interaction when visible)
+        AnimatedBuilder(
+          animation: _fadeAnimation,
+          builder: (context, child) {
+            return widget.buildControls(context, state);
+          },
+        ),
+      ],
     );
   }
 }

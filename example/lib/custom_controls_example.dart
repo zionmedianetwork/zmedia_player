@@ -18,10 +18,10 @@ class MinimalCustomControls extends CustomControlsBase {
 
   @override
   Widget buildControls(BuildContext context, ControlsState state) {
-    return IgnorePointer(
-      ignoring: !state.isVisible,
-      child: Opacity(
-        opacity: state.animationValue,
+    return Opacity(
+      opacity: state.animationValue,
+      child: IgnorePointer(
+        ignoring: !state.isVisible,
         child: Container(
           decoration: BoxDecoration(
             gradient: LinearGradient(
@@ -189,10 +189,10 @@ class BuilderBasedControls extends StatelessWidget {
     return CustomControlsBuilder(
       controller: controller,
       builder: (context, state) {
-        return IgnorePointer(
-          ignoring: !state.isVisible,
-          child: Opacity(
-            opacity: state.animationValue,
+        return Opacity(
+          opacity: state.animationValue,
+          child: IgnorePointer(
+            ignoring: !state.isVisible,
             child: Container(
               color: Colors.black.withValues(alpha: 0.5),
               child: Center(
