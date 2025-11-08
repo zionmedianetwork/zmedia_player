@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:zmedia_player/zmedia_player.dart';
 
+/// Control style options for Phase 2 UI/UX showcase
+enum ControlStyle {
+  material,
+  cupertino,
+  classic,
+}
+
 /// Demonstrates Phase 1 & Phase 2 features:
 /// - Phase 1: Adaptive buffering, buffer health monitoring, network quality
 /// - Phase 2: HLS/DASH streaming, quality selection, subtitle tracks, ABR
@@ -54,8 +61,8 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
   BufferStatistics? _bufferStatistics;
   bool _showBufferDetails = false;
 
-  // Phase 2: Material Design 3 toggle
-  bool _useMaterialDesign3 = true;
+  // Phase 2: Control style selection
+  ControlStyle _controlStyle = ControlStyle.material;
 
   @override
   void initState() {
@@ -198,6 +205,64 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
     );
   }
 
+  Widget _buildControls() {
+    final title = _streamingVideos[_selectedVideoIndex].title;
+
+    switch (_controlStyle) {
+      case ControlStyle.material:
+        return MaterialMediaControls(
+          controller: _controller,
+          title: title,
+          showFullscreen: true,
+          showSettings: true,
+          showPip: true,
+        );
+      case ControlStyle.cupertino:
+        return CupertinoMediaControls(
+          controller: _controller,
+          title: title,
+          showFullscreen: true,
+          showSettings: true,
+          showPip: true,
+        );
+      case ControlStyle.classic:
+        return MediaControls(
+          controller: _controller,
+          title: title,
+          showCastButton: true,
+          showPipButton: true,
+          showSettingsButton: true,
+          allowFullscreen: true,
+          showSubtitleControls: true,
+          showSpeedControls: true,
+          showVolumeControls: true,
+          showPlaylistControls: false,
+        );
+    }
+  }
+
+  IconData _getStyleIcon() {
+    switch (_controlStyle) {
+      case ControlStyle.material:
+        return Icons.design_services;
+      case ControlStyle.cupertino:
+        return Icons.apple;
+      case ControlStyle.classic:
+        return Icons.widgets;
+    }
+  }
+
+  String _getStyleName() {
+    switch (_controlStyle) {
+      case ControlStyle.material:
+        return 'M3';
+      case ControlStyle.cupertino:
+        return 'iOS';
+      case ControlStyle.classic:
+        return 'Classic';
+    }
+  }
+
   @override
   void dispose() {
     _controller.dispose();
@@ -213,31 +278,103 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
         title: const Text('Streaming Demo (Phase 1 & 2)'),
         backgroundColor: Colors.deepPurple,
         actions: [
-          // Phase 2: Material Design 3 toggle
-          Tooltip(
-            message: _useMaterialDesign3
-                ? 'Switch to Classic Controls'
-                : 'Switch to Material Design 3',
-            child: IconButton(
-              icon: Icon(
-                  _useMaterialDesign3 ? Icons.design_services : Icons.widgets),
-              onPressed: () {
-                setState(() {
-                  _useMaterialDesign3 = !_useMaterialDesign3;
-                });
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      _useMaterialDesign3
-                          ? 'Switched to Material Design 3 Controls'
-                          : 'Switched to Classic Controls',
+          // Phase 2: Control style selector
+          PopupMenuButton<ControlStyle>(
+            icon: const Icon(Icons.palette),
+            tooltip: 'Change Control Style',
+            onSelected: (ControlStyle style) {
+              setState(() {
+                _controlStyle = style;
+              });
+              String styleName;
+              switch (style) {
+                case ControlStyle.material:
+                  styleName = 'Material Design 3';
+                  break;
+                case ControlStyle.cupertino:
+                  styleName = 'Cupertino (iOS)';
+                  break;
+                case ControlStyle.classic:
+                  styleName = 'Classic';
+                  break;
+              }
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Switched to $styleName Controls'),
+                  duration: const Duration(seconds: 2),
+                  backgroundColor: Colors.deepPurple,
+                ),
+              );
+            },
+            itemBuilder: (BuildContext context) =>
+                <PopupMenuEntry<ControlStyle>>[
+              PopupMenuItem<ControlStyle>(
+                value: ControlStyle.material,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.design_services,
+                      color: _controlStyle == ControlStyle.material
+                          ? Colors.deepPurple
+                          : null,
                     ),
-                    duration: const Duration(seconds: 2),
-                    backgroundColor: Colors.deepPurple,
-                  ),
-                );
-              },
-            ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Material Design 3',
+                      style: TextStyle(
+                        fontWeight: _controlStyle == ControlStyle.material
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem<ControlStyle>(
+                value: ControlStyle.cupertino,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.apple,
+                      color: _controlStyle == ControlStyle.cupertino
+                          ? Colors.deepPurple
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Cupertino (iOS)',
+                      style: TextStyle(
+                        fontWeight: _controlStyle == ControlStyle.cupertino
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PopupMenuItem<ControlStyle>(
+                value: ControlStyle.classic,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.widgets,
+                      color: _controlStyle == ControlStyle.classic
+                          ? Colors.deepPurple
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Classic',
+                      style: TextStyle(
+                        fontWeight: _controlStyle == ControlStyle.classic
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -251,26 +388,7 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
               child: MediaPlayerWidget(
                 controller: _controller,
                 showControls: true,
-                customControls: _useMaterialDesign3
-                    ? MaterialMediaControls(
-                        controller: _controller,
-                        title: _streamingVideos[_selectedVideoIndex].title,
-                        showFullscreen: true,
-                        showSettings: true,
-                        showPip: true,
-                      )
-                    : MediaControls(
-                        controller: _controller,
-                        title: _streamingVideos[_selectedVideoIndex].title,
-                        showCastButton: true,
-                        showPipButton: true,
-                        showSettingsButton: true,
-                        allowFullscreen: true,
-                        showSubtitleControls: true,
-                        showSpeedControls: true,
-                        showVolumeControls: true,
-                        showPlaylistControls: false,
-                      ),
+                customControls: _buildControls(),
               ),
             ),
           ),
@@ -298,9 +416,9 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
                   _controller.player.selectedSubtitleTrack?.title ?? 'Off',
                 ),
                 _buildInfoItem(
-                  _useMaterialDesign3 ? Icons.design_services : Icons.widgets,
+                  _getStyleIcon(),
                   'UI Style',
-                  _useMaterialDesign3 ? 'M3' : 'Classic',
+                  _getStyleName(),
                 ),
               ],
             ),

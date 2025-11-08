@@ -114,6 +114,30 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
       behavior: HitTestBehavior.opaque,
       child: Stack(
         children: [
+          // LIVE badge (lower left corner)
+          AnimatedBuilder(
+            animation: widget.controller,
+            builder: (context, child) {
+              final isLive = widget.controller.currentItem?.isLive ?? false;
+              if (!isLive) return const SizedBox.shrink();
+
+              return Positioned(
+                left: 16,
+                bottom: 16,
+                child: TimeDisplay(
+                  position: Duration.zero,
+                  isLive: true,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  liveColor: Colors.red,
+                ),
+              );
+            },
+          ),
+
           // Main controls
           AnimatedBuilder(
             animation: _fadeAnimation,
@@ -230,10 +254,10 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
                   ? () => widget.controller.skipToPrevious()
                   : null,
               colorScheme: colorScheme,
-              size: 32,
+              size: 20,
             ),
 
-            const SizedBox(width: 24),
+            const SizedBox(width: 16),
 
             // Play/Pause button (large, elevated)
             Material(
@@ -252,28 +276,28 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
                       },
                 customBorder: const CircleBorder(),
                 child: Container(
-                  width: 72,
-                  height: 72,
+                  width: 56,
+                  height: 56,
                   alignment: Alignment.center,
                   child: isLoading
                       ? SizedBox(
-                          width: 32,
-                          height: 32,
+                          width: 24,
+                          height: 24,
                           child: CircularProgressIndicator(
                             color: colorScheme.onPrimaryContainer,
-                            strokeWidth: 3,
+                            strokeWidth: 2.5,
                           ),
                         )
                       : Icon(
                           isPlaying ? Icons.pause : Icons.play_arrow,
-                          size: 40,
+                          size: 32,
                           color: colorScheme.onPrimaryContainer,
                         ),
                 ),
               ),
             ),
 
-            const SizedBox(width: 24),
+            const SizedBox(width: 16),
 
             // Next button
             _buildM3FilledButton(
@@ -282,7 +306,7 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
                   ? () => widget.controller.skipToNext()
                   : null,
               colorScheme: colorScheme,
-              size: 32,
+              size: 20,
             ),
           ],
         );
@@ -297,10 +321,18 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Seek bar with time
+            // Seek bar with time OR live indicator
             AnimatedBuilder(
               animation: widget.controller,
               builder: (context, child) {
+                final isLive = widget.controller.currentItem?.isLive ?? false;
+
+                // For live streams, hide seek bar (LIVE badge shown separately)
+                if (isLive) {
+                  return const SizedBox.shrink();
+                }
+
+                // For non-live content, show seek bar
                 final position = widget.controller.position;
                 final duration = widget.controller.duration;
                 final value = duration.inMilliseconds > 0
