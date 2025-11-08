@@ -98,12 +98,11 @@ class CustomControlsBaseState extends State<CustomControlsBase>
     // Listen to controller's controls visibility changes
     widget.controller.addListener(_onControllerChanged);
 
-    // Sync initial state
+    // Start fade-in animation when widget is first created
+    // (CustomControlsBase is only in the tree when controls should be visible)
     if (widget.controller.controlsVisible) {
-      _fadeController.value = 1.0;
+      _fadeController.forward();
       _startAutoHideTimer();
-    } else {
-      _fadeController.value = 0.0;
     }
   }
 

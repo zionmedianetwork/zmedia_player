@@ -297,7 +297,7 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
         controller: _controller,
         title: _controller.currentItem?.title ?? 'Simple Player',
         autoHideEnabled: true,
-        autoHideDelay: const Duration(seconds: 3),
+        autoHideDelay: const Duration(seconds: 5),
       ),
     );
   }
