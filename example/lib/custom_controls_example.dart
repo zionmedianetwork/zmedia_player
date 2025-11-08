@@ -18,33 +18,45 @@ class MinimalCustomControls extends CustomControlsBase {
 
   @override
   Widget buildControls(BuildContext context, ControlsState state) {
+    if (!state.isVisible) {
+      return const SizedBox.shrink();
+    }
+
     return Opacity(
       opacity: state.animationValue,
-      child: IgnorePointer(
-        ignoring: !state.isVisible,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withValues(alpha: 0.6),
-                Colors.transparent,
-                Colors.black.withValues(alpha: 0.8),
-              ],
-            ),
-          ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // Top bar
-              _buildTopBar(context),
-              // Center play button
-              _buildCenterControls(state),
-              // Bottom progress bar
-              _buildBottomBar(state),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.black.withValues(alpha: 0.6),
+              Colors.transparent,
+              Colors.black.withValues(alpha: 0.8),
             ],
           ),
+        ),
+        child: Stack(
+          children: [
+            // Top bar
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: _buildTopBar(context),
+            ),
+            // Center play button
+            Center(
+              child: _buildCenterControls(state),
+            ),
+            // Bottom progress bar
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: _buildBottomBar(state),
+            ),
+          ],
         ),
       ),
     );
@@ -189,51 +201,52 @@ class BuilderBasedControls extends StatelessWidget {
     return CustomControlsBuilder(
       controller: controller,
       builder: (context, state) {
+        if (!state.isVisible) {
+          return const SizedBox.shrink();
+        }
+
         return Opacity(
           opacity: state.animationValue,
-          child: IgnorePointer(
-            ignoring: !state.isVisible,
-            child: Container(
-              color: Colors.black.withValues(alpha: 0.5),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (title != null)
-                      Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Text(
-                          title!,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.5),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (title != null)
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text(
+                        title!,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    AnimatedBuilder(
-                      animation: controller,
-                      builder: (context, _) {
-                        return IconButton(
-                          iconSize: 64,
-                          icon: Icon(
-                            controller.isPlaying
-                                ? Icons.pause_circle_filled
-                                : Icons.play_circle_filled,
-                            color: Colors.white,
-                          ),
-                          onPressed: () {
-                            if (controller.isPlaying) {
-                              controller.pause();
-                            } else {
-                              controller.play();
-                            }
-                          },
-                        );
-                      },
                     ),
-                  ],
-                ),
+                  AnimatedBuilder(
+                    animation: controller,
+                    builder: (context, _) {
+                      return IconButton(
+                        iconSize: 64,
+                        icon: Icon(
+                          controller.isPlaying
+                              ? Icons.pause_circle_filled
+                              : Icons.play_circle_filled,
+                          color: Colors.white,
+                        ),
+                        onPressed: () {
+                          if (controller.isPlaying) {
+                            controller.pause();
+                          } else {
+                            controller.play();
+                          }
+                        },
+                      );
+                    },
+                  ),
+                ],
               ),
             ),
           ),
