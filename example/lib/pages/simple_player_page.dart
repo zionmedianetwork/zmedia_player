@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:zmedia_player/zmedia_player.dart';
 import '../data/sample_videos.dart';
+import '../custom_controls_example.dart';
 
 class SimplePlayerPage extends StatefulWidget {
   const SimplePlayerPage({super.key});
@@ -202,17 +203,17 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
                           ),
                           const SizedBox(height: 12),
                           Text(
-                            'This simple player demonstrates basic video playback with default controls. '
-                            'Tap the video to show/hide controls.',
+                            'This simple player demonstrates basic video playback with custom controls. '
+                            'Tap the video to show/hide controls. Controls auto-hide after 3 seconds of inactivity.',
                             style: Theme.of(context).textTheme.bodyMedium,
                           ),
                           const SizedBox(height: 12),
                           const Text(
-                            '✓ Auto-play enabled\n'
-                            '✓ Default controls\n'
-                            '✓ Volume control\n'
-                            '✓ Seek functionality\n'
-                            '✓ Fullscreen support',
+                            '✓ Custom controls using CustomControlsBase\n'
+                            '✓ Auto-hide controls (3 seconds)\n'
+                            '✓ Smooth fade animations\n'
+                            '✓ Minimal UI design\n'
+                            '✓ Play/pause and seek functionality',
                             style: TextStyle(
                               fontSize: 13,
                               color: Colors.white60,
@@ -292,17 +293,11 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
       key: _playerKey,
       controller: _controller,
       showControls: true,
-      customControls: MediaControls(
+      customControls: MinimalCustomControls(
         controller: _controller,
         title: _controller.currentItem?.title ?? 'Simple Player',
-        showCastButton: true,
-        showPipButton: true,
-        showSettingsButton: true,
-        allowFullscreen: true,
-        showSubtitleControls: true,
-        showSpeedControls: true,
-        showVolumeControls: true,
-        showPlaylistControls: false,
+        autoHideEnabled: true,
+        autoHideDelay: const Duration(seconds: 3),
       ),
     );
   }
