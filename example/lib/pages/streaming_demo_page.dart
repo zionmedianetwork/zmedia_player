@@ -3,6 +3,7 @@ import 'package:zmedia_player/zmedia_player.dart';
 
 /// Control style options for Phase 2 UI/UX showcase
 enum ControlStyle {
+  adaptive,
   material,
   cupertino,
   classic,
@@ -62,7 +63,7 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
   bool _showBufferDetails = false;
 
   // Phase 2: Control style selection
-  ControlStyle _controlStyle = ControlStyle.material;
+  ControlStyle _controlStyle = ControlStyle.adaptive;
 
   @override
   void initState() {
@@ -209,6 +210,14 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
     final title = _streamingVideos[_selectedVideoIndex].title;
 
     switch (_controlStyle) {
+      case ControlStyle.adaptive:
+        return AdaptiveMediaControls(
+          controller: _controller,
+          title: title,
+          showFullscreen: true,
+          showSettings: true,
+          showPip: true,
+        );
       case ControlStyle.material:
         return MaterialMediaControls(
           controller: _controller,
@@ -243,6 +252,8 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
 
   IconData _getStyleIcon() {
     switch (_controlStyle) {
+      case ControlStyle.adaptive:
+        return Icons.auto_awesome;
       case ControlStyle.material:
         return Icons.design_services;
       case ControlStyle.cupertino:
@@ -254,6 +265,8 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
 
   String _getStyleName() {
     switch (_controlStyle) {
+      case ControlStyle.adaptive:
+        return 'Auto';
       case ControlStyle.material:
         return 'M3';
       case ControlStyle.cupertino:
@@ -288,6 +301,9 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
               });
               String styleName;
               switch (style) {
+                case ControlStyle.adaptive:
+                  styleName = 'Adaptive (Platform-specific)';
+                  break;
                 case ControlStyle.material:
                   styleName = 'Material Design 3';
                   break;
@@ -308,6 +324,28 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
             },
             itemBuilder: (BuildContext context) =>
                 <PopupMenuEntry<ControlStyle>>[
+              PopupMenuItem<ControlStyle>(
+                value: ControlStyle.adaptive,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.auto_awesome,
+                      color: _controlStyle == ControlStyle.adaptive
+                          ? Colors.deepPurple
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Adaptive (Auto)',
+                      style: TextStyle(
+                        fontWeight: _controlStyle == ControlStyle.adaptive
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               PopupMenuItem<ControlStyle>(
                 value: ControlStyle.material,
                 child: Row(
