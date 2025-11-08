@@ -53,6 +53,7 @@ export 'src/widgets/media_controls.dart';
 export 'src/widgets/material_media_controls.dart';
 export 'src/widgets/cupertino_media_controls.dart';
 export 'src/widgets/adaptive_media_controls.dart';
+export 'src/widgets/custom_controls_base.dart';
 export 'src/widgets/subtitle_view.dart';
 
 // Phase 2 Widgets - UI/UX Enhancement
