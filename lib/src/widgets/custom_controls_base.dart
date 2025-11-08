@@ -89,18 +89,50 @@ class CustomControlsBaseState extends State<CustomControlsBase>
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
   Timer? _autoHideTimer;
-  bool _isVisible = true;
 
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
-    _startAutoHideTimer();
+
+    // Listen to controller's controls visibility changes
+    widget.controller.addListener(_onControllerChanged);
+
+    // Sync initial state
+    if (widget.controller.controlsVisible) {
+      _fadeController.value = 1.0;
+      _startAutoHideTimer();
+    } else {
+      _fadeController.value = 0.0;
+    }
+  }
+
+  void _onControllerChanged() {
+    if (!mounted) return;
+
+    // Sync animation with controller's controls visibility
+    if (widget.controller.controlsVisible) {
+      if (_fadeController.value == 0.0) {
+        _fadeController.forward();
+        _startAutoHideTimer();
+      }
+    } else {
+      if (_fadeController.value == 1.0) {
+        _fadeController.reverse();
+        _cancelAutoHideTimer();
+      }
+    }
   }
 
   @override
   void didUpdateWidget(CustomControlsBase oldWidget) {
     super.didUpdateWidget(oldWidget);
+
+    // Update controller listener if controller changed
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller.removeListener(_onControllerChanged);
+      widget.controller.addListener(_onControllerChanged);
+    }
 
     // Update animation if duration or curve changed
     if (oldWidget.animationDuration != widget.animationDuration ||
@@ -113,7 +145,7 @@ class CustomControlsBaseState extends State<CustomControlsBase>
     if (oldWidget.autoHideEnabled != widget.autoHideEnabled ||
         oldWidget.autoHideDelay != widget.autoHideDelay) {
       _cancelAutoHideTimer();
-      if (widget.autoHideEnabled && _isVisible) {
+      if (widget.autoHideEnabled && widget.controller.controlsVisible) {
         _startAutoHideTimer();
       }
     }
@@ -121,6 +153,7 @@ class CustomControlsBaseState extends State<CustomControlsBase>
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onControllerChanged);
     _cancelAutoHideTimer();
     _fadeController.dispose();
     super.dispose();
@@ -140,48 +173,28 @@ class CustomControlsBaseState extends State<CustomControlsBase>
 
   /// Toggle controls visibility
   void toggleControls() {
-    setState(() {
-      _isVisible = !_isVisible;
-      if (_isVisible) {
-        _fadeController.forward();
-        _startAutoHideTimer();
-      } else {
-        _fadeController.reverse();
-        _cancelAutoHideTimer();
-      }
-    });
+    widget.controller.toggleControls();
   }
 
   /// Show controls (with optional auto-hide)
   void showControls({bool startAutoHide = true}) {
-    if (!_isVisible) {
-      setState(() {
-        _isVisible = true;
-        _fadeController.forward();
-      });
-    }
-
-    if (startAutoHide && widget.autoHideEnabled) {
-      _startAutoHideTimer();
+    if (startAutoHide) {
+      widget.controller.showControlsTemporarily();
+    } else {
+      widget.controller.showControls();
     }
   }
 
   /// Hide controls
   void hideControls() {
-    if (_isVisible) {
-      setState(() {
-        _isVisible = false;
-        _fadeController.reverse();
-      });
-    }
-    _cancelAutoHideTimer();
+    widget.controller.hideControls();
   }
 
   /// Reset the auto-hide timer
   ///
   /// Call this when user interacts with controls to prevent auto-hiding
   void resetAutoHideTimer() {
-    if (widget.autoHideEnabled && _isVisible) {
+    if (widget.autoHideEnabled && widget.controller.controlsVisible) {
       _cancelAutoHideTimer();
       _startAutoHideTimer();
     }
@@ -192,7 +205,7 @@ class CustomControlsBaseState extends State<CustomControlsBase>
 
     _cancelAutoHideTimer();
     _autoHideTimer = Timer(widget.autoHideDelay, () {
-      if (mounted && _isVisible) {
+      if (mounted && widget.controller.controlsVisible) {
         hideControls();
       }
     });
@@ -203,37 +216,21 @@ class CustomControlsBaseState extends State<CustomControlsBase>
     _autoHideTimer = null;
   }
 
-  /// Handle tap gesture on the player
-  void _handleTap() {
-    toggleControls();
-  }
-
   @override
   Widget build(BuildContext context) {
     final state = ControlsState(
-      isVisible: _isVisible,
+      isVisible: widget.controller.controlsVisible,
       animation: _fadeAnimation,
       animationValue: _fadeAnimation.value,
       controller: widget.controller,
     );
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // Background tap detector (for toggling controls)
-        GestureDetector(
-          onTap: _handleTap,
-          behavior: HitTestBehavior.opaque,
-          child: Container(color: const Color(0x00000000)),
-        ),
-        // Controls layer (allows interaction when visible)
-        AnimatedBuilder(
-          animation: _fadeAnimation,
-          builder: (context, child) {
-            return widget.buildControls(context, state);
-          },
-        ),
-      ],
+    // Just build the controls - MediaPlayerWidget handles the tap detection
+    return AnimatedBuilder(
+      animation: _fadeAnimation,
+      builder: (context, child) {
+        return widget.buildControls(context, state);
+      },
     );
   }
 }
