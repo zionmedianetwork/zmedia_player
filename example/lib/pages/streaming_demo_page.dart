@@ -3,6 +3,7 @@ import 'package:zmedia_player/zmedia_player.dart';
 
 /// Control style options for Phase 2 UI/UX showcase
 enum ControlStyle {
+  adaptive,
   material,
   cupertino,
   classic,
@@ -62,7 +63,7 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
   bool _showBufferDetails = false;
 
   // Phase 2: Control style selection
-  ControlStyle _controlStyle = ControlStyle.material;
+  ControlStyle _controlStyle = ControlStyle.adaptive;
 
   @override
   void initState() {
@@ -209,6 +210,14 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
     final title = _streamingVideos[_selectedVideoIndex].title;
 
     switch (_controlStyle) {
+      case ControlStyle.adaptive:
+        return AdaptiveMediaControls(
+          controller: _controller,
+          title: title,
+          showFullscreen: true,
+          showSettings: true,
+          showPip: true,
+        );
       case ControlStyle.material:
         return MaterialMediaControls(
           controller: _controller,
@@ -243,6 +252,8 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
 
   IconData _getStyleIcon() {
     switch (_controlStyle) {
+      case ControlStyle.adaptive:
+        return Icons.auto_awesome;
       case ControlStyle.material:
         return Icons.design_services;
       case ControlStyle.cupertino:
@@ -254,12 +265,30 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
 
   String _getStyleName() {
     switch (_controlStyle) {
+      case ControlStyle.adaptive:
+        return 'Auto';
       case ControlStyle.material:
         return 'M3';
       case ControlStyle.cupertino:
         return 'iOS';
       case ControlStyle.classic:
         return 'Classic';
+    }
+  }
+
+  String _getQualityInfo() {
+    try {
+      return _controller.player.selectedQualityTrack?.name ?? 'Auto';
+    } catch (e) {
+      return 'Auto';
+    }
+  }
+
+  String _getSubtitleInfo() {
+    try {
+      return _controller.player.selectedSubtitleTrack?.title ?? 'Off';
+    } catch (e) {
+      return 'Off';
     }
   }
 
@@ -288,6 +317,9 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
               });
               String styleName;
               switch (style) {
+                case ControlStyle.adaptive:
+                  styleName = 'Adaptive (Platform-specific)';
+                  break;
                 case ControlStyle.material:
                   styleName = 'Material Design 3';
                   break;
@@ -308,6 +340,28 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
             },
             itemBuilder: (BuildContext context) =>
                 <PopupMenuEntry<ControlStyle>>[
+              PopupMenuItem<ControlStyle>(
+                value: ControlStyle.adaptive,
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.auto_awesome,
+                      color: _controlStyle == ControlStyle.adaptive
+                          ? Colors.deepPurple
+                          : null,
+                    ),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Adaptive (Auto)',
+                      style: TextStyle(
+                        fontWeight: _controlStyle == ControlStyle.adaptive
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               PopupMenuItem<ControlStyle>(
                 value: ControlStyle.material,
                 child: Row(
@@ -408,12 +462,12 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
                 _buildInfoItem(
                   Icons.high_quality,
                   'Quality',
-                  _controller.player.selectedQualityTrack?.name ?? 'Auto',
+                  _getQualityInfo(),
                 ),
                 _buildInfoItem(
                   Icons.subtitles,
                   'Subtitles',
-                  _controller.player.selectedSubtitleTrack?.title ?? 'Off',
+                  _getSubtitleInfo(),
                 ),
                 _buildInfoItem(
                   _getStyleIcon(),
@@ -799,170 +853,182 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
   }
 
   Widget _buildQualitySettingsSheet() {
-    final qualityTracks = _controller.player.qualityTracks;
+    try {
+      final qualityTracks = _controller.player.qualityTracks;
 
-    return Container(
-      height: 300,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: Column(
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Video Quality (${qualityTracks.length})',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => setState(() => _showQualitySettings = false),
-                ),
-              ],
-            ),
-          ),
-          const Divider(),
-
-          // Auto Quality Option
-          ListTile(
-            leading: const Icon(Icons.auto_awesome),
-            title: const Text('Auto (Recommended)'),
-            subtitle: const Text('Adapts to network conditions'),
-            trailing: _controller.player.selectedQualityTrack == null
-                ? const Icon(Icons.check, color: Colors.green)
-                : null,
-            onTap: () {
-              _toggleAutoQuality();
-              setState(() => _showQualitySettings = false);
-            },
-          ),
-
-          // Quality Track Options or Empty State
-          Expanded(
-            child: qualityTracks.isEmpty
-                ? Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: const [
-                        Icon(Icons.info_outline, size: 48, color: Colors.grey),
-                        SizedBox(height: 16),
-                        Text(
-                          'Loading quality options...',
-                          style: TextStyle(color: Colors.grey),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          'Quality tracks will appear after\nthe stream starts playing',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.grey, fontSize: 12),
-                        ),
-                      ],
+      return Container(
+        height: 300,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Video Quality (${qualityTracks.length})',
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
                     ),
-                  )
-                : ListView.builder(
-                    itemCount: qualityTracks.length,
-                    itemBuilder: (context, index) {
-                      final track = qualityTracks[index];
-                      return ListTile(
-                        leading: const Icon(Icons.high_quality),
-                        title: Text(track.name),
-                        subtitle: Text(
-                          '${track.width}x${track.height} • ${(track.bitrate / 1000).toStringAsFixed(0)} Kbps',
-                        ),
-                        trailing: track.isSelected
-                            ? const Icon(Icons.check, color: Colors.green)
-                            : null,
-                        onTap: () {
-                          _setQuality(track);
-                          setState(() => _showQualitySettings = false);
-                        },
-                      );
-                    },
                   ),
-          ),
-        ],
-      ),
-    );
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () =>
+                        setState(() => _showQualitySettings = false),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(),
+
+            // Auto Quality Option
+            ListTile(
+              leading: const Icon(Icons.auto_awesome),
+              title: const Text('Auto (Recommended)'),
+              subtitle: const Text('Adapts to network conditions'),
+              trailing: _controller.player.selectedQualityTrack == null
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () {
+                _toggleAutoQuality();
+                setState(() => _showQualitySettings = false);
+              },
+            ),
+
+            // Quality Track Options or Empty State
+            Expanded(
+              child: qualityTracks.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.info_outline,
+                              size: 48, color: Colors.grey),
+                          SizedBox(height: 16),
+                          Text(
+                            'Loading quality options...',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Quality tracks will appear after\nthe stream starts playing',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(color: Colors.grey, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    )
+                  : ListView.builder(
+                      itemCount: qualityTracks.length,
+                      itemBuilder: (context, index) {
+                        final track = qualityTracks[index];
+                        return ListTile(
+                          leading: const Icon(Icons.high_quality),
+                          title: Text(track.name),
+                          subtitle: Text(
+                            '${track.width}x${track.height} • ${(track.bitrate / 1000).toStringAsFixed(0)} Kbps',
+                          ),
+                          trailing: track.isSelected
+                              ? const Icon(Icons.check, color: Colors.green)
+                              : null,
+                          onTap: () {
+                            _setQuality(track);
+                            setState(() => _showQualitySettings = false);
+                          },
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      // Player disposed, return empty container
+      return const SizedBox.shrink();
+    }
   }
 
   Widget _buildSubtitleSettingsSheet() {
-    return Container(
-      height: 300,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      child: Column(
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Subtitles',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
+    try {
+      return Container(
+        height: 300,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        child: Column(
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Subtitles',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () =>
-                      setState(() => _showSubtitleSettings = false),
-                ),
-              ],
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () =>
+                        setState(() => _showSubtitleSettings = false),
+                  ),
+                ],
+              ),
             ),
-          ),
-          const Divider(),
+            const Divider(),
 
-          // Off Option
-          ListTile(
-            leading: const Icon(Icons.subtitles_off),
-            title: const Text('Off'),
-            trailing: _controller.player.selectedSubtitleTrack == null
-                ? const Icon(Icons.check, color: Colors.green)
-                : null,
-            onTap: () {
-              _controller.disableSubtitles();
-              setState(() => _showSubtitleSettings = false);
-            },
-          ),
-
-          // Subtitle Track Options
-          Expanded(
-            child: ListView.builder(
-              itemCount: _controller.player.subtitleTracks.length,
-              itemBuilder: (context, index) {
-                final track = _controller.player.subtitleTracks[index];
-                return ListTile(
-                  leading: const Icon(Icons.closed_caption),
-                  title: Text(track.title),
-                  subtitle:
-                      track.language != null ? Text(track.language!) : null,
-                  trailing: track.isSelected
-                      ? const Icon(Icons.check, color: Colors.green)
-                      : null,
-                  onTap: () {
-                    _controller.setSubtitleTrack(track);
-                    setState(() => _showSubtitleSettings = false);
-                  },
-                );
+            // Off Option
+            ListTile(
+              leading: const Icon(Icons.subtitles_off),
+              title: const Text('Off'),
+              trailing: _controller.player.selectedSubtitleTrack == null
+                  ? const Icon(Icons.check, color: Colors.green)
+                  : null,
+              onTap: () {
+                _controller.disableSubtitles();
+                setState(() => _showSubtitleSettings = false);
               },
             ),
-          ),
-        ],
-      ),
-    );
+
+            // Subtitle Track Options
+            Expanded(
+              child: ListView.builder(
+                itemCount: _controller.player.subtitleTracks.length,
+                itemBuilder: (context, index) {
+                  final track = _controller.player.subtitleTracks[index];
+                  return ListTile(
+                    leading: const Icon(Icons.closed_caption),
+                    title: Text(track.title),
+                    subtitle:
+                        track.language != null ? Text(track.language!) : null,
+                    trailing: track.isSelected
+                        ? const Icon(Icons.check, color: Colors.green)
+                        : null,
+                    onTap: () {
+                      _controller.setSubtitleTrack(track);
+                      setState(() => _showSubtitleSettings = false);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      // Player disposed, return empty container
+      return const SizedBox.shrink();
+    }
   }
 
   void _toggleAutoQuality() {
