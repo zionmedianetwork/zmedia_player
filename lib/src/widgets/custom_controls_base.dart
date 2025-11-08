@@ -218,14 +218,13 @@ class CustomControlsBaseState extends State<CustomControlsBase>
     );
 
     return Stack(
+      fit: StackFit.expand,
       children: [
         // Background tap detector (for toggling controls)
-        Positioned.fill(
-          child: GestureDetector(
-            onTap: _handleTap,
-            behavior: HitTestBehavior.translucent,
-            child: Container(color: const Color(0x00000000)),
-          ),
+        GestureDetector(
+          onTap: _handleTap,
+          behavior: HitTestBehavior.opaque,
+          child: Container(color: const Color(0x00000000)),
         ),
         // Controls layer (allows interaction when visible)
         AnimatedBuilder(
