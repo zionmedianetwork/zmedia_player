@@ -346,46 +346,38 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   Widget _buildInteractiveContent(Widget content) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        // Video content - ensure it fills the available space
-        Positioned.fill(child: content),
+    // Wrap the entire stack in a GestureDetector to capture taps
+    // before they reach the native platform view
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final showTapDetector = !widget.controller.controlsVisible;
 
-        // Subtitle overlay - show when subtitles are enabled
-        if (widget.controller.config.enableSubtitles == true)
-          _buildSubtitleOverlay(),
+        return GestureDetector(
+          onTap: showTapDetector ? (widget.onTap ?? _handleTap) : null,
+          onDoubleTap:
+              showTapDetector ? (widget.onDoubleTap ?? _handleDoubleTap) : null,
+          onLongPress: showTapDetector ? widget.onLongPress : null,
+          behavior: showTapDetector
+              ? HitTestBehavior.opaque
+              : HitTestBehavior.deferToChild,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // Video content - ensure it fills the available space
+              Positioned.fill(child: content),
 
-        // Controls overlay - only show when needed
-        // Use ListenableBuilder to rebuild when controls visibility changes
-        ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            if (widget.showControls && widget.controller.controlsVisible) {
-              return Positioned.fill(child: _buildControlsOverlay());
-            }
-            return const SizedBox.shrink();
-          },
-        ),
+              // Subtitle overlay - show when subtitles are enabled
+              if (widget.controller.config.enableSubtitles == true)
+                _buildSubtitleOverlay(),
 
-        // Gesture detector for video area - only when controls are not visible
-        ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            if (!widget.controller.controlsVisible) {
-              return Positioned.fill(
-                child: GestureDetector(
-                  onTap: widget.onTap ?? _handleTap,
-                  onDoubleTap: widget.onDoubleTap ?? _handleDoubleTap,
-                  onLongPress: widget.onLongPress,
-                  behavior: HitTestBehavior.translucent,
-                ),
-              );
-            }
-            return const SizedBox.shrink();
-          },
-        ),
-      ],
+              // Controls overlay - only show when needed
+              if (widget.showControls && widget.controller.controlsVisible)
+                Positioned.fill(child: _buildControlsOverlay()),
+            ],
+          ),
+        );
+      },
     );
   }
 
