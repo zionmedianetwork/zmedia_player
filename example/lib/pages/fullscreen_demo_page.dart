@@ -254,16 +254,14 @@ class _FullscreenDemoPageState extends State<FullscreenDemoPage> {
   void _openMaterialFullscreen(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (context) => Scaffold(
-          body: MediaPlayerWidget(
+        builder: (context) => MediaPlayerWidget(
+          controller: _controller,
+          showControls: true,
+          customControls: MaterialFullscreenPlayer(
             controller: _controller,
-            showControls: true,
-            customControls: MaterialFullscreenPlayer(
-              controller: _controller,
-              title: _controller.currentItem?.title ?? 'Material Fullscreen',
-              showSettings: true,
-              showPip: true,
-            ),
+            title: _controller.currentItem?.title ?? 'Material Fullscreen',
+            showSettings: true,
+            showPip: true,
           ),
         ),
       ),
@@ -273,16 +271,14 @@ class _FullscreenDemoPageState extends State<FullscreenDemoPage> {
   void _openCupertinoFullscreen(BuildContext context) {
     Navigator.of(context).push(
       CupertinoPageRoute(
-        builder: (context) => CupertinoPageScaffold(
-          child: MediaPlayerWidget(
+        builder: (context) => MediaPlayerWidget(
+          controller: _controller,
+          showControls: true,
+          customControls: CupertinoFullscreenPlayer(
             controller: _controller,
-            showControls: true,
-            customControls: CupertinoFullscreenPlayer(
-              controller: _controller,
-              title: _controller.currentItem?.title ?? 'Cupertino Fullscreen',
-              showSettings: true,
-              showPip: true,
-            ),
+            title: _controller.currentItem?.title ?? 'Cupertino Fullscreen',
+            showSettings: true,
+            showPip: true,
           ),
         ),
       ),
