@@ -346,46 +346,43 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   Widget _buildInteractiveContent(Widget content) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        // Video content - ensure it fills the available space
-        Positioned.fill(child: content),
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final showTapDetector = !widget.controller.controlsVisible;
+        final showControlsOverlay =
+            widget.showControls && widget.controller.controlsVisible;
 
-        // Subtitle overlay - show when subtitles are enabled
-        if (widget.controller.config.enableSubtitles == true)
-          _buildSubtitleOverlay(),
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            // Video content - ensure it fills the available space
+            Positioned.fill(child: content),
 
-        // Controls overlay - only show when needed
-        // Use ListenableBuilder to rebuild when controls visibility changes
-        ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            if (widget.showControls && widget.controller.controlsVisible) {
-              return Positioned.fill(child: _buildControlsOverlay());
-            }
-            return const SizedBox.shrink();
-          },
-        ),
+            // Subtitle overlay - show when subtitles are enabled
+            if (widget.controller.config.enableSubtitles == true)
+              _buildSubtitleOverlay(),
 
-        // Gesture detector for video area - only when controls are not visible
-        ListenableBuilder(
-          listenable: widget.controller,
-          builder: (context, _) {
-            if (!widget.controller.controlsVisible) {
-              return Positioned.fill(
+            // Controls overlay - only show when needed
+            if (showControlsOverlay)
+              Positioned.fill(child: _buildControlsOverlay()),
+
+            // Transparent tap detector overlay - positioned ABOVE native view
+            // This ensures taps are captured even when native platform view
+            // (UiKitView/AndroidView) would otherwise consume them
+            if (showTapDetector)
+              Positioned.fill(
                 child: GestureDetector(
                   onTap: widget.onTap ?? _handleTap,
                   onDoubleTap: widget.onDoubleTap ?? _handleDoubleTap,
                   onLongPress: widget.onLongPress,
-                  behavior: HitTestBehavior.translucent,
+                  behavior: HitTestBehavior.opaque,
+                  child: Container(color: Colors.transparent),
                 ),
-              );
-            }
-            return const SizedBox.shrink();
-          },
-        ),
-      ],
+              ),
+          ],
+        );
+      },
     );
   }
 
