@@ -93,15 +93,17 @@ class CustomControlsBaseState extends State<CustomControlsBase>
   @override
   void initState() {
     super.initState();
-    _initializeAnimations();
+
+    // If controls are visible when widget is created, start at full opacity
+    // (CustomControlsBase is only in the tree when controls should be visible)
+    final initialValue = widget.controller.controlsVisible ? 1.0 : 0.0;
+    _initializeAnimations(initialValue: initialValue);
 
     // Listen to controller's controls visibility changes
     widget.controller.addListener(_onControllerChanged);
 
-    // Start fade-in animation when widget is first created
-    // (CustomControlsBase is only in the tree when controls should be visible)
+    // Start auto-hide timer if controls are visible
     if (widget.controller.controlsVisible) {
-      _fadeController.forward();
       _startAutoHideTimer();
     }
   }
@@ -136,8 +138,9 @@ class CustomControlsBaseState extends State<CustomControlsBase>
     // Update animation if duration or curve changed
     if (oldWidget.animationDuration != widget.animationDuration ||
         oldWidget.animationCurve != widget.animationCurve) {
+      final currentValue = _fadeController.value;
       _fadeController.dispose();
-      _initializeAnimations();
+      _initializeAnimations(initialValue: currentValue);
     }
 
     // Restart timer if auto-hide settings changed
@@ -158,16 +161,16 @@ class CustomControlsBaseState extends State<CustomControlsBase>
     super.dispose();
   }
 
-  void _initializeAnimations() {
+  void _initializeAnimations({double initialValue = 0.0}) {
     _fadeController = AnimationController(
       duration: widget.animationDuration,
       vsync: this,
+      value: initialValue, // Start at the specified initial value
     );
     _fadeAnimation = CurvedAnimation(
       parent: _fadeController,
       curve: widget.animationCurve,
     );
-    _fadeController.forward();
   }
 
   /// Toggle controls visibility

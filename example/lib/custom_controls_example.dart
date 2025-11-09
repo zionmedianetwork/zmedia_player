@@ -25,6 +25,8 @@ class MinimalCustomControls extends CustomControlsBase {
     return Opacity(
       opacity: state.animationValue,
       child: Container(
+        width: double.infinity,
+        height: double.infinity,
         decoration: BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
@@ -37,6 +39,7 @@ class MinimalCustomControls extends CustomControlsBase {
           ),
         ),
         child: Stack(
+          fit: StackFit.expand,
           children: [
             // Top bar
             Positioned(
@@ -83,6 +86,15 @@ class MinimalCustomControls extends CustomControlsBase {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
+            // Settings icon - top right corner
+            IconButton(
+              icon: const Icon(Icons.settings, color: Colors.white, size: 24),
+              onPressed: () {
+                debugPrint('Settings tapped');
+              },
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            ),
           ],
         ),
       ),
@@ -130,45 +142,72 @@ class MinimalCustomControls extends CustomControlsBase {
   }
 
   Widget _buildBottomBar(ControlsState state) {
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: AnimatedBuilder(
-          animation: state.controller,
-          builder: (context, _) {
-            final position = state.controller.position;
-            final duration = state.controller.duration;
-            final value = duration.inMilliseconds > 0
-                ? position.inMilliseconds / duration.inMilliseconds
-                : 0.0;
+    return AnimatedBuilder(
+      animation: state.controller,
+      builder: (context, _) {
+        final position = state.controller.position;
+        final duration = state.controller.duration;
+        final value = duration.inMilliseconds > 0
+            ? position.inMilliseconds / duration.inMilliseconds
+            : 0.0;
 
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                LinearProgressIndicator(
-                  value: value.clamp(0.0, 1.0),
-                  backgroundColor: Colors.white.withValues(alpha: 0.3),
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.red),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Control buttons and time display - with padding
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                children: [
+                  // Current time
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
                       _formatDuration(position),
                       style: const TextStyle(color: Colors.white, fontSize: 12),
                     ),
-                    Text(
+                  ),
+
+                  // Spacer to push fullscreen to the right
+                  const Spacer(),
+
+                  // Fullscreen toggle
+                  IconButton(
+                    icon: const Icon(Icons.fullscreen,
+                        color: Colors.white, size: 24),
+                    onPressed: () {
+                      debugPrint('Fullscreen tapped');
+                    },
+                    padding: EdgeInsets.zero,
+                    constraints:
+                        const BoxConstraints(minWidth: 40, minHeight: 40),
+                  ),
+
+                  // Duration
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
                       _formatDuration(duration),
                       style: const TextStyle(color: Colors.white, fontSize: 12),
                     ),
-                  ],
-                ),
-              ],
-            );
-          },
-        ),
-      ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Progress bar - absolutely at the bottom edge, no padding
+            Container(
+              height: 4,
+              child: LinearProgressIndicator(
+                value: value.clamp(0.0, 1.0),
+                backgroundColor: Colors.white.withValues(alpha: 0.3),
+                valueColor: const AlwaysStoppedAnimation<Color>(Colors.red),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
