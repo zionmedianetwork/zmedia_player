@@ -1,6 +1,6 @@
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
-import 'package:flutter/material.dart' show Colors;
+import 'package:flutter/material.dart' show Colors, Material, MaterialType;
 import 'package:flutter/services.dart';
 import '../models/player_state.dart';
 import 'components/seek_bar.dart';
@@ -416,8 +416,11 @@ class CupertinoFullscreenPlayer extends FullscreenControlsBase {
   void _showSettingsMenu(BuildContext context) {
     showCupertinoModalPopup(
       context: context,
-      builder: (context) => SettingsMenu(
-        controller: controller,
+      builder: (context) => Material(
+        type: MaterialType.transparency,
+        child: SettingsMenu(
+          controller: controller,
+        ),
       ),
     );
   }

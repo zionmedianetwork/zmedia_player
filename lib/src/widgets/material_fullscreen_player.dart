@@ -392,8 +392,11 @@ class MaterialFullscreenPlayer extends FullscreenControlsBase {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (context) => SettingsMenu(
-        controller: controller,
+      builder: (context) => Material(
+        type: MaterialType.transparency,
+        child: SettingsMenu(
+          controller: controller,
+        ),
       ),
     );
   }
