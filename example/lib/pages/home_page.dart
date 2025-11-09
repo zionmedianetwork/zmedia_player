@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'simple_player_page.dart';
 import 'full_featured_player_page.dart';
+import 'fullscreen_demo_page.dart';
 import 'playlist_demo_page.dart';
 import 'streaming_demo_page.dart';
 import 'notifications_demo_page.dart';
@@ -129,6 +130,28 @@ class HomePage extends StatelessWidget {
                       context,
                       MaterialPageRoute(
                         builder: (context) => const PlaylistDemoPage(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  _FeatureCard(
+                    icon: Icons.fullscreen,
+                    iconColor: const Color(0xFF10B981),
+                    title: 'Fullscreen Players (Phase 2)',
+                    description:
+                        'Immersive fullscreen with platform-specific controls',
+                    features: const [
+                      'Material Design Fullscreen',
+                      'Cupertino (iOS) Fullscreen',
+                      'Orientation Locking',
+                      'System UI Hiding',
+                    ],
+                    badge: 'PHASE 2',
+                    onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const FullscreenDemoPage(),
                       ),
                     ),
                   ),
