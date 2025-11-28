@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/player_state.dart';
+import '../models/network_status.dart';
 import 'components/seek_bar.dart';
 import 'components/time_display.dart';
 import 'fullscreen_controls_base.dart';
 import 'menus/settings_menu.dart';
+import 'overlays/buffering_indicator.dart';
+import 'overlays/network_quality_indicator.dart';
 
 /// Material Design 3 fullscreen media player
 ///
@@ -127,6 +130,39 @@ class MaterialFullscreenPlayer extends FullscreenControlsBase {
                       );
                     },
                   ),
+
+                  // Network Quality Indicator (top-right corner)
+                  Positioned(
+                    top: 80,
+                    right: 16,
+                    child: StreamBuilder(
+                      stream: controller.player.bandwidthStream,
+                      builder: (context, bandwidthSnapshot) {
+                        final bandwidth = bandwidthSnapshot.data ?? 0;
+                        final networkQuality =
+                            NetworkQuality.fromBandwidth(bandwidth);
+
+                        if (networkQuality == NetworkQuality.unknown) {
+                          return const SizedBox.shrink();
+                        }
+
+                        return NetworkQualityIndicator(
+                          networkStatus: NetworkStatus(
+                            quality: networkQuality,
+                            downloadSpeed: bandwidth,
+                            connectionType: ConnectionType.wifi,
+                            isMetered: false,
+                            signalStrength: _estimateSignalStrength(
+                              networkQuality,
+                            ),
+                            timestamp: DateTime.now(),
+                          ),
+                          showDetails: true,
+                          size: 18.0,
+                        );
+                      },
+                    ),
+                  ),
                 ],
               ),
             )
@@ -212,6 +248,33 @@ class MaterialFullscreenPlayer extends FullscreenControlsBase {
         final isPlaying = controller.isPlaying;
         final isLoading = playerState == PlayerState.buffering;
 
+        // Show BufferingIndicator when buffering
+        if (isLoading) {
+          return StreamBuilder(
+            stream: controller.player.bufferHealthStream,
+            builder: (context, bufferSnapshot) {
+              if (bufferSnapshot.hasData && bufferSnapshot.data != null) {
+                return BufferingIndicator(
+                  bufferHealth: bufferSnapshot.data!,
+                  showDetails: true,
+                  size: 80.0,
+                  backgroundColor: Colors.black.withValues(alpha: 0.8),
+                );
+              }
+              // Fallback to simple indicator
+              return SizedBox(
+                width: 64,
+                height: 64,
+                child: CircularProgressIndicator(
+                  color: colorScheme.primary,
+                  strokeWidth: 3,
+                ),
+              );
+            },
+          );
+        }
+
+        // Show playback controls when not buffering
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -233,24 +296,14 @@ class MaterialFullscreenPlayer extends FullscreenControlsBase {
             const SizedBox(width: 24),
 
             // Play/Pause button
-            if (isLoading)
-              SizedBox(
-                width: 64,
-                height: 64,
-                child: CircularProgressIndicator(
-                  color: colorScheme.primary,
-                  strokeWidth: 3,
-                ),
-              )
-            else
-              _buildM3IconButton(
-                icon: isPlaying ? Icons.pause : Icons.play_arrow,
-                onPressed: controller.togglePlayPause,
-                tooltip: isPlaying ? 'Pause' : 'Play',
-                colorScheme: colorScheme,
-                size: 64,
-                filled: true,
-              ),
+            _buildM3IconButton(
+              icon: isPlaying ? Icons.pause : Icons.play_arrow,
+              onPressed: controller.togglePlayPause,
+              tooltip: isPlaying ? 'Pause' : 'Play',
+              colorScheme: colorScheme,
+              size: 64,
+              filled: true,
+            ),
 
             const SizedBox(width: 24),
 
@@ -399,5 +452,22 @@ class MaterialFullscreenPlayer extends FullscreenControlsBase {
         ),
       ),
     );
+  }
+
+  /// Estimate signal strength from network quality
+  double _estimateSignalStrength(NetworkQuality quality) {
+    switch (quality) {
+      case NetworkQuality.excellent:
+        return 1.0;
+      case NetworkQuality.good:
+        return 0.75;
+      case NetworkQuality.fair:
+        return 0.5;
+      case NetworkQuality.poor:
+        return 0.25;
+      case NetworkQuality.offline:
+      case NetworkQuality.unknown:
+        return 0.0;
+    }
   }
 }

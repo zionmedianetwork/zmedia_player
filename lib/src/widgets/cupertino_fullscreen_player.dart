@@ -3,10 +3,13 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show Colors, Material, MaterialType;
 import 'package:flutter/services.dart';
 import '../models/player_state.dart';
+import '../models/network_status.dart';
 import 'components/seek_bar.dart';
 import 'components/time_display.dart';
 import 'fullscreen_controls_base.dart';
 import 'menus/settings_menu.dart';
+import 'overlays/buffering_indicator.dart';
+import 'overlays/network_quality_indicator.dart';
 
 /// Cupertino (iOS) fullscreen media player
 ///
@@ -126,6 +129,39 @@ class CupertinoFullscreenPlayer extends FullscreenControlsBase {
                       );
                     },
                   ),
+
+                  // Network Quality Indicator (top-right corner)
+                  Positioned(
+                    top: 80,
+                    right: 16,
+                    child: StreamBuilder(
+                      stream: controller.player.bandwidthStream,
+                      builder: (context, bandwidthSnapshot) {
+                        final bandwidth = bandwidthSnapshot.data ?? 0;
+                        final networkQuality =
+                            NetworkQuality.fromBandwidth(bandwidth);
+
+                        if (networkQuality == NetworkQuality.unknown) {
+                          return const SizedBox.shrink();
+                        }
+
+                        return NetworkQualityIndicator(
+                          networkStatus: NetworkStatus(
+                            quality: networkQuality,
+                            downloadSpeed: bandwidth,
+                            connectionType: ConnectionType.wifi,
+                            isMetered: false,
+                            signalStrength: _estimateSignalStrength(
+                              networkQuality,
+                            ),
+                            timestamp: DateTime.now(),
+                          ),
+                          showDetails: true,
+                          size: 18.0,
+                        );
+                      },
+                    ),
+                  ),
                 ],
               ),
             )
@@ -217,6 +253,33 @@ class CupertinoFullscreenPlayer extends FullscreenControlsBase {
         final isPlaying = controller.isPlaying;
         final isLoading = playerState == PlayerState.buffering;
 
+        // Show BufferingIndicator when buffering
+        if (isLoading) {
+          return StreamBuilder(
+            stream: controller.player.bufferHealthStream,
+            builder: (context, bufferSnapshot) {
+              if (bufferSnapshot.hasData && bufferSnapshot.data != null) {
+                return BufferingIndicator(
+                  bufferHealth: bufferSnapshot.data!,
+                  showDetails: true,
+                  size: 80.0,
+                  backgroundColor: Colors.black.withValues(alpha: 0.8),
+                );
+              }
+              // Fallback to simple indicator
+              return SizedBox(
+                width: 64,
+                height: 64,
+                child: CupertinoActivityIndicator(
+                  color: iconColor,
+                  radius: 20,
+                ),
+              );
+            },
+          );
+        }
+
+        // Show playback controls when not buffering
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -237,42 +300,31 @@ class CupertinoFullscreenPlayer extends FullscreenControlsBase {
             const SizedBox(width: 32),
 
             // Play/Pause button
-            if (isLoading)
-              SizedBox(
-                width: 64,
-                height: 64,
-                child: CupertinoActivityIndicator(
-                  color: iconColor,
-                  radius: 20,
-                ),
-              )
-            else
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color:
-                      (isDark ? CupertinoColors.white : CupertinoColors.black)
-                          .withValues(alpha: 0.3),
-                ),
-                child: ClipOval(
-                  child: BackdropFilter(
-                    filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                    child: CupertinoButton(
-                      padding: EdgeInsets.zero,
-                      onPressed: controller.togglePlayPause,
-                      child: Icon(
-                        isPlaying
-                            ? CupertinoIcons.pause_fill
-                            : CupertinoIcons.play_fill,
-                        color: iconColor,
-                        size: 36,
-                      ),
+            Container(
+              width: 72,
+              height: 72,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: (isDark ? CupertinoColors.white : CupertinoColors.black)
+                    .withValues(alpha: 0.3),
+              ),
+              child: ClipOval(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: CupertinoButton(
+                    padding: EdgeInsets.zero,
+                    onPressed: controller.togglePlayPause,
+                    child: Icon(
+                      isPlaying
+                          ? CupertinoIcons.pause_fill
+                          : CupertinoIcons.play_fill,
+                      color: iconColor,
+                      size: 36,
                     ),
                   ),
                 ),
               ),
+            ),
 
             const SizedBox(width: 32),
 
@@ -423,5 +475,22 @@ class CupertinoFullscreenPlayer extends FullscreenControlsBase {
         ),
       ),
     );
+  }
+
+  /// Estimate signal strength from network quality
+  double _estimateSignalStrength(NetworkQuality quality) {
+    switch (quality) {
+      case NetworkQuality.excellent:
+        return 1.0;
+      case NetworkQuality.good:
+        return 0.75;
+      case NetworkQuality.fair:
+        return 0.5;
+      case NetworkQuality.poor:
+        return 0.25;
+      case NetworkQuality.offline:
+      case NetworkQuality.unknown:
+        return 0.0;
+    }
   }
 }
