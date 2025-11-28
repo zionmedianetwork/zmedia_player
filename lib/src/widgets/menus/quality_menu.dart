@@ -4,16 +4,20 @@ import '../../core/media_controller.dart';
 
 /// A menu widget for selecting video quality/resolution
 ///
-/// Displays available quality tracks with information including:
-/// - Resolution (360p, 720p, 1080p, 4K, etc.)
-/// - Bitrate and codec information
-/// - Auto quality toggle
-/// - Current quality indicator
+/// Displays available quality tracks with rounded pill selection style
+/// Follows design specifications from docs/images/screenshots/controls_settings_video_quality.png
+///
+/// Features:
+/// - Auto quality option with "Recommended" subtitle
+/// - Quality presets: Full HD (1080p), High (720p), Medium (480p), etc.
+/// - Rounded pill background for selected item
+/// - Checkmark indicator for selection
 ///
 /// Example usage:
 /// ```dart
 /// showModalBottomSheet(
 ///   context: context,
+///   backgroundColor: Colors.transparent,
 ///   builder: (context) => QualitySelectionMenu(
 ///     controller: mediaController,
 ///   ),
@@ -23,33 +27,17 @@ class QualitySelectionMenu extends StatefulWidget {
   /// The media controller to get quality tracks from
   final MediaController controller;
 
-  /// Whether auto quality is currently enabled
-  final bool isAutoQualityEnabled;
-
   /// Callback when a quality track is selected
   final ValueChanged<QualityTrack>? onQualitySelected;
 
   /// Callback when auto quality is toggled
   final ValueChanged<bool>? onAutoQualityToggled;
 
-  /// Whether to show bitrate information
-  final bool showBitrate;
-
-  /// Whether to show codec information
-  final bool showCodec;
-
-  /// Whether to show frame rate information
-  final bool showFrameRate;
-
   const QualitySelectionMenu({
     super.key,
     required this.controller,
-    this.isAutoQualityEnabled = false,
     this.onQualitySelected,
     this.onAutoQualityToggled,
-    this.showBitrate = true,
-    this.showCodec = true,
-    this.showFrameRate = false,
   });
 
   @override
@@ -57,12 +45,41 @@ class QualitySelectionMenu extends StatefulWidget {
 }
 
 class _QualitySelectionMenuState extends State<QualitySelectionMenu> {
-  late bool _isAutoQualityEnabled;
+  bool _isAutoQualityEnabled = false;
 
   @override
   void initState() {
     super.initState();
-    _isAutoQualityEnabled = widget.isAutoQualityEnabled;
+    // Check if auto quality is enabled by checking if no track is manually selected
+    final qualityTracks = widget.controller.player.qualityTracks;
+    _isAutoQualityEnabled = qualityTracks.every((t) => !t.isSelected);
+  }
+
+  /// Get quality label and resolution for display
+  Map<String, String> _getQualityInfo(QualityTrack track) {
+    if (track.height != null) {
+      final height = track.height!;
+      if (height >= 2160) {
+        return {'label': '4K Ultra HD', 'resolution': '2160p'};
+      }
+      if (height >= 1440) {
+        return {'label': '2K', 'resolution': '1440p'};
+      }
+      if (height >= 1080) {
+        return {'label': 'Full HD', 'resolution': '1080p'};
+      }
+      if (height >= 720) {
+        return {'label': 'High', 'resolution': '720p'};
+      }
+      if (height >= 480) {
+        return {'label': 'Medium', 'resolution': '480p'};
+      }
+      if (height >= 360) {
+        return {'label': 'Low', 'resolution': '360p'};
+      }
+      return {'label': 'SD', 'resolution': '${height}p'};
+    }
+    return {'label': track.name, 'resolution': ''};
   }
 
   /// Deduplicate quality tracks by height to avoid showing duplicates
@@ -70,7 +87,15 @@ class _QualitySelectionMenuState extends State<QualitySelectionMenu> {
     final seen = <int>{};
     final deduplicated = <QualityTrack>[];
 
-    for (final track in tracks) {
+    // Sort by height descending
+    final sortedTracks = List<QualityTrack>.from(tracks)
+      ..sort((a, b) {
+        if (a.height == null) return 1;
+        if (b.height == null) return -1;
+        return b.height!.compareTo(a.height!);
+      });
+
+    for (final track in sortedTracks) {
       if (track.height != null) {
         if (!seen.contains(track.height)) {
           seen.add(track.height!);
@@ -85,269 +110,189 @@ class _QualitySelectionMenuState extends State<QualitySelectionMenu> {
     return deduplicated;
   }
 
+  void _selectAutoQuality() {
+    setState(() {
+      _isAutoQualityEnabled = true;
+    });
+    widget.onAutoQualityToggled?.call(true);
+    widget.controller.player.enableAutoQuality();
+    Navigator.of(context).pop();
+  }
+
+  void _selectQuality(QualityTrack track) {
+    setState(() {
+      _isAutoQualityEnabled = false;
+    });
+    widget.onQualitySelected?.call(track);
+    widget.onAutoQualityToggled?.call(false);
+    widget.controller.player.setQualityTrack(track);
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final allQualityTracks = widget.controller.player.qualityTracks;
     final qualityTracks = _deduplicateQualityTracks(allQualityTracks);
 
     return Container(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: isDark
+            ? const Color(0xE6282828) // rgba(40, 40, 40, 0.9)
+            : const Color(0xE6FFFFFF),
         borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Handle bar
-          Container(
-            margin: const EdgeInsets.only(top: 12),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: theme.dividerColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.high_quality,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Quality',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-          ),
-
-          const Divider(height: 1),
-
-          // Auto quality toggle
-          ListTile(
-            leading: Icon(
-              _isAutoQualityEnabled ? Icons.auto_awesome : Icons.auto_fix_off,
-              color: _isAutoQualityEnabled
-                  ? theme.colorScheme.primary
-                  : theme.iconTheme.color,
-            ),
-            title: const Text('Auto Quality'),
-            subtitle: Text(
-              _isAutoQualityEnabled
-                  ? 'Automatically adjust quality based on network'
-                  : 'Manually select quality',
-              style: theme.textTheme.bodySmall,
-            ),
-            trailing: Switch(
-              value: _isAutoQualityEnabled,
-              onChanged: (value) {
-                setState(() {
-                  _isAutoQualityEnabled = value;
-                });
-                widget.onAutoQualityToggled?.call(value);
-                if (value) {
-                  widget.controller.player.enableAutoQuality();
-                }
-                // Note: Disabling auto quality happens automatically when user selects a manual quality
-              },
-            ),
-            onTap: () {
-              final newValue = !_isAutoQualityEnabled;
-              setState(() {
-                _isAutoQualityEnabled = newValue;
-              });
-              widget.onAutoQualityToggled?.call(newValue);
-              if (newValue) {
-                widget.controller.player.enableAutoQuality();
-              }
-              // Note: Disabling auto quality happens automatically when user selects a manual quality
-            },
-          ),
-
-          const Divider(height: 1),
-
-          // Quality tracks list
-          if (qualityTracks.isEmpty)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Column(
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
+              child: Row(
                 children: [
-                  Icon(Icons.info_outline, size: 48, color: Colors.grey),
-                  SizedBox(height: 16),
                   Text(
-                    'No quality tracks available',
-                    style: TextStyle(color: Colors.grey),
+                    'Video Quality',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: Icon(
+                      Icons.close,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 40,
+                      minHeight: 40,
+                    ),
                   ),
                 ],
               ),
-            )
-          else
-            Flexible(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: qualityTracks.length,
-                itemBuilder: (context, index) {
-                  final track = qualityTracks[index];
-                  return _QualityTrackTile(
-                    track: track,
-                    isSelected: track.isSelected,
-                    isDisabled: !track.isAvailable || _isAutoQualityEnabled,
-                    showBitrate: widget.showBitrate,
-                    showCodec: widget.showCodec,
-                    showFrameRate: widget.showFrameRate,
-                    onTap: () {
-                      if (!_isAutoQualityEnabled && track.isAvailable) {
-                        widget.onQualitySelected?.call(track);
-                        widget.controller.player.setQualityTrack(track);
-                        Navigator.of(context).pop();
-                      }
-                    },
-                  );
-                },
-              ),
             ),
 
-          // Bottom safe area
-          SizedBox(height: MediaQuery.of(context).padding.bottom),
-        ],
+            // Quality options list
+            Flexible(
+              child: ListView(
+                shrinkWrap: true,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                children: [
+                  // Auto quality option
+                  _QualityOption(
+                    label: 'Auto',
+                    subtitle: 'Recommended',
+                    isSelected: _isAutoQualityEnabled,
+                    onTap: _selectAutoQuality,
+                    isDark: isDark,
+                  ),
+
+                  // Quality tracks
+                  ...qualityTracks.map((track) {
+                    final info = _getQualityInfo(track);
+                    return _QualityOption(
+                      label: info['label']!,
+                      subtitle: info['resolution']!,
+                      isSelected: !_isAutoQualityEnabled && track.isSelected,
+                      onTap: () => _selectQuality(track),
+                      isDark: isDark,
+                    );
+                  }),
+
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-/// Individual quality track tile
-class _QualityTrackTile extends StatelessWidget {
-  final QualityTrack track;
+/// Individual quality option with pill selection style
+class _QualityOption extends StatelessWidget {
+  final String label;
+  final String subtitle;
   final bool isSelected;
-  final bool isDisabled;
-  final bool showBitrate;
-  final bool showCodec;
-  final bool showFrameRate;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
+  final bool isDark;
 
-  const _QualityTrackTile({
-    required this.track,
+  const _QualityOption({
+    required this.label,
+    required this.subtitle,
     required this.isSelected,
-    required this.isDisabled,
-    this.showBitrate = true,
-    this.showCodec = true,
-    this.showFrameRate = false,
-    this.onTap,
+    required this.onTap,
+    required this.isDark,
   });
-
-  String _getQualityAbbreviation() {
-    if (track.height != null) {
-      final height = track.height!;
-      if (height >= 2160) return '4K';
-      if (height >= 1440) return '2K';
-      if (height >= 1080) return 'FHD';
-      if (height >= 720) return 'HD';
-      if (height >= 360) return 'SD';
-      return '${height}p';
-    }
-    return 'N/A';
-  }
-
-  String _getCleanTrackName() {
-    // Remove bitrate in parentheses (e.g., "720p (2119Kbs)" -> "720p")
-    return track.name.replaceAll(RegExp(r'\s*\(.*?\)'), '').trim();
-  }
-
-  String _getBitrateLabel() {
-    final kbps = track.bitrate ~/ 1000;
-    if (kbps >= 1000) {
-      return '${(kbps / 1000).toStringAsFixed(1)} Mbps';
-    }
-    return '$kbps Kbps';
-  }
-
-  List<String> _getTrackInfo() {
-    final info = <String>[];
-
-    if (track.width != null && track.height != null) {
-      info.add('${track.width}×${track.height}');
-    }
-
-    if (showBitrate) {
-      info.add(_getBitrateLabel());
-    }
-
-    if (showCodec && track.codec != null) {
-      info.add(track.codec!);
-    }
-
-    if (showFrameRate && track.frameRate != null) {
-      info.add('${track.frameRate!.toStringAsFixed(0)} fps');
-    }
-
-    return info;
-  }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final trackInfo = _getTrackInfo();
-
-    return ListTile(
-      enabled: !isDisabled,
-      leading: Container(
-        width: 56,
-        height: 32,
-        decoration: BoxDecoration(
-          color: isSelected
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: isSelected ? theme.colorScheme.primary : Colors.transparent,
-            width: 2,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            _getQualityAbbreviation(),
-            style: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.bold,
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(30),
+          child: Container(
+            height: 56,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            decoration: BoxDecoration(
               color: isSelected
-                  ? theme.colorScheme.primary
-                  : theme.textTheme.bodyMedium?.color,
+                  ? (isDark
+                      ? const Color(0x26FFFFFF) // rgba(255, 255, 255, 0.15)
+                      : const Color(0x1A000000)) // rgba(0, 0, 0, 0.1)
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(30),
+            ),
+            child: Row(
+              children: [
+                // Label and subtitle
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                        color: isDark ? Colors.white : Colors.black87,
+                      ),
+                    ),
+                    if (subtitle.isNotEmpty)
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isDark
+                              ? const Color(0xFFB0B0B0)
+                              : const Color(0xFF808080),
+                        ),
+                      ),
+                  ],
+                ),
+
+                const Spacer(),
+
+                // Checkmark for selected item
+                if (isSelected)
+                  Icon(
+                    Icons.check,
+                    size: 24,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+              ],
             ),
           ),
         ),
       ),
-      title: Text(
-        _getCleanTrackName(),
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
-      ),
-      subtitle: trackInfo.isNotEmpty
-          ? Text(
-              trackInfo.join(' • '),
-              style: theme.textTheme.bodySmall,
-            )
-          : null,
-      trailing: isSelected
-          ? Icon(
-              Icons.check_circle,
-              color: theme.colorScheme.primary,
-            )
-          : null,
-      onTap: isDisabled ? null : onTap,
     );
   }
 }

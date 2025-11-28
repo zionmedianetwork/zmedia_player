@@ -257,6 +257,7 @@ class _FullscreenDemoPageState extends State<FullscreenDemoPage> {
         builder: (context) => MediaPlayerWidget(
           controller: _controller,
           showControls: true,
+          expandToFill: true,
           customControls: MaterialFullscreenPlayer(
             controller: _controller,
             title: _controller.currentItem?.title ?? 'Material Fullscreen',
@@ -274,6 +275,7 @@ class _FullscreenDemoPageState extends State<FullscreenDemoPage> {
         builder: (context) => MediaPlayerWidget(
           controller: _controller,
           showControls: true,
+          expandToFill: true,
           customControls: CupertinoFullscreenPlayer(
             controller: _controller,
             title: _controller.currentItem?.title ?? 'Cupertino Fullscreen',

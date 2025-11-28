@@ -58,7 +58,6 @@ class MaterialMediaControls extends StatefulWidget {
 class _MaterialMediaControlsState extends State<MaterialMediaControls>
     with SingleTickerProviderStateMixin {
   bool _showControls = true;
-  bool _showSettings = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
 
@@ -98,9 +97,20 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
   }
 
   void _toggleSettings() {
-    setState(() {
-      _showSettings = !_showSettings;
-    });
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => SettingsMenu(
+        controller: widget.controller,
+        onSettingChanged: () {
+          // Refresh UI if needed
+          if (mounted) {
+            setState(() {});
+          }
+        },
+      ),
+    );
   }
 
   @override
@@ -180,8 +190,7 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
             ),
           ),
 
-          // Settings overlay
-          if (_showSettings) _buildSettingsOverlay(colorScheme),
+          // Settings overlay removed - now using modal bottom sheet
         ],
       ),
     );
@@ -422,40 +431,6 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
               ],
             ),
           ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSettingsOverlay(ColorScheme colorScheme) {
-    return Material(
-      color: Colors.black.withValues(alpha: 0.5),
-      child: GestureDetector(
-        onTap: _toggleSettings,
-        child: Container(
-          alignment: Alignment.bottomCenter,
-          child: GestureDetector(
-            onTap: () {}, // Prevent taps from closing when tapping sheet
-            child: Container(
-              constraints: const BoxConstraints(maxHeight: 500),
-              decoration: BoxDecoration(
-                color: colorScheme.surface,
-                borderRadius: const BorderRadius.vertical(
-                  top: Radius.circular(28), // M3 large border radius
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    blurRadius: 16,
-                    offset: const Offset(0, -4),
-                  ),
-                ],
-              ),
-              child: SettingsMenu(
-                controller: widget.controller,
-              ),
-            ),
-          ),
         ),
       ),
     );

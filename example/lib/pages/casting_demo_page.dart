@@ -258,96 +258,14 @@ class _CastingDemoPageState extends State<CastingDemoPage> {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) {
         return SettingsMenu(
           controller: _controller,
-          isAutoQualityEnabled: false,
-          onQualitySelected: (track) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Quality changed to ${track.name}'),
-                backgroundColor: Colors.purple,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          },
-          onAutoQualityToggled: (enabled) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  enabled ? 'Auto quality enabled' : 'Auto quality disabled',
-                ),
-                backgroundColor: Colors.purple,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          },
-          onAudioTrackSelected: (track) {
-            final languageMap = {
-              'en': 'English',
-              'es': 'Spanish',
-              'fr': 'French',
-              'de': 'German',
-              'it': 'Italian',
-              'pt': 'Portuguese',
-              'ru': 'Russian',
-              'ja': 'Japanese',
-              'ko': 'Korean',
-              'zh': 'Chinese',
-            };
-            final language = track.language != null
-                ? languageMap[track.language!.toLowerCase()] ??
-                    track.language!.toUpperCase()
-                : 'Unknown';
-
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('Audio track changed to $language'),
-                backgroundColor: Colors.purple,
-                duration: const Duration(seconds: 2),
-              ),
-            );
-          },
-          onSubtitleSelected: (track) {
-            final languageMap = {
-              'en': 'English',
-              'es': 'Spanish',
-              'fr': 'French',
-              'de': 'German',
-              'it': 'Italian',
-              'pt': 'Portuguese',
-              'ru': 'Russian',
-              'ja': 'Japanese',
-              'ko': 'Korean',
-              'zh': 'Chinese',
-              'ar': 'Arabic',
-              'hi': 'Hindi',
-              'tr': 'Turkish',
-              'nl': 'Dutch',
-              'pl': 'Polish',
-            };
-
-            if (track == null) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Subtitles disabled'),
-                  backgroundColor: Colors.purple,
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            } else {
-              final language = track.language != null
-                  ? languageMap[track.language!.toLowerCase()] ??
-                      track.language!.toUpperCase()
-                  : 'Unknown';
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Subtitle changed to $language'),
-                  backgroundColor: Colors.purple,
-                  duration: const Duration(seconds: 2),
-                ),
-              );
+          onSettingChanged: () {
+            // Refresh UI if needed
+            if (mounted) {
+              setState(() {});
             }
           },
         );
