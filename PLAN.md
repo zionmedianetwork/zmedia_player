@@ -537,19 +537,19 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 
 ### Week 5: Enhanced States & Feedback (P1)
 
-- [ ] **Advanced loading/buffering indicators** (2 days)
-  - [ ] Create `BufferingIndicator` widget
-    - [ ] Circular progress with buffer percentage
-    - [ ] Buffer health color coding (green/yellow/red)
-    - [ ] Buffering reason display ("Slow network", "Rebuffering")
-    - [ ] Estimated time to ready
-    - [ ] Animated loading states
-  - [ ] Create `NetworkQualityIndicator` widget
-    - [ ] Real-time network quality badge
-    - [ ] Signal strength bars
-    - [ ] Connection type icon (WiFi, 4G, 5G)
-    - [ ] Bandwidth estimation display
-  - [ ] Integration with BufferingService and NetworkMonitor
+- [x] **Advanced loading/buffering indicators** (2 days)
+  - [x] Create `BufferingIndicator` widget
+    - [x] Circular progress with buffer percentage
+    - [x] Buffer health color coding (green/yellow/red)
+    - [x] Buffering reason display ("Slow network", "Rebuffering")
+    - [x] Estimated time to ready
+    - [x] Animated loading states
+  - [x] Create `NetworkQualityIndicator` widget
+    - [x] Real-time network quality badge
+    - [x] Signal strength bars
+    - [x] Connection type icon (WiFi, 4G, 5G)
+    - [x] Bandwidth estimation display
+  - [x] Integration with BufferingService and NetworkMonitor
   - [ ] Loading skeleton screens for initial load
 
 - [ ] **Comprehensive error overlay** (2 days)
@@ -678,7 +678,7 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - [x] Platform-specific fullscreen variants
 - [ ] Visual feedback system (toasts, overlays)
 
-**Files Created:** 5/22 new files completed
+**Files Created:** 7/22 new files completed
 - [x] `lib/src/widgets/menus/quality_menu.dart`
 - [x] `lib/src/widgets/menus/audio_track_menu.dart`
 - [x] `lib/src/widgets/menus/settings_menu.dart` (unified settings with navigation)
@@ -695,7 +695,8 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - [ ] `lib/src/widgets/components/control_button.dart`
 - [ ] `lib/src/widgets/components/time_display.dart`
 - [x] `lib/src/widgets/components/quality_badge.dart`
-- [ ] `lib/src/widgets/overlays/buffering_indicator.dart`
+- [x] `lib/src/widgets/overlays/buffering_indicator.dart`
+- [x] `lib/src/widgets/overlays/network_quality_indicator.dart`
 - [ ] `lib/src/widgets/overlays/error_overlay.dart`
 - `lib/src/widgets/overlays/feedback_overlay.dart`
 - `lib/src/widgets/theme/media_theme.dart`
@@ -711,7 +712,8 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - [x] `lib/src/widgets/cupertino_media_controls.dart` (updated to use showCupertinoModalPopup)
 - [x] `example/lib/pages/casting_demo_page.dart` (updated to new SettingsMenu API)
 - [x] `example/lib/pages/fullscreen_demo_page.dart` (added SettingsMenu import)
-- [ ] `lib/zmedia_player.dart` (exports)
+- [x] `lib/zmedia_player.dart` (exports for overlay widgets)
+- [x] `example/lib/pages/streaming_demo_page.dart` (integrated buffering and network quality indicators)
 - [ ] `lib/src/widgets/media_player_widget.dart` (adaptive controls integration)
 - [ ] `example/lib/main.dart` (showcase Material/Cupertino variants)
 - [ ] `example/lib/pages/custom_controls_demo.dart` (new demo page)
