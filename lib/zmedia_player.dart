@@ -71,6 +71,8 @@ export 'src/widgets/components/time_display.dart';
 export 'src/widgets/components/control_button.dart';
 export 'src/widgets/components/seek_bar.dart';
 export 'src/widgets/components/volume_slider.dart';
+export 'src/widgets/overlays/buffering_indicator.dart';
+export 'src/widgets/overlays/network_quality_indicator.dart';
 
 // Phase 3 Widgets
 export 'src/widgets/media_list_player.dart';

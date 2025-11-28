@@ -439,10 +439,45 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
             aspectRatio: 16 / 9,
             child: Container(
               color: Colors.black,
-              child: MediaPlayerWidget(
-                controller: _controller,
-                showControls: true,
-                customControls: _buildControls(),
+              child: Stack(
+                children: [
+                  MediaPlayerWidget(
+                    controller: _controller,
+                    showControls: true,
+                    customControls: _buildControls(),
+                  ),
+
+                  // Phase 2: Buffering Indicator (shown during buffering)
+                  if (_controller.state.state == PlayerState.buffering &&
+                      _bufferHealth != null)
+                    Center(
+                      child: BufferingIndicator(
+                        bufferHealth: _bufferHealth!,
+                        showDetails: true,
+                        size: 80.0,
+                      ),
+                    ),
+
+                  // Phase 2: Network Quality Indicator (top-right corner)
+                  if (_networkQuality != NetworkQuality.unknown)
+                    Positioned(
+                      top: 16,
+                      right: 16,
+                      child: NetworkQualityIndicator(
+                        networkStatus: NetworkStatus(
+                          quality: _networkQuality,
+                          downloadSpeed: _controller.player.currentBandwidth,
+                          connectionType: ConnectionType.wifi,
+                          isMetered: false,
+                          signalStrength:
+                              _estimateSignalStrength(_networkQuality),
+                          timestamp: DateTime.now(),
+                        ),
+                        showDetails: true,
+                        size: 20.0,
+                      ),
+                    ),
+                ],
               ),
             ),
           ),
@@ -849,6 +884,23 @@ class _StreamingDemoPageState extends State<StreamingDemoPage> {
         return Colors.red;
       case NetworkQuality.unknown:
         return Colors.grey;
+    }
+  }
+
+  /// Estimate signal strength from network quality
+  double _estimateSignalStrength(NetworkQuality quality) {
+    switch (quality) {
+      case NetworkQuality.excellent:
+        return 1.0;
+      case NetworkQuality.good:
+        return 0.75;
+      case NetworkQuality.fair:
+        return 0.5;
+      case NetworkQuality.poor:
+        return 0.25;
+      case NetworkQuality.offline:
+      case NetworkQuality.unknown:
+        return 0.0;
     }
   }
 
