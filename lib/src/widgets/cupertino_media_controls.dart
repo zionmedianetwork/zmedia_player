@@ -60,7 +60,6 @@ class CupertinoMediaControls extends StatefulWidget {
 class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
     with SingleTickerProviderStateMixin {
   bool _showControls = true;
-  bool _showSettings = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
 
@@ -100,9 +99,23 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
   }
 
   void _toggleSettings() {
-    setState(() {
-      _showSettings = !_showSettings;
-    });
+    showCupertinoModalPopup(
+      context: context,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.transparent,
+        ),
+        child: SettingsMenu(
+          controller: widget.controller,
+          onSettingChanged: () {
+            // Refresh UI if needed
+            if (mounted) {
+              setState(() {});
+            }
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -182,8 +195,7 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
             ),
           ),
 
-          // Settings overlay with blur
-          if (_showSettings) _buildSettingsOverlay(),
+          // Settings overlay removed - now using modal popup
         ],
       ),
     );
@@ -447,36 +459,6 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
                     ],
                   ),
                 ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSettingsOverlay() {
-    return GestureDetector(
-      onTap: _toggleSettings,
-      child: ClipRect(
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            color: CupertinoColors.black.withValues(alpha: 0.3),
-            alignment: Alignment.bottomCenter,
-            child: GestureDetector(
-              onTap: () {}, // Prevent closing when tapping sheet
-              child: Container(
-                constraints: const BoxConstraints(maxHeight: 500),
-                decoration: BoxDecoration(
-                  color: CupertinoColors.systemBackground.darkColor,
-                  borderRadius: const BorderRadius.vertical(
-                    top: Radius.circular(13), // iOS standard radius
-                  ),
-                ),
-                child: SettingsMenu(
-                  controller: widget.controller,
-                ),
               ),
             ),
           ),

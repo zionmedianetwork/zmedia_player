@@ -1,769 +1,311 @@
 import 'package:flutter/material.dart';
-import '../../models/streaming_config.dart';
-import '../../models/subtitle_track.dart';
 import '../../core/media_controller.dart';
+import 'quality_menu.dart';
+import 'subtitle_menu.dart';
 import 'speed_menu.dart';
 
-/// A unified settings menu with tabs for all player configurations
+/// A unified settings menu with navigation-based interface
 ///
 /// Provides access to:
-/// - Quality/Resolution selection
-/// - Audio track selection
-/// - Subtitle settings (future)
-/// - Playback speed (future)
-/// - Other player settings (future)
+/// - Subtitle selection
+/// - Video quality/resolution selection
+/// - Playback speed selection
+/// - Audio track selection (if available)
+///
+/// Follows design specifications from docs/images/screenshots/controls_settings.png
 ///
 /// Example usage:
 /// ```dart
 /// showModalBottomSheet(
 ///   context: context,
+///   backgroundColor: Colors.transparent,
 ///   builder: (context) => SettingsMenu(
 ///     controller: mediaController,
 ///   ),
 /// );
 /// ```
-class SettingsMenu extends StatefulWidget {
+class SettingsMenu extends StatelessWidget {
   /// The media controller
   final MediaController controller;
 
-  /// Whether auto quality is currently enabled
-  final bool isAutoQualityEnabled;
-
-  /// Callback when a quality track is selected
-  final ValueChanged<QualityTrack>? onQualitySelected;
-
-  /// Callback when auto quality is toggled
-  final ValueChanged<bool>? onAutoQualityToggled;
-
-  /// Callback when an audio track is selected
-  final ValueChanged<AudioTrack>? onAudioTrackSelected;
-
-  /// Callback when a subtitle track is selected
-  final ValueChanged<SubtitleTrack?>? onSubtitleSelected;
-
-  /// Callback when playback speed is changed
-  final ValueChanged<double>? onSpeedChanged;
+  /// Callback when a setting is changed
+  final VoidCallback? onSettingChanged;
 
   const SettingsMenu({
     super.key,
     required this.controller,
-    this.isAutoQualityEnabled = false,
-    this.onQualitySelected,
-    this.onAutoQualityToggled,
-    this.onAudioTrackSelected,
-    this.onSubtitleSelected,
-    this.onSpeedChanged,
+    this.onSettingChanged,
   });
 
-  @override
-  State<SettingsMenu> createState() => _SettingsMenuState();
-}
+  String _getCurrentSubtitleValue() {
+    final selectedTrack = controller.player.selectedSubtitleTrack;
+    if (selectedTrack == null) {
+      return 'Off';
+    }
 
-class _SettingsMenuState extends State<SettingsMenu>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
-  late bool _isAutoQualityEnabled;
+    // Return language name or title
+    if (selectedTrack.language != null) {
+      final languageMap = {
+        'en': 'English',
+        'es': 'Spanish',
+        'fr': 'French',
+        'de': 'German',
+        'it': 'Italian',
+        'pt': 'Portuguese',
+        'ru': 'Russian',
+        'ja': 'Japanese',
+        'ko': 'Korean',
+        'zh': 'Chinese',
+      };
+      return languageMap[selectedTrack.language!.toLowerCase()] ??
+          selectedTrack.language!.toUpperCase();
+    }
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 4, vsync: this);
-    _isAutoQualityEnabled = widget.isAutoQualityEnabled;
+    return selectedTrack.title;
   }
 
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+  String _getCurrentQualityValue() {
+    final qualityTracks = controller.player.qualityTracks;
+    final selectedTrack = qualityTracks.where((t) => t.isSelected).firstOrNull;
+
+    // Check if auto quality is enabled
+    // For now, we'll check if there's no manually selected track
+    if (selectedTrack == null || qualityTracks.isEmpty) {
+      return 'Auto';
+    }
+
+    // Return quality label
+    if (selectedTrack.height != null) {
+      final height = selectedTrack.height!;
+      if (height >= 2160) return '4K';
+      if (height >= 1440) return '2K';
+      if (height >= 1080) return 'Full HD';
+      if (height >= 720) return 'HD';
+      if (height >= 480) return 'SD';
+      return '${height}p';
+    }
+
+    return 'Auto';
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final screenHeight = MediaQuery.of(context).size.height;
+  String _getCurrentSpeedValue() {
+    final speed = controller.speed;
+    if ((speed - 1.0).abs() < 0.01) {
+      return 'Normal';
+    }
+    return '${speed.toStringAsFixed(2)}x';
+  }
 
-    return Container(
-      constraints: BoxConstraints(
-        maxHeight: screenHeight * 0.6, // Max 60% of screen height
-      ),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Handle bar
-          Container(
-            margin: const EdgeInsets.only(top: 12),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: theme.dividerColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-
-          // Header
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.settings,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  'Settings',
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.of(context).pop(),
-                ),
-              ],
-            ),
-          ),
-
-          // Tabs
-          TabBar(
-            controller: _tabController,
-            tabs: const [
-              Tab(text: 'Quality', icon: Icon(Icons.high_quality, size: 20)),
-              Tab(text: 'Audio', icon: Icon(Icons.audiotrack, size: 20)),
-              Tab(
-                  text: 'Subtitles',
-                  icon: Icon(Icons.closed_caption, size: 20)),
-              Tab(text: 'Speed', icon: Icon(Icons.speed, size: 20)),
-            ],
-          ),
-
-          // Tab content
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildQualityTab(theme),
-                _buildAudioTab(theme),
-                _buildSubtitlesTab(theme),
-                _buildSpeedTab(theme),
-              ],
-            ),
-          ),
-
-          // Bottom safe area
-          SizedBox(height: MediaQuery.of(context).padding.bottom),
-        ],
+  void _showSubtitleMenu(BuildContext context) {
+    Navigator.of(context).pop(); // Close settings menu
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => SubtitleSelectionMenu(
+        controller: controller,
+        onSubtitleSelected: (track) {
+          onSettingChanged?.call();
+        },
       ),
     );
   }
 
-  Widget _buildQualityTab(ThemeData theme) {
-    final qualityTracks = widget.controller.player.qualityTracks;
+  void _showQualityMenu(BuildContext context) {
+    Navigator.of(context).pop(); // Close settings menu
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => QualitySelectionMenu(
+        controller: controller,
+        onQualitySelected: (track) {
+          onSettingChanged?.call();
+        },
+      ),
+    );
+  }
 
-    return Column(
-      children: [
-        const Divider(height: 1),
+  void _showSpeedMenu(BuildContext context) {
+    Navigator.of(context).pop(); // Close settings menu
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => SpeedMenu(
+        controller: controller,
+        onSpeedSelected: (speed) {
+          onSettingChanged?.call();
+        },
+      ),
+    );
+  }
 
-        // Auto quality toggle
-        ListTile(
-          leading: Icon(
-            _isAutoQualityEnabled ? Icons.auto_awesome : Icons.auto_fix_off,
-            color: _isAutoQualityEnabled
-                ? theme.colorScheme.primary
-                : theme.iconTheme.color,
-          ),
-          title: const Text('Auto Quality'),
-          subtitle: Text(
-            _isAutoQualityEnabled
-                ? 'Automatically adjust quality based on network'
-                : 'Manually select quality',
-            style: theme.textTheme.bodySmall,
-          ),
-          trailing: Switch(
-            value: _isAutoQualityEnabled,
-            onChanged: (value) {
-              setState(() {
-                _isAutoQualityEnabled = value;
-              });
-              widget.onAutoQualityToggled?.call(value);
-              if (value) {
-                widget.controller.player.enableAutoQuality();
-              }
-            },
-          ),
-          onTap: () {
-            final newValue = !_isAutoQualityEnabled;
-            setState(() {
-              _isAutoQualityEnabled = newValue;
-            });
-            widget.onAutoQualityToggled?.call(newValue);
-            if (newValue) {
-              widget.controller.player.enableAutoQuality();
-            }
-          },
-        ),
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-        const Divider(height: 1),
-
-        // Quality tracks list
-        if (qualityTracks.isEmpty)
-          const Expanded(
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
+    return Container(
+      decoration: BoxDecoration(
+        color: isDark
+            ? const Color(0xE6282828) // rgba(40, 40, 40, 0.9)
+            : const Color(0xE6FFFFFF),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 16, 20),
+              child: Row(
                 children: [
-                  Icon(Icons.info_outline, size: 48, color: Colors.grey),
-                  SizedBox(height: 16),
                   Text(
-                    'No quality tracks available',
-                    style: TextStyle(color: Colors.grey),
+                    'Settings',
+                    style: TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.bold,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: Icon(
+                      Icons.close,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                    onPressed: () => Navigator.of(context).pop(),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(
+                      minWidth: 40,
+                      minHeight: 40,
+                    ),
                   ),
                 ],
               ),
             ),
-          )
-        else
-          Expanded(
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: qualityTracks.length,
-              itemBuilder: (context, index) {
-                final track = qualityTracks[index];
-                return _QualityTrackTile(
-                  track: track,
-                  isSelected: track.isSelected,
-                  isDisabled: !track.isAvailable || _isAutoQualityEnabled,
-                  onTap: () {
-                    if (!_isAutoQualityEnabled && track.isAvailable) {
-                      widget.onQualitySelected?.call(track);
-                      widget.controller.player.setQualityTrack(track);
-                      Navigator.of(context).pop();
-                    }
-                  },
-                );
-              },
+
+            // Menu items
+            _SettingsMenuItem(
+              icon: Icons.closed_caption_outlined,
+              label: 'Subtitles',
+              currentValue: _getCurrentSubtitleValue(),
+              onTap: () => _showSubtitleMenu(context),
+              isDark: isDark,
             ),
+
+            _SettingsMenuItem(
+              icon: Icons.play_circle_outline,
+              label: 'video',
+              currentValue: _getCurrentQualityValue(),
+              onTap: () => _showQualityMenu(context),
+              isDark: isDark,
+            ),
+
+            _SettingsMenuItem(
+              icon: Icons.speed,
+              label: 'Playback speed',
+              currentValue: _getCurrentSpeedValue(),
+              onTap: () => _showSpeedMenu(context),
+              isDark: isDark,
+              showDivider: false,
+            ),
+
+            // Bottom spacing
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Individual settings menu item
+class _SettingsMenuItem extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String currentValue;
+  final VoidCallback onTap;
+  final bool isDark;
+  final bool showDivider;
+
+  const _SettingsMenuItem({
+    required this.icon,
+    required this.label,
+    required this.currentValue,
+    required this.onTap,
+    required this.isDark,
+    this.showDivider = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            child: Container(
+              height: 60,
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  // Icon
+                  Icon(
+                    icon,
+                    size: 24,
+                    color: isDark ? Colors.white : Colors.black87,
+                  ),
+                  const SizedBox(width: 16),
+
+                  // Label
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white : Colors.black87,
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  // Current value
+                  Text(
+                    currentValue,
+                    style: TextStyle(
+                      fontSize: 15,
+                      color: isDark
+                          ? const Color(0xFFB0B0B0)
+                          : const Color(0xFF808080),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+
+                  // Chevron
+                  Icon(
+                    Icons.chevron_right,
+                    size: 24,
+                    color: isDark
+                        ? const Color(0xFFB0B0B0)
+                        : const Color(0xFF808080),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        if (showDivider)
+          Divider(
+            height: 1,
+            thickness: 0.5,
+            indent: 60,
+            color: isDark ? const Color(0x33FFFFFF) : const Color(0x1F000000),
           ),
       ],
-    );
-  }
-
-  Widget _buildAudioTab(ThemeData theme) {
-    return StreamBuilder<List<AudioTrack>>(
-      stream: widget.controller.player.audioTracksStream,
-      initialData: widget.controller.player.audioTracks,
-      builder: (context, snapshot) {
-        final audioTracks = snapshot.data ?? [];
-
-        return Column(
-          children: [
-            const Divider(height: 1),
-
-            // Audio tracks list
-            if (audioTracks.isEmpty)
-              const Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.info_outline, size: 48, color: Colors.grey),
-                      SizedBox(height: 16),
-                      Text(
-                        'No audio tracks available',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              Expanded(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: audioTracks.length,
-                  itemBuilder: (context, index) {
-                    final track = audioTracks[index];
-                    return _AudioTrackTile(
-                      track: track,
-                      isSelected: track.isSelected,
-                      isDisabled: !track.isAvailable,
-                      onTap: () {
-                        if (track.isAvailable) {
-                          widget.onAudioTrackSelected?.call(track);
-                          widget.controller.player.setAudioTrack(track);
-                          Navigator.of(context).pop();
-                        }
-                      },
-                    );
-                  },
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildSubtitlesTab(ThemeData theme) {
-    return StreamBuilder<List<SubtitleTrack>>(
-      stream: widget.controller.player.subtitleTracksStream,
-      initialData: widget.controller.player.subtitleTracks,
-      builder: (context, snapshot) {
-        final subtitleTracks = snapshot.data ?? [];
-        final hasSelectedTrack =
-            subtitleTracks.any((track) => track.isSelected);
-
-        return Column(
-          children: [
-            const Divider(height: 1),
-
-            // Off option
-            ListTile(
-              leading: Container(
-                width: 56,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: !hasSelectedTrack
-                      ? theme.colorScheme.primaryContainer
-                      : theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(
-                    color: !hasSelectedTrack
-                        ? theme.colorScheme.primary
-                        : Colors.transparent,
-                    width: 2,
-                  ),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.subtitles_off,
-                    size: 20,
-                    color: !hasSelectedTrack
-                        ? theme.colorScheme.primary
-                        : theme.textTheme.bodyMedium?.color,
-                  ),
-                ),
-              ),
-              title: Text(
-                'Off',
-                style: theme.textTheme.bodyLarge?.copyWith(
-                  fontWeight:
-                      !hasSelectedTrack ? FontWeight.bold : FontWeight.normal,
-                ),
-              ),
-              trailing: !hasSelectedTrack
-                  ? Icon(
-                      Icons.check_circle,
-                      color: theme.colorScheme.primary,
-                    )
-                  : null,
-              onTap: () {
-                widget.onSubtitleSelected?.call(null);
-                widget.controller.player.setSubtitleTrack(null);
-                // Don't close immediately to allow user to see the state change
-                Future.delayed(const Duration(milliseconds: 300), () {
-                  if (context.mounted) {
-                    Navigator.of(context).pop();
-                  }
-                });
-              },
-            ),
-
-            const Divider(height: 1),
-
-            // Subtitle tracks list
-            if (subtitleTracks.isEmpty)
-              const Expanded(
-                child: Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.info_outline, size: 48, color: Colors.grey),
-                      SizedBox(height: 16),
-                      Text(
-                        'No subtitle tracks available',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            else
-              Expanded(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: subtitleTracks.length,
-                  itemBuilder: (context, index) {
-                    final track = subtitleTracks[index];
-
-                    return _SubtitleTrackTile(
-                      track: track,
-                      isSelected: track.isSelected,
-                      onTap: () {
-                        widget.onSubtitleSelected?.call(track);
-                        widget.controller.player.setSubtitleTrack(track);
-                        // Don't close immediately to allow user to see the state change
-                        Future.delayed(const Duration(milliseconds: 300), () {
-                          if (context.mounted) {
-                            Navigator.of(context).pop();
-                          }
-                        });
-                      },
-                    );
-                  },
-                ),
-              ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildSpeedTab(ThemeData theme) {
-    return SpeedMenu(
-      controller: widget.controller,
-      onSpeedSelected: (speed) {
-        widget.onSpeedChanged?.call(speed);
-      },
-      onPitchCorrectionToggled: (enabled) {
-        // Placeholder - pitch correction not yet implemented in native layer
-      },
-    );
-  }
-}
-
-/// Quality track tile
-class _QualityTrackTile extends StatelessWidget {
-  final QualityTrack track;
-  final bool isSelected;
-  final bool isDisabled;
-  final VoidCallback? onTap;
-
-  const _QualityTrackTile({
-    required this.track,
-    required this.isSelected,
-    required this.isDisabled,
-    this.onTap,
-  });
-
-  String _getQualityAbbreviation() {
-    if (track.height != null) {
-      final height = track.height!;
-      if (height >= 2160) return '4K';
-      if (height >= 1440) return '2K';
-      if (height >= 1080) return 'FHD';
-      if (height >= 720) return 'HD';
-      if (height >= 360) return 'SD';
-      return '${height}p';
-    }
-    return 'N/A';
-  }
-
-  String _getCleanTrackName() {
-    return track.name.replaceAll(RegExp(r'\s*\(.*?\)'), '').trim();
-  }
-
-  String _getTrackInfo() {
-    if (track.width != null && track.height != null) {
-      return '${track.width}×${track.height}';
-    }
-    return '';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final trackInfo = _getTrackInfo();
-
-    return ListTile(
-      enabled: !isDisabled,
-      leading: Container(
-        width: 56,
-        height: 32,
-        decoration: BoxDecoration(
-          color: isSelected
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: isSelected ? theme.colorScheme.primary : Colors.transparent,
-            width: 2,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            _getQualityAbbreviation(),
-            style: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: isSelected
-                  ? theme.colorScheme.primary
-                  : theme.textTheme.bodyMedium?.color,
-            ),
-          ),
-        ),
-      ),
-      title: Text(
-        _getCleanTrackName(),
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
-      ),
-      subtitle: trackInfo.isNotEmpty
-          ? Text(
-              trackInfo,
-              style: theme.textTheme.bodySmall,
-            )
-          : null,
-      trailing: isSelected
-          ? Icon(
-              Icons.check_circle,
-              color: theme.colorScheme.primary,
-            )
-          : null,
-      onTap: isDisabled ? null : onTap,
-    );
-  }
-}
-
-/// Audio track tile
-class _AudioTrackTile extends StatelessWidget {
-  final AudioTrack track;
-  final bool isSelected;
-  final bool isDisabled;
-  final VoidCallback? onTap;
-
-  const _AudioTrackTile({
-    required this.track,
-    required this.isSelected,
-    required this.isDisabled,
-    this.onTap,
-  });
-
-  String _getLanguageLabel() {
-    if (track.language != null) {
-      final languageMap = {
-        'en': 'English',
-        'es': 'Spanish',
-        'fr': 'French',
-        'de': 'German',
-        'it': 'Italian',
-        'pt': 'Portuguese',
-        'ru': 'Russian',
-        'ja': 'Japanese',
-        'ko': 'Korean',
-        'zh': 'Chinese',
-        'ar': 'Arabic',
-        'hi': 'Hindi',
-        'tr': 'Turkish',
-        'nl': 'Dutch',
-        'pl': 'Polish',
-        'sv': 'Swedish',
-        'da': 'Danish',
-        'fi': 'Finnish',
-        'no': 'Norwegian',
-        'cs': 'Czech',
-      };
-
-      return languageMap[track.language!.toLowerCase()] ??
-          track.language!.toUpperCase();
-    }
-    return 'Unknown';
-  }
-
-  String _getLanguageAbbreviation() {
-    return track.language?.toUpperCase() ?? 'N/A';
-  }
-
-  String _getChannelLabel() {
-    if (track.channels != null) {
-      switch (track.channels!) {
-        case 1:
-          return 'Mono';
-        case 2:
-          return 'Stereo';
-        case 6:
-          return '5.1';
-        case 8:
-          return '7.1';
-        default:
-          return '${track.channels} ch';
-      }
-    }
-    return '';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final channelLabel = _getChannelLabel();
-
-    return ListTile(
-      enabled: !isDisabled,
-      leading: Container(
-        width: 56,
-        height: 32,
-        decoration: BoxDecoration(
-          color: isSelected
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: isSelected ? theme.colorScheme.primary : Colors.transparent,
-            width: 2,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            _getLanguageAbbreviation(),
-            style: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: isSelected
-                  ? theme.colorScheme.primary
-                  : theme.textTheme.bodyMedium?.color,
-            ),
-          ),
-        ),
-      ),
-      title: Text(
-        _getLanguageLabel(),
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
-      ),
-      subtitle: channelLabel.isNotEmpty
-          ? Text(
-              channelLabel,
-              style: theme.textTheme.bodySmall,
-            )
-          : null,
-      trailing: isSelected
-          ? Icon(
-              Icons.check_circle,
-              color: theme.colorScheme.primary,
-            )
-          : null,
-      onTap: isDisabled ? null : onTap,
-    );
-  }
-}
-
-/// Subtitle track tile
-class _SubtitleTrackTile extends StatelessWidget {
-  final SubtitleTrack track;
-  final bool isSelected;
-  final VoidCallback? onTap;
-
-  const _SubtitleTrackTile({
-    required this.track,
-    required this.isSelected,
-    this.onTap,
-  });
-
-  String _getLanguageLabel() {
-    if (track.language != null) {
-      final languageMap = {
-        'en': 'English',
-        'es': 'Spanish',
-        'fr': 'French',
-        'de': 'German',
-        'it': 'Italian',
-        'pt': 'Portuguese',
-        'ru': 'Russian',
-        'ja': 'Japanese',
-        'ko': 'Korean',
-        'zh': 'Chinese',
-        'ar': 'Arabic',
-        'hi': 'Hindi',
-        'tr': 'Turkish',
-        'nl': 'Dutch',
-        'pl': 'Polish',
-        'sv': 'Swedish',
-        'da': 'Danish',
-        'fi': 'Finnish',
-        'no': 'Norwegian',
-        'cs': 'Czech',
-      };
-
-      return languageMap[track.language!.toLowerCase()] ??
-          track.language!.toUpperCase();
-    }
-    return track.title;
-  }
-
-  String _getLanguageAbbreviation() {
-    if (track.language != null) {
-      return track.language!.toUpperCase();
-    }
-    return 'CC';
-  }
-
-  String _getFormatLabel() {
-    switch (track.format) {
-      case SubtitleFormat.srt:
-        return 'SRT';
-      case SubtitleFormat.webvtt:
-        return 'WebVTT';
-      case SubtitleFormat.ass:
-        return 'ASS';
-      case SubtitleFormat.ssa:
-        return 'SSA';
-      case SubtitleFormat.ttml:
-        return 'TTML';
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    return ListTile(
-      leading: Container(
-        width: 56,
-        height: 32,
-        decoration: BoxDecoration(
-          color: isSelected
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: isSelected ? theme.colorScheme.primary : Colors.transparent,
-            width: 2,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            _getLanguageAbbreviation(),
-            style: theme.textTheme.labelMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: isSelected
-                  ? theme.colorScheme.primary
-                  : theme.textTheme.bodyMedium?.color,
-            ),
-          ),
-        ),
-      ),
-      title: Text(
-        _getLanguageLabel(),
-        style: theme.textTheme.bodyLarge?.copyWith(
-          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-        ),
-      ),
-      subtitle: Text(
-        _getFormatLabel(),
-        style: theme.textTheme.bodySmall,
-      ),
-      trailing: isSelected
-          ? Icon(
-              Icons.check_circle,
-              color: theme.colorScheme.primary,
-            )
-          : null,
-      onTap: onTap,
     );
   }
 }

@@ -325,16 +325,20 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 
 - [x] **Extract and enhance subtitle controls** (2 days)
   - [x] Extract `SubtitleMenu` from MediaControls
-  - [x] Enhance with subtitle styling options
-    - [x] Font size slider
-    - [x] Font color picker
-    - [x] Background color/opacity
-    - [x] Text outline options
-    - [x] Position adjustment
-  - [x] Add subtitle preview
-  - [x] Create `SubtitleConfig` UI
-  - [x] Integrated as Subtitles tab in SettingsMenu
+  - [x] Refactored to pill selection style with navigation list
+  - [x] Integrated as modal bottom sheet from SettingsMenu
   - [x] Added StreamBuilder for reactive track updates
+  - [x] Language label mapping (English, Spanish, French, etc.)
+  - [x] Off option with pill selection
+  - [x] Current subtitle track indicator with checkmark
+  - [ ] Enhance with advanced subtitle styling options (pending)
+    - [ ] Font size slider
+    - [ ] Font color picker
+    - [ ] Background color/opacity
+    - [ ] Text outline options
+    - [ ] Position adjustment
+  - [ ] Add subtitle preview
+  - [ ] Create `SubtitleConfig` UI
   - ⚠️ Note: Requires native platform implementation to expose subtitle tracks
 
 - [x] **Fix native audio/subtitle track exposure** (3 days) - CRITICAL
@@ -360,10 +364,15 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 
 - [x] **Extract and enhance speed controls** (1 day)
   - [x] Extract `SpeedMenu` from MediaControls
-  - [x] Add custom speed input (0.1x - 4.0x)
-  - [x] Add speed presets (0.25x, 0.5x, 0.75x, 1.0x, 1.25x, 1.5x, 1.75x, 2.0x)
-  - [x] Current speed indicator
-  - [x] Pitch correction toggle (placeholder - native implementation pending)
+  - [x] Refactored to vertical list with descriptive labels
+  - [x] Integrated as modal bottom sheet from SettingsMenu
+  - [x] Descriptive speed labels (Slowest, Slow, Normal, Fast, Fastest)
+  - [x] Speed multipliers (0.5x, 0.75x, 1.0x, 1.25x, 1.5x)
+  - [x] Current speed indicator with checkmark
+  - [x] Pill selection style for selected item
+  - [ ] Add custom speed input (0.1x - 4.0x) - future enhancement
+  - [ ] Add more speed presets (0.25x, 1.75x, 2.0x) - future enhancement
+  - [ ] Pitch correction toggle (native implementation pending)
 
 - [x] **Settings bottom sheet with animations** (3 days)
   - [x] Create `SettingsBottomSheet` widget (implemented as `SettingsMenu`)
@@ -372,18 +381,40 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
     - [x] Smooth expand/collapse animations
     - [x] Drag-to-dismiss gesture support
     - [x] Backdrop blur/dim effect
+  - [x] Navigation-based interface with pill selection style
+    - [x] Settings menu with icon/label/value/chevron layout
+    - [x] Rounded pill selection (border-radius: 30px)
+    - [x] Dark background (rgba(40, 40, 40, 0.9))
+    - [x] Selected state with pill background (rgba(255, 255, 255, 0.15))
+    - [x] Checkmark indicator for selected items
   - [x] Comprehensive configuration sections:
-    - [x] **Quality Settings** (via Quality tab)
+    - [x] **Quality Settings** (via Quality menu)
       - [x] Default quality preference
-      - [x] Auto quality toggle
+      - [x] Auto quality toggle with "Recommended" label
       - [x] Quality switching behavior (smooth/immediate)
+      - [x] Quality labels (Auto, Full HD, HD, SD, etc.)
       - [ ] Bandwidth limit settings
     - [x] **Audio Settings** (via Audio tab)
       - [x] Default audio track selection (language preference)
       - [ ] Audio normalization toggle
       - [x] Channel preference (stereo/5.1/7.1)
       - [ ] Audio boost/attenuation
-    - [ ] **Subtitle Settings**
+    - [x] **Subtitle Settings** (via Subtitle menu)
+      - [x] Subtitle track selection with language labels
+      - [x] Off option
+      - [x] Current subtitle indicator
+      - [x] Pill selection style
+      - [ ] Font size (slider: 8pt - 32pt)
+      - [ ] Font color picker
+      - [ ] Background color/opacity
+      - [ ] Text outline/shadow options
+      - [ ] Position adjustment (vertical offset)
+    - [x] **Speed Settings** (via Speed menu)
+      - [x] Descriptive speed labels (Slowest, Slow, Normal, Fast, Fastest)
+      - [x] Speed multipliers (0.5x, 0.75x, 1.0x, 1.25x, 1.5x)
+      - [x] Current speed indicator
+      - [x] Pill selection style
+    - [ ] **Subtitle Settings** (advanced styling - pending)
       - [ ] Default subtitle language
       - [ ] Auto-enable subtitles toggle
       - [ ] Font size (slider: 8pt - 32pt)
@@ -483,16 +514,16 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
   - [x] Cross-platform testing
   - [x] Documentation for adaptive usage
 
-- [ ] **Fullscreen widget variants** (2 days)
-  - [ ] Create `MaterialFullscreenPlayer`
-    - [ ] Full Material controls
-    - [ ] System UI integration (Android)
-    - [ ] Orientation handling
-  - [ ] Create `CupertinoFullscreenPlayer`
-    - [ ] Full Cupertino controls
-    - [ ] System UI integration (iOS)
-    - [ ] Orientation handling
-  - [ ] Shared fullscreen logic base class
+- [x] **Fullscreen widget variants** (2 days)
+  - [x] Create `MaterialFullscreenPlayer`
+    - [x] Full Material controls
+    - [x] System UI integration (Android)
+    - [x] Orientation handling
+  - [x] Create `CupertinoFullscreenPlayer`
+    - [x] Full Cupertino controls
+    - [x] System UI integration (iOS)
+    - [x] Orientation handling
+  - [x] Shared fullscreen logic base class
 
 - [x] **Custom controls base class** (2 days)
   - [x] Create `CustomControlsBase` abstract class
@@ -644,15 +675,15 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - [ ] Enhanced loading/buffering/error states
 - [ ] Comprehensive design system (theme, typography, spacing, animations, icons)
 - [ ] Basic accessibility features (WCAG 2.1 A/AA compliance started)
-- [ ] Platform-specific fullscreen variants
+- [x] Platform-specific fullscreen variants
 - [ ] Visual feedback system (toasts, overlays)
 
-**Files Created:** 4/22 new files completed
+**Files Created:** 5/22 new files completed
 - [x] `lib/src/widgets/menus/quality_menu.dart`
 - [x] `lib/src/widgets/menus/audio_track_menu.dart`
-- [x] `lib/src/widgets/menus/settings_menu.dart` (unified settings)
-- [ ] `lib/src/widgets/menus/subtitle_menu.dart`
-- [ ] `lib/src/widgets/menus/speed_menu.dart`
+- [x] `lib/src/widgets/menus/settings_menu.dart` (unified settings with navigation)
+- [x] `lib/src/widgets/menus/subtitle_menu.dart`
+- [x] `lib/src/widgets/menus/speed_menu.dart`
 - [ ] `lib/src/widgets/menus/material_settings_sheet.dart`
 - [ ] `lib/src/widgets/menus/cupertino_settings_sheet.dart`
 - [ ] `lib/src/widgets/controls/material_controls.dart`
@@ -673,12 +704,17 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - `lib/src/widgets/theme/animations.dart`
 - `lib/src/widgets/theme/icons.dart`
 
-**Files Modified:** ~5 files
-- `lib/zmedia_player.dart` (exports)
-- `lib/src/widgets/media_controls.dart` (refactor to use components)
-- `lib/src/widgets/media_player_widget.dart` (adaptive controls integration)
-- `example/lib/main.dart` (showcase Material/Cupertino variants)
-- `example/lib/pages/custom_controls_demo.dart` (new demo page)
+**Files Modified:** ~8 files
+- [x] `CLAUDE.md` (added UI/UX design specifications)
+- [x] `lib/src/widgets/media_controls.dart` (refactored to use modal bottom sheets, removed 185 lines)
+- [x] `lib/src/widgets/material_media_controls.dart` (updated to use showModalBottomSheet)
+- [x] `lib/src/widgets/cupertino_media_controls.dart` (updated to use showCupertinoModalPopup)
+- [x] `example/lib/pages/casting_demo_page.dart` (updated to new SettingsMenu API)
+- [x] `example/lib/pages/fullscreen_demo_page.dart` (added SettingsMenu import)
+- [ ] `lib/zmedia_player.dart` (exports)
+- [ ] `lib/src/widgets/media_player_widget.dart` (adaptive controls integration)
+- [ ] `example/lib/main.dart` (showcase Material/Cupertino variants)
+- [ ] `example/lib/pages/custom_controls_demo.dart` (new demo page)
 
 ---
 

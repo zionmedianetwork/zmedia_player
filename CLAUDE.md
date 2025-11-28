@@ -323,6 +323,251 @@ MediaItem(drmConfig) → MediaPlayer.load()
 7. **Multiple instances are supported** - Use unique playerIds for concurrent players (e.g., ListView)
 8. **MethodChannel calls are async** - Always await native operations to prevent race conditions
 
+## UI/UX Design Specifications
+
+All control overlays and layouts MUST strictly follow the design specifications shown in `docs/images/screenshots/controls_*`. These screenshots define the canonical UI/UX implementation.
+
+### Control Overlay Structure
+
+**Reference:** `controls_full_size.png`, `controls_normal_size.png`
+
+The control overlay consists of three main zones:
+
+#### Top Bar (Always visible when controls are shown)
+- **Position:** Top edge of video player
+- **Left side:** Collapse/Exit fullscreen button (chevron down icon)
+- **Right side (in order):**
+  1. Settings icon (gear icon)
+  2. Cast icon (Chromecast/AirPlay icon)
+  3. Picture-in-Picture icon (PiP icon)
+- **Styling:**
+  - Icons: White, semi-transparent background
+  - Size: Consistent icon sizing (~24-28dp/pt)
+  - Spacing: Equal horizontal spacing between right-side icons
+  - Padding: 16dp/pt from edges
+
+#### Center Controls (Overlaid on video)
+- **Position:** Vertically and horizontally centered on video
+- **Layout:** Horizontal row with three buttons
+  1. **Rewind 10 seconds** (left)
+     - Icon: Circular arrow counterclockwise with "10" label
+     - Size: Medium (~48-56dp/pt)
+  2. **Play/Pause** (center)
+     - Icon: Circular background with play/pause icon
+     - Size: Large (~64-72dp/pt), larger than side buttons
+     - Style: Prominent, filled circle background
+  3. **Forward 10 seconds** (right)
+     - Icon: Circular arrow clockwise with "10" label
+     - Size: Medium (~48-56dp/pt)
+- **Styling:**
+  - All buttons: White icons with semi-transparent dark background
+  - Spacing: Equal spacing between buttons (~24-32dp/pt)
+  - Visual hierarchy: Center button is largest
+
+#### Bottom Bar (Seek controls)
+- **Position:** Bottom edge of video player
+- **Layout:** Stacked vertically
+  1. **Seek bar**
+     - Progress indicator with draggable thumb
+     - Buffered progress (secondary color)
+     - Played progress (primary/accent color)
+     - Remaining progress (gray/dim)
+  2. **Time display**
+     - Format: "current / duration" (e.g., "0:00 / 0:14")
+     - Position: Below or integrated with seek bar, left-aligned
+     - Typography: Small, monospace or tabular numbers
+- **Styling:**
+  - Padding: 16dp/pt from edges
+  - Seek bar height: ~4-6dp/pt (inactive), ~8-10dp/pt (active/dragging)
+  - Thumb size: ~12-16dp/pt
+  - Colors: White/accent for progress, gray for remaining
+
+### Fullscreen vs Normal Mode
+
+**Reference:** Compare `controls_full_size.png` vs `controls_normal_size.png`
+
+- **Fullscreen mode:**
+  - Video occupies entire screen
+  - Controls overlay on top of video
+  - Larger control elements for easier touch targets
+
+- **Normal mode:**
+  - Video in constrained container
+  - Same control layout, proportionally scaled
+  - Collapse button changes to expand/fullscreen button
+
+### Settings Menu Design
+
+**Reference:** `controls_settings.png`
+
+#### Main Settings Bottom Sheet
+- **Presentation:** Modal bottom sheet with rounded top corners
+- **Background:** Dark gray overlay (rgba(0, 0, 0, 0.85) or similar)
+- **Border radius:** 16-20dp/pt on top corners
+- **Header:**
+  - Title: "Settings" (bold, large text ~20-24sp/pt)
+  - Close button: X icon (top-right corner)
+  - Padding: 20-24dp/pt
+- **Menu Items:** List of navigation items, each containing:
+  - **Icon** (left): Relevant icon for the option
+    - Subtitles: CC/closed captions icon
+    - Video: Play/video icon
+    - Playback speed: Gauge/speedometer icon
+  - **Label** (center-left): Option name (medium weight)
+  - **Current value** (center-right): Current selection in gray text
+  - **Chevron** (right): Right-pointing arrow (›)
+  - **Divider:** Optional subtle line between items
+  - **Height:** 56-64dp/pt per item
+  - **Padding:** 16-20dp/pt horizontal, 12-16dp/pt vertical
+- **Interaction:**
+  - Tap to navigate to submenu
+  - Smooth slide-in animation from bottom
+  - Backdrop: Semi-transparent black overlay (rgba(0, 0, 0, 0.5))
+
+#### Video Quality Submenu
+
+**Reference:** `controls_settings_video_quality.png`
+
+- **Header:** "Video Quality" title with close button
+- **List items:** Quality options presented vertically
+  - **Auto (Recommended)** - with "Recommended" as subtitle
+  - **Full HD** - 1080p resolution label
+  - **High** - 720p resolution label
+  - **Medium** - 480p resolution label
+  - (Additional options as needed: Low, SD, etc.)
+- **Selected state:**
+  - **Background:** Rounded pill/capsule background (border-radius: 28-32dp/pt)
+  - **Color:** Lighter gray than sheet background (rgba(255, 255, 255, 0.15))
+  - **Checkmark:** Right-aligned checkmark icon
+  - **Padding:** Item padding creates pill shape (12-16dp/pt vertical, 20-24dp/pt horizontal)
+- **Non-selected state:**
+  - Transparent background
+  - No checkmark
+  - Same text styling
+
+#### Subtitles Submenu
+
+**Reference:** `controls_settings_subtitle.png`
+
+- **Header:** "Subtitles" title with close button
+- **List items:** Language/subtitle track options
+  - **Off** - Disables subtitles
+  - **English** - Language options
+  - (Additional languages as available)
+- **Selected state:** Same rounded pill style as Video Quality
+  - Rounded pill background
+  - Checkmark on right
+- **Item height:** 56-64dp/pt
+- **Typography:** Language names in regular weight, ~16-18sp/pt
+
+#### Playback Speed Submenu
+
+**Reference:** `controls_settings_speed_vertical.png`
+
+- **Header:** "Speed" title with close button
+- **List items:** Speed multiplier options presented vertically
+  - **Slowest** - 0.5x
+  - **Slow** - 0.75x
+  - **Normal** - 1.0x (default)
+  - **Fast** - 1.25x
+  - **Fastest** - 1.5x
+  - (Additional speeds as needed: 1.5x, 2.0x, etc.)
+- **Layout:**
+  - **Label** (left): Descriptive name (Slowest, Slow, Normal, etc.)
+  - **Multiplier** (right of label): Speed value in gray (0.5x, 1.0x, etc.)
+  - **Checkmark** (far right): For selected item
+- **Selected state:** Same rounded pill background as other submenus
+- **Default selection:** "Normal (1.0x)"
+
+### Design System Specifications
+
+#### Color Palette
+- **Background overlays:**
+  - Semi-transparent black: rgba(0, 0, 0, 0.6-0.7) for video overlay
+  - Dark gray: rgba(40, 40, 40, 0.95) or similar for bottom sheets
+- **Text:**
+  - Primary: White (#FFFFFF) or near-white
+  - Secondary: Light gray (#B0B0B0, #808080)
+  - Accent: Use theme accent color for interactive elements
+- **Selection state:**
+  - Pill background: rgba(255, 255, 255, 0.1-0.15)
+  - Checkmark: White or accent color
+
+#### Typography
+- **Bottom sheet titles:** Bold, 20-24sp/pt
+- **Menu item labels:** Medium weight, 16-18sp/pt
+- **Secondary text (values, multipliers):** Regular, 14-16sp/pt, gray color
+- **Time display:** Regular or medium, 12-14sp/pt, monospace recommended
+
+#### Spacing & Layout
+- **Bottom sheet padding:**
+  - Horizontal: 20-24dp/pt
+  - Vertical (header): 20-24dp/pt
+  - Between items: 8-12dp/pt
+- **Menu item padding:**
+  - Horizontal: 16-20dp/pt
+  - Vertical: 12-16dp/pt
+  - Icon spacing: 12-16dp/pt from left edge
+  - Value spacing: 12-16dp/pt from right edge
+- **Icon sizes:**
+  - Menu icons: 24dp/pt
+  - Checkmarks: 20-24dp/pt
+  - Control buttons: 24-32dp/pt (top bar), 48-72dp/pt (center controls)
+
+#### Animation & Transitions
+- **Bottom sheet appearance:**
+  - Duration: 250-300ms
+  - Easing: Deceleration curve (ease-out)
+  - Motion: Slide up from bottom
+- **Submenu navigation:**
+  - Duration: 200-250ms
+  - Easing: Standard curve
+  - Motion: Slide right (to submenu), slide left (back to main)
+- **Selection state:**
+  - Duration: 150-200ms
+  - Easing: Standard curve
+  - Visual feedback: Immediate pill background appearance
+
+#### Accessibility Requirements
+- **Touch targets:** Minimum 48x48dp/pt for all interactive elements
+- **Contrast ratios:**
+  - Text on dark backgrounds: Minimum 4.5:1 (WCAG AA)
+  - Icons: Minimum 3:1
+- **Screen reader support:**
+  - All buttons must have semantic labels
+  - Bottom sheet must announce content changes
+  - Selection state must be announced
+- **Keyboard navigation:** Support for D-pad and keyboard navigation on TV/tablet devices
+
+### Implementation Notes
+
+1. **Strict adherence required:** All implementations MUST match the screenshots exactly
+   - Layout structure and positioning
+   - Visual styling (colors, borders, shadows)
+   - Typography and spacing
+   - Animation behavior
+
+2. **Platform adaptation:**
+   - Android: Use Material Design 3 components where applicable (BottomSheet, ListTile, etc.)
+   - iOS: Use Cupertino components for iOS styling variant
+   - Maintain same UX patterns across platforms, adapt visual styling only
+
+3. **Responsive behavior:**
+   - Controls scale proportionally with video size
+   - Touch targets maintain minimum size requirements
+   - Text remains legible at all sizes
+
+4. **Testing requirements:**
+   - Visual regression tests against reference screenshots
+   - Interaction tests for all menu navigation
+   - Accessibility audits (TalkBack, VoiceOver)
+   - Performance: Animations must maintain 60fps
+
+5. **Design assets location:** `docs/images/screenshots/controls_*`
+   - Use as reference during implementation
+   - Compare final implementation against screenshots
+   - Update screenshots if design evolves (with documentation)
+
 ## Platform-Specific Notes
 
 ### Android

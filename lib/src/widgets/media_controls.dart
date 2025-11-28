@@ -7,6 +7,7 @@ import '../models/player_state.dart';
 import '../models/cast_device.dart';
 import 'media_player_widget.dart';
 import 'airplay_button.dart';
+import 'menus/settings_menu.dart';
 
 /// Modern media controls widget with enhanced UX and smooth animations
 class MediaControls extends StatefulWidget {
@@ -67,7 +68,6 @@ class _MediaControlsState extends State<MediaControls>
   bool _showVolumeSlider = false;
   bool _showSpeedMenu = false;
   bool _showSubtitleMenu = false;
-  bool _showSettingsMenu = false;
   bool _showCastMenu = false;
   bool _isDraggingProgress = false;
   double _dragValue = 0.0;
@@ -185,7 +185,6 @@ class _MediaControlsState extends State<MediaControls>
                 if (_showVolumeSlider) _buildVolumeOverlay(theme),
                 if (_showSpeedMenu) _buildSpeedMenu(theme),
                 if (_showSubtitleMenu) _buildSubtitleMenu(theme),
-                if (_showSettingsMenu) _buildSettingsMenu(theme),
                 if (_showCastMenu) _buildCastMenu(theme),
 
                 // Loading overlay
@@ -447,7 +446,7 @@ class _MediaControlsState extends State<MediaControls>
                   if (widget.showSettingsButton)
                     _buildTopActionButton(
                       icon: FluentIcons.settings_20_regular,
-                      isActive: _showSettingsMenu,
+                      isActive: false,
                       onTap: _toggleSettingsMenu,
                       tooltip: 'Settings',
                     ),
@@ -903,192 +902,6 @@ class _MediaControlsState extends State<MediaControls>
     );
   }
 
-  Widget _buildSettingsMenu(MediaControlsTheme theme) {
-    return Positioned(
-      right: 8,
-      top: 60,
-      child: FadeTransition(
-        opacity: _overlayAnimation,
-        child: ScaleTransition(
-          scale: Tween<double>(
-            begin: 0.0,
-            end: 1.0,
-          ).animate(CurvedAnimation(
-            parent: _overlayController,
-            curve: Curves.easeOutBack,
-          )),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: 250,
-              maxHeight: 400,
-            ),
-            child: Container(
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.95),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  width: 1,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.5),
-                    blurRadius: 20,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  // Header
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      border: Border(
-                        bottom: BorderSide(
-                          color: Colors.white.withValues(alpha: 0.1),
-                          width: 1,
-                        ),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(FluentIcons.settings_20_regular,
-                            color: theme.iconColor, size: 20),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Settings',
-                          style: TextStyle(
-                            color: theme.textColor,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // Playback Speed
-                  if (widget.showSpeedControls)
-                    _buildSettingsItem(
-                      theme: theme,
-                      icon: FluentIcons.timer_20_regular,
-                      title: 'Playback Speed',
-                      value: '${widget.controller.speed}x',
-                      onTap: () {
-                        _toggleSettingsMenu();
-                        Future.delayed(const Duration(milliseconds: 200), () {
-                          _toggleSpeedMenu();
-                        });
-                      },
-                    ),
-
-                  // Subtitles
-                  if (widget.showSubtitleControls &&
-                      widget.controller.subtitleTracks.isNotEmpty)
-                    _buildSettingsItem(
-                      theme: theme,
-                      icon: FluentIcons.closed_caption_20_regular,
-                      title: 'Subtitles',
-                      value: widget.controller.selectedSubtitleTrack?.title ??
-                          'Off',
-                      onTap: () {
-                        _toggleSettingsMenu();
-                        Future.delayed(const Duration(milliseconds: 200), () {
-                          _toggleSubtitleMenu();
-                        });
-                      },
-                    ),
-
-                  // Volume
-                  if (widget.showVolumeControls)
-                    _buildSettingsItem(
-                      theme: theme,
-                      icon: widget.controller.isMuted
-                          ? FluentIcons.speaker_mute_20_regular
-                          : _getVolumeIcon(widget.controller.volume),
-                      title: 'Volume',
-                      value: widget.controller.isMuted
-                          ? 'Muted'
-                          : '${(widget.controller.volume * 100).round()}%',
-                      onTap: () {
-                        _toggleSettingsMenu();
-                        Future.delayed(const Duration(milliseconds: 200), () {
-                          _toggleVolumeSlider();
-                        });
-                      },
-                    ),
-
-                  // Quality (placeholder - can be implemented later)
-                  _buildSettingsItem(
-                    theme: theme,
-                    icon: FluentIcons.hd_20_regular,
-                    title: 'Quality',
-                    value: 'Auto',
-                    onTap: () {
-                      // TODO: Implement quality selection
-                      HapticFeedback.lightImpact();
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSettingsItem({
-    required MediaControlsTheme theme,
-    required IconData icon,
-    required String title,
-    required String value,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Row(
-            children: [
-              Icon(icon,
-                  color: theme.iconColor.withValues(alpha: 0.8), size: 20),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    color: theme.textColor,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              Text(
-                value,
-                style: TextStyle(
-                  color: theme.activeIconColor,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Icon(
-                FluentIcons.chevron_right_20_regular,
-                color: theme.iconColor.withValues(alpha: 0.5),
-                size: 20,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildCastMenu(MediaControlsTheme theme) {
     return Positioned(
       right: 16,
@@ -1367,31 +1180,11 @@ class _MediaControlsState extends State<MediaControls>
     );
   }
 
-  void _toggleVolumeSlider() {
-    setState(() {
-      _showVolumeSlider = !_showVolumeSlider;
-      _showSpeedMenu = false;
-      _showSubtitleMenu = false;
-      _showSettingsMenu = false;
-      _showCastMenu = false;
-    });
-
-    if (_showVolumeSlider) {
-      _overlayController.forward();
-    } else {
-      _overlayController.reverse();
-    }
-
-    widget.controller.showControlsTemporarily();
-    HapticFeedback.lightImpact();
-  }
-
   void _toggleSpeedMenu() {
     setState(() {
       _showSpeedMenu = !_showSpeedMenu;
       _showVolumeSlider = false;
       _showSubtitleMenu = false;
-      _showSettingsMenu = false;
       _showCastMenu = false;
     });
 
@@ -1410,7 +1203,6 @@ class _MediaControlsState extends State<MediaControls>
       _showSubtitleMenu = !_showSubtitleMenu;
       _showVolumeSlider = false;
       _showSpeedMenu = false;
-      _showSettingsMenu = false;
       _showCastMenu = false;
     });
 
@@ -1425,22 +1217,23 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   void _toggleSettingsMenu() {
-    setState(() {
-      _showSettingsMenu = !_showSettingsMenu;
-      _showVolumeSlider = false;
-      _showSpeedMenu = false;
-      _showSubtitleMenu = false;
-      _showCastMenu = false;
-    });
-
-    if (_showSettingsMenu) {
-      _overlayController.forward();
-    } else {
-      _overlayController.reverse();
-    }
-
-    widget.controller.showControlsTemporarily();
     HapticFeedback.lightImpact();
+    widget.controller.showControlsTemporarily();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => SettingsMenu(
+        controller: widget.controller,
+        onSettingChanged: () {
+          // Refresh UI if needed
+          if (mounted) {
+            setState(() {});
+          }
+        },
+      ),
+    );
   }
 
   void _toggleCastMenu() {
@@ -1449,7 +1242,6 @@ class _MediaControlsState extends State<MediaControls>
       _showVolumeSlider = false;
       _showSpeedMenu = false;
       _showSubtitleMenu = false;
-      _showSettingsMenu = false;
     });
 
     if (_showCastMenu) {
