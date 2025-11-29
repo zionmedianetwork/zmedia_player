@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version_bump:
-        description: 'Version bump type'
+        description: 'Version bump type (ignored if manual_version is set)'
         required: true
         default: 'auto'
         type: choice
@@ -13,6 +13,11 @@ on:
           - major
           - minor
           - patch
+      manual_version:
+        description: 'Manual version (e.g., 1.2.3) - overrides version_bump if set'
+        required: false
+        type: string
+        default: ''
       pre_release:
         description: 'Pre-release type (leave empty for stable)'
         required: false
@@ -54,6 +59,7 @@ jobs:
         with:
           fetch-depth: 0  # Fetch all history for changelog generation
           token: ${{ secrets.GITHUB_TOKEN }}
+          ref: main  # Always work from main branch
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -109,8 +115,14 @@ jobs:
 
             if [ "$COMMIT_COUNT" = "0" ]; then
               echo "⚠️ Warning: No new commits since last tag ${{ steps.latest_tag.outputs.tag }}"
-              echo "Cannot create release without new commits. Exiting."
-              exit 1
+
+              # Allow release without new commits if manual version is specified
+              if [ -z "${{ github.event.inputs.manual_version }}" ]; then
+                echo "❌ Cannot create release without new commits (unless manual_version is specified)"
+                exit 1
+              else
+                echo "✅ Manual version specified, proceeding with release"
+              fi
             fi
 
             COMMITS=$(git log ${{ steps.latest_tag.outputs.tag }}..HEAD --pretty=format:"%s")
@@ -141,44 +153,62 @@ jobs:
         run: |
           CURRENT="${{ steps.current_version.outputs.version }}"
 
-          # Remove any existing pre-release suffix
-          BASE_VERSION=$(echo "$CURRENT" | sed 's/-.*$//')
+          # Check if manual version is specified
+          if [ -n "${{ github.event.inputs.manual_version }}" ]; then
+            MANUAL_VERSION="${{ github.event.inputs.manual_version }}"
 
-          # Parse version
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+            # Validate manual version format
+            if ! echo "$MANUAL_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "❌ Error: Invalid manual version format: $MANUAL_VERSION"
+              echo "Expected format: MAJOR.MINOR.PATCH (e.g., 1.2.3)"
+              exit 1
+            fi
 
-          # Determine bump type
-          if [ "${{ github.event.inputs.version_bump }}" = "auto" ]; then
-            BUMP="${{ steps.version_bump_analysis.outputs.detected_bump }}"
+            BASE_VERSION="$MANUAL_VERSION"
+            echo "Using manual version: $MANUAL_VERSION"
+            BUMP="manual"
           else
-            BUMP="${{ github.event.inputs.version_bump }}"
+            # Remove any existing pre-release suffix
+            BASE_VERSION=$(echo "$CURRENT" | sed 's/-.*$//')
+
+            # Parse version
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
+
+            # Determine bump type
+            if [ "${{ github.event.inputs.version_bump }}" = "auto" ]; then
+              BUMP="${{ steps.version_bump_analysis.outputs.detected_bump }}"
+            else
+              BUMP="${{ github.event.inputs.version_bump }}"
+            fi
+
+            # Apply version bump
+            case "$BUMP" in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
+
+            BASE_VERSION="$MAJOR.$MINOR.$PATCH"
           fi
 
-          # Apply version bump
-          case "$BUMP" in
-            major)
-              MAJOR=$((MAJOR + 1))
-              MINOR=0
-              PATCH=0
-              ;;
-            minor)
-              MINOR=$((MINOR + 1))
-              PATCH=0
-              ;;
-            patch)
-              PATCH=$((PATCH + 1))
-              ;;
-          esac
-
-          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          NEW_VERSION="$BASE_VERSION"
 
           # Add pre-release suffix if specified
           PRE_RELEASE="${{ github.event.inputs.pre_release }}"
           if [ "$PRE_RELEASE" != "none" ] && [ -n "$PRE_RELEASE" ]; then
             # Get pre-release number
-            PRE_NUM=$(git tag -l "v${NEW_VERSION}-${PRE_RELEASE}.*" | wc -l | tr -d ' ')
+            PRE_NUM=$(git tag -l "v${BASE_VERSION}-${PRE_RELEASE}.*" | wc -l | tr -d ' ')
             PRE_NUM=$((PRE_NUM + 1))
-            NEW_VERSION="${NEW_VERSION}-${PRE_RELEASE}.${PRE_NUM}"
+            NEW_VERSION="${BASE_VERSION}-${PRE_RELEASE}.${PRE_NUM}"
           fi
 
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
@@ -298,13 +328,23 @@ jobs:
           mv CHANGELOG.new.md CHANGELOG.md
           echo "✅ Updated CHANGELOG.md"
 
+      - name: Update README.md version badge
+        if: ${{ !github.event.inputs.dry_run }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+
+          # Update version badge in README.md
+          sed -i "s/version-[0-9]\+\.[0-9]\+\.[0-9]\+/version-$NEW_VERSION/" README.md
+
+          echo "✅ Updated README.md version badge to $NEW_VERSION"
+
       - name: Commit version bump
         if: ${{ !github.event.inputs.dry_run }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add pubspec.yaml CHANGELOG.md
+          git add pubspec.yaml CHANGELOG.md README.md
           git commit -m "chore(release): bump version to ${{ steps.version.outputs.new_version }}"
 
           echo "Committed version bump"
@@ -318,17 +358,16 @@ jobs:
           # Create annotated tag
           git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
 
-          # Push commit and tag (use current branch, not hardcoded "main")
-          CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-          echo "Pushing to branch: $CURRENT_BRANCH"
-          git push origin HEAD:"$CURRENT_BRANCH"
+          # Push to main branch and tag
+          echo "Pushing to main branch"
+          git push origin HEAD:main
           git push origin "v$NEW_VERSION"
 
           echo "✅ Created and pushed tag v$NEW_VERSION"
 
       - name: Create GitHub Release
         if: ${{ !github.event.inputs.dry_run }}
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.new_version }}
           name: ZMedia Player v${{ steps.version.outputs.new_version }}
@@ -361,6 +400,7 @@ jobs:
           draft: false
           prerelease: ${{ github.event.inputs.pre_release != 'none' }}
           token: ${{ secrets.GITHUB_TOKEN }}
+          generate_release_notes: false
 
       - name: Dry run summary
         if: ${{ github.event.inputs.dry_run }}

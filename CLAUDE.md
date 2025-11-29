@@ -1037,6 +1037,7 @@ ZMedia Player uses automated semantic versioning with customizable release notes
 2. Click **Run workflow**
 3. Select options:
    - **Version bump**: `auto` (detect from commits) or `major`/`minor`/`patch`
+   - **Manual version**: Optional - specify exact version (e.g., `1.2.3`) to override version bump
    - **Pre-release**: `none` (stable) or `alpha`/`beta`/`rc`
    - **Dry run**: Test without creating actual release
 4. Click **Run workflow**
@@ -1046,8 +1047,14 @@ ZMedia Player uses automated semantic versioning with customizable release notes
 # Stable release (auto-detect version)
 gh workflow run release.yml --ref main -f version_bump=auto -f pre_release=none
 
+# Manual version (overrides version_bump)
+gh workflow run release.yml --ref main -f manual_version=1.2.3 -f pre_release=none
+
 # Pre-release (beta)
 gh workflow run release.yml --ref main -f version_bump=minor -f pre_release=beta
+
+# Manual version with pre-release
+gh workflow run release.yml --ref main -f manual_version=2.0.0 -f pre_release=beta
 
 # Dry run (test only)
 gh workflow run release.yml --ref main -f version_bump=auto -f dry_run=true
@@ -1081,11 +1088,24 @@ Use repeatMode: RepeatMode.all instead."
 ### Release Process
 
 1. **Commit Analysis**: Analyzes commits since last release
-2. **Version Calculation**: Determines new version using semantic versioning
+2. **Version Calculation**: Determines new version using semantic versioning (or uses manual version if specified)
 3. **Changelog Generation**: Auto-generates categorized changelog
-4. **Version Bump**: Updates `pubspec.yaml` and `CHANGELOG.md`
+4. **Version Bump**: Updates `pubspec.yaml`, `CHANGELOG.md`, and `README.md` version badge
 5. **Git Tag**: Creates annotated tag `v{version}`
 6. **GitHub Release**: Creates release with generated notes
+
+**Manual Version Override:**
+
+- If `manual_version` is specified (e.g., `1.2.3`), it overrides automatic version calculation
+- Manual version must follow MAJOR.MINOR.PATCH format
+- Allows creating releases without new commits (useful for hotfixes or corrections)
+- Pre-release suffixes are still applied if `pre_release` is set
+
+**Files Updated During Release:**
+
+- `pubspec.yaml` - Package version
+- `CHANGELOG.md` - Version history with categorized changes
+- `README.md` - Version badge (`[![Version](https://img.shields.io/badge/version-X.Y.Z-blue.svg)]`)
 
 ### Pre-releases
 
@@ -1107,6 +1127,7 @@ Pre-release versions: `v1.2.0-alpha.1`, `v1.2.0-beta.1`, `v1.2.0-rc.1`
 ### Version History
 
 All versions are preserved:
+
 - ✅ Git tags (never deleted)
 - ✅ GitHub releases (permanent)
 - ✅ CHANGELOG.md (complete history)
@@ -1117,6 +1138,7 @@ All versions are preserved:
 ### Customizing Release Notes
 
 Edit `.github/workflows/release.yml` to customize:
+
 - Changelog format
 - Sections and categories
 - Commit filtering
