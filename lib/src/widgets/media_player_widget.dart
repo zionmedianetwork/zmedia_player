@@ -8,6 +8,7 @@ import '../core/media_config.dart';
 import '../models/subtitle_track.dart';
 import 'media_controls.dart';
 import 'subtitle_view.dart';
+import 'overlays/error_overlay.dart';
 
 /// Main widget for displaying video content with optional controls
 ///
@@ -664,50 +665,15 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       return widget.errorWidget!;
     }
 
-    return Container(
-      color: widget.backgroundColor,
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              size: 64,
-              color: Colors.red,
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Playback Error',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Text(
-                widget.controller.state.errorMessage ??
-                    'Unknown error occurred',
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 14,
-                ),
-                textAlign: TextAlign.center,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _handleRetry,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Retry'),
-            ),
-          ],
-        ),
-      ),
+    // Use comprehensive ErrorOverlay by default
+    // Note: We pass the error message as a string since the full exception
+    // object is not currently stored in PlaybackState
+    return ErrorOverlay(
+      error: widget.controller.state.errorMessage,
+      controller: widget.controller,
+      onRetry: _handleRetry,
+      showErrorCode: true,
+      animated: true,
     );
   }
 
