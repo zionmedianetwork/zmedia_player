@@ -73,6 +73,7 @@ export 'src/widgets/components/seek_bar.dart';
 export 'src/widgets/components/volume_slider.dart';
 export 'src/widgets/overlays/buffering_indicator.dart';
 export 'src/widgets/overlays/network_quality_indicator.dart';
+export 'src/widgets/overlays/error_overlay.dart';
 
 // Phase 3 Widgets
 export 'src/widgets/media_list_player.dart';
