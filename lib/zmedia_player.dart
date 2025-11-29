@@ -71,6 +71,8 @@ export 'src/widgets/components/time_display.dart';
 export 'src/widgets/components/control_button.dart';
 export 'src/widgets/components/seek_bar.dart';
 export 'src/widgets/components/volume_slider.dart';
+export 'src/widgets/components/live_badge.dart';
+export 'src/widgets/components/buffer_health_badge.dart';
 export 'src/widgets/overlays/buffering_indicator.dart';
 export 'src/widgets/overlays/network_quality_indicator.dart';
 export 'src/widgets/overlays/error_overlay.dart';
