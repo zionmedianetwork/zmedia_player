@@ -818,7 +818,51 @@ git branch -d feat/material-design-3-controls
 
 ### Tasks and Plan
 
-For each completed tasks in PLAN.md check the box next the task and its sub-tasks to mark them as completed in PLAN.md.
+For each completed task in PLAN.md, you MUST update the following:
+
+#### 1. Mark Tasks as Complete
+Check the box next to the task and all its sub-tasks to mark them as completed in PLAN.md.
+
+#### 2. Update PLAN.md Metadata (REQUIRED)
+After completing ANY task, always update the metadata section at the top of PLAN.md:
+
+```markdown
+**Last Updated:** [Current Date in format: Month DD, YYYY]
+**Current Phase:** Phase X - [Phase Name] (Week Y [Status] - Z%)
+```
+
+**Examples:**
+- `**Last Updated:** November 29, 2025`
+- `**Current Phase:** Phase 2 - UI/UX Enhancement (Week 5 Complete - 68%)`
+
+**Update triggers:**
+- ✅ After completing a task or sub-task
+- ✅ After updating progress percentages
+- ✅ After adding/modifying deliverables
+- ✅ After creating/modifying files listed in PLAN.md
+
+#### 3. Update Progress Tracking
+Update the following sections when applicable:
+- Phase completion percentage in the progress table
+- File counts in "Files Created" sections
+- Task counts (e.g., "14/22 tasks complete")
+- Overall completion percentage
+
+**Example workflow:**
+```bash
+# After completing "Visual feedback enhancements" task:
+# 1. Mark task as complete with [x]
+# 2. Update: Phase 2: 64% → 68%
+# 3. Update: Files Created: 10/22 → 15/22
+# 4. Update: Last Updated: November 29, 2025
+# 5. Update: Current Phase: Phase 2 - UI/UX Enhancement (Week 5 Complete - 68%)
+```
+
+#### 4. Document Changes in Files Created/Modified
+When you create or modify files as part of task completion:
+- Add new files to the "Files Created" list with [x]
+- Update the "Files Modified" list with descriptions
+- Keep accurate counts of total files created
 
 ### Commit Authorship Rules
 
