@@ -76,6 +76,11 @@ export 'src/widgets/components/buffer_health_badge.dart';
 export 'src/widgets/overlays/buffering_indicator.dart';
 export 'src/widgets/overlays/network_quality_indicator.dart';
 export 'src/widgets/overlays/error_overlay.dart';
+export 'src/widgets/overlays/feedback_overlay.dart';
+export 'src/widgets/overlays/volume_change_overlay.dart';
+export 'src/widgets/overlays/seek_feedback_overlay.dart';
+export 'src/widgets/overlays/playback_feedback_overlay.dart';
+export 'src/widgets/overlays/toast_notification.dart';
 
 // Phase 3 Widgets
 export 'src/widgets/media_list_player.dart';
