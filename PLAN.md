@@ -17,7 +17,7 @@ Transform ZMedia Player from a feature-rich package into an enterprise-grade, pr
 |-------|--------|----------|------------|
 | Phase 0: Critical Bug Fixes | ✅ Complete | 3 weeks | 100% |
 | Phase 1: Essential Features | ✅ Complete | 4 weeks | 100% |
-| Phase 2: UI/UX Enhancement | ⏳ In Progress | 6 weeks | 59% |
+| Phase 2: UI/UX Enhancement | ⏳ In Progress | 6 weeks | 64% |
 | Phase 3: Offline & DRM | ⏳ Planned | 3 weeks | 0% |
 | Phase 4: Advanced Features | ⏳ Planned | 4 weeks | 0% |
 | Phase 5: Testing & QA | ⏳ Planned | 3 weeks | 0% |
@@ -567,16 +567,17 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
   - [x] Integration with exception hierarchy
   - [x] User-friendly error explanations
 
-- [ ] **Status badges and indicators** (1 day)
-  - [ ] Create `LiveBadge` component
-    - [ ] "LIVE" indicator with pulsing animation
-    - [ ] DVR available indicator
-    - [ ] Live latency display
-  - [ ] Create `QualityBadge` component (if not done in Week 1)
-  - [ ] Create `BufferHealthBadge` component
-    - [ ] Visual buffer health (healthy/warning/critical)
-    - [ ] Tooltip with buffer statistics
-  - [ ] Positioning and layout options
+- [x] **Status badges and indicators** (1 day)
+  - [x] Create `LiveBadge` component
+    - [x] "LIVE" indicator with pulsing animation
+    - [x] DVR available indicator
+    - [x] Live latency display
+  - [x] Create `QualityBadge` component (already exists from Week 1)
+  - [x] Create `BufferHealthBadge` component
+    - [x] Visual buffer health (healthy/warning/critical)
+    - [x] Tooltip with buffer statistics
+  - [x] Integrate badges into MaterialMediaControls and CupertinoMediaControls
+  - [x] Export badge components in public API
 
 - [ ] **Visual feedback enhancements** (1 day)
   - [ ] Volume change overlay (center screen)
@@ -678,7 +679,7 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - [x] Platform-specific fullscreen variants
 - [ ] Visual feedback system (toasts, overlays)
 
-**Files Created:** 8/22 new files completed
+**Files Created:** 10/22 new files completed
 - [x] `lib/src/widgets/menus/quality_menu.dart`
 - [x] `lib/src/widgets/menus/audio_track_menu.dart`
 - [x] `lib/src/widgets/menus/settings_menu.dart` (unified settings with navigation)
@@ -695,6 +696,8 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - [ ] `lib/src/widgets/components/control_button.dart`
 - [ ] `lib/src/widgets/components/time_display.dart`
 - [x] `lib/src/widgets/components/quality_badge.dart`
+- [x] `lib/src/widgets/components/live_badge.dart`
+- [x] `lib/src/widgets/components/buffer_health_badge.dart`
 - [x] `lib/src/widgets/overlays/buffering_indicator.dart`
 - [x] `lib/src/widgets/overlays/network_quality_indicator.dart`
 - [x] `lib/src/widgets/overlays/error_overlay.dart`
@@ -705,14 +708,14 @@ Transform ZMedia Player's UI from basic controls to an enterprise-grade, fully c
 - `lib/src/widgets/theme/animations.dart`
 - `lib/src/widgets/theme/icons.dart`
 
-**Files Modified:** ~9 files
+**Files Modified:** ~11 files
 - [x] `CLAUDE.md` (added UI/UX design specifications)
 - [x] `lib/src/widgets/media_controls.dart` (refactored to use modal bottom sheets, removed 185 lines)
-- [x] `lib/src/widgets/material_media_controls.dart` (updated to use showModalBottomSheet)
-- [x] `lib/src/widgets/cupertino_media_controls.dart` (updated to use showCupertinoModalPopup)
+- [x] `lib/src/widgets/material_media_controls.dart` (integrated status badges: LIVE, Quality, Buffer Health)
+- [x] `lib/src/widgets/cupertino_media_controls.dart` (integrated status badges: LIVE, Quality, Buffer Health)
 - [x] `example/lib/pages/casting_demo_page.dart` (updated to new SettingsMenu API)
 - [x] `example/lib/pages/fullscreen_demo_page.dart` (added SettingsMenu import)
-- [x] `lib/zmedia_player.dart` (exports for overlay widgets)
+- [x] `lib/zmedia_player.dart` (exports for overlay widgets and badge components)
 - [x] `example/lib/pages/streaming_demo_page.dart` (integrated buffering and network quality indicators)
 - [x] `lib/src/widgets/media_player_widget.dart` (integrated ErrorOverlay)
 - [ ] `example/lib/main.dart` (showcase Material/Cupertino variants)

@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import '../core/media_controller.dart';
 import '../models/player_state.dart';
+import '../models/buffer_health.dart';
+import '../models/streaming_config.dart';
 import 'components/seek_bar.dart';
 import 'components/time_display.dart';
+import 'components/live_badge.dart';
+import 'components/quality_badge.dart';
+import 'components/buffer_health_badge.dart';
 import 'menus/settings_menu.dart';
 
 /// Material Design 3 media controls widget
@@ -60,11 +65,34 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
   bool _showControls = true;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
+  BufferHealth? _currentBufferHealth;
+  List<QualityTrack>? _qualityTracks;
 
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
+    _setupListeners();
+  }
+
+  void _setupListeners() {
+    // Listen to buffer health updates
+    widget.controller.player.bufferHealthStream.listen((health) {
+      if (mounted) {
+        setState(() {
+          _currentBufferHealth = health;
+        });
+      }
+    });
+
+    // Listen to quality track updates
+    widget.controller.player.qualityTracksStream.listen((tracks) {
+      if (mounted) {
+        setState(() {
+          _qualityTracks = tracks;
+        });
+      }
+    });
   }
 
   void _initializeAnimations() {
@@ -124,25 +152,63 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
       behavior: HitTestBehavior.opaque,
       child: Stack(
         children: [
-          // LIVE badge (lower left corner)
+          // Status badges (top-left corner)
           AnimatedBuilder(
             animation: widget.controller,
             builder: (context, child) {
               final isLive = widget.controller.currentItem?.isLive ?? false;
-              if (!isLive) return const SizedBox.shrink();
+              final hasQualityTracks =
+                  _qualityTracks != null && _qualityTracks!.isNotEmpty;
+              final hasUnhealthyBuffer = _currentBufferHealth != null &&
+                  !_currentBufferHealth!.isHealthy;
+
+              // Only show badges if we have something to display
+              if (!isLive && !hasQualityTracks && !hasUnhealthyBuffer) {
+                return const SizedBox.shrink();
+              }
 
               return Positioned(
+                top: 16,
                 left: 16,
-                bottom: 16,
-                child: TimeDisplay(
-                  position: Duration.zero,
-                  isLive: true,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
+                child: SafeArea(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // LIVE badge (for live streams)
+                      if (isLive) ...[
+                        LiveBadge(
+                          isLive: isLive,
+                          dvrAvailable:
+                              false, // DVR info not available in current model
+                          showDvrIndicator: false,
+                          backgroundColor: Colors.black.withValues(alpha: 0.8),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+
+                      // Quality badge (show first quality track when available)
+                      if (hasQualityTracks) ...[
+                        QualityBadge(
+                          qualityTrack: _qualityTracks!.first,
+                          isAuto:
+                              false, // Auto quality info not available in current implementation
+                          backgroundColor: Colors.black.withValues(alpha: 0.8),
+                          textColor: Colors.white,
+                          borderColor: Colors.white.withValues(alpha: 0.3),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+
+                      // Buffer health badge (when buffering or unhealthy)
+                      if (hasUnhealthyBuffer) ...[
+                        BufferHealthBadge(
+                          bufferHealth: _currentBufferHealth,
+                          showPercentage: true,
+                          showTooltip: true,
+                        ),
+                      ],
+                    ],
                   ),
-                  liveColor: Colors.red,
                 ),
               );
             },
