@@ -287,14 +287,14 @@ jobs:
           cat RELEASE_CHANGELOG.md
 
       - name: Update pubspec.yaml
-        if: ${{ !github.event.inputs.dry_run }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           sed -i "s/^version: .*/version: $NEW_VERSION/" pubspec.yaml
           echo "Updated pubspec.yaml to version $NEW_VERSION"
 
       - name: Update CHANGELOG.md
-        if: ${{ !github.event.inputs.dry_run }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           set -e  # Exit on error
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
@@ -329,7 +329,7 @@ jobs:
           echo "✅ Updated CHANGELOG.md"
 
       - name: Update README.md version badge
-        if: ${{ !github.event.inputs.dry_run }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
 
@@ -339,7 +339,7 @@ jobs:
           echo "✅ Updated README.md version badge to $NEW_VERSION"
 
       - name: Commit version bump
-        if: ${{ !github.event.inputs.dry_run }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -350,7 +350,7 @@ jobs:
           echo "Committed version bump"
 
       - name: Create and push tag
-        if: ${{ !github.event.inputs.dry_run }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           set -e  # Exit on error
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
@@ -366,7 +366,7 @@ jobs:
           echo "✅ Created and pushed tag v$NEW_VERSION"
 
       - name: Create GitHub Release
-        if: ${{ !github.event.inputs.dry_run }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.version.outputs.new_version }}
@@ -403,7 +403,7 @@ jobs:
           generate_release_notes: false
 
       - name: Dry run summary
-        if: ${{ github.event.inputs.dry_run }}
+        if: ${{ github.event.inputs.dry_run == 'true' }}
         run: |
           echo "=== DRY RUN SUMMARY ==="
           echo "New version would be: ${{ steps.version.outputs.new_version }}"
@@ -416,7 +416,7 @@ jobs:
           echo "No changes were made (dry run mode)"
 
       - name: Release summary
-        if: ${{ !github.event.inputs.dry_run }}
+        if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           echo "=== RELEASE SUMMARY ==="
           echo "✅ Released version: ${{ steps.version.outputs.new_version }}"
