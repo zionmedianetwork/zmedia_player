@@ -1087,12 +1087,31 @@ Use repeatMode: RepeatMode.all instead."
 
 ### Release Process
 
+The release workflow respects branch protection rules on `main` by creating a pull request for version bumps:
+
 1. **Commit Analysis**: Analyzes commits since last release
 2. **Version Calculation**: Determines new version using semantic versioning (or uses manual version if specified)
 3. **Changelog Generation**: Auto-generates categorized changelog
 4. **Version Bump**: Updates `pubspec.yaml`, `CHANGELOG.md`, and `README.md` version badge
-5. **Git Tag**: Creates annotated tag `v{version}`
-6. **GitHub Release**: Creates release with generated notes
+5. **Release Branch**: Creates a `release/vX.Y.Z` branch with version bump commits
+6. **Pull Request**: Creates PR to `main` with version changes (triggers required status checks)
+7. **Git Tag**: Creates annotated tag `v{version}` from release branch
+8. **GitHub Release**: Creates release with generated notes
+
+**Branch Protection Compatibility:**
+
+- Release workflow creates a PR instead of pushing directly to `main`
+- This allows required status checks to run before merging version bumps
+- The Git tag and GitHub release are created immediately from the release branch
+- After the PR passes checks, merge it to update `main` with the new version
+
+**Post-Release Steps:**
+
+1. Workflow creates the release and tag automatically
+2. A PR is created for the version bump (e.g., `release/v1.2.3 → main`)
+3. Wait for required status checks to pass on the PR
+4. Merge the PR to update `main` with the new version
+5. Delete the release branch after merge (optional)
 
 **Manual Version Override:**
 
@@ -1106,6 +1125,13 @@ Use repeatMode: RepeatMode.all instead."
 - `pubspec.yaml` - Package version
 - `CHANGELOG.md` - Version history with categorized changes
 - `README.md` - Version badge (`[![Version](https://img.shields.io/badge/version-X.Y.Z-blue.svg)]`)
+
+**Release Branch:**
+
+- Created as `release/vX.Y.Z` (e.g., `release/v1.2.3`)
+- Contains version bump commits
+- Used as source for git tag
+- Can be deleted after PR is merged to `main`
 
 ### Pre-releases
 
