@@ -1087,31 +1087,54 @@ Use repeatMode: RepeatMode.all instead."
 
 ### Release Process
 
-The release workflow respects branch protection rules on `main` by creating a pull request for version bumps:
+The release workflow respects branch protection rules on `main` by creating a release branch for version bumps:
 
 1. **Commit Analysis**: Analyzes commits since last release
 2. **Version Calculation**: Determines new version using semantic versioning (or uses manual version if specified)
 3. **Changelog Generation**: Auto-generates categorized changelog
 4. **Version Bump**: Updates `pubspec.yaml`, `CHANGELOG.md`, and `README.md` version badge
 5. **Release Branch**: Creates a `release/vX.Y.Z` branch with version bump commits
-6. **Pull Request**: Creates PR to `main` with version changes (triggers required status checks)
-7. **Git Tag**: Creates annotated tag `v{version}` from release branch
-8. **GitHub Release**: Creates release with generated notes
+6. **Git Tag**: Creates annotated tag `v{version}` from release branch
+7. **GitHub Release**: Creates release with generated notes
+8. **Manual Merge**: You create a PR or merge the release branch to `main`
 
 **Branch Protection Compatibility:**
 
-- Release workflow creates a PR instead of pushing directly to `main`
-- This allows required status checks to run before merging version bumps
+- Release workflow creates a release branch instead of pushing directly to `main`
+- This allows you to merge via PR (triggers required status checks) or direct merge (if you have admin permissions)
 - The Git tag and GitHub release are created immediately from the release branch
-- After the PR passes checks, merge it to update `main` with the new version
+- You manually merge the release branch to update `main` with the new version
 
 **Post-Release Steps:**
 
-1. Workflow creates the release and tag automatically
-2. A PR is created for the version bump (e.g., `release/v1.2.3 → main`)
-3. Wait for required status checks to pass on the PR
-4. Merge the PR to update `main` with the new version
-5. Delete the release branch after merge (optional)
+After the workflow completes, you'll see instructions with three options:
+
+**Option 1 - Create Pull Request (Recommended):**
+
+```bash
+gh pr create --base main --head release/v1.2.3 \
+  --title "chore(release): v1.2.3" \
+  --body "Automated version bump for v1.2.3"
+```
+
+**Option 2 - Direct Merge (requires admin permissions):**
+
+```bash
+git checkout main
+git merge release/v1.2.3
+git push origin main
+```
+
+**Option 3 - Use GitHub UI:**
+
+Visit the comparison URL provided in the workflow output to create a PR via the web interface.
+
+**After merging:**
+
+```bash
+# Delete the release branch
+git push origin --delete release/v1.2.3
+```
 
 **Manual Version Override:**
 
