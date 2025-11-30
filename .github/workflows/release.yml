@@ -338,29 +338,74 @@ jobs:
 
           echo "✅ Updated README.md version badge to $NEW_VERSION"
 
-      - name: Commit version bump
+      - name: Create release branch and commit version bump
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
+          set -e
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          RELEASE_BRANCH="release/v$NEW_VERSION"
+
+          # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add pubspec.yaml CHANGELOG.md README.md
-          git commit -m "chore(release): bump version to ${{ steps.version.outputs.new_version }}"
+          # Create release branch from main
+          git checkout -b "$RELEASE_BRANCH"
 
-          echo "Committed version bump"
+          # Commit version bump
+          git add pubspec.yaml CHANGELOG.md README.md
+          git commit -m "chore(release): bump version to $NEW_VERSION"
+
+          # Push release branch
+          git push origin "$RELEASE_BRANCH"
+
+          echo "✅ Created and pushed release branch: $RELEASE_BRANCH"
+          echo "release_branch=$RELEASE_BRANCH" >> $GITHUB_OUTPUT
+        id: release_branch
+
+      - name: Create Pull Request for version bump
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          RELEASE_BRANCH="${{ steps.release_branch.outputs.release_branch }}"
+
+          gh pr create \
+            --base main \
+            --head "$RELEASE_BRANCH" \
+            --title "chore(release): v$NEW_VERSION" \
+            --body "$(cat <<'EOF'
+          ## Release v$NEW_VERSION
+
+          Automated version bump for release v$NEW_VERSION.
+
+          ### Changes
+          - Updated \`pubspec.yaml\` to v$NEW_VERSION
+          - Updated \`CHANGELOG.md\` with release notes
+          - Updated \`README.md\` version badge
+
+          ### Changelog
+          ${{ steps.changelog.outputs.changelog }}
+
+          ---
+          🤖 This PR was automatically created by the release workflow.
+          After checks pass and this PR is merged, the release will be available.
+          EOF
+          )"
+
+          echo "✅ Created PR for version bump"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create and push tag
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
-          set -e  # Exit on error
+          set -e
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
 
-          # Create annotated tag
+          # Create annotated tag from release branch
           git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
 
-          # Push to main branch and tag
-          echo "Pushing to main branch"
-          git push origin HEAD:main
+          # Push tag
           git push origin "v$NEW_VERSION"
 
           echo "✅ Created and pushed tag v$NEW_VERSION"
@@ -418,9 +463,17 @@ jobs:
       - name: Release summary
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          RELEASE_BRANCH="${{ steps.release_branch.outputs.release_branch }}"
+
           echo "=== RELEASE SUMMARY ==="
-          echo "✅ Released version: ${{ steps.version.outputs.new_version }}"
-          echo "✅ Tag created: v${{ steps.version.outputs.new_version }}"
+          echo "✅ Released version: v$NEW_VERSION"
+          echo "✅ Release branch created: $RELEASE_BRANCH"
+          echo "✅ Pull request created for version bump"
+          echo "✅ Tag created: v$NEW_VERSION"
           echo "✅ GitHub release created"
           echo ""
-          echo "View release: https://github.com/${{ github.repository }}/releases/tag/v${{ steps.version.outputs.new_version }}"
+          echo "📦 View release: https://github.com/${{ github.repository }}/releases/tag/v$NEW_VERSION"
+          echo "🔀 View PR: https://github.com/${{ github.repository }}/pulls"
+          echo ""
+          echo "⚠️  Note: Merge the version bump PR after status checks pass to update main branch."
