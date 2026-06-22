@@ -1,308 +1,165 @@
-# ZMedia Player Example App
+# ZMedia Player — Feature Gallery Example
 
-A beautiful and comprehensive example app showcasing all features of the ZMedia Player Flutter package.
+A clean, **feature-per-page gallery** app that demonstrates the public API of the
+`zmedia_player` Flutter package. Each page is a focused, self-contained example of
+one capability — load it, read it, copy from it.
 
-## 🎯 Features Demonstrated
+The home screen lists every feature; tap a card to open its demo page. Pages are
+built against the **real public API** only (everything exported from
+`package:zmedia_player/zmedia_player.dart`), initialize/dispose their controllers
+correctly, and surface loading/error states.
 
-### 1. **Simple Player** 📹
-- Basic video playback with default controls
-- Auto-play functionality
-- Play, pause, and seek operations
-- Volume control
-- Real-time state monitoring
-- Fullscreen support
-
-### 2. **Full Featured Player** 🎬
-- Custom video controls with beautiful UI
-- **BoxFit Options**: All 7 BoxFit modes (contain, cover, fill, fitWidth, fitHeight, none, scaleDown)
-- **Speed Control**: Adjustable playback speed from 0.25x to 4.0x
-- **Volume Control**: Fine-grained volume adjustment with slider
-- **Mute/Unmute**: Quick toggle for audio
-- **Video Selection**: Browse and switch between multiple videos
-- **Debug Mode**: Real-time state information display
-- Custom overlay controls with auto-hide
-
-### 3. **Playlist Demo** 📑
-- Full playlist management with 8+ videos
-- **Sequential Playback**: Play videos in order
-- **Shuffle Mode**: Random playback order
-- **Repeat Modes**:
-  - None: Play once and stop
-  - Single: Repeat current video
-  - All: Loop entire playlist
-- Next/Previous track navigation
-- Visual playlist with current item indicator
-- Tap to play any video in the playlist
-
-### 4. **Settings & Configuration** ⚙️
-- Interactive configuration panel
-- **Playback Settings**:
-  - Auto-play toggle
-  - Looping mode
-  - Start muted option
-- **Volume & Speed**:
-  - Volume slider (0-100%)
-  - Speed slider with presets
-- **Display Settings**:
-  - BoxFit mode selection
-  - Show/hide controls toggle
-- **Performance**:
-  - Hardware acceleration toggle
-- **HTTP Headers**:
-  - Add custom headers for authenticated requests
-- **Real-time State Display**:
-  - Current playback state
-  - Position and duration
-  - All active settings
-
-## 🎨 UI/UX Features
-
-### Beautiful Modern Design
-- **Dark Theme**: Elegant dark color scheme
-- **Material Design 3**: Latest Material Design guidelines
-- **Gradient Backgrounds**: Eye-catching gradient effects
-- **Smooth Animations**: Fluid transitions and interactions
-- **Card-based Layout**: Clean and organized interface
-- **Responsive Design**: Adapts to different screen sizes
-
-### Color Palette
-- Primary: Indigo (`#6366F1`)
-- Secondary: Purple (`#8B5CF6`)
-- Accent: Pink (`#EC4899`)
-- Success: Green (`#10B981`)
-- Background: Dark Slate (`#0F172A`)
-- Card: Slate (`#1E293B`)
-
-## 📱 Screenshots
-
-The app features:
-- Gradient app bars with flexible space
-- Feature cards with icons and descriptions
-- Slick video player interface
-- Customizable controls
-- Interactive settings panel
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Flutter 3.19 or higher
-- Dart 3.0 or higher
-- Android SDK (for Android)
-- Xcode (for iOS)
-
-### Running the App
-
-1. Navigate to the example directory:
-```bash
-cd example
-```
-
-2. Install dependencies:
-```bash
-flutter pub get
-```
-
-3. Run the app:
-```bash
-flutter run
-```
-
-## 📦 Package Features Showcased
-
-### Phase 1 Features (Implemented)
-✅ **Basic Media Playback**
-- Play, pause, stop operations
-- Seek to position
-- Volume control with mute
-
-✅ **Cross-Platform Support**
-- Android (ExoPlayer)
-- iOS (AVPlayer)
-
-✅ **HTTP Headers Support**
-- Custom headers for authenticated media
-- Per-request configuration
-
-✅ **BoxFit Support**
-- All 7 Flutter BoxFit options
-- Dynamic BoxFit changes during playback
-
-✅ **Playback Speed Control**
-- Speed range: 0.25x to 4.0x
-- Preset speed options
-- Real-time speed adjustment
-
-✅ **Playlist Management**
-- Sequential and shuffle modes
-- Repeat modes (none, single, all)
-- Next/previous navigation
-- Skip to specific index
-
-✅ **State Management**
-- Comprehensive state tracking
-- Real-time position updates
-- Event streaming
-- Error handling
-
-✅ **Widget Integration**
-- MediaPlayerWidget for video display
-- CustomControls for UI
-- Gesture handling
-- Fullscreen support
-
-## 🎬 Sample Videos
-
-The app includes 8 sample videos from:
-- **Blender Foundation**: Big Buck Bunny, Elephant's Dream, Sintel, Tears of Steel
-- **Google**: Various demo videos
-
-All videos are publicly accessible and used for demonstration purposes.
-
-## 🏗️ Architecture
-
-### File Structure
-```
-example/lib/
-├── main.dart                          # App entry point
-├── pages/
-│   ├── home_page.dart                 # Landing page with feature cards
-│   ├── simple_player_page.dart        # Basic player demo
-│   ├── full_featured_player_page.dart # Advanced player with all features
-│   ├── playlist_demo_page.dart        # Playlist management demo
-│   └── settings_page.dart             # Configuration panel
-├── widgets/
-│   └── custom_controls.dart           # Custom video controls overlay
-└── data/
-    └── sample_videos.dart             # Sample video data
-```
-
-### Key Components
-
-1. **MediaController**: Main controller for player operations
-2. **MediaPlayerWidget**: Video display widget
-3. **CustomControls**: Custom overlay controls
-4. **Sample Videos**: Curated list of demo videos
-
-## 🔧 Configuration Examples
-
-### Basic Configuration
-```dart
-MediaController.create(
-  config: MediaConfig(
-    autoPlay: true,
-    volume: 0.8,
-    showControls: true,
-  ),
-);
-```
-
-### Advanced Configuration
-```dart
-MediaController.create(
-  config: MediaConfig(
-    autoPlay: false,
-    looping: true,
-    boxFit: BoxFit.contain,
-    volume: 1.0,
-    speed: 1.5,
-    startMuted: false,
-    httpHeaders: {
-      'Authorization': 'Bearer your-token',
-      'User-Agent': 'YourApp/1.0',
-    },
-    showControls: true,
-    useHardwareAcceleration: true,
-  ),
-);
-```
-
-## 📚 Learning Resources
-
-### Topics Covered
-- Flutter video playback
-- State management with ChangeNotifier
-- Custom widget creation
-- Playlist management
-- Platform channels
-- Material Design 3
-- Responsive UI design
-- Error handling
-
-## 🎯 Use Cases
-
-This example app demonstrates solutions for:
-- Video streaming apps
-- Educational platforms
-- Entertainment apps
-- Video conferencing
-- Media libraries
-- Content management systems
-
-## 🔮 Future Enhancements (Planned)
-
-### Phase 2
-- HLS/DASH streaming support
-- Subtitle support (SRT, WebVTT)
-- Alternative resolution selection
-- Cache system for offline playback
-
-### Phase 3
-- Picture-in-Picture (PiP) mode
-- ListView integration
-- Media notifications
-- Background playback
-- AirPlay and Chromecast support
-
-### Phase 4
-- DRM support (Widevine, FairPlay)
-- Performance optimizations
-- Comprehensive testing
-- Additional documentation
-
-## 🤝 Contributing
-
-Feel free to:
-- Report bugs
-- Suggest features
-- Submit pull requests
-- Improve documentation
-
-## 📄 License
-
-This example app is part of the ZMedia Player package and follows the same license.
-
-## 💡 Tips
-
-1. **For Best Performance**: Enable hardware acceleration in settings
-2. **Network Testing**: Try different videos to test network handling
-3. **Playlist Testing**: Use shuffle and repeat modes to test playlist behavior
-4. **Speed Testing**: Try extreme speeds (0.25x and 4.0x) to test stability
-5. **BoxFit Testing**: Compare different BoxFit modes with various video aspect ratios
-
-## 🐛 Troubleshooting
-
-### Video Not Playing
-- Check internet connection
-- Verify video URL is accessible
-- Check device permissions
-
-### Performance Issues
-- Enable hardware acceleration
-- Close other apps
-- Check device capabilities
-
-### Controls Not Showing
-- Tap the video to toggle controls
-- Check showControls setting
-- Verify controls timeout setting
-
-## 📞 Support
-
-For issues or questions:
-- Check the main package README
-- Review the code examples
-- Open an issue on GitHub
+> This example has been exercised on a **physical iPhone (iOS 26)** — playback,
+> fullscreen, custom controls, adaptive streaming/quality, subtitles, background
+> audio, and lock‑screen notification controls were all verified on-device. The
+> features that still need your own infrastructure or hardware (DRM, casting) are
+> called out below.
 
 ---
 
-**Made with ❤️ using Flutter and ZMedia Player**
+## Requirements
+
+- **Flutter** ≥ 3.19, **Dart** ≥ 3.0
+- **iOS** 12.0+ (a physical device is required for DRM/FairPlay, PiP, casting, and
+  to hear background audio over the silent switch)
+- **Android** API 21+ (API 26+ for Picture-in-Picture)
+
+The example app depends on the package via a local `path:` reference (`../`), so no
+publishing step is needed.
+
+## Running the app
+
+```bash
+cd example
+flutter pub get
+flutter run                 # pick a device when prompted
+flutter run -d <device-id>  # or target a specific device (flutter devices)
+```
+
+First iOS build runs CocoaPods and a full Xcode build, so it can take a few
+minutes. For a physical iPhone you must configure code signing once in Xcode
+(open `example/ios/Runner.xcworkspace` → Runner target → Signing & Capabilities →
+select your Team).
+
+---
+
+## Feature pages
+
+| Page | File | Public API exercised |
+|------|------|----------------------|
+| **Simple Playback** | `pages/simple_playback_page.dart` | `MediaController.create` · `initialize` · `load(MediaItem)` · `play`/`pause`/`stop` · `seekForward`/`seekBackward` · `setVolume` · `toggleMute` |
+| **Playlist** | `pages/playlist_page.dart` | `setPlaylist(Playlist)` · `skipToNext`/`skipToPrevious`/`skipToIndex` · `RepeatMode` (none/all/single) · `PlaybackMode` (sequential/shuffle) · auto-advance on completion |
+| **Adaptive Streaming & Quality** | `pages/streaming_quality_page.dart` | `player.qualityTracksStream` · `setQualityTrack` · `enableAutoQuality` · `player.bandwidthStream` · HLS & DASH sources |
+| **Subtitles** | `pages/subtitles_page.dart` | `setSubtitleTrack` · `disableSubtitles` · `player.subtitleTracksStream` · `selectedSubtitleTrack` · `SubtitleConfig` |
+| **DRM (Widevine / FairPlay / EZDRM)** | `pages/drm_page.dart` | `DrmConfig.widevine` · `DrmConfig.fairplay(certificateUrl:)` · `DrmConfig.ezdrm` · `EzdrmConfig` · `CertificatePinningConfig` · `player.drmSessionStream` |
+| **Picture-in-Picture** | `pages/pip_page.dart` | `checkPipAvailability` · `enterPictureInPicture`/`exitPictureInPicture` · `pipStatusStream` · `PipConfig` |
+| **Casting (Chromecast / AirPlay)** | `pages/casting_page.dart` | `startCastDiscovery`/`stopCastDiscovery` · `connectToCastDevice`/`connectAndLoadMedia`/`disconnectFromCastDevice` · `castStatusStream` · `player.castDevicesStream` · `AirPlayButton` |
+| **Media Notifications** | `pages/notifications_page.dart` | `NotificationService` · `NotificationConfig` · `initialize(mediaPlayer:)` · `show`/`dismiss` · `actionStream` (lock-screen / Control Center controls) |
+| **Fullscreen Playback** | `pages/fullscreen_page.dart` | `FullscreenMediaPlayer` · `MaterialFullscreenPlayer` · a single `MediaController` shared across routes |
+| **Adaptive Controls** | `pages/adaptive_controls_page.dart` | `AdaptiveMediaControls` (Material vs Cupertino) · `MaterialMediaControls` · `CupertinoMediaControls` · a minimal `CustomControlsBase` subclass |
+| **Fully Custom Controls & Overlay** | `pages/custom_controls_page.dart` | `CustomControlsBase` → `buildControls(context, state)` with `ControlsState`; a hand-built branded overlay (custom seek bar, gestures, speed/quality pickers) injected via `MediaPlayerWidget.customControls` |
+| **Error Handling** | `pages/error_handling_page.dart` | `MediaPlayerException` hierarchy · `PlayerState.error` · `PlaybackState.errorMessage` · `player.stateStream` |
+
+---
+
+## Sample media
+
+All sample sources are defined in `lib/data/sample_media.dart`. They were chosen to
+be **reachable and to carry an audio track** (so the audio/notification demos are
+meaningful):
+
+| Source | URL | Notes |
+|--------|-----|-------|
+| Big Buck Bunny (primary) | `https://www.w3schools.com/html/mov_bbb.mp4` | Direct HTTP 200, has audio — reliable first-load |
+| Big Buck Bunny (full · 10 min) | `https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4` | Long clip for seek/playlist/notification tests; served via a 302 redirect so the first load can be slightly slower |
+| Bee / Butterfly | `https://flutter.github.io/assets-for-api-docs/assets/videos/{bee,butterfly}.mp4` | Short Flutter test clips, both have audio |
+| HLS (Apple bipbop, fMP4) | `https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8` | Multi-bitrate adaptive stream for the Quality/Subtitles pages |
+| DASH (Akamai BBB 30fps) | `https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd` | Multi-bitrate DASH for the Quality page |
+
+> The previously-used Google `commondatastorage.googleapis.com/gtv-videos-bucket`
+> samples now return **HTTP 403** and have been removed. Some popular
+> `test-videos.co.uk` clips are **video-only** (no audio) and are intentionally not
+> used for the playback demos.
+
+---
+
+## Features that need a real device or extra setup
+
+### DRM (Widevine / FairPlay / EZDRM)
+- The DRM page demonstrates how to **construct** the config; it does not ship a live
+  protected stream. Supply your own protected URL **and** license server.
+- **Widevine:** Android device (API 21+); L1 needs a non-rooted device.
+- **FairPlay:** iOS **physical device** with a valid FPS certificate + license
+  server. `certificateUrl` is **required** by `DrmConfig.fairplay` (no default).
+- `CertificatePinningConfig` pins are `hex(SHA-256(SPKI))`; pinning is enforced
+  natively on the DRM license requests.
+
+### Picture-in-Picture
+- **iOS:** physical device (AVPictureInPictureController).
+- **Android:** API 26+. The example's `android/.../MainActivity.kt` relays
+  `onPictureInPictureModeChanged` to the plugin (required for PiP state).
+- `checkPipAvailability()` returns `false` on unsupported devices; the button
+  disables accordingly.
+
+### Casting (Chromecast / AirPlay)
+- **Chromecast:** Google Play Services + a Chromecast on the same Wi-Fi.
+- **AirPlay:** an Apple TV / AirPlay display on the same Wi-Fi. `AirPlayButton`
+  renders on iOS only.
+
+### Media notifications (lock screen / Control Center)
+- **iOS:** Now Playing info + remote commands. Background audio requires
+  `UIBackgroundModes: audio` in `ios/Runner/Info.plist` (already configured here),
+  and the app sets the audio session to `.playback` on play so audio is audible
+  with the **silent switch on** and continues in the background.
+- **Android 13+:** `POST_NOTIFICATIONS` runtime permission.
+- The demo loads a short **playlist** so all lock-screen controls are exercisable:
+  play/pause, next/previous, and ±10s skip.
+
+### Quality tracks (HLS / DASH)
+- Tracks are reported by the native player **after you press Play** and buffering
+  starts — they won't appear before playback begins.
+
+### Subtitles
+- In-stream subtitle tracks require a stream that carries them (use the HLS source).
+  Plain MP4s report no tracks; the package does not sideload external subtitle files
+  from Dart alone.
+
+---
+
+## Project structure
+
+```
+example/
+  lib/
+    main.dart                       # App entry (dark Material 3, orientation reset on launch)
+    data/
+      sample_media.dart             # Reusable MediaItem / Playlist sample constants
+    pages/
+      home_page.dart                # Feature gallery (cards → pages)
+      simple_playback_page.dart
+      playlist_page.dart
+      streaming_quality_page.dart
+      subtitles_page.dart
+      drm_page.dart
+      pip_page.dart
+      casting_page.dart
+      notifications_page.dart
+      fullscreen_page.dart
+      adaptive_controls_page.dart
+      custom_controls_page.dart     # Flagship: fully bespoke overlay via CustomControlsBase
+      error_handling_page.dart
+    widgets/
+      feature_card.dart             # Card used on the home screen
+      player_scaffold.dart          # Shared scaffold: AppBar + 16:9 player + scrollable body
+  android/                          # Runner (PiP relay + permissions)
+  ios/                              # Runner (background-audio mode, signing)
+```
+
+---
+
+## See also
+
+- Package API and guides: the repository [`README.md`](../README.md) and
+  [`docs/`](../docs).
+- Building custom controls: start from the **Fully Custom Controls & Overlay** page,
+  which doubles as documentation for extending `CustomControlsBase`.
