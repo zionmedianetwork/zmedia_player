@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../core/media_controller.dart';
 import '../models/player_state.dart';
@@ -68,6 +69,9 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
   BufferHealth? _currentBufferHealth;
   List<QualityTrack>? _qualityTracks;
 
+  StreamSubscription<BufferHealth>? _bufferHealthSubscription;
+  StreamSubscription<List<QualityTrack>>? _qualityTracksSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -76,8 +80,9 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
   }
 
   void _setupListeners() {
-    // Listen to buffer health updates
-    widget.controller.player.bufferHealthStream.listen((health) {
+    // Listen to buffer health updates — store subscription for cancellation
+    _bufferHealthSubscription =
+        widget.controller.player.bufferHealthStream.listen((health) {
       if (mounted) {
         setState(() {
           _currentBufferHealth = health;
@@ -85,8 +90,9 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
       }
     });
 
-    // Listen to quality track updates
-    widget.controller.player.qualityTracksStream.listen((tracks) {
+    // Listen to quality track updates — store subscription for cancellation
+    _qualityTracksSubscription =
+        widget.controller.player.qualityTracksStream.listen((tracks) {
       if (mounted) {
         setState(() {
           _qualityTracks = tracks;
@@ -109,6 +115,8 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
 
   @override
   void dispose() {
+    _bufferHealthSubscription?.cancel();
+    _qualityTracksSubscription?.cancel();
     _fadeController.dispose();
     super.dispose();
   }

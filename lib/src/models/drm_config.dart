@@ -230,6 +230,12 @@ class EzdrmConfig {
   /// Content ID
   final String contentId;
 
+  /// FairPlay certificate URL.
+  ///
+  /// Required when [_isFairPlay] is true. Must be provided explicitly via
+  /// [EzdrmConfig.fairplay]; there is no default fallback URL.
+  final String? _certificateUrl;
+
   /// License URL (auto-generated from customer ID)
   String get licenseUrl {
     // Widevine license URL
@@ -240,13 +246,11 @@ class EzdrmConfig {
     return 'https://fps.ezdrm.com/api/licenses/$customerId';
   }
 
-  /// Certificate URL for FairPlay
-  String? get certificateUrl {
-    if (_isFairPlay) {
-      return 'https://fps.ezdrm.com/demo/video/eleisure.cer';
-    }
-    return null;
-  }
+  /// Certificate URL for FairPlay.
+  ///
+  /// Returns null for non-FairPlay configurations. For FairPlay configurations
+  /// this returns the URL supplied at construction time.
+  String? get certificateUrl => _isFairPlay ? _certificateUrl : null;
 
   /// HTTP headers for EZDRM requests
   Map<String, String> get headers {
@@ -266,8 +270,10 @@ class EzdrmConfig {
     required this.contentId,
     bool isWidevine = false,
     bool isFairPlay = false,
+    String? certificateUrl,
   })  : _isWidevine = isWidevine,
-        _isFairPlay = isFairPlay;
+        _isFairPlay = isFairPlay,
+        _certificateUrl = certificateUrl;
 
   /// Create EZDRM config for Widevine (Android)
   factory EzdrmConfig.widevine({
@@ -283,17 +289,22 @@ class EzdrmConfig {
     );
   }
 
-  /// Create EZDRM config for FairPlay (iOS)
+  /// Create EZDRM config for FairPlay (iOS).
+  ///
+  /// [certificateUrl] is required and must point to the FPS certificate for
+  /// the content provider. There is no default fallback URL.
   factory EzdrmConfig.fairplay({
     required String customerId,
     required String apiKey,
     required String contentId,
+    required String certificateUrl,
   }) {
     return EzdrmConfig(
       customerId: customerId,
       apiKey: apiKey,
       contentId: contentId,
       isFairPlay: true,
+      certificateUrl: certificateUrl,
     );
   }
 
@@ -304,6 +315,7 @@ class EzdrmConfig {
       'contentId': contentId,
       'isWidevine': _isWidevine,
       'isFairPlay': _isFairPlay,
+      'certificateUrl': _certificateUrl,
     };
   }
 
@@ -314,6 +326,7 @@ class EzdrmConfig {
       contentId: map['contentId'] as String,
       isWidevine: map['isWidevine'] as bool? ?? false,
       isFairPlay: map['isFairPlay'] as bool? ?? false,
+      certificateUrl: map['certificateUrl'] as String?,
     );
   }
 }
