@@ -3,6 +3,7 @@ package com.zionmedianetwork.zmedia_player
 import com.google.android.exoplayer2.ExoPlayer
 import com.google.android.exoplayer2.DefaultLoadControl
 import com.google.android.exoplayer2.LoadControl
+import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
 
 /**
  * Handler for adaptive buffer management in ExoPlayer.
@@ -150,9 +151,19 @@ class BufferingHandler {
     }
 
     /**
-     * Gets buffer health metrics from ExoPlayer
+     * Gets buffer health metrics from ExoPlayer.
+     *
+     * @param player     The ExoPlayer instance.
+     * @param bandwidthMeter  Optional [DefaultBandwidthMeter] shared with the
+     *   player.  When provided its [bitrateEstimate] (measured bits/sec) is
+     *   used for [downloadSpeed] instead of the declared track bitrate.
+     *   DEVICE VERIFICATION REQUIRED: confirm the value tracks real network
+     *   changes on a physical device.
      */
-    fun getBufferHealth(player: ExoPlayer?): Map<String, Any> {
+    fun getBufferHealth(
+        player: ExoPlayer?,
+        bandwidthMeter: DefaultBandwidthMeter? = null
+    ): Map<String, Any> {
         if (player == null) {
             return mapOf(
                 "bufferedDurationMs" to 0,
@@ -168,13 +179,15 @@ class BufferingHandler {
 
         val bufferedDuration = (bufferedPosition - currentPosition).coerceAtLeast(0)
 
-        // Get download speed estimate from bandwidth meter
-        val downloadSpeed = try {
-            // ExoPlayer's bandwidth estimate is in bits per second
-            // Convert to bytes per second
-            (player.currentTracks.groups.firstOrNull()?.mediaTrackGroup?.getFormat(0)?.bitrate ?: 0) / 8
+        // Use measured bitrateEstimate (bits/sec) from the bandwidth meter when
+        // available.  Fall back to 0 when the meter has not yet observed any
+        // download (e.g. before the first media chunk has been fetched).
+        // The Dart onBandwidthChanged handler stores bandwidth in bits/sec so no
+        // unit conversion is needed here.
+        val downloadSpeed: Long = try {
+            bandwidthMeter?.bitrateEstimate ?: 0L
         } catch (e: Exception) {
-            0
+            0L
         }
 
         return mapOf(

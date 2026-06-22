@@ -30,15 +30,8 @@ class SubtitleService {
       List<SubtitleCue> cues;
 
       if (track.url != null && track.url!.isNotEmpty) {
-        // Check if it's a real URL (not a placeholder)
-        if (track.url!.startsWith('http') &&
-            !track.url!.contains('example.com')) {
-          // Load from URL
-          cues = await _loadFromUrl(track.url!, track.format);
-        } else {
-          // This is a placeholder URL, return empty cues
-          cues = [];
-        }
+        // Load from any non-empty URL.
+        cues = await _loadFromUrl(track.url!, track.format);
       } else {
         // No URL provided, return empty cues
         cues = [];

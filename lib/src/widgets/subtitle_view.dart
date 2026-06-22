@@ -56,52 +56,23 @@ class _SubtitleViewState extends State<SubtitleView> {
     }
   }
 
-  /// Load available subtitle tracks
+  /// Load available subtitle tracks from the subtitle service's current state.
+  ///
+  /// The widget itself has no media-source access; real tracks are pushed into
+  /// [SubtitleService] by the player.  We read whatever the service already
+  /// has rather than fabricating placeholder URLs.
   Future<void> _loadAvailableTracks() async {
-    // This would typically load tracks from the media source
-    // For now, we'll create some example tracks with sample content
-    _availableTracks = [
-      SubtitleTrack(
-        id: 'en',
-        title: 'English',
-        language: 'en',
-        format: SubtitleFormat.srt,
-        isDefault: true,
-        url: 'https://example.com/sample_en.srt', // Placeholder URL
-      ),
-      SubtitleTrack(
-        id: 'es',
-        title: 'Spanish',
-        language: 'es',
-        format: SubtitleFormat.srt,
-        url: 'https://example.com/sample_es.srt', // Placeholder URL
-      ),
-      SubtitleTrack(
-        id: 'fr',
-        title: 'French',
-        language: 'fr',
-        format: SubtitleFormat.srt,
-        url: 'https://example.com/sample_fr.srt', // Placeholder URL
-      ),
-    ];
-
-    // Set default track - but don't try to load if no real URL
-    if (_availableTracks.isNotEmpty) {
-      _selectedTrack = _availableTracks.firstWhere(
-        (track) => track.isDefault,
-        orElse: () => _availableTracks.first,
-      );
-
-      // For demo purposes, create sample subtitles
-      // In a real app, you would load actual subtitle files
-      if (_selectedTrack != null) {
-        try {
-          await widget.subtitleService.setActiveTrack(_selectedTrack!);
-        } catch (e) {
-          // Using sample subtitles for demonstration
-          // The service will handle this gracefully now
-        }
-      }
+    // Derive available tracks from the service's current active track, if any.
+    // When the player later provides tracks (e.g. via a platform callback)
+    // the caller is expected to rebuild this widget with an updated service,
+    // which will trigger didUpdateWidget → _loadAvailableTracks again.
+    final active = widget.subtitleService.activeTrack;
+    if (active != null) {
+      _availableTracks = [active];
+      _selectedTrack = active;
+    } else {
+      _availableTracks = [];
+      _selectedTrack = null;
     }
 
     setState(() {});
@@ -267,10 +238,10 @@ class SubtitleViewWithControls extends StatelessWidget {
   final bool showControls;
 
   const SubtitleViewWithControls({
-    Key? key,
+    super.key,
     required this.subtitleView,
     this.showControls = true,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

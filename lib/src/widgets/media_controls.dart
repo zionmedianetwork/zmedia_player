@@ -1855,105 +1855,13 @@ class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
           position: _slideAnimation,
           child: Stack(
             children: [
-              // Fullscreen video player - use the dedicated FullscreenMediaPlayer
+              // Fullscreen video player — FullscreenMediaPlayer renders its own
+              // MediaControls overlay which owns the single top bar.  No
+              // duplicate header or dead PiP button is added here.
               Positioned.fill(
                 child: FullscreenMediaPlayer(
                   controller: widget.controller,
                   backgroundColor: Colors.black,
-                ),
-              ),
-
-              // Enhanced fullscreen header
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withValues(alpha: 0.7),
-                        Colors.transparent,
-                      ],
-                    ),
-                  ),
-                  child: SafeArea(
-                    child: Row(
-                      children: [
-                        // Modern exit button
-                        Container(
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.5),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: IconButton(
-                            onPressed: _exitFullscreen,
-                            icon: const Icon(
-                              FluentIcons.full_screen_minimize_20_regular,
-                              color: Colors.white,
-                            ),
-                            tooltip: 'Exit Fullscreen',
-                          ),
-                        ),
-
-                        const SizedBox(width: 16),
-
-                        // Enhanced title with media info
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Fullscreen Mode',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              /*if (widget.controller.currentMediaTitle != null)
-                                Text(
-                                  widget.controller.currentMediaTitle!,
-                                  style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.8),
-                                    fontSize: 14,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),*/
-                            ],
-                          ),
-                        ),
-
-                        // Additional controls
-                        Row(
-                          children: [
-                            // Picture-in-picture button (if supported)
-                            Container(
-                              decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                borderRadius: BorderRadius.circular(20),
-                              ),
-                              child: IconButton(
-                                onPressed: () {
-                                  // Implement PiP functionality
-                                  HapticFeedback.lightImpact();
-                                },
-                                icon: const Icon(
-                                  FluentIcons.picture_in_picture_20_regular,
-                                  color: Colors.white,
-                                ),
-                                tooltip: 'Picture in Picture',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ),
 

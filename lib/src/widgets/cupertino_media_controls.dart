@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show Colors;
+import 'package:flutter/services.dart';
 import '../core/media_controller.dart';
 import '../models/player_state.dart';
 import '../models/buffer_health.dart';
@@ -11,7 +12,9 @@ import 'components/time_display.dart';
 import 'components/live_badge.dart';
 import 'components/quality_badge.dart';
 import 'components/buffer_health_badge.dart';
+import 'components/volume_slider.dart';
 import 'menus/settings_menu.dart';
+import 'media_player_widget.dart';
 
 /// Cupertino (iOS) media controls widget
 ///
@@ -66,6 +69,7 @@ class CupertinoMediaControls extends StatefulWidget {
 class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
     with SingleTickerProviderStateMixin {
   bool _showControls = true;
+  bool _showVolumeSlider = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
   BufferHealth? _currentBufferHealth;
@@ -154,6 +158,29 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
     );
   }
 
+  void _toggleVolumeSlider() {
+    setState(() {
+      _showVolumeSlider = !_showVolumeSlider;
+    });
+    HapticFeedback.lightImpact();
+  }
+
+  void _toggleFullscreen() {
+    HapticFeedback.mediumImpact();
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            _CupertinoFullscreenPlayerRoute(
+          controller: widget.controller,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final brightness = widget.brightness ?? Brightness.dark;
@@ -230,6 +257,26 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
               );
             },
           ),
+
+          // Volume overlay — shown above the bottom bar when toggled
+          if (_showVolumeSlider)
+            Positioned(
+              left: 16,
+              bottom: 96,
+              child: AnimatedBuilder(
+                animation: widget.controller,
+                builder: (context, child) => VolumeSlider(
+                  value: widget.controller.volume,
+                  isMuted: widget.controller.isMuted,
+                  onChanged: (value) => widget.controller.setVolume(value),
+                  onMuteToggle: () => widget.controller.toggleMute(),
+                  orientation: VolumeSliderOrientation.horizontal,
+                  activeColor: CupertinoColors.white,
+                  sliderLength: 120,
+                  showPercentage: false,
+                ),
+              ),
+            ),
 
           // Main controls with blur background
           AnimatedBuilder(
@@ -508,33 +555,47 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
                   const SizedBox(height: 16),
 
                   // Control buttons row
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
+                  AnimatedBuilder(
+                    animation: widget.controller,
+                    builder: (context, child) {
+                      final isMuted = widget.controller.isMuted;
+                      final vol = widget.controller.volume;
+                      final IconData volumeIcon;
+                      if (isMuted || vol == 0.0) {
+                        volumeIcon = CupertinoIcons.speaker_slash_fill;
+                      } else if (vol < 0.4) {
+                        volumeIcon = CupertinoIcons.speaker_1_fill;
+                      } else {
+                        volumeIcon = CupertinoIcons.speaker_2_fill;
+                      }
+                      return Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          // Volume button
-                          _buildIOSButton(
-                            icon: CupertinoIcons.speaker_2_fill,
-                            onPressed: () {
-                              // Volume control (placeholder)
-                            },
+                          Row(
+                            children: [
+                              // Volume button — toggles a horizontal VolumeSlider
+                              // overlay anchored above the bottom bar.
+                              _buildIOSButton(
+                                icon: volumeIcon,
+                                onPressed: _toggleVolumeSlider,
+                              ),
+                            ],
+                          ),
+                          Row(
+                            children: [
+                              // Fullscreen button — mirrors MediaControls._toggleFullscreen:
+                              // pushes _CupertinoFullscreenPlayerRoute via Navigator.push
+                              // with a FadeTransition, which handles orientation + system UI.
+                              if (widget.showFullscreen)
+                                _buildIOSButton(
+                                  icon: CupertinoIcons.fullscreen,
+                                  onPressed: _toggleFullscreen,
+                                ),
+                            ],
                           ),
                         ],
-                      ),
-                      Row(
-                        children: [
-                          // Fullscreen button
-                          if (widget.showFullscreen)
-                            _buildIOSButton(
-                              icon: CupertinoIcons.fullscreen,
-                              onPressed: () {
-                                // Fullscreen toggle (placeholder)
-                              },
-                            ),
-                        ],
-                      ),
-                    ],
+                      );
+                    },
                   ),
                 ],
               ),
@@ -594,6 +655,100 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
                   ? CupertinoColors.white
                   : CupertinoColors.white.withValues(alpha: 0.4),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Private fullscreen route used by [CupertinoMediaControls].
+///
+/// Mirrors the mechanism in MediaControls._toggleFullscreen: forces landscape,
+/// hides system UI, and delegates rendering to [FullscreenMediaPlayer] whose
+/// built-in controls own the single top bar.  No duplicate header or dead
+/// buttons are added here.
+class _CupertinoFullscreenPlayerRoute extends StatefulWidget {
+  final MediaController controller;
+
+  const _CupertinoFullscreenPlayerRoute({required this.controller});
+
+  @override
+  State<_CupertinoFullscreenPlayerRoute> createState() =>
+      _CupertinoFullscreenPlayerRouteState();
+}
+
+class _CupertinoFullscreenPlayerRouteState
+    extends State<_CupertinoFullscreenPlayerRoute>
+    with TickerProviderStateMixin {
+  late AnimationController _slideController;
+  late Animation<Offset> _slideAnimation;
+  bool _isExiting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+    _slideController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideController,
+      curve: Curves.easeOutCubic,
+    ));
+    _slideController.forward();
+  }
+
+  @override
+  void dispose() {
+    _restoreSystemSettings();
+    _slideController.dispose();
+    super.dispose();
+  }
+
+  void _restoreSystemSettings() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  Future<void> _exitFullscreen() async {
+    if (_isExiting) return;
+    setState(() => _isExiting = true);
+    HapticFeedback.lightImpact();
+    await _slideController.reverse();
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop) await _exitFullscreen();
+      },
+      child: CupertinoPageScaffold(
+        backgroundColor: CupertinoColors.black,
+        child: SlideTransition(
+          position: _slideAnimation,
+          child: FullscreenMediaPlayer(
+            controller: widget.controller,
+            backgroundColor: Colors.black,
           ),
         ),
       ),
