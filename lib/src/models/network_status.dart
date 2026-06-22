@@ -309,9 +309,9 @@ class NetworkChangeEvent {
         connectionRestored =
             previousStatus?.isAvailable == false && currentStatus.isAvailable,
         qualityImproved = previousStatus != null &&
-            currentStatus.quality.index > previousStatus.quality.index,
+            currentStatus.quality.index < previousStatus.quality.index,
         qualityDegraded = previousStatus != null &&
-            currentStatus.quality.index < previousStatus.quality.index;
+            currentStatus.quality.index > previousStatus.quality.index;
 
   /// Checks if this is a significant change requiring action
   bool get isSignificant {

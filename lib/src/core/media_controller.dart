@@ -4,6 +4,7 @@ import '../models/media_item.dart';
 import '../models/player_state.dart';
 import '../models/playlist.dart';
 import '../models/subtitle_track.dart';
+import '../models/streaming_config.dart';
 import '../models/pip_config.dart';
 import '../models/cast_device.dart';
 import 'media_player.dart';
@@ -35,6 +36,13 @@ class MediaController extends ChangeNotifier {
   /// Whether an operation is in progress (for preventing race conditions)
   bool _operationInProgress = false;
 
+  /// When the current operation lock was acquired (used for staleness detection)
+  DateTime? _operationStartedAt;
+
+  /// How long before a held lock is considered stale (matches the
+  /// .timeout() inside _executeOperation so they agree)
+  static const Duration _operationTimeout = Duration(seconds: 10);
+
   /// Last position update time to prevent excessive notifications
   DateTime _lastPositionUpdate = DateTime.now();
 
@@ -44,7 +52,6 @@ class MediaController extends ChangeNotifier {
   /// Create a media controller with the given player instance
   MediaController(this._player) {
     _setupSubscriptions();
-    _startOperationStateMonitor();
   }
 
   /// Create a media controller with optional configuration
@@ -73,6 +80,18 @@ class MediaController extends ChangeNotifier {
 
   /// Currently selected subtitle track
   SubtitleTrack? get selectedSubtitleTrack => _player.selectedSubtitleTrack;
+
+  /// Available quality tracks
+  List<QualityTrack> get qualityTracks => _player.qualityTracks;
+
+  /// Currently selected quality track
+  QualityTrack? get selectedQualityTrack => _player.selectedQualityTrack;
+
+  /// Available audio tracks
+  List<AudioTrack> get audioTracks => _player.audioTracks;
+
+  /// Currently selected audio track
+  AudioTrack? get selectedAudioTrack => _player.selectedAudioTrack;
 
   /// Whether controls are visible
   bool get controlsVisible => _controlsVisible;
@@ -457,6 +476,45 @@ class MediaController extends ChangeNotifier {
     }
   }
 
+  /// Set video quality track
+  Future<void> setQualityTrack(QualityTrack track) async {
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.setQualityTrack(track));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error setting quality track: $e');
+      rethrow;
+    }
+  }
+
+  /// Enable automatic quality selection (adaptive bitrate)
+  Future<void> enableAutoQuality() async {
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.enableAutoQuality());
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error enabling auto quality: $e');
+      rethrow;
+    }
+  }
+
+  /// Set audio track
+  Future<void> setAudioTrack(AudioTrack track) async {
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(() => _player.setAudioTrack(track));
+      _showControlsTemporarily();
+    } catch (e) {
+      debugPrint('MediaController: Error setting audio track: $e');
+      rethrow;
+    }
+  }
+
   // Control visibility methods
   /// Show controls
   void showControls() {
@@ -543,39 +601,60 @@ class MediaController extends ChangeNotifier {
 
   // Private methods
 
-  /// Execute an operation with race condition protection
+  /// Execute an operation with race condition protection.
+  ///
+  /// The lock is acquired before the operation starts and is ALWAYS released
+  /// in a [finally] block — it can never get permanently stuck.  If the lock
+  /// is already held we first check whether the holder has exceeded
+  /// [_operationTimeout] (stale lock), and treat it as expired only if so.
+  /// Non-critical operations that arrive while a fresh lock is held are
+  /// rejected immediately rather than waiting; critical ones wait briefly.
   Future<T> _executeOperation<T>(Future<T> Function() operation) async {
-    // Allow certain operations to proceed even if others are in progress
     if (_operationInProgress) {
-      // Wait a short time for the current operation to complete
-      await Future.delayed(const Duration(milliseconds: 100));
+      // Check if the current lock is stale (exceeded the operation timeout).
+      final started = _operationStartedAt;
+      final isStale = started != null &&
+          DateTime.now().difference(started) > _operationTimeout;
 
-      // If still in progress, check if it's a critical operation
-      if (_operationInProgress) {
+      if (isStale) {
+        // The timeout handler inside the operation body already cleared the
+        // flag, but defensively reset both fields here.
         debugPrint(
-            'MediaController: Operation in progress, queuing: ${operation.toString()}');
-        // For non-critical operations, throw OperationBusyException
-        if (_isNonCriticalOperation(operation)) {
-          throw const OperationBusyException(
-            'Non-critical operation skipped - another operation in progress',
-          );
-        }
-        // For critical operations, wait a bit more
-        await Future.delayed(const Duration(milliseconds: 200));
+            'MediaController: Clearing stale lock (held > ${_operationTimeout.inSeconds}s)');
+        _operationInProgress = false;
+        _operationStartedAt = null;
+      } else {
+        // Lock is held by a live operation.
+        await Future.delayed(const Duration(milliseconds: 100));
+
         if (_operationInProgress) {
-          throw StateError('Another operation is already in progress');
+          debugPrint(
+              'MediaController: Operation in progress, queuing: ${operation.toString()}');
+          if (_isNonCriticalOperation(operation)) {
+            throw const OperationBusyException(
+              'Non-critical operation skipped - another operation in progress',
+            );
+          }
+          await Future.delayed(const Duration(milliseconds: 200));
+          if (_operationInProgress) {
+            throw StateError('Another operation is already in progress');
+          }
         }
       }
     }
 
     _operationInProgress = true;
+    _operationStartedAt = DateTime.now();
     try {
-      // Add timeout to prevent operations from getting stuck
       return await operation().timeout(
-        const Duration(seconds: 10),
+        _operationTimeout,
         onTimeout: () {
+          // Timeout handler clears the lock so subsequent calls are not
+          // blocked; the finally below will also run and is a no-op.
           _operationInProgress = false;
-          throw TimeoutException('Operation timed out after 10 seconds');
+          _operationStartedAt = null;
+          throw TimeoutException(
+              'Operation timed out after ${_operationTimeout.inSeconds} seconds');
         },
       );
     } catch (e) {
@@ -583,6 +662,7 @@ class MediaController extends ChangeNotifier {
       rethrow;
     } finally {
       _operationInProgress = false;
+      _operationStartedAt = null;
     }
   }
 
@@ -611,27 +691,6 @@ class MediaController extends ChangeNotifier {
 
   /// Check if an operation is currently in progress
   bool get isOperationInProgress => _operationInProgress;
-
-  /// Timer for monitoring operation state
-  Timer? _operationStateTimer;
-
-  /// Start monitoring operation state to prevent stuck operations
-  void _startOperationStateMonitor() {
-    _operationStateTimer?.cancel();
-    _operationStateTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      if (_isDisposed) {
-        timer.cancel();
-        return;
-      }
-
-      // If an operation has been in progress for more than 5 seconds, reset it
-      if (_operationInProgress) {
-        debugPrint(
-            'MediaController: Operation state monitor detected stuck operation, resetting');
-        _resetOperationState();
-      }
-    });
-  }
 
   /// Setup stream subscriptions with proper error handling
   void _setupSubscriptions() {
@@ -691,6 +750,62 @@ class MediaController extends ChangeNotifier {
           },
           onError: (error) {
             debugPrint('MediaController: Subtitle tracks stream error: $error');
+          },
+        ),
+      );
+
+      // Quality tracks stream subscription
+      _subscriptions.add(
+        _player.qualityTracksStream.listen(
+          (_) {
+            if (!_isDisposed) {
+              _notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('MediaController: Quality tracks stream error: $error');
+          },
+        ),
+      );
+
+      // Audio tracks stream subscription
+      _subscriptions.add(
+        _player.audioTracksStream.listen(
+          (_) {
+            if (!_isDisposed) {
+              _notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('MediaController: Audio tracks stream error: $error');
+          },
+        ),
+      );
+
+      // Volume stream subscription
+      _subscriptions.add(
+        _player.volumeStream.listen(
+          (_) {
+            if (!_isDisposed) {
+              _notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('MediaController: Volume stream error: $error');
+          },
+        ),
+      );
+
+      // Speed stream subscription
+      _subscriptions.add(
+        _player.speedStream.listen(
+          (_) {
+            if (!_isDisposed) {
+              _notifyListeners();
+            }
+          },
+          onError: (error) {
+            debugPrint('MediaController: Speed stream error: $error');
           },
         ),
       );
@@ -899,7 +1014,6 @@ class MediaController extends ChangeNotifier {
 
     // Cancel timers
     _cancelControlsTimer();
-    _operationStateTimer?.cancel();
 
     // Cancel all subscriptions
     _cleanupSubscriptions();
