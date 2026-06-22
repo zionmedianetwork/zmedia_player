@@ -17,6 +17,7 @@ class NotificationService {
   bool _isShowing = false;
   MediaItem? _currentMedia;
   StreamSubscription<String>? _notificationActionSubscription;
+  StreamSubscription<PlaybackState>? _stateSubscription;
 
   NotificationService(this._config);
 
@@ -43,6 +44,14 @@ class NotificationService {
           if (!_actionController.isClosed) {
             _actionController.add(action);
           }
+        });
+
+        // Keep the platform's Now Playing info (lock screen / Control Center)
+        // in sync with real playback state. Without this the widget's
+        // play/pause button stays frozen at the state captured by show(), so
+        // its controls appear dead. updateState is a no-op while not showing.
+        _stateSubscription = mediaPlayer.stateStream.listen((state) {
+          updateState(state: state, playerId: playerId);
         });
       }
 
@@ -161,6 +170,8 @@ class NotificationService {
   void dispose() {
     _notificationActionSubscription?.cancel();
     _notificationActionSubscription = null;
+    _stateSubscription?.cancel();
+    _stateSubscription = null;
     _actionController.close();
   }
 }
