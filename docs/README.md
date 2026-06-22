@@ -150,12 +150,17 @@ ZMedia Player is a production-ready Flutter media player package that provides:
 - [Security Audit](implementation/security.md)
 - [Better Player Comparison](implementation/better-player-comparison.md)
 - [Better Player Parity](implementation/better-player-parity.md)
+- [Codebase Audit & Remediation Roadmap](implementation/codebase-audit.md)
 
 ### Summary
 - [Complete Feature List](summary/features.md)
 - [Development Phases](summary/phases.md)
 - [Test Coverage Report](summary/test-coverage.md)
 - [Production Readiness](summary/production-readiness.md)
+
+### Releases
+- [Release Notes Index](releases/README.md)
+- [v0.1.0 Release Notes](releases/RELEASE_NOTES_v0.1.0.md)
 
 ---
 
