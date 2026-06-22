@@ -26,9 +26,18 @@ class NotificationHandler(
     private val methodChannel: MethodChannel
 ) {
     companion object {
-        private const val NOTIFICATION_ID = 1001
         private const val TAG = "NotificationHandler"
     }
+
+    // Per-instance notification ID derived from playerId so that multiple concurrent
+    // player instances do not overwrite or cancel each other's notifications.
+    // hashCode() can be negative; AND with 0x7FFFFFFF ensures a positive value and
+    // avoids 0 (which is reserved/invalid for notification IDs on some Android versions).
+    private val notificationId: Int = (playerId.hashCode() and 0x7FFFFFFF).let { if (it == 0) 1 else it }
+
+    // Owned scope: all coroutines are cancelled in dispose() to prevent leaks.
+    // Main dispatcher matches the original intent (invokeMethod must run on Main).
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     private var notificationManager: NotificationManager? = null
     private var mediaSession: MediaSessionCompat? = null
@@ -194,7 +203,7 @@ class NotificationHandler(
     fun dismiss() {
         android.util.Log.d(TAG, "Dismissing notification")
 
-        notificationManager?.cancel(NOTIFICATION_ID)
+        notificationManager?.cancel(notificationId)
         mediaSession?.isActive = false
         isShowing = false
         currentArtworkBitmap = null
@@ -205,6 +214,9 @@ class NotificationHandler(
      */
     fun dispose() {
         android.util.Log.d(TAG, "Disposing notification handler")
+
+        // Cancel all coroutines owned by this handler (artwork loading, action forwarding).
+        scope.cancel()
 
         dismiss()
         mediaSession?.release()
@@ -217,7 +229,7 @@ class NotificationHandler(
     private fun buildAndShowNotification() {
         val notification = buildNotification()
         this.notification = notification
-        notificationManager?.notify(NOTIFICATION_ID, notification)
+        notificationManager?.notify(notificationId, notification)
     }
 
     private fun buildNotification(): Notification {
@@ -336,8 +348,8 @@ class NotificationHandler(
     }
 
     private fun loadArtwork(url: String) {
-        // Load artwork asynchronously
-        CoroutineScope(Dispatchers.IO).launch {
+        // Load artwork asynchronously on the IO dispatcher via the owned scope.
+        scope.launch(Dispatchers.IO) {
             try {
                 val connection = URL(url).openConnection()
                 connection.connect()
@@ -359,7 +371,7 @@ class NotificationHandler(
     }
 
     private fun sendActionToFlutter(action: String) {
-        CoroutineScope(Dispatchers.Main).launch {
+        scope.launch {
             methodChannel.invokeMethod("onNotificationAction", mapOf(
                 "playerId" to playerId,
                 "action" to action

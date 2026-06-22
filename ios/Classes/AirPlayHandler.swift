@@ -11,7 +11,10 @@ class AirPlayHandler: NSObject {
     private var routePickerView: AVRoutePickerView?
     private var isAirPlayActive: Bool = false
     private var currentRoute: AVAudioSessionRouteDescription?
-    private var isObservingExternalPlayback: Bool = false  // Track KVO observation state
+
+    // Block-based KVO token for AVPlayer.isExternalPlaybackActive.
+    // Invalidated in dispose() and auto-invalidated on dealloc.
+    private var externalPlaybackObservation: NSKeyValueObservation?
 
     // Configuration
     private var config: [String: Any]?
@@ -35,11 +38,9 @@ class AirPlayHandler: NSObject {
 
         self.config = config
 
-        // Remove observer from previous player
-        if let oldPlayer = self.player, isObservingExternalPlayback {
-            oldPlayer.removeObserver(self, forKeyPath: "externalPlaybackActive")
-            isObservingExternalPlayback = false
-        }
+        // Invalidate any existing block-based observation before switching players.
+        externalPlaybackObservation?.invalidate()
+        externalPlaybackObservation = nil
 
         self.player = player
 
@@ -48,9 +49,35 @@ class AirPlayHandler: NSObject {
             player.allowsExternalPlayback = true
             player.usesExternalPlaybackWhileExternalScreenIsActive = true
 
-            // Add observer for external playback
-            player.addObserver(self, forKeyPath: "externalPlaybackActive", options: [.new, .old], context: nil)
-            isObservingExternalPlayback = true
+            // Block-based KVO — safer than string-keyPath KVO because:
+            //   • The observation token self-invalidates on dealloc (no dangling observer crash).
+            //   • The keypath is type-checked at compile time.
+            //   • No need for an observeValue override or manual remove tracking.
+            externalPlaybackObservation = player.observe(
+                \.isExternalPlaybackActive,
+                options: [.new, .old]
+            ) { [weak self] _, change in
+                guard let self = self else { return }
+
+                let isActive = change.newValue ?? false
+                print("AirPlayHandler: External playback active changed: \(isActive)")
+
+                self.isAirPlayActive = isActive
+
+                if isActive {
+                    self.notifyCastStatusChanged(
+                        state: "connected",
+                        device: self.getCurrentDevice(),
+                        isCasting: true
+                    )
+                } else {
+                    self.notifyCastStatusChanged(
+                        state: "disconnected",
+                        device: nil,
+                        isCasting: false
+                    )
+                }
+            }
         }
 
         // Check initial AirPlay availability
@@ -429,38 +456,6 @@ class AirPlayHandler: NSObject {
         }
     }
 
-    // MARK: - KVO
-
-    override func observeValue(
-        forKeyPath keyPath: String?,
-        of object: Any?,
-        change: [NSKeyValueChangeKey : Any]?,
-        context: UnsafeMutableRawPointer?
-    ) {
-        if keyPath == "externalPlaybackActive" {
-            guard let player = object as? AVPlayer else { return }
-
-            let isActive = player.isExternalPlaybackActive
-            print("AirPlayHandler: External playback active changed: \(isActive)")
-
-            isAirPlayActive = isActive
-
-            if isActive {
-                notifyCastStatusChanged(
-                    state: "connected",
-                    device: getCurrentDevice(),
-                    isCasting: true
-                )
-            } else {
-                notifyCastStatusChanged(
-                    state: "disconnected",
-                    device: nil,
-                    isCasting: false
-                )
-            }
-        }
-    }
-
     // MARK: - Status Getters
 
     func getStatus() -> [String: Any] {
@@ -481,14 +476,12 @@ class AirPlayHandler: NSObject {
     func dispose() {
         print("AirPlayHandler: Disposing")
 
-        // Remove NotificationCenter observers
+        // Remove NotificationCenter observers (route change notifications).
         NotificationCenter.default.removeObserver(self)
 
-        // Remove KVO observer safely
-        if let player = player, isObservingExternalPlayback {
-            player.removeObserver(self, forKeyPath: "externalPlaybackActive")
-            isObservingExternalPlayback = false
-        }
+        // Invalidate block-based KVO observation for isExternalPlaybackActive.
+        externalPlaybackObservation?.invalidate()
+        externalPlaybackObservation = nil
 
         routePickerView = nil
         player = nil
