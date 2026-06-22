@@ -7,7 +7,7 @@ import '../widgets/player_scaffold.dart';
 /// - [MediaController.setPlaylist] to load a [Playlist]
 /// - [MediaController.skipToNext] / [MediaController.skipToPrevious]
 /// - [MediaController.skipToIndex] for direct track selection
-/// - [RepeatMode] cycling (none → single → all)
+/// - [MediaRepeatMode] cycling (none → single → all)
 /// - [PlaybackMode] toggling (sequential ↔ shuffle)
 /// - Auto-advance on completion (handled natively)
 ///
@@ -24,7 +24,7 @@ class _PlaylistPageState extends State<PlaylistPage> {
   late final MediaController _controller;
 
   PlaybackMode _mode = PlaybackMode.sequential;
-  RepeatMode _repeatMode = RepeatMode.none;
+  MediaRepeatMode _repeatMode = MediaRepeatMode.none;
   bool _isLoading = false;
   String? _error;
 
@@ -115,9 +115,9 @@ class _PlaylistPageState extends State<PlaylistPage> {
 
 class _ModeControls extends StatelessWidget {
   final PlaybackMode mode;
-  final RepeatMode repeatMode;
+  final MediaRepeatMode repeatMode;
   final ValueChanged<PlaybackMode> onModeChanged;
-  final ValueChanged<RepeatMode> onRepeatChanged;
+  final ValueChanged<MediaRepeatMode> onRepeatChanged;
 
   const _ModeControls({
     required this.mode,
@@ -149,19 +149,19 @@ class _ModeControls extends StatelessWidget {
         // Repeat modes
         ChoiceChip(
           label: const Text('No Repeat'),
-          selected: repeatMode == RepeatMode.none,
-          onSelected: (_) => onRepeatChanged(RepeatMode.none),
+          selected: repeatMode == MediaRepeatMode.none,
+          onSelected: (_) => onRepeatChanged(MediaRepeatMode.none),
         ),
         ChoiceChip(
           label: const Text('Repeat One'),
-          selected: repeatMode == RepeatMode.single,
-          onSelected: (_) => onRepeatChanged(RepeatMode.single),
+          selected: repeatMode == MediaRepeatMode.single,
+          onSelected: (_) => onRepeatChanged(MediaRepeatMode.single),
           avatar: const Icon(Icons.repeat_one, size: 16),
         ),
         ChoiceChip(
           label: const Text('Repeat All'),
-          selected: repeatMode == RepeatMode.all,
-          onSelected: (_) => onRepeatChanged(RepeatMode.all),
+          selected: repeatMode == MediaRepeatMode.all,
+          onSelected: (_) => onRepeatChanged(MediaRepeatMode.all),
           avatar: const Icon(Icons.repeat, size: 16),
         ),
       ],

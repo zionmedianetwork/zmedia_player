@@ -151,7 +151,7 @@ final playlist = Playlist(
     ),
   ],
   mode: PlaybackMode.sequential,
-  repeatMode: RepeatMode.all,
+  repeatMode: MediaRepeatMode.all,
 );
 
 // Set the playlist
@@ -678,7 +678,7 @@ Playlist(
   items: [mediaItem1, mediaItem2],
   currentIndex: 0,
   mode: PlaybackMode.sequential,  // or PlaybackMode.shuffle
-  repeatMode: RepeatMode.none,    // none, single, or all
+  repeatMode: MediaRepeatMode.none,    // none, single, or all
 )
 ```
 

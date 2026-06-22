@@ -170,7 +170,7 @@ class SampleMedia {
   /// Returns a [Playlist] suitable for the playlist demo page.
   static Playlist samplePlaylist({
     PlaybackMode mode = PlaybackMode.sequential,
-    RepeatMode repeatMode = RepeatMode.none,
+    MediaRepeatMode repeatMode = MediaRepeatMode.none,
   }) {
     return Playlist(
       id: 'sample_playlist',

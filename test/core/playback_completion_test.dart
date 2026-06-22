@@ -3,7 +3,7 @@
 //  Fix A — Playlist auto-advance on completion (_handlePlaybackCompleted):
 //    When state transitions to PlayerState.completed, the player should:
 //    • Call skipToIndex(nextIndex) then play() for a multi-item playlist.
-//    • Do nothing (no advance) at the last item with RepeatMode.none.
+//    • Do nothing (no advance) at the last item with MediaRepeatMode.none.
 //    • With no playlist and config.looping == true: call seekTo(0) then play().
 //    • Guard: a second consecutive 'completed' event must not re-advance.
 //
@@ -112,7 +112,7 @@ void main() {
     test(
         'completed at non-last item: issues skipToIndex(nextIndex) then play()',
         () async {
-      // Arrange: 3-item playlist, sequential, RepeatMode.none, at index 0.
+      // Arrange: 3-item playlist, sequential, MediaRepeatMode.none, at index 0.
       final calls = _installCapture();
       final player = MediaPlayer(playerId: 'cmp-advance-1');
       await player.initialize();
@@ -123,7 +123,7 @@ void main() {
         items: _items,
         currentIndex: 0,
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.none,
+        repeatMode: MediaRepeatMode.none,
       );
       await player.setPlaylist(playlist);
       calls.clear(); // ignore setup calls
@@ -164,7 +164,7 @@ void main() {
 
     // -----------------------------------------------------------------------
     test(
-        'completed at last item with RepeatMode.none: does NOT issue skipToIndex or play',
+        'completed at last item with MediaRepeatMode.none: does NOT issue skipToIndex or play',
         () async {
       // Arrange: at the last item (index 2), no repeat.
       final calls = _installCapture();
@@ -177,7 +177,7 @@ void main() {
         items: _items,
         currentIndex: 2, // last
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.none,
+        repeatMode: MediaRepeatMode.none,
       );
       await player.setPlaylist(playlist);
       calls.clear();
@@ -191,7 +191,7 @@ void main() {
         methodNames.contains('skipToIndex'),
         isFalse,
         reason:
-            'No skipToIndex must be sent when at the last item with RepeatMode.none',
+            'No skipToIndex must be sent when at the last item with MediaRepeatMode.none',
       );
       // play() is also not expected to be called by the auto-advance logic.
       // (A standalone play() call from the test itself would be a different story.)
@@ -199,7 +199,7 @@ void main() {
         methodNames.contains('play'),
         isFalse,
         reason:
-            'No play must be sent when at the last item with RepeatMode.none',
+            'No play must be sent when at the last item with MediaRepeatMode.none',
       );
 
       await player.dispose();
@@ -254,7 +254,7 @@ void main() {
         items: _items,
         currentIndex: 0,
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.none,
+        repeatMode: MediaRepeatMode.none,
       );
       await player.setPlaylist(playlist);
       calls.clear();
@@ -293,7 +293,7 @@ void main() {
 
     // -----------------------------------------------------------------------
     test(
-        'completed at last item with RepeatMode.all: wraps to index 0 and plays',
+        'completed at last item with MediaRepeatMode.all: wraps to index 0 and plays',
         () async {
       final calls = _installCapture();
       final player = MediaPlayer(playerId: 'cmp-all-wrap');
@@ -305,7 +305,7 @@ void main() {
         items: _items,
         currentIndex: 2, // last
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.all,
+        repeatMode: MediaRepeatMode.all,
       );
       await player.setPlaylist(playlist);
       calls.clear();
@@ -318,14 +318,14 @@ void main() {
       expect(
         methodNames,
         containsAllInOrder(['skipToIndex', 'play']),
-        reason: 'RepeatMode.all at last item must wrap to first and play',
+        reason: 'MediaRepeatMode.all at last item must wrap to first and play',
       );
 
       final skipCall = calls.firstWhere((c) => c.method == 'skipToIndex');
       expect(
         skipCall.arguments['index'],
         0,
-        reason: 'RepeatMode.all must wrap to index 0',
+        reason: 'MediaRepeatMode.all must wrap to index 0',
       );
 
       await player.dispose();

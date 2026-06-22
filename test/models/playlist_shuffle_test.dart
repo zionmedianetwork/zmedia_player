@@ -166,7 +166,7 @@ void main() {
     });
 
     test(
-        'traversal with shuffle+RepeatMode.none visits every item exactly once then returns null',
+        'traversal with shuffle+MediaRepeatMode.none visits every item exactly once then returns null',
         () {
       // Use 8 items for a meaningful test — small enough to be deterministic
       // in each run but large enough to catch sequential ordering with high
@@ -178,7 +178,7 @@ void main() {
         items: items,
         currentIndex: 0,
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.none,
+        repeatMode: MediaRepeatMode.none,
       ).copyWith(mode: PlaybackMode.shuffle);
 
       final order = shuffled.shuffleOrder!;
@@ -191,7 +191,7 @@ void main() {
         visited.length,
         items.length - 1,
         reason:
-            'With RepeatMode.none traversal must visit every item exactly once '
+            'With MediaRepeatMode.none traversal must visit every item exactly once '
             'then return null',
       );
 
@@ -219,7 +219,7 @@ void main() {
     });
 
     test(
-        'traversal with shuffle+RepeatMode.none traversal order != sequential for 8 items (statistical guard)',
+        'traversal with shuffle+MediaRepeatMode.none traversal order != sequential for 8 items (statistical guard)',
         () {
       // Run 5 independent shuffled playlists and assert that AT LEAST ONE
       // produces a non-sequential order. The probability all five are sequential
@@ -235,7 +235,7 @@ void main() {
           items: items,
           currentIndex: 0,
           mode: PlaybackMode.sequential,
-          repeatMode: RepeatMode.none,
+          repeatMode: MediaRepeatMode.none,
         ).copyWith(mode: PlaybackMode.shuffle);
 
         final visited = _traverseNext(shuffled);
@@ -255,7 +255,7 @@ void main() {
     });
 
     test(
-        'shuffle+RepeatMode.all: after the last shuffled item, nextIndex wraps to shuffleOrder.first',
+        'shuffle+MediaRepeatMode.all: after the last shuffled item, nextIndex wraps to shuffleOrder.first',
         () {
       final items = _makeItems(5);
       final shuffled = Playlist(
@@ -264,7 +264,7 @@ void main() {
         items: items,
         currentIndex: 0,
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.all,
+        repeatMode: MediaRepeatMode.all,
       ).copyWith(mode: PlaybackMode.shuffle);
 
       final order = shuffled.shuffleOrder!;
@@ -276,11 +276,11 @@ void main() {
         atLast.nextIndex,
         order.first,
         reason:
-            'RepeatMode.all must wrap nextIndex from the last shuffled item back to shuffleOrder.first',
+            'MediaRepeatMode.all must wrap nextIndex from the last shuffled item back to shuffleOrder.first',
       );
     });
 
-    test('shuffle+RepeatMode.single: nextIndex returns currentIndex', () {
+    test('shuffle+MediaRepeatMode.single: nextIndex returns currentIndex', () {
       final items = _makeItems(5);
       final shuffled = Playlist(
         id: 'pl-shuffle-single',
@@ -288,14 +288,14 @@ void main() {
         items: items,
         currentIndex: 2,
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.single,
+        repeatMode: MediaRepeatMode.single,
       ).copyWith(mode: PlaybackMode.shuffle);
 
       expect(
         shuffled.nextIndex,
         2,
         reason:
-            'RepeatMode.single must always return currentIndex regardless of shuffle mode',
+            'MediaRepeatMode.single must always return currentIndex regardless of shuffle mode',
       );
     });
 
@@ -310,7 +310,7 @@ void main() {
         items: items,
         currentIndex: 0,
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.none,
+        repeatMode: MediaRepeatMode.none,
       ).copyWith(mode: PlaybackMode.shuffle);
 
       final order = shuffled.shuffleOrder!;
@@ -332,7 +332,7 @@ void main() {
     });
 
     test(
-        'shuffle+RepeatMode.all: previousIndex at shuffleOrder.first wraps to shuffleOrder.last',
+        'shuffle+MediaRepeatMode.all: previousIndex at shuffleOrder.first wraps to shuffleOrder.last',
         () {
       final items = _makeItems(5);
       final shuffled = Playlist(
@@ -341,7 +341,7 @@ void main() {
         items: items,
         currentIndex: 0,
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.all,
+        repeatMode: MediaRepeatMode.all,
       ).copyWith(mode: PlaybackMode.shuffle);
 
       final order = shuffled.shuffleOrder!;
@@ -352,7 +352,7 @@ void main() {
         atFirst.previousIndex,
         order.last,
         reason:
-            'RepeatMode.all must wrap previousIndex from shuffleOrder.first to shuffleOrder.last',
+            'MediaRepeatMode.all must wrap previousIndex from shuffleOrder.first to shuffleOrder.last',
       );
     });
 
@@ -364,7 +364,7 @@ void main() {
         items: items,
         currentIndex: 0,
         mode: PlaybackMode.sequential,
-        repeatMode: RepeatMode.none,
+        repeatMode: MediaRepeatMode.none,
       ).copyWith(mode: PlaybackMode.shuffle);
 
       // Call nextIndex three times on the same immutable instance.

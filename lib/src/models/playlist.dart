@@ -20,7 +20,7 @@ class Playlist {
   final PlaybackMode mode;
 
   /// Whether the playlist should repeat
-  final RepeatMode repeatMode;
+  final MediaRepeatMode repeatMode;
 
   /// Additional metadata
   final Map<String, dynamic>? metadata;
@@ -36,7 +36,7 @@ class Playlist {
     required this.items,
     this.currentIndex = 0,
     this.mode = PlaybackMode.sequential,
-    this.repeatMode = RepeatMode.none,
+    this.repeatMode = MediaRepeatMode.none,
     this.metadata,
     this.shuffleOrder,
   });
@@ -67,7 +67,7 @@ class Playlist {
     List<MediaItem>? items,
     int? currentIndex,
     PlaybackMode? mode,
-    RepeatMode? repeatMode,
+    MediaRepeatMode? repeatMode,
     Map<String, dynamic>? metadata,
     List<int>? shuffleOrder,
   }) {
@@ -109,11 +109,11 @@ class Playlist {
   /// Whether there is a next item available
   bool get hasNext {
     switch (repeatMode) {
-      case RepeatMode.all:
+      case MediaRepeatMode.all:
         return items.isNotEmpty;
-      case RepeatMode.single:
+      case MediaRepeatMode.single:
         return true;
-      case RepeatMode.none:
+      case MediaRepeatMode.none:
         return currentIndex < items.length - 1;
     }
   }
@@ -121,11 +121,11 @@ class Playlist {
   /// Whether there is a previous item available
   bool get hasPrevious {
     switch (repeatMode) {
-      case RepeatMode.all:
+      case MediaRepeatMode.all:
         return items.isNotEmpty;
-      case RepeatMode.single:
+      case MediaRepeatMode.single:
         return true;
-      case RepeatMode.none:
+      case MediaRepeatMode.none:
         return currentIndex > 0;
     }
   }
@@ -156,36 +156,36 @@ class Playlist {
 
   int? _getNextSequentialIndex() {
     switch (repeatMode) {
-      case RepeatMode.single:
+      case MediaRepeatMode.single:
         return currentIndex;
-      case RepeatMode.all:
+      case MediaRepeatMode.all:
         return (currentIndex + 1) % items.length;
-      case RepeatMode.none:
+      case MediaRepeatMode.none:
         return currentIndex < items.length - 1 ? currentIndex + 1 : null;
     }
   }
 
   int? _getPreviousSequentialIndex() {
     switch (repeatMode) {
-      case RepeatMode.single:
+      case MediaRepeatMode.single:
         return currentIndex;
-      case RepeatMode.all:
+      case MediaRepeatMode.all:
         return currentIndex > 0 ? currentIndex - 1 : items.length - 1;
-      case RepeatMode.none:
+      case MediaRepeatMode.none:
         return currentIndex > 0 ? currentIndex - 1 : null;
     }
   }
 
   int? _getNextShuffleIndex() {
     if (items.isEmpty) return null;
-    if (repeatMode == RepeatMode.single) return currentIndex;
+    if (repeatMode == MediaRepeatMode.single) return currentIndex;
 
     final order = _effectiveShuffleOrder;
     final pos = order.indexOf(currentIndex);
     final nextPos = pos + 1;
     if (nextPos < order.length) return order[nextPos];
     // Reached the end of the shuffled order.
-    return repeatMode == RepeatMode.all ? order.first : null;
+    return repeatMode == MediaRepeatMode.all ? order.first : null;
   }
 
   /// The shuffle order to traverse, falling back to identity order if none was
@@ -198,14 +198,14 @@ class Playlist {
 
   int? _getPreviousShuffleIndex() {
     if (items.isEmpty) return null;
-    if (repeatMode == RepeatMode.single) return currentIndex;
+    if (repeatMode == MediaRepeatMode.single) return currentIndex;
 
     final order = _effectiveShuffleOrder;
     final pos = order.indexOf(currentIndex);
     final prevPos = pos - 1;
     if (prevPos >= 0) return order[prevPos];
     // Reached the start of the shuffled order.
-    return repeatMode == RepeatMode.all ? order.last : null;
+    return repeatMode == MediaRepeatMode.all ? order.last : null;
   }
 
   /// Add an item to the playlist
@@ -284,7 +284,7 @@ enum PlaybackMode {
 }
 
 /// Repeat mode for playlists
-enum RepeatMode {
+enum MediaRepeatMode {
   /// No repeat
   none,
 

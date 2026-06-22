@@ -1120,7 +1120,7 @@ git commit -m "fix: Resolve memory leak in MediaController"
 git commit -m "refactor!: Remove deprecated autoLoop parameter
 
 BREAKING CHANGE: The autoLoop parameter has been removed.
-Use repeatMode: RepeatMode.all instead."
+Use repeatMode: MediaRepeatMode.all instead."
 ```
 
 ### Release Process
