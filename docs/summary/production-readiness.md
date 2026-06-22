@@ -1,10 +1,20 @@
 # Production Readiness Report - ZMedia Player
 
+> ⚠️ **Superseded (historical, v0.1.0).** This Oct 2025 report predates the codebase
+> audit, which found correctness and security defects that contradicted the
+> "ready for production" conclusion (e.g. DRM handlers that were never wired,
+> certificate pinning that wasn't enforced). Much of that has since been remediated
+> (P0–P2), but the **native layers still require on-device verification** and the
+> package is **not yet validated production-ready end-to-end**. Treat this as a
+> historical snapshot; see the
+> [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md) for
+> current status.
+
 ## Executive Summary
 
 **Date:** October 19, 2025
 **Version:** Phase 4 Complete
-**Status:** ✅ **READY FOR PRODUCTION**
+**Status (as of v0.1.0):** ✅ **READY FOR PRODUCTION** — *see superseding note above*
 
 ZMedia Player has successfully completed Phase 4 (DRM & Polish) and is now production-ready with comprehensive testing, security measures, and documentation.
 

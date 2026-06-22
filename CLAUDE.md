@@ -266,7 +266,7 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 ### Instance Management
 - **MediaPlayer uses factory pattern with instance registry**
 - Each playerId gets a unique instance stored in `_instances` map
-- Background cleanup timer removes stale instances (30min inactivity)
+- Background cleanup timer removes stale instances (15min inactivity)
 - Always dispose controllers to prevent memory leaks
 
 ### Error Handling
@@ -314,8 +314,14 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - Performance tests have specific latency targets (e.g., <100ms for DRM init)
 
 ### Test Coverage
-- Current: 113/113 tests passing
-- Focus on state management, playlist logic, DRM configuration, error handling
+- Run `flutter test` for the current pass count (the suite has grown well past the
+  original 113 as audit-remediation work added regression coverage)
+- Coverage is strongest in the Dart layer: state management, playlist logic, DRM/
+  config models, MethodChannel event routing, subtitle parsing, retry/backoff, and
+  value-model equality
+- **Gaps:** native Android/Kotlin and iOS/Swift code has no automated tests; several
+  native features (DRM decryption, certificate pinning, casting, bandwidth metering)
+  are implemented but still require on-device verification
 - Performance benchmarks included for critical paths
 
 ## Important Implementation Details

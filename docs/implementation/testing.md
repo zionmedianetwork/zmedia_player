@@ -501,6 +501,5 @@ For questions about testing:
 
 ---
 
-**Last Updated:** October 19, 2025
-**Test Coverage:** 95% (Models), TBD (Overall)
-**Status:** ✅ Production Ready
+**Test Coverage:** strong in the Dart layer; **no automated native tests yet**
+**Status:** 🚧 Active development — native layers need on-device verification

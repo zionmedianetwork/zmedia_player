@@ -2,6 +2,12 @@
 
 Complete overview of all four development phases for the ZMedia Player.
 
+> ⚠️ **Historical record (v0.1.0).** "Production Ready" and the 113/113 test figures
+> below describe the Oct 2025 release. The project is now in audit-driven hardening:
+> the Dart layer is well-tested but the native layers require on-device verification
+> and are not yet validated production-ready end-to-end. See the
+> [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
+
 ---
 
 ## Phase 1: Core Functionality ✅

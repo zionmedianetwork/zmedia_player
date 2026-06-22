@@ -2,13 +2,18 @@
 
 High-level overview of development progress, completed features, and project status.
 
+> ⚠️ **Historical (v0.1.0).** The "Production Ready / 113 tests / 100%" figures below
+> are the Oct 2025 release snapshot. The project is now in audit-driven hardening: the
+> Dart suite has grown to 350+ tests, but native code has no automated tests and needs
+> on-device verification. See the
+> [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
+
 ---
 
-## 📊 Project Status: **COMPLETE** ✅
+## 📊 Project Status (v0.1.0): **feature-complete, hardening in progress** 🚧
 
 **Version:** 0.1.0
-**Status:** Production Ready
-**Test Coverage:** 113/113 tests passing (100%)
+**Status:** 🚧 Active development — native layers need on-device verification
 **Last Updated:** October 19, 2025
 
 ---
