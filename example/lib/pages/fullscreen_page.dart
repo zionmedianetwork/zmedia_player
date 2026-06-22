@@ -79,21 +79,18 @@ class _FullscreenPageState extends State<FullscreenPage> {
   /// This variant lets you customise the controls in fullscreen while still
   /// using [MediaPlayerWidget] as the video surface.
   Future<void> _enterMaterialFullscreen() async {
+    // Reuse the built-in FullscreenMediaPlayer wrapper (handles orientation, the
+    // video surface, and an always-visible exit button) but supply
+    // MaterialFullscreenPlayer as the controls overlay.
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          body: MediaPlayerWidget(
+        builder: (_) => FullscreenMediaPlayer(
+          controller: _controller,
+          customControls: MaterialFullscreenPlayer(
             controller: _controller,
-            expandToFill: true,
-            backgroundColor: Colors.black,
-            customControls: MaterialFullscreenPlayer(
-              controller: _controller,
-              title: SampleMedia.bigBuckBunny.title,
-              showSettings: true,
-              showPip: true,
-              onExitFullscreen: () => Navigator.of(context).pop(),
-            ),
+            title: SampleMedia.bigBuckBunny.title,
+            showSettings: true,
+            showPip: true,
           ),
         ),
         fullscreenDialog: true,

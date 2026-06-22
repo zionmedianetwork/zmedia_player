@@ -12,86 +12,99 @@ class SampleMedia {
   // Base URLs
   // ---------------------------------------------------------------------------
 
-  static const _gcs =
-      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample';
+  // Reliable progressive MP4 sources that include BOTH video and audio tracks.
+  // NOTE: the old Google GCS sample bucket
+  // (commondatastorage.googleapis.com/gtv-videos-bucket) now returns HTTP 403.
+  // The test-videos.co.uk clips are reachable but VIDEO-ONLY (no audio), so we
+  // use sources verified (via ffprobe) to carry an audio track: archive.org's
+  // full Big Buck Bunny, Flutter's bee/butterfly clips, and W3Schools' BBB clip.
+  static const _bbbFull =
+      'https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4';
+  static const _bbbShort = 'https://www.w3schools.com/html/mov_bbb.mp4';
+  static const _bee =
+      'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4';
+  static const _butterfly =
+      'https://flutter.github.io/assets-for-api-docs/assets/videos/butterfly.mp4';
 
   // ---------------------------------------------------------------------------
-  // Individual MP4 items
+  // Individual MP4 items (all sources include an audio track)
   // ---------------------------------------------------------------------------
 
   static const bigBuckBunny = MediaItem(
     id: 'bbb',
     title: 'Big Buck Bunny',
     artist: 'Blender Foundation',
-    url: '$_gcs/BigBuckBunny.mp4',
+    // Direct HTTP 200 (no redirect) + audio — reliable first-load on iOS.
+    url: _bbbShort,
     artworkUrl:
         'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Big_buck_bunny_poster_big.jpg/800px-Big_buck_bunny_poster_big.jpg',
-    duration: Duration(minutes: 9, seconds: 56),
+    duration: Duration(seconds: 10),
     mediaType: MediaType.video,
   );
 
   static const elephantsDream = MediaItem(
-    id: 'ed',
-    title: 'Elephants Dream',
-    artist: 'Blender Foundation',
-    url: '$_gcs/ElephantsDream.mp4',
-    artworkUrl:
-        'https://upload.wikimedia.org/wikipedia/commons/thumb/6/6c/Elephants_Dream_s5_both.jpg/800px-Elephants_Dream_s5_both.jpg',
-    duration: Duration(minutes: 10, seconds: 54),
+    id: 'butterfly',
+    title: 'Butterfly',
+    artist: 'Flutter',
+    url: _butterfly,
+    duration: Duration(seconds: 4),
     mediaType: MediaType.video,
   );
 
   static const forBiggerBlazes = MediaItem(
-    id: 'fbb',
-    title: 'For Bigger Blazes',
-    artist: 'Google',
-    url: '$_gcs/ForBiggerBlazes.mp4',
-    duration: Duration(seconds: 15),
+    id: 'bbb_short',
+    title: 'Big Buck Bunny (short)',
+    artist: 'Blender Foundation',
+    url: _bbbShort,
+    duration: Duration(seconds: 10),
     mediaType: MediaType.video,
   );
 
   static const forBiggerEscapes = MediaItem(
-    id: 'fbe',
-    title: 'For Bigger Escapes',
-    artist: 'Google',
-    url: '$_gcs/ForBiggerEscapes.mp4',
-    duration: Duration(seconds: 15),
+    id: 'bee',
+    title: 'Bee',
+    artist: 'Flutter',
+    url: _bee,
+    duration: Duration(seconds: 5),
     mediaType: MediaType.video,
   );
 
+  // Full 10-minute Big Buck Bunny (archive.org). Served via a 302 redirect, so
+  // the first load can be slightly slower — kept as a longer sample for
+  // seek/playlist demos, not as the primary item.
   static const forBiggerFun = MediaItem(
-    id: 'fbf',
-    title: 'For Bigger Fun',
-    artist: 'Google',
-    url: '$_gcs/ForBiggerFun.mp4',
-    duration: Duration(seconds: 60),
+    id: 'bbb_full',
+    title: 'Big Buck Bunny (full · 10 min)',
+    artist: 'Blender Foundation',
+    url: _bbbFull,
+    duration: Duration(minutes: 9, seconds: 56),
     mediaType: MediaType.video,
   );
 
   static const forBiggerJoyrides = MediaItem(
-    id: 'fbj',
-    title: 'For Bigger Joyrides',
-    artist: 'Google',
-    url: '$_gcs/ForBiggerJoyrides.mp4',
-    duration: Duration(seconds: 15),
+    id: 'bee2',
+    title: 'Bee (clip)',
+    artist: 'Flutter',
+    url: _bee,
+    duration: Duration(seconds: 5),
     mediaType: MediaType.video,
   );
 
   static const sintel = MediaItem(
-    id: 'sintel',
-    title: 'Sintel',
+    id: 'bbb_short2',
+    title: 'Big Buck Bunny (clip)',
     artist: 'Blender Foundation',
-    url: '$_gcs/Sintel.mp4',
-    duration: Duration(minutes: 14, seconds: 48),
+    url: _bbbShort,
+    duration: Duration(seconds: 10),
     mediaType: MediaType.video,
   );
 
   static const tearsOfSteel = MediaItem(
-    id: 'tos',
-    title: 'Tears of Steel',
-    artist: 'Blender Foundation',
-    url: '$_gcs/TearsOfSteel.mp4',
-    duration: Duration(minutes: 12, seconds: 14),
+    id: 'butterfly3',
+    title: 'Butterfly (alt)',
+    artist: 'Flutter',
+    url: _butterfly,
+    duration: Duration(seconds: 4),
     mediaType: MediaType.video,
   );
 

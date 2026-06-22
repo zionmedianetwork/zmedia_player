@@ -98,7 +98,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
         }
       });
 
-      await _controller.load(SampleMedia.bigBuckBunny);
+      // Load a short playlist (starting with the full ~10-minute Big Buck
+      // Bunny) so every lock-screen control is testable: play/pause, the ±10s
+      // skip/seek (needs runtime), and next/previous (needs a playlist).
+      await _controller.setPlaylist(
+        const Playlist(
+          id: 'notif_demo',
+          title: 'Notifications Demo',
+          items: [
+            SampleMedia.forBiggerFun,
+            SampleMedia.bigBuckBunny,
+            SampleMedia.elephantsDream,
+          ],
+        ),
+      );
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {

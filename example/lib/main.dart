@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'pages/home_page.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Reset to all orientations + normal system UI on startup so a previous
+  // fullscreen session that locked landscape can't leave the app stuck.
+  SystemChrome.setPreferredOrientations(DeviceOrientation.values);
+  SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   runApp(const ZMediaPlayerExampleApp());
 }
 
