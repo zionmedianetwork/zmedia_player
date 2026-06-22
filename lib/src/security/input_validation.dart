@@ -5,6 +5,7 @@
 library;
 
 import '../models/drm_config.dart';
+import '../models/media_item.dart';
 import '../core/exceptions.dart';
 
 /// Input validator for media player inputs
@@ -71,6 +72,18 @@ class InputValidator {
         value: url,
       );
     }
+  }
+
+  /// Validates a MediaItem that carries a DRM configuration.
+  ///
+  /// When [item.drmConfig] is non-null the media URL itself must also use
+  /// HTTPS — an HTTP media URL with DRM would expose the stream to interception
+  /// even if the license request is secured.  Non-DRM items are not affected.
+  static void validateMediaItemWithDrm(MediaItem item) {
+    if (item.drmConfig == null) return;
+
+    validateUrl(item.url, requireHttps: true);
+    validateDrmConfig(item.drmConfig!);
   }
 
   /// Validates a DRM configuration

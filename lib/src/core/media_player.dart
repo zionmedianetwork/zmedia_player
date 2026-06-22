@@ -14,6 +14,7 @@ import '../models/buffering_config.dart';
 import '../models/buffer_health.dart';
 import '../models/network_status.dart';
 import '../services/buffering_service.dart';
+import '../security/input_validation.dart';
 import 'media_config.dart';
 import 'crash_reporter.dart';
 import 'exceptions.dart';
@@ -565,6 +566,9 @@ class MediaPlayer {
   Future<void> load(MediaItem item) async {
     await _ensureInitialized();
     _markActivity();
+
+    // Enforce HTTPS for DRM-protected media URLs before touching any state.
+    InputValidator.validateMediaItemWithDrm(item);
 
     try {
       crashReporter?.setCustomKey('media_id', item.id);
@@ -1873,7 +1877,7 @@ class MediaPlayer {
       'httpHeaders': config.httpHeaders,
       'showControls': config.showControls,
       'controlsTimeout': config.controlsTimeout.inMilliseconds,
-      'allowBackgroundPlaybook': config.allowBackgroundPlayback,
+      'allowBackgroundPlayback': config.allowBackgroundPlayback,
       'useHardwareAcceleration': config.useHardwareAcceleration,
     };
   }
