@@ -1,105 +1,141 @@
 # ZMedia Player — Feature Gallery Example
 
-A clean, feature-per-page gallery app demonstrating the public API of the
-`zmedia_player` Flutter package.
+A clean, **feature-per-page gallery** app that demonstrates the public API of the
+`zmedia_player` Flutter package. Each page is a focused, self-contained example of
+one capability — load it, read it, copy from it.
 
-## Running the App
+The home screen lists every feature; tap a card to open its demo page. Pages are
+built against the **real public API** only (everything exported from
+`package:zmedia_player/zmedia_player.dart`), initialize/dispose their controllers
+correctly, and surface loading/error states.
+
+> This example has been exercised on a **physical iPhone (iOS 26)** — playback,
+> fullscreen, custom controls, adaptive streaming/quality, subtitles, background
+> audio, and lock‑screen notification controls were all verified on-device. The
+> features that still need your own infrastructure or hardware (DRM, casting) are
+> called out below.
+
+---
+
+## Requirements
+
+- **Flutter** ≥ 3.19, **Dart** ≥ 3.0
+- **iOS** 12.0+ (a physical device is required for DRM/FairPlay, PiP, casting, and
+  to hear background audio over the silent switch)
+- **Android** API 21+ (API 26+ for Picture-in-Picture)
+
+The example app depends on the package via a local `path:` reference (`../`), so no
+publishing step is needed.
+
+## Running the app
 
 ```bash
 cd example
 flutter pub get
-flutter run
+flutter run                 # pick a device when prompted
+flutter run -d <device-id>  # or target a specific device (flutter devices)
 ```
 
-To run on a specific device:
-
-```bash
-flutter run -d <device-id>
-```
+First iOS build runs CocoaPods and a full Xcode build, so it can take a few
+minutes. For a physical iPhone you must configure code signing once in Xcode
+(open `example/ios/Runner.xcworkspace` → Runner target → Signing & Capabilities →
+select your Team).
 
 ---
 
-## Feature Pages
+## Feature pages
 
-| Page | File | Public API Exercised |
+| Page | File | Public API exercised |
 |------|------|----------------------|
-| **Simple Playback** | `pages/simple_playback_page.dart` | `MediaController.create`, `initialize`, `load(MediaItem)`, `play`, `pause`, `stop`, `seekForward`, `seekBackward`, `setVolume`, `toggleMute` |
-| **Playlist** | `pages/playlist_page.dart` | `setPlaylist(Playlist)`, `skipToNext`, `skipToPrevious`, `skipToIndex`, `RepeatMode`, `PlaybackMode` |
-| **Adaptive Streaming & Quality** | `pages/streaming_quality_page.dart` | `MediaPlayer.bandwidthStream`, `qualityTracksStream`, `setQualityTrack(QualityTrack)`, `enableAutoQuality`, `HlsConfig`, `DashConfig` |
-| **Subtitles** | `pages/subtitles_page.dart` | `setSubtitleTrack(SubtitleTrack)`, `disableSubtitles`, `subtitleTracksStream`, `selectedSubtitleTrack`, `SubtitleConfig` |
-| **DRM** | `pages/drm_page.dart` | `DrmConfig.widevine`, `DrmConfig.fairplay(certificateUrl:)`, `DrmConfig.ezdrm`, `EzdrmConfig.widevine/fairplay`, `CertificatePinningConfig`, `player.drmSessionStream` |
-| **Picture-in-Picture** | `pages/pip_page.dart` | `checkPipAvailability`, `enterPictureInPicture`, `exitPictureInPicture`, `pipStatusStream`, `PipConfig`, `PipStatus` |
-| **Casting** | `pages/casting_page.dart` | `startCastDiscovery`, `stopCastDiscovery`, `connectToCastDevice`, `connectAndLoadMedia`, `disconnectFromCastDevice`, `castStatusStream`, `castDevicesStream`, `AirPlayButton` |
-| **Notifications** | `pages/notifications_page.dart` | `NotificationService`, `NotificationConfig`, `NotificationService.initialize`, `show`, `dismiss`, `actionStream` |
-| **Fullscreen** | `pages/fullscreen_page.dart` | `FullscreenMediaPlayer`, `MaterialFullscreenPlayer`, shared `MediaController` across routes |
-| **Adaptive Controls** | `pages/adaptive_controls_page.dart` | `AdaptiveMediaControls`, `AdaptiveControlStyle`, `MaterialMediaControls`, `CupertinoMediaControls`, `CustomControlsBase` (subclassed) |
-| **Error Handling** | `pages/error_handling_page.dart` | `MediaLoadException`, `NetworkException`, `PlayerState.error`, `PlaybackState.errorMessage`, `player.stateStream` |
+| **Simple Playback** | `pages/simple_playback_page.dart` | `MediaController.create` · `initialize` · `load(MediaItem)` · `play`/`pause`/`stop` · `seekForward`/`seekBackward` · `setVolume` · `toggleMute` |
+| **Playlist** | `pages/playlist_page.dart` | `setPlaylist(Playlist)` · `skipToNext`/`skipToPrevious`/`skipToIndex` · `RepeatMode` (none/all/single) · `PlaybackMode` (sequential/shuffle) · auto-advance on completion |
+| **Adaptive Streaming & Quality** | `pages/streaming_quality_page.dart` | `player.qualityTracksStream` · `setQualityTrack` · `enableAutoQuality` · `player.bandwidthStream` · HLS & DASH sources |
+| **Subtitles** | `pages/subtitles_page.dart` | `setSubtitleTrack` · `disableSubtitles` · `player.subtitleTracksStream` · `selectedSubtitleTrack` · `SubtitleConfig` |
+| **DRM (Widevine / FairPlay / EZDRM)** | `pages/drm_page.dart` | `DrmConfig.widevine` · `DrmConfig.fairplay(certificateUrl:)` · `DrmConfig.ezdrm` · `EzdrmConfig` · `CertificatePinningConfig` · `player.drmSessionStream` |
+| **Picture-in-Picture** | `pages/pip_page.dart` | `checkPipAvailability` · `enterPictureInPicture`/`exitPictureInPicture` · `pipStatusStream` · `PipConfig` |
+| **Casting (Chromecast / AirPlay)** | `pages/casting_page.dart` | `startCastDiscovery`/`stopCastDiscovery` · `connectToCastDevice`/`connectAndLoadMedia`/`disconnectFromCastDevice` · `castStatusStream` · `player.castDevicesStream` · `AirPlayButton` |
+| **Media Notifications** | `pages/notifications_page.dart` | `NotificationService` · `NotificationConfig` · `initialize(mediaPlayer:)` · `show`/`dismiss` · `actionStream` (lock-screen / Control Center controls) |
+| **Fullscreen Playback** | `pages/fullscreen_page.dart` | `FullscreenMediaPlayer` · `MaterialFullscreenPlayer` · a single `MediaController` shared across routes |
+| **Adaptive Controls** | `pages/adaptive_controls_page.dart` | `AdaptiveMediaControls` (Material vs Cupertino) · `MaterialMediaControls` · `CupertinoMediaControls` · a minimal `CustomControlsBase` subclass |
+| **Fully Custom Controls & Overlay** | `pages/custom_controls_page.dart` | `CustomControlsBase` → `buildControls(context, state)` with `ControlsState`; a hand-built branded overlay (custom seek bar, gestures, speed/quality pickers) injected via `MediaPlayerWidget.customControls` |
+| **Error Handling** | `pages/error_handling_page.dart` | `MediaPlayerException` hierarchy · `PlayerState.error` · `PlaybackState.errorMessage` · `player.stateStream` |
 
 ---
 
-## Sample / Test Stream URLs
+## Sample media
 
-| Type | URL | Used in |
-|------|-----|---------|
-| MP4 (Big Buck Bunny) | `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4` | Simple Playback, Fullscreen, Subtitles |
-| MP4 (For Bigger *) | `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4` etc. | Playlist, Adaptive Controls |
-| MP4 (Sintel, Tears of Steel, Elephants Dream) | `https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/...` | Playlist |
-| HLS (Apple bipbop fMP4) | `https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8` | Streaming Quality, Subtitles |
-| DASH (Akamai BBB 30fps) | `https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd` | Streaming Quality |
+All sample sources are defined in `lib/data/sample_media.dart`. They were chosen to
+be **reachable and to carry an audio track** (so the audio/notification demos are
+meaningful):
+
+| Source | URL | Notes |
+|--------|-----|-------|
+| Big Buck Bunny (primary) | `https://www.w3schools.com/html/mov_bbb.mp4` | Direct HTTP 200, has audio — reliable first-load |
+| Big Buck Bunny (full · 10 min) | `https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4` | Long clip for seek/playlist/notification tests; served via a 302 redirect so the first load can be slightly slower |
+| Bee / Butterfly | `https://flutter.github.io/assets-for-api-docs/assets/videos/{bee,butterfly}.mp4` | Short Flutter test clips, both have audio |
+| HLS (Apple bipbop, fMP4) | `https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8` | Multi-bitrate adaptive stream for the Quality/Subtitles pages |
+| DASH (Akamai BBB 30fps) | `https://dash.akamaized.net/akamai/bbb_30fps/bbb_30fps.mpd` | Multi-bitrate DASH for the Quality page |
+
+> The previously-used Google `commondatastorage.googleapis.com/gtv-videos-bucket`
+> samples now return **HTTP 403** and have been removed. Some popular
+> `test-videos.co.uk` clips are **video-only** (no audio) and are intentionally not
+> used for the playback demos.
 
 ---
 
-## Features That Require a Real Device or Extra Setup
+## Features that need a real device or extra setup
 
 ### DRM (Widevine / FairPlay / EZDRM)
-- The DRM page shows the API but the placeholder URLs **will fail** — this is
-  intentional and honest.
-- Replace with your own DRM-protected stream URL + valid license server.
-- **Widevine:** Android device (API 21+); L1 requires non-rooted device.
-- **FairPlay:** iOS physical device with valid FPS certificate and license server.
-  `certificateUrl` is required by `DrmConfig.fairplay` — there is no default.
-- `EzdrmConfig` is pre-configured for EZDRM accounts — supply your own credentials.
+- The DRM page demonstrates how to **construct** the config; it does not ship a live
+  protected stream. Supply your own protected URL **and** license server.
+- **Widevine:** Android device (API 21+); L1 needs a non-rooted device.
+- **FairPlay:** iOS **physical device** with a valid FPS certificate + license
+  server. `certificateUrl` is **required** by `DrmConfig.fairplay` (no default).
+- `CertificatePinningConfig` pins are `hex(SHA-256(SPKI))`; pinning is enforced
+  natively on the DRM license requests.
 
 ### Picture-in-Picture
-- **Android:** API 26 (Oreo) or higher. The `example/android` `MainActivity.kt`
-  must relay `onPictureInPictureModeChanged` to the plugin.
-- **iOS:** Physical device with AVPictureInPictureController support.
-- `checkPipAvailability()` returns `false` on unsupported devices; the UI
-  disables the Enter PiP button accordingly.
+- **iOS:** physical device (AVPictureInPictureController).
+- **Android:** API 26+. The example's `android/.../MainActivity.kt` relays
+  `onPictureInPictureModeChanged` to the plugin (required for PiP state).
+- `checkPipAvailability()` returns `false` on unsupported devices; the button
+  disables accordingly.
 
 ### Casting (Chromecast / AirPlay)
-- **Chromecast:** Google Play Services + Chromecast device on the same Wi-Fi.
-- **AirPlay:** Physical Apple TV or AirPlay-compatible display on the same Wi-Fi.
-- `AirPlayButton` only renders on iOS (hides on Android).
+- **Chromecast:** Google Play Services + a Chromecast on the same Wi-Fi.
+- **AirPlay:** an Apple TV / AirPlay display on the same Wi-Fi. `AirPlayButton`
+  renders on iOS only.
 
-### Media Notifications
-- **Android 13+:** `POST_NOTIFICATIONS` runtime permission is required.
-- **iOS:** User must grant notification permission at runtime.
-- **Background audio (iOS):** `UIBackgroundModes` with `audio` must be declared
-  in `ios/Runner/Info.plist`.
+### Media notifications (lock screen / Control Center)
+- **iOS:** Now Playing info + remote commands. Background audio requires
+  `UIBackgroundModes: audio` in `ios/Runner/Info.plist` (already configured here),
+  and the app sets the audio session to `.playback` on play so audio is audible
+  with the **silent switch on** and continues in the background.
+- **Android 13+:** `POST_NOTIFICATIONS` runtime permission.
+- The demo loads a short **playlist** so all lock-screen controls are exercisable:
+  play/pause, next/previous, and ±10s skip.
 
-### Quality Tracks (HLS / DASH)
-- Quality tracks are reported **by the native player after buffering starts**.
-- Press Play on the Streaming Quality page, wait a few seconds for tracks.
-- Works best on a physical device with a network connection.
+### Quality tracks (HLS / DASH)
+- Tracks are reported by the native player **after you press Play** and buffering
+  starts — they won't appear before playback begins.
 
 ### Subtitles
-- In-stream subtitle tracks require a stream that carries them (the HLS bipbop
-  stream is used as it may carry text tracks). Plain MP4 files without sideloaded
-  subtitle files will report no tracks.
+- In-stream subtitle tracks require a stream that carries them (use the HLS source).
+  Plain MP4s report no tracks; the package does not sideload external subtitle files
+  from Dart alone.
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 example/
   lib/
-    main.dart                         # App entry point (dark Material 3 theme)
+    main.dart                       # App entry (dark Material 3, orientation reset on launch)
     data/
-      sample_media.dart               # Reusable MediaItem / Playlist constants
+      sample_media.dart             # Reusable MediaItem / Playlist sample constants
     pages/
-      home_page.dart                  # Feature gallery list
+      home_page.dart                # Feature gallery (cards → pages)
       simple_playback_page.dart
       playlist_page.dart
       streaming_quality_page.dart
@@ -110,8 +146,20 @@ example/
       notifications_page.dart
       fullscreen_page.dart
       adaptive_controls_page.dart
+      custom_controls_page.dart     # Flagship: fully bespoke overlay via CustomControlsBase
       error_handling_page.dart
     widgets/
-      feature_card.dart               # Card used on home page
-      player_scaffold.dart            # Shared scaffold: AppBar + 16:9 player + body
+      feature_card.dart             # Card used on the home screen
+      player_scaffold.dart          # Shared scaffold: AppBar + 16:9 player + scrollable body
+  android/                          # Runner (PiP relay + permissions)
+  ios/                              # Runner (background-audio mode, signing)
 ```
+
+---
+
+## See also
+
+- Package API and guides: the repository [`README.md`](../README.md) and
+  [`docs/`](../docs).
+- Building custom controls: start from the **Fully Custom Controls & Overlay** page,
+  which doubles as documentation for extending `CustomControlsBase`.
