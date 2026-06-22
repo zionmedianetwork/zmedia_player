@@ -117,9 +117,13 @@ class NetworkMonitor {
 
     private func checkNetworkQuality(_ path: NWPath) {
         let status = getNetworkStatus(from: path)
-        let quality = status["quality"] as! String
-        let downloadSpeed = status["downloadSpeed"] as! Int
-        let isMetered = status["isMetered"] as! Bool
+
+        guard let quality = status["quality"] as? String,
+              let downloadSpeed = status["downloadSpeed"] as? Int,
+              let isMetered = status["isMetered"] as? Bool else {
+            print("NetworkMonitor: Unexpected shape in getNetworkStatus result — skipping quality update")
+            return
+        }
 
         if quality != lastQuality {
             lastQuality = quality

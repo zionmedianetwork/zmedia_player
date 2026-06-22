@@ -27,6 +27,9 @@ class CastHandler(
         private const val RECEIVER_APP_ID = "CC1AD845"
     }
 
+    // Owned scope: cancelled in dispose() to stop all coroutines launched by this handler.
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+
     private var castContext: CastContext? = null
     private var sessionManager: SessionManager? = null
     private var remoteMediaClient: RemoteMediaClient? = null
@@ -262,7 +265,12 @@ class CastHandler(
     }
 
     /**
-     * Load media on cast device
+     * Load media on cast device.
+     *
+     * Polling for RemoteMediaClient readiness is done off the main thread using
+     * coroutine delay() so the UI thread is never blocked (avoids ANR risk).
+     * The owned [scope] is used so this coroutine is automatically cancelled
+     * when [dispose] is called.
      */
     fun loadMedia(mediaItem: Map<String, Any>) {
         android.util.Log.d(TAG, "========================================")
@@ -270,55 +278,60 @@ class CastHandler(
         android.util.Log.d(TAG, "Media title: ${mediaItem["title"]}")
         android.util.Log.d(TAG, "Media URL: ${mediaItem["url"]}")
 
-        // Wait for remote media client to be available (with timeout)
-        var client = remoteMediaClient
-        var attempts = 0
-        val maxAttempts = 20 // 20 attempts * 100ms = 2 seconds max wait
+        scope.launch(Dispatchers.IO) {
+            // Poll for remote media client on a background thread, max 2 s.
+            var client: RemoteMediaClient? = remoteMediaClient
+            var attempts = 0
+            val maxAttempts = 20 // 20 × 100 ms = 2 000 ms
 
-        while (client == null && attempts < maxAttempts) {
-            android.util.Log.d(TAG, "Waiting for remote media client... (attempt ${attempts + 1}/$maxAttempts)")
-            Thread.sleep(100)
-            client = remoteMediaClient ?: sessionManager?.currentCastSession?.remoteMediaClient
-            attempts++
-        }
-
-        if (client == null) {
-            android.util.Log.e(TAG, "Cannot load media: No remote media client available after ${maxAttempts * 100}ms!")
-            android.util.Log.e(TAG, "SessionManager: $sessionManager")
-            android.util.Log.e(TAG, "Current session: ${sessionManager?.currentCastSession}")
-            android.util.Log.e(TAG, "Session connected: ${sessionManager?.currentCastSession?.isConnected}")
-            android.util.Log.e(TAG, "========================================")
-            return
-        }
-
-        android.util.Log.d(TAG, "✓ Remote media client available after ${attempts * 100}ms: $client")
-        // Update our reference
-        remoteMediaClient = client
-
-        try {
-            val mediaInfo = buildMediaInfo(mediaItem)
-            android.util.Log.d(TAG, "MediaInfo built - Content ID: ${mediaInfo.contentId}")
-
-            val request = MediaLoadRequestData.Builder()
-                .setMediaInfo(mediaInfo)
-                .setAutoplay(true)
-                .build()
-
-            android.util.Log.d(TAG, "Sending load request to Cast device...")
-            val result = client.load(request)
-
-            result.setResultCallback { mediaChannelResult ->
-                if (mediaChannelResult.status.isSuccess) {
-                    android.util.Log.d(TAG, "✓✓✓ Media successfully loaded on Cast device!")
-                } else {
-                    android.util.Log.e(TAG, "✗✗✗ Failed to load media on Cast device: ${mediaChannelResult.status}")
-                }
+            while (client == null && attempts < maxAttempts) {
+                android.util.Log.d(TAG, "Waiting for remote media client... (attempt ${attempts + 1}/$maxAttempts)")
+                delay(100)
+                client = remoteMediaClient ?: sessionManager?.currentCastSession?.remoteMediaClient
+                attempts++
             }
 
-            android.util.Log.d(TAG, "========================================")
-        } catch (e: Exception) {
-            android.util.Log.e(TAG, "Error loading media on cast: ${e.message}", e)
-            android.util.Log.e(TAG, "========================================")
+            if (client == null) {
+                android.util.Log.e(TAG, "Cannot load media: No remote media client available after ${maxAttempts * 100}ms!")
+                android.util.Log.e(TAG, "SessionManager: $sessionManager")
+                android.util.Log.e(TAG, "Current session: ${sessionManager?.currentCastSession}")
+                android.util.Log.e(TAG, "Session connected: ${sessionManager?.currentCastSession?.isConnected}")
+                android.util.Log.e(TAG, "========================================")
+                return@launch
+            }
+
+            android.util.Log.d(TAG, "✓ Remote media client available after ${attempts * 100}ms: $client")
+
+            // Update our reference and send the load request back on Main.
+            withContext(Dispatchers.Main) {
+                remoteMediaClient = client
+
+                try {
+                    val mediaInfo = buildMediaInfo(mediaItem)
+                    android.util.Log.d(TAG, "MediaInfo built - Content ID: ${mediaInfo.contentId}")
+
+                    val request = MediaLoadRequestData.Builder()
+                        .setMediaInfo(mediaInfo)
+                        .setAutoplay(true)
+                        .build()
+
+                    android.util.Log.d(TAG, "Sending load request to Cast device...")
+                    val loadResult = client.load(request)
+
+                    loadResult.setResultCallback { mediaChannelResult ->
+                        if (mediaChannelResult.status.isSuccess) {
+                            android.util.Log.d(TAG, "✓✓✓ Media successfully loaded on Cast device!")
+                        } else {
+                            android.util.Log.e(TAG, "✗✗✗ Failed to load media on Cast device: ${mediaChannelResult.status}")
+                        }
+                    }
+
+                    android.util.Log.d(TAG, "========================================")
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "Error loading media on cast: ${e.message}", e)
+                    android.util.Log.e(TAG, "========================================")
+                }
+            }
         }
     }
 
@@ -360,6 +373,9 @@ class CastHandler(
      */
     fun dispose() {
         android.util.Log.d(TAG, "Disposing cast handler")
+
+        // Cancel all coroutines owned by this handler before any other teardown.
+        scope.cancel()
 
         // Stop discovery if active
         if (isDiscovering) {
@@ -449,7 +465,7 @@ class CastHandler(
     private fun notifyDevicesChanged() {
         val devices = getAvailableDevices()
 
-        CoroutineScope(Dispatchers.Main).launch {
+        scope.launch {
             methodChannel.invokeMethod("onCastDevicesChanged", mapOf(
                 "playerId" to playerId,
                 "devices" to devices
@@ -522,7 +538,7 @@ class CastHandler(
             "errorMessage" to errorMessage
         )
 
-        CoroutineScope(Dispatchers.Main).launch {
+        scope.launch {
             methodChannel.invokeMethod("onCastStatusChanged", statusMap)
         }
     }
