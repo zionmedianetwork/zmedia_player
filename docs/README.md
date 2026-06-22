@@ -83,7 +83,7 @@ This documentation is organized into three main sections:
 
 ## 📖 What is ZMedia Player?
 
-ZMedia Player is a production-ready Flutter media player package that provides:
+ZMedia Player is a comprehensive Flutter media player package that provides:
 
 - **Complete Playback Control** - Play, pause, seek, volume, speed
 - **Adaptive Streaming** - HLS/DASH with automatic quality adjustment
@@ -113,9 +113,13 @@ ZMedia Player is a production-ready Flutter media player package that provides:
 ## 🚀 Project Status
 
 **Version:** 0.1.0
-**Status:** ✅ **Production Ready**
-**Test Coverage:** 113/113 tests passing (100%)
-**Completion Date:** October 19, 2025
+**Status:** 🚧 **Active development — feature-complete, hardening in progress**
+
+All features are implemented across the Dart and native layers. The project is
+undergoing audit-driven correctness/security/robustness remediation — see the
+[Codebase Audit & Remediation Roadmap](implementation/codebase-audit.md). It is
+**not yet validated as production-ready end-to-end**: the native Android/iOS layers
+are implemented but require on-device verification.
 
 ### Phase Completion
 - ✅ **Phase 1** - Core Functionality (Complete)
@@ -124,9 +128,10 @@ ZMedia Player is a production-ready Flutter media player package that provides:
 - ✅ **Phase 4** - DRM & Polish (Complete)
 
 ### Key Metrics
-- **Features:** 179/179 complete (100%)
-- **Tests:** 113/113 passing (100%)
-- **Performance:** 94-99% faster than targets
+- **Tests:** 350+ automated tests (run `flutter test` for the current count); strong
+  Dart-layer coverage, **no automated native tests yet**
+- **Native verification:** DRM, casting, certificate pinning, and bandwidth metering
+  are implemented but need on-device testing
 - **Documentation:** Comprehensive guides for all features
 
 ---
@@ -266,5 +271,4 @@ This project is licensed under the MIT License - see the [LICENSE](../LICENSE) f
 **Project:** ZMedia Player
 **Organization:** Zion Media Network
 **Version:** 0.1.0
-**Last Updated:** October 19, 2025
-**Status:** ✅ Production Ready
+**Status:** 🚧 Active development — feature-complete, hardening in progress

@@ -593,7 +593,7 @@ controller.player.drmSessionStream.listen((session) {
 
 - **[Complete Feature List](docs/summary/features.md)** - All 172 implemented features
 - **[Development Phases](docs/summary/phases.md)** - Phases 1-4 detailed summaries
-- **[Test Coverage Report](docs/summary/test-coverage.md)** - 113/113 tests passing
+- **[Test Coverage Report](docs/summary/test-coverage.md)** - Dart test suite overview
 - **[Production Readiness](docs/summary/production-readiness.md)** - Deployment checklist
 
 ### 🚀 Quick Start
@@ -756,7 +756,12 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Project Status
 
-✅ **All Phases Complete - Production Ready**
+🚧 **Active development — feature-complete, hardening in progress**
+
+The full feature set (core playback, streaming/subtitles, notifications, PiP,
+casting, DRM) is implemented across the Dart and native layers. The codebase is
+currently undergoing audit-driven correctness, security, and robustness remediation
+(see [Codebase Audit & Remediation Roadmap](docs/implementation/codebase-audit.md)).
 
 - **Phase 1** ✅ - Core playback features
 - **Phase 2** ✅ - Streaming and subtitles
@@ -765,13 +770,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### Quality Metrics
 
-- **Test Coverage:** 113/113 tests passing (100%)
-- **Features:** 179/179 complete
-- **Performance:** 94-99% faster than targets
-- **Documentation:** Comprehensive guides and API reference
+- **Tests:** 350+ automated tests — run `flutter test` for the current count
+- **Coverage:** strong in the Dart layer (state, models, MethodChannel routing,
+  subtitle parsing, retry/backoff). **Native (Kotlin/Swift) code has no automated
+  tests yet**, and several native features (DRM decryption, certificate pinning,
+  casting, bandwidth metering) require **on-device verification**.
 - **Version:** 0.1.0
 
-See [Production Readiness](docs/summary/production-readiness.md) for full details.
+> **Not yet validated as production-ready end-to-end.** The native platform layers
+> are implemented but unverified on real devices — verify DRM, casting, and security
+> features on Android and iOS before relying on them in production.
 
 ## Support
 
