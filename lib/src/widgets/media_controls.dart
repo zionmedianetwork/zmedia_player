@@ -607,7 +607,7 @@ class _MediaControlsState extends State<MediaControls>
 
                 // Time display (per-tick) + fullscreen button (static)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   child: Row(
                     children: [
                       // Time text — only this Text rebuilds per tick
