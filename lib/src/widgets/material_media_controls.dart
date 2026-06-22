@@ -73,6 +73,10 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
   BufferHealth? _currentBufferHealth;
   List<QualityTrack>? _qualityTracks;
 
+  /// Local drag value for the position slider.
+  /// Non-null while the user is dragging; null otherwise.
+  double? _seekDragValue;
+
   StreamSubscription<BufferHealth>? _bufferHealthSubscription;
   StreamSubscription<List<QualityTrack>>? _qualityTracksSubscription;
 
@@ -341,24 +345,32 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
 
             // PiP button
             if (widget.showPip)
-              _buildM3IconButton(
-                icon: Icons.picture_in_picture_alt,
-                onPressed: () async {
-                  await widget.controller.enterPictureInPicture();
-                },
-                tooltip: 'Picture in Picture',
-                colorScheme: colorScheme,
+              Semantics(
+                button: true,
+                label: 'Picture in picture',
+                child: _buildM3IconButton(
+                  icon: Icons.picture_in_picture_alt,
+                  onPressed: () async {
+                    await widget.controller.enterPictureInPicture();
+                  },
+                  tooltip: 'Picture in Picture',
+                  colorScheme: colorScheme,
+                ),
               ),
 
             const SizedBox(width: 8),
 
             // Settings button
             if (widget.showSettings)
-              _buildM3IconButton(
-                icon: Icons.settings,
-                onPressed: _toggleSettings,
-                tooltip: 'Settings',
-                colorScheme: colorScheme,
+              Semantics(
+                button: true,
+                label: 'Settings',
+                child: _buildM3IconButton(
+                  icon: Icons.settings,
+                  onPressed: _toggleSettings,
+                  tooltip: 'Settings',
+                  colorScheme: colorScheme,
+                ),
               ),
           ],
         ),
@@ -390,39 +402,43 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
             const SizedBox(width: 16),
 
             // Play/Pause button (large, elevated)
-            Material(
-              elevation: 6, // M3 elevation level 3
-              shape: const CircleBorder(),
-              color: colorScheme.primaryContainer,
-              child: InkWell(
-                onTap: isLoading
-                    ? null
-                    : () {
-                        if (isPlaying) {
-                          widget.controller.pause();
-                        } else {
-                          widget.controller.play();
-                        }
-                      },
-                customBorder: const CircleBorder(),
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  alignment: Alignment.center,
-                  child: isLoading
-                      ? SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
+            Semantics(
+              button: true,
+              label: isPlaying ? 'Pause' : 'Play',
+              child: Material(
+                elevation: 6, // M3 elevation level 3
+                shape: const CircleBorder(),
+                color: colorScheme.primaryContainer,
+                child: InkWell(
+                  onTap: isLoading
+                      ? null
+                      : () {
+                          if (isPlaying) {
+                            widget.controller.pause();
+                          } else {
+                            widget.controller.play();
+                          }
+                        },
+                  customBorder: const CircleBorder(),
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    alignment: Alignment.center,
+                    child: isLoading
+                        ? SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(
+                              color: colorScheme.onPrimaryContainer,
+                              strokeWidth: 2.5,
+                            ),
+                          )
+                        : Icon(
+                            isPlaying ? Icons.pause : Icons.play_arrow,
+                            size: 32,
                             color: colorScheme.onPrimaryContainer,
-                            strokeWidth: 2.5,
                           ),
-                        )
-                      : Icon(
-                          isPlaying ? Icons.pause : Icons.play_arrow,
-                          size: 32,
-                          color: colorScheme.onPrimaryContainer,
-                        ),
+                  ),
                 ),
               ),
             ),
@@ -465,15 +481,22 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
                 // For non-live content, show seek bar
                 final position = widget.controller.position;
                 final duration = widget.controller.duration;
-                final value = duration.inMilliseconds > 0
+                final rawValue = duration.inMilliseconds > 0
                     ? position.inMilliseconds / duration.inMilliseconds
                     : 0.0;
+                // While dragging, show the drag position in the time label;
+                // after drag ends the controller position updates normally.
+                final displayValue =
+                    (_seekDragValue ?? rawValue).clamp(0.0, 1.0);
+                final displayPosition = _seekDragValue != null
+                    ? duration * _seekDragValue!
+                    : position;
 
                 return Row(
                   children: [
                     // Current time
                     TimeDisplay(
-                      position: position,
+                      position: displayPosition,
                       format: TimeDisplayFormat.currentOnly,
                       style: textTheme.bodySmall?.copyWith(
                         color: colorScheme.onSurface,
@@ -482,21 +505,36 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
 
                     const SizedBox(width: 12),
 
-                    // Seek bar
+                    // Seek bar — seekTo fires once in onChangeEnd, not per drag frame
                     Expanded(
-                      child: SeekBar(
-                        value: value.clamp(0.0, 1.0),
-                        duration: duration,
-                        onChanged: (newValue) {
-                          final seekTo = duration * newValue;
-                          widget.controller.seekTo(seekTo);
-                        },
-                        activeColor: colorScheme.primary,
-                        inactiveColor:
-                            colorScheme.onSurface.withValues(alpha: 0.3),
-                        thumbColor: colorScheme.primary,
-                        trackHeight: 4.0,
-                        thumbRadius: 8.0,
+                      child: Semantics(
+                        label: 'Seek',
+                        value: widget.controller.formattedPosition,
+                        child: SeekBar(
+                          value: displayValue,
+                          duration: duration,
+                          onChanged: (newValue) {
+                            // Update local drag state for visual feedback only —
+                            // do NOT call seekTo here (would fire 60x/s during drag)
+                            setState(() {
+                              _seekDragValue = newValue;
+                            });
+                          },
+                          onChangeEnd: (newValue) {
+                            // Fire seekTo exactly once when the gesture ends
+                            final seekTo = duration * newValue;
+                            widget.controller.seekTo(seekTo);
+                            setState(() {
+                              _seekDragValue = null;
+                            });
+                          },
+                          activeColor: colorScheme.primary,
+                          inactiveColor:
+                              colorScheme.onSurface.withValues(alpha: 0.3),
+                          thumbColor: colorScheme.primary,
+                          trackHeight: 4.0,
+                          thumbRadius: 8.0,
+                        ),
                       ),
                     ),
 
@@ -549,15 +587,17 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
                     ),
                     Row(
                       children: [
-                        // Fullscreen button — mirrors MediaControls._toggleFullscreen:
-                        // pushes _FullscreenPlayerRoute via Navigator.push with a
-                        // FadeTransition, which handles orientation + system UI.
+                        // Fullscreen button
                         if (widget.showFullscreen)
-                          _buildM3IconButton(
-                            icon: Icons.fullscreen,
-                            onPressed: _toggleFullscreen,
-                            tooltip: 'Fullscreen',
-                            colorScheme: colorScheme,
+                          Semantics(
+                            button: true,
+                            label: 'Fullscreen',
+                            child: _buildM3IconButton(
+                              icon: Icons.fullscreen,
+                              onPressed: _toggleFullscreen,
+                              tooltip: 'Fullscreen',
+                              colorScheme: colorScheme,
+                            ),
                           ),
                       ],
                     ),
