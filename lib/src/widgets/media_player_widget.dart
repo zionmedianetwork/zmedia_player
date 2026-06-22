@@ -902,16 +902,58 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
       },
       child: Scaffold(
         backgroundColor: widget.backgroundColor,
-        body: SafeArea(
-          child: MediaPlayerWidget(
-            controller: widget.controller,
-            showControls: true,
-            customControls: widget.customControls,
-            expandToFill: true,
-            backgroundColor: widget.backgroundColor,
-            onTap: () => widget.controller.toggleControls(),
-            onDoubleTap: () => widget.controller.togglePlayPause(),
-          ),
+        // Do NOT wrap with SafeArea here — the inner controls (MediaControls,
+        // CupertinoMediaControls, MaterialMediaControls) already apply their own
+        // SafeArea per-zone (top bar / bottom bar).  A SafeArea at this level
+        // would double-count insets and cause RenderFlex overflow in landscape.
+        body: Stack(
+          children: [
+            // Video player fills the entire scaffold body.
+            Positioned.fill(
+              child: MediaPlayerWidget(
+                controller: widget.controller,
+                showControls: true,
+                customControls: widget.customControls,
+                expandToFill: true,
+                backgroundColor: widget.backgroundColor,
+                onTap: () => widget.controller.toggleControls(),
+                onDoubleTap: () => widget.controller.togglePlayPause(),
+              ),
+            ),
+
+            // Guaranteed exit affordance: always-visible close button in the
+            // top-left corner, outside the auto-hiding controls overlay.
+            // Wired directly to Navigator.maybePop so the user can always exit
+            // even if the inner controls are hidden or overflowing.
+            Positioned(
+              top: 8,
+              left: 8,
+              child: SafeArea(
+                child: Semantics(
+                  button: true,
+                  label: 'Exit fullscreen',
+                  child: IconButton(
+                    icon: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 22,
+                    ),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.black54,
+                      padding: const EdgeInsets.all(8),
+                      minimumSize: const Size(40, 40),
+                    ),
+                    tooltip: 'Exit fullscreen',
+                    onPressed: () {
+                      if (!_isDisposed) {
+                        Navigator.maybePop(context);
+                      }
+                    },
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

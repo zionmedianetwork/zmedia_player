@@ -461,9 +461,13 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
   }
 
   Widget _buildBottomBar(ColorScheme colorScheme, TextTheme textTheme) {
+    // bottom:true SafeArea only — no top inset needed here.
+    // Tighter vertical padding prevents RenderFlex overflow in landscape
+    // where available height is ~320px after the top bar consumes ~56px.
     return SafeArea(
+      top: false,
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -554,7 +558,7 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
               },
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 8),
 
             // Control buttons row
             AnimatedBuilder(

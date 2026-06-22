@@ -215,9 +215,10 @@ class MediaPlayerManager {
             throw MediaPlayerError.playerNotFound
         }
 
-        let playerView = playerInstance.getPlayerView()
-        print("MediaPlayerManager: getPlayerLayer - playerView exists, returning playerLayer")
-        return playerView.playerLayer
+        // Use currentPlayerLayer() which reads the active view WITHOUT creating a new one.
+        let layer = playerInstance.currentPlayerLayer()
+        print("MediaPlayerManager: getPlayerLayer - returning active player layer: \(layer != nil)")
+        return layer
     }
 
     func getBufferHealth(playerId: String) -> [String: Any] {
@@ -265,7 +266,31 @@ class MediaPlayerInstance: NSObject {
     private var config: [String: Any]?
 
     private var avPlayer: AVPlayer?
-    private var playerView: MediaPlayerView?
+
+    // Per-host view tracking — each UiKitView host gets its own MediaPlayerView
+    // (its own containerView + its own AVPlayerLayer) all sharing the same avPlayer.
+    // AVPlayer supports multiple AVPlayerLayers rendering simultaneously, so both
+    // the embedded and fullscreen hosts show video without a black screen.
+    //
+    // The manager holds only WEAK references; Flutter (the UiKitView host) is the
+    // strong owner.  Dead entries are pruned lazily in activePlayerView.
+    private struct WeakPlayerView { weak var view: MediaPlayerView? }
+    private var playerViews: [WeakPlayerView] = []
+
+    /// The most-recently-created live view (the topmost/active host, e.g. fullscreen).
+    /// Prunes dead entries as a side effect.
+    private var activePlayerView: MediaPlayerView? {
+        playerViews = playerViews.filter { $0.view != nil }
+        return playerViews.last?.view
+    }
+
+    /// Apply an action to every currently-live view.
+    private func forEachLiveView(_ body: (MediaPlayerView) -> Void) {
+        for ref in playerViews {
+            if let v = ref.view { body(v) }
+        }
+    }
+
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
@@ -436,12 +461,13 @@ class MediaPlayerInstance: NSObject {
 
             print("MediaPlayerInstance.loadMediaItem(): Item replaced, player: \(self.avPlayer != nil)")
 
-            // Force update the player view with the current player
-            if let playerView = self.playerView {
-                print("MediaPlayerInstance.loadMediaItem(): Updating existing player view")
-                playerView.updatePlayer(self.avPlayer)
+            // Force update ALL live player views with the current player
+            let liveCount = self.playerViews.filter { $0.view != nil }.count
+            if liveCount > 0 {
+                print("MediaPlayerInstance.loadMediaItem(): Updating \(liveCount) live player view(s)")
+                self.forEachLiveView { $0.updatePlayer(self.avPlayer) }
             } else {
-                print("MediaPlayerInstance.loadMediaItem(): No player view exists yet")
+                print("MediaPlayerInstance.loadMediaItem(): No player views exist yet")
             }
 
             // Auto play if configured
@@ -464,6 +490,17 @@ class MediaPlayerInstance: NSObject {
     }
 
     func play() {
+        // Configure the audio session for media playback so audio is audible
+        // even when the ring/silent switch is on, and continues in the background
+        // (the host app declares UIBackgroundModes: audio). Without this the
+        // default .soloAmbient category mutes audio on silent and stops in background.
+        do {
+            let audioSession = AVAudioSession.sharedInstance()
+            try audioSession.setCategory(.playback, mode: .moviePlayback)
+            try audioSession.setActive(true)
+        } catch {
+            print("MediaPlayerInstance.play(): Failed to activate playback audio session: \(error)")
+        }
         avPlayer?.play()
     }
 
@@ -495,7 +532,7 @@ class MediaPlayerInstance: NSObject {
     }
 
     func setBoxFit(boxFit: String) {
-        playerView?.setVideoGravity(boxFit: boxFit)
+        forEachLiveView { $0.setVideoGravity(boxFit: boxFit) }
     }
 
     func setSubtitleTrack(subtitleTrack: [String: Any]?) {
@@ -621,24 +658,31 @@ class MediaPlayerInstance: NSObject {
         applyConfig()
     }
 
+    /// Creates a NEW MediaPlayerView for each UiKitView host.
+    /// Only the platform-view factory should call this method.
+    /// All other code that needs the active layer must use currentPlayerLayer().
     func getPlayerView() -> MediaPlayerView {
-        if playerView == nil {
-            print("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil), has item: \(avPlayer?.currentItem != nil)")
-            playerView = MediaPlayerView(player: avPlayer)
+        print("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil), has item: \(avPlayer?.currentItem != nil)")
+        let newView = MediaPlayerView(player: avPlayer)
 
-            // If the player already has a current item, ensure the view is updated
-            if avPlayer?.currentItem != nil {
-                print("MediaPlayerInstance.getPlayerView(): Player already has item, forcing update")
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                    self?.playerView?.updatePlayer(self?.avPlayer)
-                }
+        // Track weakly — Flutter (UiKitView host) owns the strong reference.
+        playerViews.append(WeakPlayerView(view: newView))
+
+        // If the player already has a current item, ensure the fresh view shows it.
+        if avPlayer?.currentItem != nil {
+            print("MediaPlayerInstance.getPlayerView(): Player already has item, scheduling update on new view")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak newView, weak self] in
+                newView?.updatePlayer(self?.avPlayer)
             }
-        } else {
-            // Ensure the existing player view has the current player
-            print("MediaPlayerInstance.getPlayerView(): Updating existing player view, has item: \(avPlayer?.currentItem != nil)")
-            playerView?.updatePlayer(avPlayer)
         }
-        return playerView!
+
+        return newView
+    }
+
+    /// Returns the AVPlayerLayer of the active (most recently mounted) view,
+    /// WITHOUT creating a new view.  Used by PiP/AirPlay/getPlayerLayer paths.
+    func currentPlayerLayer() -> AVPlayerLayer? {
+        return activePlayerView?.playerLayer
     }
 
     // Phase 3: Helper to expose AVPlayer for PiP and AirPlay
@@ -727,7 +771,7 @@ class MediaPlayerInstance: NSObject {
         // Clear references
         currentMediaItem = nil
         avPlayer = nil
-        playerView = nil
+        playerViews.removeAll()
     }
 
     private func applyConfig() {
@@ -748,9 +792,9 @@ class MediaPlayerInstance: NSObject {
             player.rate = Float(speed)
         }
 
-        // Apply BoxFit
+        // Apply BoxFit to all live views
         if let boxFit = config["boxFit"] as? String {
-            playerView?.setVideoGravity(boxFit: boxFit)
+            forEachLiveView { $0.setVideoGravity(boxFit: boxFit) }
         }
     }
 
@@ -763,12 +807,12 @@ class MediaPlayerInstance: NSObject {
             notifyStateChanged(state: "ready", isBuffering: false)
             notifyDurationChanged()
 
-            // Force player view to update when ready
-            if let playerView = self.playerView {
-                print("MediaPlayerInstance: Forcing player view update on ready state")
-                DispatchQueue.main.async {
-                    playerView.updatePlayer(self.avPlayer)
-                }
+            // Force ALL live player views to update when ready
+            let player = self.avPlayer
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                print("MediaPlayerInstance: Forcing all live player views update on ready state")
+                self.forEachLiveView { $0.updatePlayer(player) }
             }
         case .failed:
             print("MediaPlayerInstance: Player failed with error: \(avPlayer?.error?.localizedDescription ?? "Unknown")")

@@ -751,6 +751,16 @@ class MediaPlayer {
     _markActivity();
 
     try {
+      // If playback has finished, restart from the beginning so that calling
+      // play() (e.g. from a lock-screen control or the play button) resumes
+      // instead of no-opping at the end of the media.
+      if (_currentState.state == PlayerState.completed) {
+        await _channel.invokeMethod('seekTo', {
+          'playerId': playerId,
+          'position': 0,
+        });
+      }
+
       await _channel.invokeMethod('play', {'playerId': playerId});
 
       // Start buffer health monitoring
@@ -1593,6 +1603,7 @@ class MediaPlayer {
 
     final stateString = arguments['state'] as String;
     final state = _stringToPlayerState(stateString);
+    final wasCompleted = _currentState.state == PlayerState.completed;
 
     _updateState(_currentState.copyWith(
       state: state,
@@ -1600,6 +1611,37 @@ class MediaPlayer {
       bufferPercentage:
           (arguments['bufferPercentage'] as num?)?.toDouble() ?? 0.0,
     ));
+
+    // Auto-advance the playlist (respecting repeat/shuffle) when an item
+    // finishes, or loop the current item when looping is enabled. Guarded by
+    // wasCompleted so repeated 'completed' events don't advance more than once.
+    if (state == PlayerState.completed && !wasCompleted) {
+      _handlePlaybackCompleted();
+    }
+  }
+
+  /// Called once when playback transitions into [PlayerState.completed].
+  ///
+  /// If a playlist is loaded and has a next index (per its repeat/shuffle
+  /// rules), advances to it and plays. Otherwise, if [MediaConfig.looping] is
+  /// enabled, restarts the current item.
+  void _handlePlaybackCompleted() {
+    if (_isDisposed) return;
+
+    final playlist = _currentPlaylist;
+    final nextIndex = playlist?.nextIndex;
+    if (playlist != null && nextIndex != null) {
+      skipToIndex(nextIndex).then((_) => play()).catchError(
+            (Object e) => debugPrint('MediaPlayer: auto-advance failed: $e'),
+          );
+      return;
+    }
+
+    if (_config.looping) {
+      seekTo(Duration.zero).then((_) => play()).catchError(
+            (Object e) => debugPrint('MediaPlayer: loop restart failed: $e'),
+          );
+    }
   }
 
   /// Handle position change events from platform

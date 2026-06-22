@@ -143,7 +143,7 @@ class NotificationHandler: NSObject {
         remoteCommandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: seekInterval)]
         remoteCommandCenter.skipForwardCommand.addTarget { [weak self] event in
             print("NotificationHandler: Skip forward command received")
-            self?.sendActionToFlutter("seek_forward")
+            self?.sendActionToFlutter("seekForward")
             return .success
         }
 
@@ -152,7 +152,7 @@ class NotificationHandler: NSObject {
         remoteCommandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: seekInterval)]
         remoteCommandCenter.skipBackwardCommand.addTarget { [weak self] event in
             print("NotificationHandler: Skip backward command received")
-            self?.sendActionToFlutter("seek_backward")
+            self?.sendActionToFlutter("seekBackward")
             return .success
         }
 

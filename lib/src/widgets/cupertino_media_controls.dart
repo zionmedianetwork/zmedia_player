@@ -341,7 +341,7 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
           child: SafeArea(
             bottom: false,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               child: Row(
                 children: [
                   // Title
@@ -491,10 +491,13 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
           decoration: BoxDecoration(
             color: CupertinoColors.black.withValues(alpha: 0.2),
           ),
+          // Use bottom:true SafeArea only — no top inset needed here.
+          // Tighter vertical padding prevents RenderFlex overflow in landscape
+          // where the available height is ~320px after the top bar consumes ~56px.
           child: SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -589,7 +592,7 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
                     },
                   ),
 
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 4),
 
                   // Control buttons row
                   AnimatedBuilder(
