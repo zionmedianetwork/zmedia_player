@@ -233,6 +233,14 @@
 -keep class * extends com.google.android.exoplayer2.upstream.HttpDataSource$Factory { *; }
 -keep class com.google.android.exoplayer2.upstream.DefaultHttpDataSource { *; }
 -keep class com.google.android.exoplayer2.upstream.DefaultHttpDataSource$** { *; }
+-keep class com.google.android.exoplayer2.ext.okhttp.OkHttpDataSource { *; }
+-keep class com.google.android.exoplayer2.ext.okhttp.OkHttpDataSource$** { *; }
+
+# OkHttp certificate pinning
+-keep class okhttp3.** { *; }
+-keep interface okhttp3.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
 
 # ============================================================================
 # Reflection & Annotations

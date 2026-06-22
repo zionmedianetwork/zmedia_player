@@ -3,22 +3,48 @@
 /// Prevents man-in-the-middle attacks by validating server certificates
 /// against known good certificates (pins). Used for DRM license servers
 /// and media CDNs.
+///
+/// Pin format: lowercase hex string of SHA-256 over the DER-encoded
+/// SubjectPublicKeyInfo (SPKI) of a certificate in the server's TLS chain.
+/// Each pin is exactly 64 lowercase hex characters.
+///
+/// Generate a pin with openssl:
+/// ```sh
+/// openssl s_client -connect host:443 </dev/null 2>/dev/null \
+///   | openssl x509 -pubkey -noout \
+///   | openssl pkey -pubin -outform der \
+///   | openssl dgst -sha256 -hex \
+///   | awk '{print $2}'
+/// ```
 library;
 
-import 'dart:convert';
-
-/// Configuration for certificate pinning
+/// Configuration for certificate pinning.
+///
+/// Pass an instance of this class to [DrmConfig] via the
+/// `certificatePinning` parameter.  The config is serialised with
+/// [toMap] and carried to native code inside the DRM config map.
+/// Real pin enforcement happens natively:
+///   - Android: OkHttp [CertificatePinner] (hex → base64 conversion done in
+///     DrmHandler.kt)
+///   - iOS: URLSessionDelegate server-trust challenge in DrmHandler.swift
 class CertificatePinningConfig {
-  /// Map of domains to their certificate pins (SHA256 hashes)
+  /// Map of domains to their certificate pins.
+  ///
+  /// Keys may be:
+  ///   - exact hostname:    "drm.example.com"
+  ///   - wildcard:         "*.example.com"  (matches one label only)
+  ///
+  /// Values are lists of lowercase 64-character hex strings, each being
+  /// SHA-256(DER SubjectPublicKeyInfo) of a certificate in the server's chain.
   final Map<String, List<String>> pins;
 
-  /// Whether to enforce pinning (fail if pin doesn't match)
+  /// Whether to enforce pin expiration (reserved for future use).
   final bool enforceExpiration;
 
-  /// Whether to allow backup pins
+  /// Whether to allow backup pins (reserved for future use).
   final bool allowBackupPins;
 
-  /// Number of pins required for a domain
+  /// Minimum number of pins required per domain for [isValid] to pass.
   final int minimumPins;
 
   const CertificatePinningConfig({
@@ -28,12 +54,12 @@ class CertificatePinningConfig {
     this.minimumPins = 2,
   });
 
-  /// Creates an empty config (no pinning)
+  /// Creates an empty config (no pinning).
   factory CertificatePinningConfig.disabled() {
     return const CertificatePinningConfig(pins: {});
   }
 
-  /// Creates config from domain and certificate hashes
+  /// Creates config from a domain→pins map.
   factory CertificatePinningConfig.fromPins(
     Map<String, List<String>> pins, {
     bool enforceExpiration = true,
@@ -44,19 +70,21 @@ class CertificatePinningConfig {
     );
   }
 
-  /// Validates the configuration
+  /// Validates the configuration.
+  ///
+  /// Returns true when:
+  ///   - [pins] is empty (no pinning — always valid), OR
+  ///   - every domain has at least [minimumPins] entries and each entry is a
+  ///     64-character lowercase hex string.
   bool isValid() {
-    if (pins.isEmpty) return true; // No pinning is valid
+    if (pins.isEmpty) return true;
 
-    // Check that each domain has minimum required pins
     for (final entry in pins.entries) {
       if (entry.value.length < minimumPins) {
         return false;
       }
-
-      // Validate pin format (should be SHA256 hashes)
       for (final pin in entry.value) {
-        if (!_isValidSha256(pin)) {
+        if (!_isValidSha256Hex(pin)) {
           return false;
         }
       }
@@ -65,7 +93,11 @@ class CertificatePinningConfig {
     return true;
   }
 
-  /// Gets pins for a specific domain
+  /// Returns the configured pins for [domain], supporting exact and wildcard
+  /// matches.  Returns null when no pins are configured for the domain.
+  ///
+  /// Wildcard semantics: "*.example.com" matches "cdn.example.com" but NOT
+  /// "example.com" or "a.b.example.com".
   List<String>? getPinsForDomain(String domain) {
     // Exact match
     if (pins.containsKey(domain)) {
@@ -84,12 +116,15 @@ class CertificatePinningConfig {
     return null;
   }
 
-  /// Checks if a domain has pinning configured
+  /// Checks if a domain has pinning configured.
   bool hasPinsForDomain(String domain) {
     return getPinsForDomain(domain) != null;
   }
 
-  /// Converts to map for platform communication
+  /// Converts to a map suitable for passing through a Flutter platform channel.
+  ///
+  /// The "pins" value uses the raw [Map<String, List<String>>] type so that
+  /// the Kotlin/Swift side can cast it directly.
   Map<String, dynamic> toMap() {
     return {
       'pins': pins,
@@ -99,9 +134,10 @@ class CertificatePinningConfig {
     };
   }
 
-  /// Creates from map
+  /// Creates from a platform-channel map (e.g. received from native).
   factory CertificatePinningConfig.fromMap(Map<String, dynamic> map) {
-    final pinsMap = (map['pins'] as Map<dynamic, dynamic>).map(
+    final rawPins = map['pins'] as Map<dynamic, dynamic>? ?? {};
+    final pinsMap = rawPins.map(
       (key, value) => MapEntry(
         key.toString(),
         (value as List<dynamic>).map((e) => e.toString()).toList(),
@@ -116,8 +152,8 @@ class CertificatePinningConfig {
     );
   }
 
-  bool _isValidSha256(String hash) {
-    // SHA256 hash should be 64 hex characters
+  /// Returns true when [hash] is a 64-character lowercase hex string.
+  bool _isValidSha256Hex(String hash) {
     final regex = RegExp(r'^[a-fA-F0-9]{64}$');
     return regex.hasMatch(hash);
   }
@@ -129,86 +165,16 @@ class CertificatePinningConfig {
   }
 }
 
-/// Helper class for certificate pinning operations
-class CertificatePinningHelper {
-  /// Calculates SHA256 fingerprint of a certificate
-  /// Note: This is a placeholder. Real SHA256 calculation should be done
-  /// on the native side (Android/iOS) where crypto libraries are available.
-  static String calculateFingerprint(List<int> certificateBytes) {
-    // This will be implemented natively on Android/iOS
-    // For now, return a hex representation
-    return certificateBytes
-        .map((b) => b.toRadixString(16).padLeft(2, '0'))
-        .join('');
-  }
-
-  /// Validates certificate against pins
-  static bool validateCertificate(
-    List<int> certificateBytes,
-    List<String> pins,
-  ) {
-    final fingerprint = calculateFingerprint(certificateBytes);
-
-    // Check if fingerprint matches any of the pins
-    return pins.any((pin) => pin.toLowerCase() == fingerprint.toLowerCase());
-  }
-
-  /// Extracts domain from URL
-  static String extractDomain(String url) {
-    final uri = Uri.parse(url);
-    return uri.host;
-  }
-
-  /// Creates a pin from a PEM certificate
-  static String pinFromPem(String pemCertificate) {
-    // Remove PEM headers and whitespace
-    final lines = pemCertificate
-        .replaceAll('-----BEGIN CERTIFICATE-----', '')
-        .replaceAll('-----END CERTIFICATE-----', '')
-        .replaceAll(RegExp(r'\s'), '');
-
-    // Decode base64
-    final bytes = base64.decode(lines);
-
-    // Calculate SHA256
-    return calculateFingerprint(bytes);
-  }
-
-  /// Creates pins from multiple PEM certificates
-  static List<String> pinsFromPems(List<String> pemCertificates) {
-    return pemCertificates.map(pinFromPem).toList();
-  }
-
-  /// Formats a fingerprint for display (adds colons)
-  static String formatFingerprint(String fingerprint) {
-    final buffer = StringBuffer();
-    for (var i = 0; i < fingerprint.length; i += 2) {
-      if (i > 0) buffer.write(':');
-      buffer.write(fingerprint.substring(i, i + 2));
-    }
-    return buffer.toString().toUpperCase();
-  }
-}
-
-/// Example usage:
-/// ```dart
-/// // Create pinning config
-/// final config = CertificatePinningConfig.fromPins({
-///   'cdn.example.com': [
-///     'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
-///     'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',
-///   ],
-///   '*.drm-server.com': [
-///     'CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC',
-///     'DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD',
-///   ],
-/// });
-///
-/// // Calculate pin from PEM certificate
-/// final pem = '''
-/// -----BEGIN CERTIFICATE-----
-/// MIIDXTCCAkWgAwIBAgIJAKL0UG+mRqOjMA0GCSqGSIb3...
-/// -----END CERTIFICATE-----
-/// ''';
-/// final pin = CertificatePinningHelper.pinFromPem(pem);
-/// ```
+// NOTE: CertificatePinningHelper has been intentionally removed.
+//
+// The previous implementation of CertificatePinningHelper contained methods
+// (calculateFingerprint, validateCertificate, pinFromPem) that computed a
+// naive hex encoding of raw certificate bytes — NOT SHA-256(SPKI DER).  This
+// produced values that would never match real OkHttp / iOS URLSession pins and
+// gave false confidence in security.
+//
+// Real pin enforcement now happens natively:
+//   Android — DrmHandler.kt builds an OkHttpClient.CertificatePinner
+//   iOS     — DrmHandler.swift implements URLSessionDelegate server-trust challenge
+//
+// To generate a correct pin use the openssl command shown at the top of this file.

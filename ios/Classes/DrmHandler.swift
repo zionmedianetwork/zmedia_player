@@ -1,9 +1,42 @@
 import Foundation
 import AVFoundation
+import CommonCrypto
 import Flutter
 
-/// Handles DRM (Digital Rights Management) for iOS media playback
-/// Supports FairPlay Streaming (FPS)
+/// Handles DRM (Digital Rights Management) for iOS media playback.
+/// Supports FairPlay Streaming (FPS).
+///
+/// Certificate pinning is supported for licence requests when
+/// `drmConfig["certificatePinning"]` is present.  Pins are expressed as
+/// lowercase hex strings of SHA-256(DER SubjectPublicKeyInfo) — the same
+/// format stored in `CertificatePinningConfig.pins` on the Dart side.
+///
+/// IMPORTANT — pin semantics on iOS:
+/// iOS provides `SecCertificateCopyKey` (iOS 12+) to obtain the public key,
+/// then `SecKeyCopyExternalRepresentation` to export it.  The bytes returned
+/// by `SecKeyCopyExternalRepresentation` for RSA and EC keys are the raw
+/// public key in a platform-specific encoding (X9.63 for EC, PKCS#1 for RSA)
+/// — NOT the full DER SubjectPublicKeyInfo (SPKI).
+///
+/// To produce the same SHA-256(SPKI) value as Android/OpenSSL we need the
+/// complete SPKI DER, which includes the AlgorithmIdentifier OID prefix.
+/// We reconstruct it by prepending the well-known ASN.1 OID header for the
+/// key type before hashing, following the same approach used by TrustKit and
+/// mobile-security libraries.
+///
+/// Supported key types and their SPKI headers:
+///   RSA-2048:  30 82 01 22 30 0d 06 09 2a 86 48 86 f7 0d 01 01 01 05 00 03 82 01 0f 00
+///   RSA-4096:  30 82 02 22 30 0d 06 09 2a 86 48 86 f7 0d 01 01 01 05 00 03 82 02 0f 00
+///   EC P-256:  30 59 30 13 06 07 2a 86 48 ce 3d 02 01 06 08 2a 86 48 ce 3d 03 01 07 03 42 00
+///   EC P-384:  30 76 30 10 06 07 2a 86 48 ce 3d 02 01 06 05 2b 81 04 00 22 03 62 00
+///
+/// KEY VERIFICATION RISK: Matching is attempted only for the four key types
+/// listed above.  If the server uses a different key type (e.g. EC P-521 or
+/// RSA-3072) the SPKI header is unknown and the pin will NEVER match, causing
+/// all licence requests for that host to be rejected.  The user must verify
+/// that server certificates use one of the four supported key types when
+/// configuring pins.  This limitation is flagged in the device-verification
+/// checklist in the PR description.
 @available(iOS 10.0, *)
 class DrmHandler: NSObject {
     private let playerId: String
@@ -17,6 +50,14 @@ class DrmHandler: NSObject {
     private var drmConfig: [String: Any]?
     private var certificateData: Data?
 
+    // Certificate pinning: domain → list of 64-char lowercase hex pins.
+    // Populated from drmConfig["certificatePinning"]["pins"] in configure().
+    private var pinnedDomains: [String: [String]] = [:]
+
+    // Dedicated URLSession used for pinned licence requests.
+    // Owns the URLSession so the delegate (self) is retained correctly.
+    private var pinnedSession: URLSession?
+
     init(playerId: String, channel: FlutterMethodChannel) {
         self.playerId = playerId
         self.channel = channel
@@ -25,9 +66,25 @@ class DrmHandler: NSObject {
 
     // MARK: - Configuration
 
-    /// Configure DRM with provided settings
+    /// Configure DRM with provided settings.
     func configure(drmConfig: [String: Any]) -> Bool {
         self.drmConfig = drmConfig
+
+        // Read optional certificate pinning config
+        if let pinningConfig = drmConfig["certificatePinning"] as? [String: Any],
+           let pinsMap = pinningConfig["pins"] as? [String: [String]] {
+            pinnedDomains = pinsMap
+            if !pinnedDomains.isEmpty {
+                // Build a dedicated URLSession whose delegate (self) enforces pins
+                let config = URLSessionConfiguration.ephemeral
+                pinnedSession = URLSession(
+                    configuration: config,
+                    delegate: self,
+                    delegateQueue: nil
+                )
+                print("DrmHandler: Certificate pinning configured for \(pinnedDomains.count) domain(s)")
+            }
+        }
 
         guard let scheme = drmConfig["scheme"] as? String else {
             notifyDrmError("DRM scheme is required")
@@ -50,6 +107,9 @@ class DrmHandler: NSObject {
             return false
         }
 
+        // Suppress unused-variable warnings – these are validated above.
+        _ = licenseUrl
+
         // Load FairPlay certificate
         loadCertificate(from: certificateUrl) { [weak self] success in
             if success {
@@ -63,7 +123,7 @@ class DrmHandler: NSObject {
         return true
     }
 
-    /// Create content key session for FairPlay
+    /// Create content key session for FairPlay.
     func createContentKeySession(for player: AVPlayer) -> AVContentKeySession {
         if let existingSession = contentKeySession {
             return existingSession
@@ -84,9 +144,6 @@ class DrmHandler: NSObject {
         let delegateQueue = DispatchQueue(label: "com.zmedia_player.drm.content_key")
         keySession.setDelegate(delegate, queue: delegateQueue)
 
-        // Note: We don't add the player as recipient here.
-        // Instead, we'll add the AVURLAsset when creating the player item
-
         self.contentKeySession = keySession
 
         print("DrmHandler: Content key session created")
@@ -95,7 +152,9 @@ class DrmHandler: NSObject {
 
     // MARK: - Certificate Loading
 
-    /// Load FairPlay certificate from URL
+    /// Load FairPlay certificate from URL.
+    /// Certificate fetches use URLSession.shared (no pinning required here;
+    /// the certificate endpoint is not the licence server).
     private func loadCertificate(from urlString: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: urlString) else {
             print("DrmHandler: Invalid certificate URL")
@@ -103,7 +162,7 @@ class DrmHandler: NSObject {
             return
         }
 
-        print("DrmHandler: Loading FairPlay certificate from: \\(urlString)")
+        print("DrmHandler: Loading FairPlay certificate from: \(urlString)")
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -119,7 +178,7 @@ class DrmHandler: NSObject {
             guard let self = self else { return }
 
             if let error = error {
-                print("DrmHandler: Certificate loading error: \\(error.localizedDescription)")
+                print("DrmHandler: Certificate loading error: \(error.localizedDescription)")
                 completion(false)
                 return
             }
@@ -131,7 +190,7 @@ class DrmHandler: NSObject {
             }
 
             self.certificateData = data
-            print("DrmHandler: Certificate loaded successfully (\\(data.count) bytes)")
+            print("DrmHandler: Certificate loaded successfully (\(data.count) bytes)")
             completion(true)
         }
 
@@ -140,7 +199,9 @@ class DrmHandler: NSObject {
 
     // MARK: - License Acquisition
 
-    /// Request license from FairPlay license server
+    /// Request license from FairPlay license server.
+    /// Uses the pinned URLSession when pins are configured, otherwise falls
+    /// back to URLSession.shared (unchanged behaviour when no pins present).
     func requestLicense(
         spcData: Data,
         assetId: String,
@@ -156,7 +217,7 @@ class DrmHandler: NSObject {
             return
         }
 
-        print("DrmHandler: Requesting license for asset: \\(assetId)")
+        print("DrmHandler: Requesting license for asset: \(assetId)")
         notifyDrmSessionState(state: "acquiringLicense")
 
         var request = URLRequest(url: url)
@@ -172,18 +233,21 @@ class DrmHandler: NSObject {
 
         // Add token if provided
         if let token = drmConfig?["token"] as? String {
-            request.setValue("Bearer \\(token)", forHTTPHeaderField: "Authorization")
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
         // Content-Type for FairPlay SPC
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
 
-        let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+        // Use the pinned session when pins are configured; fall back to shared session otherwise.
+        let session: URLSession = pinnedSession ?? URLSession.shared
+
+        let task = session.dataTask(with: request) { [weak self] data, response, error in
             guard let self = self else { return }
 
             if let error = error {
-                print("DrmHandler: License request error: \\(error.localizedDescription)")
-                self.notifyDrmError("License request failed: \\(error.localizedDescription)")
+                print("DrmHandler: License request error: \(error.localizedDescription)")
+                self.notifyDrmError("License request failed: \(error.localizedDescription)")
                 completion(nil, error)
                 return
             }
@@ -195,7 +259,7 @@ class DrmHandler: NSObject {
                 return
             }
 
-            print("DrmHandler: License received successfully (\\(data.count) bytes)")
+            print("DrmHandler: License received successfully (\(data.count) bytes)")
             self.notifyDrmSessionState(state: "licensed")
             completion(data, nil)
         }
@@ -203,16 +267,116 @@ class DrmHandler: NSObject {
         task.resume()
     }
 
+    // MARK: - Pin matching helpers
+
+    /// Return the configured pins for [host], supporting exact and *.domain wildcards.
+    /// Mirrors Dart CertificatePinningConfig.getPinsForDomain.
+    private func pins(for host: String) -> [String]? {
+        // Exact match
+        if let exactPins = pinnedDomains[host] {
+            return exactPins
+        }
+        // Wildcard match: *.parent.com matches sub.parent.com
+        let parts = host.split(separator: ".", omittingEmptySubsequences: false)
+        if parts.count >= 2 {
+            let wildcard = "*." + parts.dropFirst().joined(separator: ".")
+            if let wildcardPins = pinnedDomains[wildcard] {
+                return wildcardPins
+            }
+        }
+        return nil
+    }
+
+    /// Known SPKI DER prefixes for common key types.
+    /// These are prepended to the raw public key bytes exported by
+    /// SecKeyCopyExternalRepresentation to reconstruct the full SPKI DER,
+    /// which is what `openssl x509 -pubkey | openssl pkey -pubin -outform der | openssl dgst -sha256`
+    /// hashes (and what Android OkHttp/TrustKit pin against).
+    private static let spkiHeaders: [(keyType: CFString, keySizeInBits: Int, header: [UInt8])] = [
+        // RSA 2048
+        (kSecAttrKeyTypeRSA, 2048, [
+            0x30, 0x82, 0x01, 0x22,
+            0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01,
+            0x05, 0x00,
+            0x03, 0x82, 0x01, 0x0f, 0x00
+        ]),
+        // RSA 4096
+        (kSecAttrKeyTypeRSA, 4096, [
+            0x30, 0x82, 0x02, 0x22,
+            0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01,
+            0x05, 0x00,
+            0x03, 0x82, 0x02, 0x0f, 0x00
+        ]),
+        // EC P-256
+        (kSecAttrKeyTypeECSECPrimeRandom, 256, [
+            0x30, 0x59,
+            0x30, 0x13,
+            0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+            0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07,
+            0x03, 0x42, 0x00
+        ]),
+        // EC P-384
+        (kSecAttrKeyTypeECSECPrimeRandom, 384, [
+            0x30, 0x76,
+            0x30, 0x10,
+            0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01,
+            0x06, 0x05, 0x2b, 0x81, 0x04, 0x00, 0x22,
+            0x03, 0x62, 0x00
+        ]),
+    ]
+
+    /// Compute hex(SHA-256(SPKI DER)) for a SecCertificate.
+    /// Returns nil if the key type is not one of the four supported types.
+    private func spkiSha256Hex(for certificate: SecCertificate) -> String? {
+        guard let publicKey = SecCertificateCopyKey(certificate) else {
+            return nil
+        }
+
+        var error: Unmanaged<CFError>?
+        guard let keyData = SecKeyCopyExternalRepresentation(publicKey, &error) as Data? else {
+            return nil
+        }
+
+        let keyAttrs = SecKeyCopyAttributes(publicKey) as? [CFString: Any]
+        let keyType = keyAttrs?[kSecAttrKeyType] as? String
+        let keySize = keyAttrs?[kSecAttrKeySizeInBits] as? Int ?? 0
+
+        // Find matching SPKI header
+        var spkiHeader: [UInt8]?
+        for entry in DrmHandler.spkiHeaders {
+            if (keyType as CFString?) == entry.keyType && keySize == entry.keySizeInBits {
+                spkiHeader = entry.header
+                break
+            }
+        }
+
+        guard let header = spkiHeader else {
+            print("DrmHandler: Unsupported key type '\(String(describing: keyType))' size \(keySize) — pin cannot be computed")
+            return nil
+        }
+
+        // Reconstruct SPKI DER = header bytes + raw public key bytes
+        var spkiDer = Data(header)
+        spkiDer.append(keyData)
+
+        // SHA-256
+        var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        spkiDer.withUnsafeBytes { ptr in
+            _ = CC_SHA256(ptr.baseAddress, CC_LONG(spkiDer.count), &digest)
+        }
+
+        // Hex encode
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     // MARK: - Utility Methods
 
-    /// Extract content identifier from URL
+    /// Extract content identifier from URL.
     func extractContentIdentifier(from url: URL) -> String? {
-        // Get the scheme-specific part (everything after "skd://")
         guard url.scheme == "skd" else {
             return nil
         }
 
-        // Use the host and path as content ID
         if let host = url.host {
             return host + (url.path.isEmpty ? "" : url.path)
         }
@@ -220,16 +384,15 @@ class DrmHandler: NSObject {
         return url.absoluteString.replacingOccurrences(of: "skd://", with: "")
     }
 
-    /// Check if FairPlay is supported
+    /// Check if FairPlay is supported.
     static func isFairPlaySupported() -> Bool {
         if #available(iOS 10.0, *) {
-            // FairPlay is available on iOS 10.0+
             return true
         }
         return false
     }
 
-    /// Get DRM system info
+    /// Get DRM system info.
     func getDrmSystemInfo() -> [String: Any] {
         var info: [String: Any] = [:]
 
@@ -251,7 +414,6 @@ class DrmHandler: NSObject {
     func notifyDrmError(_ message: String) {
         print("DrmHandler Error: \(message)")
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        // Primary: onDrmSessionUpdate so Dart drmSessionStream receives it.
         channel.invokeMethod(
             "onDrmSessionUpdate",
             arguments: buildDrmSessionPayload(
@@ -261,7 +423,6 @@ class DrmHandler: NSObject {
                 nowMs: nowMs
             )
         )
-        // Secondary: legacy onDrmError for other consumers.
         channel.invokeMethod("onDrmError", arguments: [
             "playerId": playerId,
             "error": message,
@@ -270,16 +431,6 @@ class DrmHandler: NSObject {
     }
 
     /// Notify Flutter of DRM session state changes via ``onDrmSessionUpdate``.
-    ///
-    /// The payload matches ``DrmSession.fromMap`` exactly:
-    ///   - ``id``          String  – session identifier (playerId-scoped)
-    ///   - ``state``       String  – DrmSessionState.name:
-    ///                               idle|acquiringLicense|licensed|renewing|error|closed
-    ///   - ``license``     Map?    – DrmLicense fields or nil
-    ///   - ``errorMessage``String? – nil unless state=error
-    ///   - ``createdAt``   Int     – epoch milliseconds
-    ///   - ``updatedAt``   Int     – epoch milliseconds
-    ///   - ``playerId``    String  – required by the Dart static dispatcher
     func notifyDrmSessionState(state: String, license: [String: Any]? = nil) {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         channel.invokeMethod(
@@ -293,12 +444,6 @@ class DrmHandler: NSObject {
         )
     }
 
-    /// Build the argument dictionary that matches ``DrmSession.fromMap``.
-    ///
-    /// Uses ``[String: Any]`` (non-optional values) so the StandardMessageCodec
-    /// serialises the map correctly through the Flutter method channel.
-    /// Nullable fields are included only when non-nil; ``DrmSession.fromMap``
-    /// handles missing nullable keys with ``as String?`` / ``as Map?`` casts.
     private func buildDrmSessionPayload(
         state: String,
         license: [String: Any]?,
@@ -324,13 +469,97 @@ class DrmHandler: NSObject {
     // MARK: - Cleanup
 
     func dispose() {
-        // Invalidate content key session
-        // Note: We don't call invalidateAllPersistableContentKeys as it requires app-specific data
-        // The session will be cleaned up when set to nil
+        pinnedSession?.invalidateAndCancel()
+        pinnedSession = nil
         contentKeySession = nil
         contentKeyDelegate = nil
         certificateData = nil
         print("DrmHandler: Disposed")
+    }
+}
+
+// MARK: - URLSessionDelegate (certificate pinning)
+
+@available(iOS 10.0, *)
+extension DrmHandler: URLSessionDelegate {
+
+    /// Called for every TLS server-trust challenge on the pinned URLSession.
+    ///
+    /// Logic:
+    ///   1. Extract the host from the protection space.
+    ///   2. Look up configured pins (exact + wildcard).
+    ///   3. If no pins exist for this host → performDefaultHandling (no-op).
+    ///   4. If pins exist → evaluate the trust object, then for each cert in the
+    ///      chain compute hex(SHA-256(SPKI)) and compare against the pins.
+    ///      Accept on first match; cancel otherwise.
+    func urlSession(
+        _ session: URLSession,
+        didReceive challenge: URLAuthenticationChallenge,
+        completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void
+    ) {
+        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        let host = challenge.protectionSpace.host
+
+        // No pins for this host → perform default TLS validation
+        guard let hostPins = pins(for: host), !hostPins.isEmpty else {
+            completionHandler(.performDefaultHandling, nil)
+            return
+        }
+
+        // We have pins; validate the server trust ourselves
+        guard let serverTrust = challenge.protectionSpace.serverTrust else {
+            print("DrmHandler: No server trust in challenge for '\(host)' — cancelling")
+            completionHandler(.cancelAuthenticationChallenge, nil)
+            return
+        }
+
+        // Evaluate the trust with the system's default policy
+        var secResult = SecTrustResultType.invalid
+        if #available(iOS 12.0, *) {
+            var error: CFError?
+            let evaluated = SecTrustEvaluateWithError(serverTrust, &error)
+            if !evaluated {
+                print("DrmHandler: Trust evaluation failed for '\(host)': \(String(describing: error))")
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+        } else {
+            // iOS < 12 fallback
+            let status = SecTrustEvaluate(serverTrust, &secResult)
+            guard status == errSecSuccess,
+                  secResult == .unspecified || secResult == .proceed else {
+                print("DrmHandler: Trust evaluation failed for '\(host)' result=\(secResult.rawValue)")
+                completionHandler(.cancelAuthenticationChallenge, nil)
+                return
+            }
+        }
+
+        // Walk the certificate chain and look for a matching pin
+        let certCount = SecTrustGetCertificateCount(serverTrust)
+        for i in 0 ..< certCount {
+            guard let cert = SecTrustGetCertificateAtIndex(serverTrust, i) else { continue }
+            guard let certHex = spkiSha256Hex(for: cert) else {
+                // Unsupported key type — log and skip (see SPKI note in file header)
+                print("DrmHandler: Could not compute SPKI hash for cert at index \(i) for '\(host)'")
+                continue
+            }
+
+            if hostPins.contains(certHex) {
+                print("DrmHandler: Pin matched for '\(host)' at chain index \(i)")
+                let credential = URLCredential(trust: serverTrust)
+                completionHandler(.useCredential, credential)
+                return
+            }
+        }
+
+        // No pin matched — reject the connection
+        print("DrmHandler: Certificate pin mismatch for '\(host)' — cancelling licence request")
+        notifyDrmError("Certificate pin mismatch for '\(host)' — DRM licence request rejected")
+        completionHandler(.cancelAuthenticationChallenge, nil)
     }
 }
 
@@ -369,19 +598,17 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
         contentKeyRequest keyRequest: AVContentKeyRequest,
         didFailWithError err: Error
     ) {
-        print("ContentKeyDelegate: Content key request failed: \\(err.localizedDescription)")
-        drmHandler?.notifyDrmError("Content key request failed: \\(err.localizedDescription)")
+        print("ContentKeyDelegate: Content key request failed: \(err.localizedDescription)")
+        drmHandler?.notifyDrmError("Content key request failed: \(err.localizedDescription)")
     }
 
     private func handleStreamingContentKeyRequest(_ keyRequest: AVContentKeyRequest) {
         guard let certificateData = certificateData else {
             drmHandler?.notifyDrmError("Certificate not loaded")
-            // DrmError already conforms to Error via LocalizedError — no force-cast needed.
             keyRequest.processContentKeyResponseError(DrmError.certificateNotLoaded)
             return
         }
 
-        // Extract content identifier
         guard let contentIdentifier = keyRequest.identifier as? String else {
             drmHandler?.notifyDrmError("Invalid content identifier")
             keyRequest.processContentKeyResponseError(DrmError.invalidContentIdentifier)
@@ -390,11 +617,8 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
 
         print("ContentKeyDelegate: Processing key request for: \(contentIdentifier)")
 
-        // Prepare SPC (Server Playback Context) request
-        // Create data from content identifier
         let contentIdentifierData = contentIdentifier.data(using: .utf8)!
 
-        // Make SPC request
         keyRequest.makeStreamingContentKeyRequestData(
             forApp: certificateData,
             contentIdentifier: contentIdentifierData,
@@ -417,7 +641,6 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
 
             print("ContentKeyDelegate: SPC data generated (\(spcData.count) bytes)")
 
-            // Request CKC (Content Key Context) from license server
             self.drmHandler?.requestLicense(
                 spcData: spcData,
                 assetId: contentIdentifier
@@ -432,7 +655,6 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
                     return
                 }
 
-                // Create content key response
                 let keyResponse = AVContentKeyResponse(fairPlayStreamingKeyResponseData: ckcData)
                 keyRequest.processContentKeyResponse(keyResponse)
 
