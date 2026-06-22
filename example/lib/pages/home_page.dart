@@ -10,6 +10,7 @@ import 'casting_page.dart';
 import 'notifications_page.dart';
 import 'fullscreen_page.dart';
 import 'adaptive_controls_page.dart';
+import 'custom_controls_page.dart';
 import 'error_handling_page.dart';
 
 /// Home page displaying a scrollable gallery of ZMedia Player feature demos.
@@ -150,6 +151,16 @@ class HomePage extends StatelessWidget {
                   icon: Icons.widgets,
                   page: const AdaptiveControlsPage(),
                   iconColor: Colors.purple,
+                ),
+                const SizedBox(height: 8),
+                _feature(
+                  context,
+                  title: 'Fully Custom Controls & Overlay',
+                  description:
+                      'Build a completely bespoke overlay from scratch using CustomControlsBase.',
+                  icon: Icons.brush,
+                  page: const CustomControlsPage(),
+                  iconColor: Colors.deepPurple,
                 ),
                 const SizedBox(height: 16),
                 _SectionLabel('Robustness'),
