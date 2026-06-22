@@ -243,29 +243,82 @@ class DrmHandler: NSObject {
 
     // MARK: - Flutter Communication
 
-    /// Notify Flutter of DRM errors
+    /// Notify Flutter of DRM errors.
+    ///
+    /// Emits an ``onDrmSessionUpdate`` with state=error so the Dart
+    /// ``drmSessionStream`` surfaces the failure.  Also emits the legacy
+    /// ``onDrmError`` event for any other consumers.
     func notifyDrmError(_ message: String) {
-        print("DrmHandler Error: \\(message)")
+        print("DrmHandler Error: \(message)")
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        // Primary: onDrmSessionUpdate so Dart drmSessionStream receives it.
+        channel.invokeMethod(
+            "onDrmSessionUpdate",
+            arguments: buildDrmSessionPayload(
+                state: "error",
+                license: nil,
+                errorMessage: message,
+                nowMs: nowMs
+            )
+        )
+        // Secondary: legacy onDrmError for other consumers.
         channel.invokeMethod("onDrmError", arguments: [
             "playerId": playerId,
             "error": message,
-            "timestamp": Date().timeIntervalSince1970 * 1000
+            "timestamp": nowMs
         ])
     }
 
-    /// Notify Flutter of DRM session state changes
+    /// Notify Flutter of DRM session state changes via ``onDrmSessionUpdate``.
+    ///
+    /// The payload matches ``DrmSession.fromMap`` exactly:
+    ///   - ``id``          String  – session identifier (playerId-scoped)
+    ///   - ``state``       String  – DrmSessionState.name:
+    ///                               idle|acquiringLicense|licensed|renewing|error|closed
+    ///   - ``license``     Map?    – DrmLicense fields or nil
+    ///   - ``errorMessage``String? – nil unless state=error
+    ///   - ``createdAt``   Int     – epoch milliseconds
+    ///   - ``updatedAt``   Int     – epoch milliseconds
+    ///   - ``playerId``    String  – required by the Dart static dispatcher
     func notifyDrmSessionState(state: String, license: [String: Any]? = nil) {
-        var args: [String: Any] = [
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        channel.invokeMethod(
+            "onDrmSessionUpdate",
+            arguments: buildDrmSessionPayload(
+                state: state,
+                license: license,
+                errorMessage: nil,
+                nowMs: nowMs
+            )
+        )
+    }
+
+    /// Build the argument dictionary that matches ``DrmSession.fromMap``.
+    ///
+    /// Uses ``[String: Any]`` (non-optional values) so the StandardMessageCodec
+    /// serialises the map correctly through the Flutter method channel.
+    /// Nullable fields are included only when non-nil; ``DrmSession.fromMap``
+    /// handles missing nullable keys with ``as String?`` / ``as Map?`` casts.
+    private func buildDrmSessionPayload(
+        state: String,
+        license: [String: Any]?,
+        errorMessage: String?,
+        nowMs: Int64
+    ) -> [String: Any] {
+        var payload: [String: Any] = [
             "playerId": playerId,
+            "id": "drm-session-\(playerId)",
             "state": state,
-            "timestamp": Date().timeIntervalSince1970 * 1000
+            "createdAt": Int(nowMs),
+            "updatedAt": Int(nowMs)
         ]
-
         if let license = license {
-            args["license"] = license
+            payload["license"] = license
         }
-
-        channel.invokeMethod("onDrmSessionChanged", arguments: args)
+        if let errorMessage = errorMessage {
+            payload["errorMessage"] = errorMessage
+        }
+        return payload
     }
 
     // MARK: - Cleanup
@@ -323,68 +376,67 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
     private func handleStreamingContentKeyRequest(_ keyRequest: AVContentKeyRequest) {
         guard let certificateData = certificateData else {
             drmHandler?.notifyDrmError("Certificate not loaded")
-            keyRequest.processContentKeyResponseError(DrmError.certificateNotLoaded as! Error)
+            // DrmError already conforms to Error via LocalizedError — no force-cast needed.
+            keyRequest.processContentKeyResponseError(DrmError.certificateNotLoaded)
             return
         }
 
         // Extract content identifier
         guard let contentIdentifier = keyRequest.identifier as? String else {
             drmHandler?.notifyDrmError("Invalid content identifier")
-            keyRequest.processContentKeyResponseError(DrmError.invalidContentIdentifier as! Error)
+            keyRequest.processContentKeyResponseError(DrmError.invalidContentIdentifier)
             return
         }
 
-        print("ContentKeyDelegate: Processing key request for: \\(contentIdentifier)")
+        print("ContentKeyDelegate: Processing key request for: \(contentIdentifier)")
 
         // Prepare SPC (Server Playback Context) request
-        do {
-            // Create data from content identifier
-            let contentIdentifierData = contentIdentifier.data(using: .utf8)!
+        // Create data from content identifier
+        let contentIdentifierData = contentIdentifier.data(using: .utf8)!
 
-            // Make SPC request
-            keyRequest.makeStreamingContentKeyRequestData(
-                forApp: certificateData,
-                contentIdentifier: contentIdentifierData,
-                options: nil
-            ) { [weak self] spcData, error in
-                guard let self = self else { return }
+        // Make SPC request
+        keyRequest.makeStreamingContentKeyRequestData(
+            forApp: certificateData,
+            contentIdentifier: contentIdentifierData,
+            options: nil
+        ) { [weak self] spcData, error in
+            guard let self = self else { return }
 
+            if let error = error {
+                print("ContentKeyDelegate: SPC request error: \(error.localizedDescription)")
+                self.drmHandler?.notifyDrmError("SPC request failed: \(error.localizedDescription)")
+                keyRequest.processContentKeyResponseError(error)
+                return
+            }
+
+            guard let spcData = spcData else {
+                self.drmHandler?.notifyDrmError("No SPC data")
+                keyRequest.processContentKeyResponseError(DrmError.noSpcData)
+                return
+            }
+
+            print("ContentKeyDelegate: SPC data generated (\(spcData.count) bytes)")
+
+            // Request CKC (Content Key Context) from license server
+            self.drmHandler?.requestLicense(
+                spcData: spcData,
+                assetId: contentIdentifier
+            ) { ckcData, error in
                 if let error = error {
-                    print("ContentKeyDelegate: SPC request error: \\(error.localizedDescription)")
-                    self.drmHandler?.notifyDrmError("SPC request failed: \\(error.localizedDescription)")
                     keyRequest.processContentKeyResponseError(error)
                     return
                 }
 
-                guard let spcData = spcData else {
-                    self.drmHandler?.notifyDrmError("No SPC data")
-                    keyRequest.processContentKeyResponseError(DrmError.noSpcData as! Error)
+                guard let ckcData = ckcData else {
+                    keyRequest.processContentKeyResponseError(DrmError.noCkcData)
                     return
                 }
 
-                print("ContentKeyDelegate: SPC data generated (\\(spcData.count) bytes)")
+                // Create content key response
+                let keyResponse = AVContentKeyResponse(fairPlayStreamingKeyResponseData: ckcData)
+                keyRequest.processContentKeyResponse(keyResponse)
 
-                // Request CKC (Content Key Context) from license server
-                self.drmHandler?.requestLicense(
-                    spcData: spcData,
-                    assetId: contentIdentifier
-                ) { ckcData, error in
-                    if let error = error {
-                        keyRequest.processContentKeyResponseError(error)
-                        return
-                    }
-
-                    guard let ckcData = ckcData else {
-                        keyRequest.processContentKeyResponseError(DrmError.noCkcData as! Error)
-                        return
-                    }
-
-                    // Create content key response
-                    let keyResponse = AVContentKeyResponse(fairPlayStreamingKeyResponseData: ckcData)
-                    keyRequest.processContentKeyResponse(keyResponse)
-
-                    print("ContentKeyDelegate: Content key processed successfully")
-                }
+                print("ContentKeyDelegate: Content key processed successfully")
             }
         }
     }

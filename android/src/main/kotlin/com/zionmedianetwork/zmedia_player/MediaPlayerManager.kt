@@ -259,6 +259,8 @@ class MediaPlayerInstance(
     private var bandwidthUpdateRunnable: Runnable? = null
     private var originalVolume: Float = 1f
     private var currentMediaItem: Map<String, Any>? = null
+    // DRM handler — non-null only when the current media item has a drmConfig.
+    private var drmHandler: DrmHandler? = null
 
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
@@ -350,28 +352,74 @@ class MediaPlayerInstance(
 
         android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
 
+        // Release any previous DRM handler before loading new media.
+        drmHandler = null
+
         // Clear previous track data immediately to prevent stale UI
         notifyQualityTracksChanged(emptyList())
         notifyAudioTracksChanged(emptyList())
         notifySubtitleTracksChanged(emptyList())
 
         val uri = Uri.parse(url)
-        val mediaSource: MediaSource
 
-        // Create media source with custom headers if provided
-        if (httpHeaders != null && httpHeaders.isNotEmpty()) {
-            val customHttpDataSourceFactory = DefaultHttpDataSource.Factory()
-                .setUserAgent("Flutter Media Player")
-
-            // Set custom headers
-            httpHeaders.forEach { (key, value) ->
-                customHttpDataSourceFactory.setDefaultRequestProperties(mapOf(key to value))
+        // Determine which DataSource.Factory to use (custom headers or default).
+        val activeDataSourceFactory: com.google.android.exoplayer2.upstream.DataSource.Factory =
+            if (httpHeaders != null && httpHeaders.isNotEmpty()) {
+                val customHttpFactory = DefaultHttpDataSource.Factory()
+                    .setUserAgent("Flutter Media Player")
+                httpHeaders.forEach { (key, value) ->
+                    customHttpFactory.setDefaultRequestProperties(mapOf(key to value))
+                }
+                DefaultDataSource.Factory(context, customHttpFactory)
+            } else {
+                dataSourceFactory
             }
 
-            val customDataSourceFactory = DefaultDataSource.Factory(context, customHttpDataSourceFactory)
-            mediaSource = createMediaSource(uri, customDataSourceFactory)
+        // --- DRM wiring ---
+        // If the media item carries a drmConfig, create a DrmHandler and obtain a
+        // DrmSessionManager so that ExoPlayer can decrypt the content.
+        @Suppress("UNCHECKED_CAST")
+        val drmConfig = mediaItem["drmConfig"] as? Map<String, Any>
+        val mediaSource: MediaSource
+
+        if (drmConfig != null) {
+            android.util.Log.d("MediaPlayerInstance", "DRM config found, initializing DrmHandler")
+            val handler = DrmHandler(context, playerId, methodChannel)
+            val drmSessionManager = handler.createDrmSessionManager(drmConfig)
+
+            if (drmSessionManager != null) {
+                // Attach the DRM session manager directly to the per-format factory so that
+                // HlsMediaSource / DashMediaSource / ProgressiveMediaSource all acquire a
+                // Widevine or ClearKey license automatically during prepare().
+                mediaSource = when {
+                    uri.toString().contains(".m3u8") ->
+                        com.google.android.exoplayer2.source.hls.HlsMediaSource.Factory(
+                            activeDataSourceFactory
+                        ).setDrmSessionManagerProvider { _ -> drmSessionManager }
+                            .createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(uri))
+
+                    uri.toString().contains(".mpd") ->
+                        com.google.android.exoplayer2.source.dash.DashMediaSource.Factory(
+                            activeDataSourceFactory
+                        ).setDrmSessionManagerProvider { _ -> drmSessionManager }
+                            .createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(uri))
+
+                    else ->
+                        com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(
+                            activeDataSourceFactory
+                        ).setDrmSessionManagerProvider { _ -> drmSessionManager }
+                            .createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(uri))
+                }
+
+                drmHandler = handler
+                android.util.Log.d("MediaPlayerInstance", "DRM media source created successfully")
+            } else {
+                android.util.Log.e("MediaPlayerInstance", "Failed to create DRM session manager, loading without DRM")
+                mediaSource = createMediaSource(uri, activeDataSourceFactory)
+            }
         } else {
-            mediaSource = createMediaSource(uri, dataSourceFactory)
+            // Non-DRM path — unchanged behaviour.
+            mediaSource = createMediaSource(uri, activeDataSourceFactory)
         }
 
         exoPlayer?.apply {
@@ -654,6 +702,9 @@ class MediaPlayerInstance(
         exoPlayer = null
         playerView = null
         currentMediaItem = null
+
+        // Release DRM resources.
+        drmHandler = null
     }
 
     private fun createMediaSource(uri: Uri, dataSourceFactory: DataSource.Factory = this.dataSourceFactory): MediaSource {

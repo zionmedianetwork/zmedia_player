@@ -63,6 +63,9 @@ class DrmHandler(
         }
 
         try {
+            // Signal that DRM initialisation is starting.
+            notifyDrmSessionState("acquiringLicense")
+
             // Create HTTP data source factory for license requests
             val dataSourceFactory = buildHttpDataSourceFactory(drmConfig)
 
@@ -79,6 +82,8 @@ class DrmHandler(
                 .build(drmCallback)
 
             Log.d(TAG, "DRM session manager created successfully for scheme: $scheme")
+            // Manager is built; actual license acquisition happens when ExoPlayer prepares
+            // the media source. Emit idle to indicate the session is set up but not yet active.
             notifyDrmSessionState("idle")
 
             return drmSessionManager
@@ -203,39 +208,105 @@ class DrmHandler(
     }
 
     /**
-     * Notify Flutter of DRM errors
+     * Notify Flutter of DRM errors by emitting an onDrmSessionUpdate with state=error.
+     * Also emits the legacy onDrmError call so any other consumers still receive it.
      */
     private fun notifyDrmError(errorMessage: String) {
         try {
-            methodChannel.invokeMethod("onDrmError", mapOf(
-                "playerId" to playerId,
-                "error" to errorMessage,
-                "timestamp" to System.currentTimeMillis()
-            ))
+            val now = System.currentTimeMillis()
+            // Primary: emit onDrmSessionUpdate with state=error so drmSessionStream surfaces the failure.
+            methodChannel.invokeMethod(
+                "onDrmSessionUpdate",
+                buildDrmSessionPayload(
+                    state = "error",
+                    license = null,
+                    errorMessage = errorMessage,
+                    nowMs = now
+                )
+            )
+            // Secondary: keep legacy onDrmError for any future consumers.
+            methodChannel.invokeMethod(
+                "onDrmError",
+                mapOf(
+                    "playerId" to playerId,
+                    "error" to errorMessage,
+                    "timestamp" to now
+                )
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Failed to notify DRM error: ${e.message}")
         }
     }
 
     /**
-     * Notify Flutter of DRM session state changes
+     * Notify Flutter of DRM session state changes via onDrmSessionUpdate.
+     *
+     * The payload matches DrmSession.fromMap exactly:
+     *   id          – String  (session identifier, playerId-scoped)
+     *   state       – String  (DrmSessionState.name: idle|acquiringLicense|licensed|renewing|error|closed)
+     *   license     – Map?    (DrmLicense fields or null)
+     *   errorMessage– String? (null unless state=error)
+     *   createdAt   – Long    (epoch millis)
+     *   updatedAt   – Long    (epoch millis)
+     *   playerId    – String  (required by the Dart static dispatcher)
      */
     fun notifyDrmSessionState(state: String, license: Map<String, Any>? = null) {
         try {
-            val args = mutableMapOf<String, Any>(
-                "playerId" to playerId,
-                "state" to state,
-                "timestamp" to System.currentTimeMillis()
+            methodChannel.invokeMethod(
+                "onDrmSessionUpdate",
+                buildDrmSessionPayload(
+                    state = state,
+                    license = license,
+                    errorMessage = null,
+                    nowMs = System.currentTimeMillis()
+                )
             )
-
-            if (license != null) {
-                args["license"] = license
-            }
-
-            methodChannel.invokeMethod("onDrmSessionChanged", args)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to notify DRM session state: ${e.message}")
         }
+    }
+
+    /**
+     * Build the argument map that matches DrmSession.fromMap.
+     *
+     * DrmSession.fromMap reads:
+     *   map['id']           as String
+     *   map['state']        as String  → DrmSessionState.name
+     *   map['license']      as Map?    → DrmLicense.fromMap (nullable)
+     *   map['errorMessage'] as String? (nullable)
+     *   map['createdAt']    as int     → DateTime.fromMillisecondsSinceEpoch
+     *   map['updatedAt']    as int     → DateTime.fromMillisecondsSinceEpoch
+     *
+     * The static Dart dispatcher additionally reads map['playerId'] to route to the
+     * correct MediaPlayer instance before calling _handleDrmSessionUpdate.
+     */
+    /**
+     * Build the argument map that matches DrmSession.fromMap.
+     *
+     * Uses Map<String, Any> (non-nullable values) so Flutter's StandardMessageCodec
+     * serialises it correctly.  Nullable fields are omitted when null; DrmSession.fromMap
+     * handles missing nullable keys via `as String?` / `as Map?` casts which return null.
+     */
+    private fun buildDrmSessionPayload(
+        state: String,
+        license: Map<String, Any>?,
+        errorMessage: String?,
+        nowMs: Long
+    ): Map<String, Any> {
+        val payload = mutableMapOf<String, Any>(
+            "playerId" to playerId,
+            "id" to "drm-session-$playerId",
+            "state" to state,
+            "createdAt" to nowMs,
+            "updatedAt" to nowMs
+        )
+        if (license != null) {
+            payload["license"] = license
+        }
+        if (errorMessage != null) {
+            payload["errorMessage"] = errorMessage
+        }
+        return payload
     }
 
     /**

@@ -279,6 +279,8 @@ class MediaPlayerInstance: NSObject {
     private var currentIndex = 0
     private var currentMediaItem: [String: Any]?
     private var previousAccessLogEventCount = 0
+    // DRM handler — non-nil only when the current media item carries a drmConfig.
+    private var drmHandler: DrmHandler?
 
     init(playerId: String, methodChannel: FlutterMethodChannel, config: [String: Any]?) {
         self.playerId = playerId
@@ -362,6 +364,10 @@ class MediaPlayerInstance: NSObject {
         // Note: No need to remove old observers - modern KVO (NSKeyValueObservation)
         // automatically cleans up when we invalidate or reassign the observer variables
 
+        // Release any previous DRM handler before loading new media.
+        drmHandler?.dispose()
+        drmHandler = nil
+
         // Create AVURLAsset with custom headers if provided
         var asset: AVURLAsset
         if let httpHeaders = mediaItem["httpHeaders"] as? [String: String] {
@@ -369,6 +375,28 @@ class MediaPlayerInstance: NSObject {
             asset = AVURLAsset(url: url, options: options)
         } else {
             asset = AVURLAsset(url: url)
+        }
+
+        // --- DRM wiring ---
+        // If the media item carries a drmConfig, configure a DrmHandler and attach
+        // the AVContentKeySession to the asset BEFORE creating the AVPlayerItem.
+        // The AVContentKeySession MUST have the asset added as a recipient before
+        // the item is created; otherwise the key request callback is never triggered.
+        if #available(iOS 10.0, *),
+           let drmConfig = mediaItem["drmConfig"] as? [String: Any],
+           let player = avPlayer {
+            print("MediaPlayerInstance.loadMediaItem(): DRM config found, initializing DrmHandler")
+            let handler = DrmHandler(playerId: playerId, channel: methodChannel)
+            let configured = handler.configure(drmConfig: drmConfig)
+            if configured {
+                let session = handler.createContentKeySession(for: player)
+                // Register the asset as a content key recipient BEFORE creating AVPlayerItem.
+                session.addContentKeyRecipient(asset)
+                drmHandler = handler
+                print("MediaPlayerInstance.loadMediaItem(): DRM content key session configured")
+            } else {
+                print("MediaPlayerInstance.loadMediaItem(): DrmHandler.configure() failed, loading without DRM")
+            }
         }
 
         let playerItem = AVPlayerItem(asset: asset)
@@ -691,6 +719,10 @@ class MediaPlayerInstance: NSObject {
         // Clean up player
         avPlayer?.pause()
         avPlayer?.replaceCurrentItem(with: nil)
+
+        // Release DRM resources.
+        drmHandler?.dispose()
+        drmHandler = nil
 
         // Clear references
         currentMediaItem = nil
