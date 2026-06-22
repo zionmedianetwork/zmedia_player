@@ -220,6 +220,34 @@ class DrmConfig {
     );
   }
 
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is DrmConfig &&
+        other.scheme == scheme &&
+        other.licenseUrl == licenseUrl &&
+        other.certificateUrl == certificateUrl &&
+        other.token == token &&
+        other.keyId == keyId &&
+        other.contentId == contentId &&
+        other.allowOffline == allowOffline &&
+        other.offlineLicenseDuration == offlineLicenseDuration &&
+        other.autoRenewLicense == autoRenewLicense;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        scheme,
+        licenseUrl,
+        certificateUrl,
+        token,
+        keyId,
+        contentId,
+        allowOffline,
+        offlineLicenseDuration,
+        autoRenewLicense,
+      );
+
   DrmConfig copyWith({
     DrmScheme? scheme,
     String? licenseUrl,
@@ -343,6 +371,28 @@ class EzdrmConfig {
     );
   }
 
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is EzdrmConfig &&
+        other.customerId == customerId &&
+        other.apiKey == apiKey &&
+        other.contentId == contentId &&
+        other._isWidevine == _isWidevine &&
+        other._isFairPlay == _isFairPlay &&
+        other._certificateUrl == _certificateUrl;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        customerId,
+        apiKey,
+        contentId,
+        _isWidevine,
+        _isFairPlay,
+        _certificateUrl,
+      );
+
   Map<String, dynamic> toMap() {
     return {
       'customerId': customerId,
@@ -394,6 +444,15 @@ class DrmLicense {
     this.renewalUrl,
     this.status = DrmLicenseStatus.active,
   });
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is DrmLicense && other.id == id;
+  }
+
+  @override
+  int get hashCode => id.hashCode;
 
   /// Check if license is expired
   bool get isExpired {

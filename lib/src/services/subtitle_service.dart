@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/subtitle_track.dart';
 
@@ -126,17 +127,20 @@ class SubtitleService {
   /// Parse subtitle content based on format
   List<SubtitleCue> _parseSubtitleContent(
       String content, SubtitleFormat format) {
+    // Normalise line endings once so all parsers receive Unix-style '\n'.
+    // This handles Windows CRLF (\r\n) and bare CR (\r) files.
+    final normalised = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
     switch (format) {
       case SubtitleFormat.srt:
-        return _parseSrt(content);
+        return _parseSrt(normalised);
       case SubtitleFormat.webvtt:
-        return _parseWebVtt(content);
+        return _parseWebVtt(normalised);
       case SubtitleFormat.ass:
-        return _parseAss(content);
+        return _parseAss(normalised);
       case SubtitleFormat.ssa:
-        return _parseSsa(content);
+        return _parseSsa(normalised);
       case SubtitleFormat.ttml:
-        return _parseTtml(content);
+        return _parseTtml(normalised);
     }
   }
 
@@ -150,7 +154,7 @@ class SubtitleService {
       if (lines.length < 3) continue;
 
       try {
-        // Skip index number
+        // Skip index number (lines[0])
         final timeLine = lines[1];
         final textLines = lines.skip(2).toList();
 
@@ -177,98 +181,151 @@ class SubtitleService {
     return cues;
   }
 
+  // Regex that matches a WebVTT timestamp line (optional cue settings after
+  // the arrow are ignored).
+  static final _webVttTimestampRegex = RegExp(
+    r'^(\d{2}:\d{2}:\d{2}\.\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}\.\d{3})',
+  );
+
+  // Block-level keywords that introduce non-cue sections to skip.
+  static final _webVttBlockKeywords = RegExp(r'^(NOTE|REGION|STYLE)\b');
+
   /// Parse WebVTT format
+  ///
+  /// Handles:
+  /// - Optional cue identifier lines before the timestamp.
+  /// - NOTE, REGION, and STYLE blocks (skipped until next blank line).
+  /// - WEBVTT header line (and optional header block separated by blank line).
   List<SubtitleCue> _parseWebVtt(String content) {
     final cues = <SubtitleCue>[];
     final lines = content.split('\n');
+    final int total = lines.length;
 
     int i = 0;
-    while (i < lines.length) {
-      // Skip WebVTT header
-      if (lines[i].startsWith('WEBVTT')) {
+
+    // Skip the mandatory WEBVTT header line and any header block that follows
+    // (separated from the first cue by a blank line).
+    if (i < total && lines[i].startsWith('WEBVTT')) {
+      i++;
+      // Skip rest of header block (until blank line).
+      while (i < total && lines[i].isNotEmpty) {
+        i++;
+      }
+    }
+
+    while (i < total) {
+      final line = lines[i];
+
+      // Blank line: separator between blocks, advance and continue.
+      if (line.isEmpty) {
         i++;
         continue;
       }
 
-      // Skip empty lines and notes
-      if (lines[i].isEmpty || lines[i].startsWith('NOTE')) {
+      // Block keywords (NOTE / REGION / STYLE): skip entire block.
+      if (_webVttBlockKeywords.hasMatch(line)) {
         i++;
-        continue;
-      }
-
-      // Parse timestamp line
-      if (i + 1 < lines.length) {
-        final timeMatch =
-            RegExp(r'(\d{2}:\d{2}:\d{2}\.\d{3}) --> (\d{2}:\d{2}:\d{2}\.\d{3})')
-                .firstMatch(lines[i]);
-        if (timeMatch != null) {
-          final startTime = _parseWebVttTime(timeMatch.group(1)!);
-          final endTime = _parseWebVttTime(timeMatch.group(2)!);
-
-          // Collect text lines
-          final textLines = <String>[];
+        while (i < total && lines[i].isNotEmpty) {
           i++;
-          while (i < lines.length && lines[i].isNotEmpty) {
-            textLines.add(lines[i]);
-            i++;
-          }
+        }
+        continue;
+      }
 
-          if (textLines.isNotEmpty) {
-            cues.add(SubtitleCue(
-              startTime: startTime,
-              endTime: endTime,
-              text: textLines.join('\n'),
-            ));
-          }
+      // Check whether the current line is a timestamp.
+      var timestampLine = line;
+      var timestampMatch = _webVttTimestampRegex.firstMatch(timestampLine);
+
+      if (timestampMatch == null) {
+        // This line is a cue identifier; the timestamp must be on the next line.
+        i++;
+        if (i >= total) break;
+        timestampLine = lines[i];
+        timestampMatch = _webVttTimestampRegex.firstMatch(timestampLine);
+        if (timestampMatch == null) {
+          // Still no timestamp — malformed block; skip.
+          i++;
+          continue;
         }
       }
+
+      // We have a valid timestamp.
+      final startTime = _parseWebVttTime(timestampMatch.group(1)!);
+      final endTime = _parseWebVttTime(timestampMatch.group(2)!);
       i++;
+
+      // Collect cue payload lines (until blank line or end of file).
+      final textLines = <String>[];
+      while (i < total && lines[i].isNotEmpty) {
+        textLines.add(lines[i]);
+        i++;
+      }
+
+      if (textLines.isNotEmpty) {
+        cues.add(SubtitleCue(
+          startTime: startTime,
+          endTime: endTime,
+          text: textLines.join('\n'),
+        ));
+      }
     }
 
     return cues;
   }
 
   /// Parse ASS format (basic implementation)
+  ///
+  /// Fixes applied:
+  /// - Uses sublist(9).join(',') so dialogue text containing commas is
+  ///   preserved intact (ASS Dialogue has exactly 9 fixed fields before Text).
+  /// - _parseAssTime correctly handles centiseconds (H:MM:SS.cc format).
   List<SubtitleCue> _parseAss(String content) {
-    // ASS parsing is complex, this is a basic implementation
     final cues = <SubtitleCue>[];
     final lines = content.split('\n');
 
     for (final line in lines) {
-      if (line.startsWith('Dialogue:')) {
-        try {
-          final parts = line.split(',');
-          if (parts.length >= 10) {
-            final startTime = _parseAssTime(parts[1]);
-            final endTime = _parseAssTime(parts[2]);
-            final text = parts[9]
-                .replaceAll(RegExp(r'\{[^}]*\}'), ''); // Remove style tags
+      if (!line.startsWith('Dialogue:')) continue;
+      try {
+        final parts = line.split(',');
+        // ASS Dialogue: Layer, Start, End, Style, Name, MarginL, MarginR,
+        //               MarginV, Effect, Text (index 0–9; Text is index 9+)
+        if (parts.length < 10) continue;
+        final startTime = _parseAssTime(parts[1].trim());
+        final endTime = _parseAssTime(parts[2].trim());
+        // Rejoin everything from index 9 onward to preserve commas in text.
+        final rawText = parts.sublist(9).join(',');
+        final text = rawText.replaceAll(RegExp(r'\{[^}]*\}'), '').trim();
 
-            cues.add(SubtitleCue(
-              startTime: startTime,
-              endTime: endTime,
-              text: text,
-            ));
-          }
-        } catch (e) {
-          continue;
-        }
+        cues.add(SubtitleCue(
+          startTime: startTime,
+          endTime: endTime,
+          text: text,
+        ));
+      } catch (e) {
+        continue;
       }
     }
 
     return cues;
   }
 
-  /// Parse SSA format (basic implementation)
+  /// Parse SSA format (basic implementation — same Dialogue line structure)
   List<SubtitleCue> _parseSsa(String content) {
-    // SSA parsing is similar to ASS
     return _parseAss(content);
   }
 
-  /// Parse TTML format (basic implementation)
+  /// Parse TTML format
+  ///
+  /// TTML requires XML parsing.  The `dart:xml` (or any XML) package is not
+  /// currently a dependency of this package.  Rather than silently returning
+  /// empty cues (which could mask integration issues), this method explicitly
+  /// documents the limitation and returns an empty list.
+  ///
+  /// To add TTML support, add an XML parser dependency (e.g. `xml: ^6.x`) and
+  /// parse `p` elements with `begin`/`end` attributes from the `body` section.
   List<SubtitleCue> _parseTtml(String content) {
-    // TTML parsing would require XML parsing
-    // This is a placeholder implementation
+    // TTML (Timed Text Markup Language) support is not yet implemented.
+    // Parsing TTML requires an XML parser dependency that is not present in
+    // this package.  The method intentionally returns an empty list.
     return [];
   }
 
@@ -306,19 +363,37 @@ class SubtitleService {
     );
   }
 
-  /// Parse ASS time format (H:MM:SS.cc)
+  /// Parse ASS/SSA time format (H:MM:SS.cc)
+  ///
+  /// The centiseconds component (cc) is two digits representing hundredths of
+  /// a second.  Previously `int.parse("SS.cc")` would throw; now the seconds
+  /// field is split on '.' to extract seconds and centiseconds separately.
   Duration _parseAssTime(String timeStr) {
-    final parts = timeStr.split(':');
-    final hours = int.parse(parts[0]);
-    final minutes = int.parse(parts[1]);
-    final seconds = int.parse(parts[2]);
+    final colonParts = timeStr.split(':');
+    final hours = int.parse(colonParts[0]);
+    final minutes = int.parse(colonParts[1]);
+    // colonParts[2] is "SS.cc"
+    final secParts = colonParts[2].split('.');
+    final seconds = int.parse(secParts[0]);
+    // centiseconds → milliseconds (* 10)
+    final centiseconds = secParts.length > 1 ? int.parse(secParts[1]) : 0;
 
     return Duration(
       hours: hours,
       minutes: minutes,
       seconds: seconds,
+      milliseconds: centiseconds * 10,
     );
   }
+
+  /// Exposes [_parseSubtitleContent] for unit testing.
+  ///
+  /// This method is intentionally kept out of the public API.  Use it only
+  /// from test files; production code should rely on [loadSubtitleTrack].
+  @visibleForTesting
+  List<SubtitleCue> parseSubtitleContentForTest(
+          String content, SubtitleFormat format) =>
+      _parseSubtitleContent(content, format);
 
   /// Dispose the service
   void dispose() {
