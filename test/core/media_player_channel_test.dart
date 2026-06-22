@@ -1,0 +1,580 @@
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:zmedia_player/zmedia_player.dart';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const _channel = MethodChannel('zmedia_player');
+
+/// Captures every outgoing MethodCall made on [_channel].
+/// Returns a cancel function that restores the previous handler.
+typedef _HandlerFn = Future<dynamic> Function(MethodCall);
+
+/// Installs [handler] as the mock handler and returns a list that accumulates
+/// every call forwarded to it. Call [reset] in tearDown.
+List<MethodCall> _installCapture([_HandlerFn? extra]) {
+  final calls = <MethodCall>[];
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(_channel, (MethodCall call) async {
+    calls.add(call);
+    return extra != null ? await extra(call) : null;
+  });
+  return calls;
+}
+
+void _resetHandler() {
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(_channel, null);
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  // Reset handler after every test so calls don't bleed.
+  tearDown(_resetHandler);
+
+  // -------------------------------------------------------------------------
+  group('initialize — outgoing contract', () {
+    test('sends method "initialize" with playerId and config keys', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-init-1');
+      await player.initialize();
+
+      final initCall =
+          calls.firstWhere((c) => c.method == 'initialize', orElse: () {
+        fail('No "initialize" call found');
+      });
+
+      expect(initCall.arguments['playerId'], 'ch-init-1');
+      final config = initCall.arguments['config'] as Map;
+      expect(config.containsKey('autoPlay'), isTrue);
+      expect(config.containsKey('volume'), isTrue);
+      expect(config.containsKey('speed'), isTrue);
+      expect(config.containsKey('looping'), isTrue);
+
+      player.dispose();
+    });
+
+    test('initialize is idempotent — only one call sent', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-init-idempotent');
+      await player.initialize();
+      await player.initialize(); // second call is a no-op
+
+      final initCalls = calls.where((c) => c.method == 'initialize').toList();
+      expect(initCalls.length, 1,
+          reason: 'initialize must be sent exactly once');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  group('load — outgoing contract', () {
+    test('sends method "load" with playerId and mediaItem fields', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-load-1');
+      await player.initialize();
+      calls.clear(); // ignore initialize calls
+
+      const item = MediaItem(
+        id: 'item-abc',
+        title: 'Test Video',
+        url: 'https://cdn.example.com/video.mp4',
+        mediaType: MediaType.video,
+      );
+      await player.load(item);
+
+      final loadCall = calls.firstWhere((c) => c.method == 'load', orElse: () {
+        fail('No "load" call found');
+      });
+
+      expect(loadCall.arguments['playerId'], 'ch-load-1');
+      final mediaItem = loadCall.arguments['mediaItem'] as Map;
+      expect(mediaItem['id'], 'item-abc');
+      expect(mediaItem['title'], 'Test Video');
+      expect(mediaItem['url'], 'https://cdn.example.com/video.mp4');
+      expect(mediaItem['mediaType'], 'video');
+
+      player.dispose();
+    });
+
+    test('load serializes drmConfig when present', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-load-drm');
+      await player.initialize();
+      calls.clear();
+
+      final item = MediaItem(
+        id: 'drm-item',
+        title: 'DRM Video',
+        url: 'https://cdn.example.com/protected.mpd',
+        drmConfig: DrmConfig.widevine(
+          licenseUrl: 'https://license.example.com/widevine',
+          headers: {'X-Auth': 'bearer-token'},
+        ),
+      );
+      await player.load(item);
+
+      final loadCall = calls.firstWhere((c) => c.method == 'load');
+      final mediaItem = loadCall.arguments['mediaItem'] as Map;
+      final drmConfig = mediaItem['drmConfig'] as Map;
+      expect(drmConfig['scheme'], 'widevine');
+      expect(drmConfig['licenseUrl'], 'https://license.example.com/widevine');
+      expect((drmConfig['headers'] as Map)['X-Auth'], 'bearer-token');
+
+      player.dispose();
+    });
+
+    test('load serializes certificatePinning when present', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-load-pin');
+      await player.initialize();
+      calls.clear();
+
+      // CertificatePinningConfig uses domain→pins map with 64-char hex pins.
+      const fakePin =
+          'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+      final pinCfg = CertificatePinningConfig(
+        pins: {
+          'license.example.com': [fakePin, fakePin],
+        },
+        minimumPins: 1,
+      );
+      final item = MediaItem(
+        id: 'pin-item',
+        title: 'Pinned Video',
+        url: 'https://cdn.example.com/video.mpd',
+        drmConfig: DrmConfig.widevine(
+          licenseUrl: 'https://license.example.com/widevine',
+          certificatePinning: pinCfg,
+        ),
+      );
+      await player.load(item);
+
+      final loadCall = calls.firstWhere((c) => c.method == 'load');
+      final mediaItem = loadCall.arguments['mediaItem'] as Map;
+      final drmConfig = mediaItem['drmConfig'] as Map;
+      final pinning = drmConfig['certificatePinning'] as Map?;
+      expect(pinning, isNotNull,
+          reason: 'certificatePinning must be serialised into drmConfig');
+      // The pins map must contain the domain we configured.
+      final pinsMap = pinning!['pins'] as Map?;
+      expect(pinsMap, isNotNull);
+
+      player.dispose();
+    });
+
+    test(
+        'load with http:// DRM URL throws ConfigurationException before any load call',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-load-http-drm');
+      await player.initialize();
+      calls.clear();
+
+      final insecureItem = MediaItem(
+        id: 'insecure-item',
+        title: 'Insecure',
+        url: 'http://cdn.example.com/protected.mpd', // HTTP, not HTTPS
+        drmConfig: DrmConfig.widevine(
+          licenseUrl: 'https://license.example.com/widevine',
+        ),
+      );
+
+      await expectLater(
+        player.load(insecureItem),
+        throwsA(isA<ConfigurationException>()),
+        reason: 'DRM + HTTP URL must throw ConfigurationException',
+      );
+
+      final loadCalls = calls.where((c) => c.method == 'load').toList();
+      expect(loadCalls, isEmpty,
+          reason:
+              'No "load" call must reach the channel when validation fails');
+
+      player.dispose();
+    });
+
+    test('load with https:// DRM URL sends "load" to the channel', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-load-https-drm');
+      await player.initialize();
+      calls.clear();
+
+      final secureItem = MediaItem(
+        id: 'secure-item',
+        title: 'Secure DRM',
+        url: 'https://cdn.example.com/protected.mpd',
+        drmConfig: DrmConfig.widevine(
+          licenseUrl: 'https://license.example.com/widevine',
+        ),
+      );
+      await player.load(secureItem);
+
+      expect(calls.any((c) => c.method == 'load'), isTrue,
+          reason: 'HTTPS DRM item must produce a "load" channel call');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  group('play / pause / stop — outgoing contract', () {
+    test('play sends method "play" with playerId', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-play-1');
+      await player.initialize();
+      calls.clear();
+
+      await player.play();
+
+      final call = calls.firstWhere((c) => c.method == 'play', orElse: () {
+        fail('No "play" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-play-1');
+
+      player.dispose();
+    });
+
+    test('pause sends method "pause" with playerId', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-pause-1');
+      await player.initialize();
+      calls.clear();
+
+      await player.pause();
+
+      final call = calls.firstWhere((c) => c.method == 'pause', orElse: () {
+        fail('No "pause" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-pause-1');
+
+      player.dispose();
+    });
+
+    test('stop sends method "stop" with playerId', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-stop-1');
+      await player.initialize();
+      calls.clear();
+
+      await player.stop();
+
+      final call = calls.firstWhere((c) => c.method == 'stop', orElse: () {
+        fail('No "stop" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-stop-1');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  group('seekTo — outgoing contract', () {
+    test('sends method "seekTo" with position in milliseconds', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-seek-1');
+      await player.initialize();
+      calls.clear();
+
+      await player.seekTo(const Duration(seconds: 30));
+
+      final call = calls.firstWhere((c) => c.method == 'seekTo', orElse: () {
+        fail('No "seekTo" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-seek-1');
+      expect(call.arguments['position'], 30000);
+
+      player.dispose();
+    });
+
+    test('negative seekTo throws without sending to channel', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-seek-neg');
+      await player.initialize();
+      calls.clear();
+
+      await expectLater(
+        player.seekTo(const Duration(seconds: -1)),
+        throwsA(isA<ConfigurationException>()),
+      );
+      expect(calls.where((c) => c.method == 'seekTo'), isEmpty);
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  group('setVolume — outgoing contract + clamping', () {
+    test('sends method "setVolume" with volume value', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-vol-1');
+      await player.initialize();
+      calls.clear();
+
+      await player.setVolume(0.7);
+
+      final call = calls.firstWhere((c) => c.method == 'setVolume', orElse: () {
+        fail('No "setVolume" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-vol-1');
+      expect(call.arguments['volume'], closeTo(0.7, 0.001));
+
+      player.dispose();
+    });
+
+    test('volume > 1.0 is clamped to 1.0 before native call', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-vol-clamp-high');
+      await player.initialize();
+      calls.clear();
+
+      await player.setVolume(2.5);
+
+      final call = calls.firstWhere((c) => c.method == 'setVolume');
+      expect(call.arguments['volume'], closeTo(1.0, 0.001),
+          reason: 'Values above 1.0 must be clamped to 1.0');
+
+      player.dispose();
+    });
+
+    test('volume < 0.0 is clamped to 0.0 before native call', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-vol-clamp-low');
+      await player.initialize();
+      calls.clear();
+
+      await player.setVolume(-0.5);
+
+      final call = calls.firstWhere((c) => c.method == 'setVolume');
+      expect(call.arguments['volume'], closeTo(0.0, 0.001),
+          reason: 'Negative values must be clamped to 0.0');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  group('setSpeed — outgoing contract + clamping', () {
+    test('sends method "setSpeed" with speed value', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-speed-1');
+      await player.initialize();
+      calls.clear();
+
+      await player.setSpeed(1.5);
+
+      final call = calls.firstWhere((c) => c.method == 'setSpeed', orElse: () {
+        fail('No "setSpeed" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-speed-1');
+      expect(call.arguments['speed'], closeTo(1.5, 0.001));
+
+      player.dispose();
+    });
+
+    test('speed above 4.0 is clamped to 4.0', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-speed-clamp-high');
+      await player.initialize();
+      calls.clear();
+
+      await player.setSpeed(10.0);
+
+      final call = calls.firstWhere((c) => c.method == 'setSpeed');
+      expect(call.arguments['speed'], closeTo(4.0, 0.001),
+          reason: 'Speed above 4.0 must be clamped to 4.0');
+
+      player.dispose();
+    });
+
+    test('speed below 0.25 is clamped to 0.25', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-speed-clamp-low');
+      await player.initialize();
+      calls.clear();
+
+      await player.setSpeed(0.0);
+
+      final call = calls.firstWhere((c) => c.method == 'setSpeed');
+      expect(call.arguments['speed'], closeTo(0.25, 0.001),
+          reason: 'Speed below 0.25 must be clamped to 0.25');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  group('setQualityTrack / setAudioTrack / enableAutoQuality', () {
+    // Inject tracks into the player via the platform event path so the
+    // validation in setQualityTrack / setAudioTrack can succeed.
+    Future<void> injectQualityTracks(
+        String playerId, List<Map<String, dynamic>> tracks) async {
+      final codec = const StandardMethodCodec();
+      final data = codec.encodeMethodCall(MethodCall(
+        'onQualityTracksChanged',
+        {'playerId': playerId, 'tracks': tracks},
+      ));
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage('zmedia_player', data, (_) {});
+    }
+
+    Future<void> injectAudioTracks(
+        String playerId, List<Map<String, dynamic>> tracks) async {
+      final codec = const StandardMethodCodec();
+      final data = codec.encodeMethodCall(MethodCall(
+        'onAudioTracksChanged',
+        {'playerId': playerId, 'tracks': tracks},
+      ));
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage('zmedia_player', data, (_) {});
+    }
+
+    test('setQualityTrack sends "setQualityTrack" with qualityTrack map',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-qt-1');
+      await player.initialize();
+      calls.clear();
+
+      const track = QualityTrack(
+        id: 'q-1080',
+        name: 'Full HD',
+        bitrate: 5000000,
+        width: 1920,
+        height: 1080,
+      );
+
+      await injectQualityTracks(
+        'ch-qt-1',
+        [
+          {
+            'id': 'q-1080',
+            'name': 'Full HD',
+            'bitrate': 5000000,
+            'width': 1920,
+            'height': 1080,
+            'isSelected': false,
+            'isAvailable': true,
+          }
+        ],
+      );
+
+      await player.setQualityTrack(track);
+
+      final call =
+          calls.firstWhere((c) => c.method == 'setQualityTrack', orElse: () {
+        fail('No "setQualityTrack" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-qt-1');
+      final qt = call.arguments['qualityTrack'] as Map;
+      expect(qt['id'], 'q-1080');
+      expect(qt['bitrate'], 5000000);
+
+      player.dispose();
+    });
+
+    test('setAudioTrack sends "setAudioTrack" with audioTrack map', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-at-1');
+      await player.initialize();
+      calls.clear();
+
+      const track = AudioTrack(
+        id: 'a-en',
+        name: 'English',
+        language: 'en',
+      );
+
+      await injectAudioTracks(
+        'ch-at-1',
+        [
+          {
+            'id': 'a-en',
+            'name': 'English',
+            'language': 'en',
+            'isSelected': false,
+            'isAvailable': true,
+          }
+        ],
+      );
+
+      await player.setAudioTrack(track);
+
+      final call =
+          calls.firstWhere((c) => c.method == 'setAudioTrack', orElse: () {
+        fail('No "setAudioTrack" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-at-1');
+      final at = call.arguments['audioTrack'] as Map;
+      expect(at['id'], 'a-en');
+      expect(at['language'], 'en');
+
+      player.dispose();
+    });
+
+    test('enableAutoQuality sends "enableAutoQuality" with playerId', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-auto-q');
+      await player.initialize();
+      calls.clear();
+
+      await player.enableAutoQuality();
+
+      final call =
+          calls.firstWhere((c) => c.method == 'enableAutoQuality', orElse: () {
+        fail('No "enableAutoQuality" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-auto-q');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  group('dispose — outgoing contract', () {
+    test('sends method "dispose" with playerId when initialized', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-dispose-1');
+      await player.initialize();
+      calls.clear();
+
+      await player.dispose();
+
+      final call = calls.firstWhere((c) => c.method == 'dispose', orElse: () {
+        fail('No "dispose" call found');
+      });
+      expect(call.arguments['playerId'], 'ch-dispose-1');
+    });
+
+    test('dispose without initialize does NOT send "dispose" to channel',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-dispose-uninit');
+      await player.dispose(); // never initialized
+
+      expect(calls.where((c) => c.method == 'dispose'), isEmpty,
+          reason: 'No channel call expected for uninitialized player');
+    });
+
+    test('dispose is idempotent — safe to call twice', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-dispose-idempotent');
+      await player.initialize();
+      calls.clear();
+
+      await player.dispose();
+      await player.dispose(); // second call is a no-op
+
+      final disposeCalls = calls.where((c) => c.method == 'dispose').toList();
+      expect(disposeCalls.length, 1);
+    });
+  });
+}

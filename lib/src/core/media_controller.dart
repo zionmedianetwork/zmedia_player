@@ -326,7 +326,10 @@ class MediaController extends ChangeNotifier {
     final clampedVolume = volume.clamp(0.0, 1.0);
 
     try {
-      await _executeOperation(() => _player.setVolume(clampedVolume));
+      await _executeOperation(
+        () => _player.setVolume(clampedVolume),
+        isCritical: false,
+      );
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error setting volume: $e');
@@ -355,7 +358,10 @@ class MediaController extends ChangeNotifier {
     if (_isDisposed) return;
 
     try {
-      await _executeOperation(() => _player.setMuted(!isMuted));
+      await _executeOperation(
+        () => _player.setMuted(!isMuted),
+        isCritical: false,
+      );
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error toggling mute: $e');
@@ -371,7 +377,10 @@ class MediaController extends ChangeNotifier {
     final clampedSpeed = speed.clamp(0.1, 4.0);
 
     try {
-      await _executeOperation(() => _player.setSpeed(clampedSpeed));
+      await _executeOperation(
+        () => _player.setSpeed(clampedSpeed),
+        isCritical: false,
+      );
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error setting speed: $e');
@@ -439,7 +448,10 @@ class MediaController extends ChangeNotifier {
     if (_isDisposed) return;
 
     try {
-      await _executeOperation(() => _player.setSubtitleTrack(track));
+      await _executeOperation(
+        () => _player.setSubtitleTrack(track),
+        isCritical: false,
+      );
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error setting subtitle track: $e');
@@ -607,9 +619,13 @@ class MediaController extends ChangeNotifier {
   /// in a [finally] block — it can never get permanently stuck.  If the lock
   /// is already held we first check whether the holder has exceeded
   /// [_operationTimeout] (stale lock), and treat it as expired only if so.
-  /// Non-critical operations that arrive while a fresh lock is held are
-  /// rejected immediately rather than waiting; critical ones wait briefly.
-  Future<T> _executeOperation<T>(Future<T> Function() operation) async {
+  /// Non-critical operations ([isCritical] == false) that arrive while a
+  /// fresh lock is held are rejected immediately with [OperationBusyException]
+  /// rather than waiting; critical ones wait briefly.
+  Future<T> _executeOperation<T>(
+    Future<T> Function() operation, {
+    bool isCritical = true,
+  }) async {
     if (_operationInProgress) {
       // Check if the current lock is stale (exceeded the operation timeout).
       final started = _operationStartedAt;
@@ -629,8 +645,8 @@ class MediaController extends ChangeNotifier {
 
         if (_operationInProgress) {
           debugPrint(
-              'MediaController: Operation in progress, queuing: ${operation.toString()}');
-          if (_isNonCriticalOperation(operation)) {
+              'MediaController: Operation in progress, skipping non-critical or queuing critical');
+          if (!isCritical) {
             throw const OperationBusyException(
               'Non-critical operation skipped - another operation in progress',
             );
@@ -664,16 +680,6 @@ class MediaController extends ChangeNotifier {
       _operationInProgress = false;
       _operationStartedAt = null;
     }
-  }
-
-  /// Check if an operation is non-critical and can be skipped if another is in progress
-  bool _isNonCriticalOperation(Function operation) {
-    // Volume, speed, and subtitle changes are non-critical
-    final operationStr = operation.toString();
-    return operationStr.contains('setVolume') ||
-        operationStr.contains('setSpeed') ||
-        operationStr.contains('setSubtitleTrack') ||
-        operationStr.contains('setMuted');
   }
 
   /// Reset operation state (useful for recovery from stuck operations)

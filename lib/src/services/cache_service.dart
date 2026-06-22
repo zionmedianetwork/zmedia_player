@@ -187,6 +187,15 @@ class CacheService {
     final entry = _metadata[mediaId];
     if (entry == null) return;
 
+    await _deleteEntry(entry);
+  }
+
+  /// Internal helper that deletes a cache entry without requiring
+  /// [_isInitialized] to be true.  This must only be called when
+  /// [_cacheDir] and [_metadataFile] have already been assigned (i.e. from
+  /// within [initialize] after those fields are set, or from [removeFromCache]
+  /// after the [_isInitialized] guard has passed).
+  Future<void> _deleteEntry(CacheEntry entry) async {
     try {
       // Delete cache file
       final file = File(path.join(_cacheDir.path, entry.fileName));
@@ -196,7 +205,7 @@ class CacheService {
 
       // Remove from metadata
       _currentCacheSize -= entry.size;
-      _metadata.remove(mediaId);
+      _metadata.remove(entry.mediaId);
 
       // Save metadata
       await _saveMetadata();
@@ -246,19 +255,24 @@ class CacheService {
     }
   }
 
-  /// Clean up expired cache entries
+  /// Clean up expired cache entries.
+  ///
+  /// Uses [_deleteEntry] directly so that it never calls back into the public
+  /// [removeFromCache] (which would re-enter [initialize] while the lock-free
+  /// [_isInitialized] flag is still false, causing a [LateInitializationError]
+  /// on the [late final] fields).
   Future<void> _cleanupExpiredEntries() async {
     final now = DateTime.now();
-    final expiredIds = <String>[];
+    final expiredEntries = <CacheEntry>[];
 
     for (final entry in _metadata.values) {
       if (entry.expiresAt.isBefore(now)) {
-        expiredIds.add(entry.mediaId);
+        expiredEntries.add(entry);
       }
     }
 
-    for (final mediaId in expiredIds) {
-      await removeFromCache(mediaId);
+    for (final entry in expiredEntries) {
+      await _deleteEntry(entry);
     }
   }
 
