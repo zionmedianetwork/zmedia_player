@@ -2,6 +2,7 @@ package com.zionmedianetwork.zmedia_player
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import io.flutter.plugin.common.MethodCall
@@ -12,17 +13,31 @@ import io.flutter.plugin.common.MethodChannel
  *
  * Uses Android Keystore system to encrypt keys and values before storing.
  * Provides a secure way to store sensitive data like DRM tokens and credentials.
+ *
+ * SECURITY POLICY: If EncryptedSharedPreferences cannot be initialised (e.g.
+ * the device has no hardware-backed Keystore, or the KeyStore is locked), every
+ * operation returns a MethodChannel error with code "ENCRYPTION_UNAVAILABLE".
+ * We deliberately refuse to fall back to plaintext SharedPreferences, because
+ * the data stored here (DRM tokens, auth credentials) must never be written in
+ * cleartext.
  */
 class SecureStorageHandler(private val context: Context) : MethodChannel.MethodCallHandler {
 
     companion object {
+        private const val TAG = "SecureStorageHandler"
         private const val PREFS_NAME = "zmedia_player_secure_storage"
+        private const val ERROR_ENCRYPTION_UNAVAILABLE = "ENCRYPTION_UNAVAILABLE"
+        private const val MESSAGE_ENCRYPTION_UNAVAILABLE =
+            "Secure storage is not available on this device; refusing to store sensitive data in plaintext"
     }
 
-    private val sharedPreferences: SharedPreferences by lazy {
+    /**
+     * Nullable encrypted prefs.  null means initialisation failed and every
+     * operation must return an error – never fall back to plaintext.
+     */
+    private val securePrefs: SharedPreferences? by lazy {
         try {
             val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-
             EncryptedSharedPreferences.create(
                 PREFS_NAME,
                 masterKeyAlias,
@@ -31,10 +46,26 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            // Fallback to regular SharedPreferences if encryption fails
-            android.util.Log.w("SecureStorageHandler", "Failed to create EncryptedSharedPreferences, using regular SharedPreferences", e)
-            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+            Log.e(TAG, "Failed to create EncryptedSharedPreferences; secure storage unavailable", e)
+            null
         }
+    }
+
+    /**
+     * Returns true if encrypted prefs are available; otherwise invokes
+     * result.error and returns false.  Callers must return immediately when
+     * this returns false.
+     */
+    private fun requireSecurePrefs(result: MethodChannel.Result): SharedPreferences? {
+        val prefs = securePrefs
+        if (prefs == null) {
+            result.error(
+                ERROR_ENCRYPTION_UNAVAILABLE,
+                MESSAGE_ENCRYPTION_UNAVAILABLE,
+                null
+            )
+        }
+        return prefs
     }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
@@ -49,6 +80,7 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
     }
 
     private fun handleWrite(call: MethodCall, result: MethodChannel.Result) {
+        val prefs = requireSecurePrefs(result) ?: return
         try {
             val key = call.argument<String>("key")
             val value = call.argument<String>("value")
@@ -58,7 +90,7 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
                 return
             }
 
-            sharedPreferences.edit().putString(key, value).apply()
+            prefs.edit().putString(key, value).apply()
             result.success(null)
         } catch (e: Exception) {
             result.error("WRITE_ERROR", "Failed to write to secure storage: ${e.message}", null)
@@ -66,6 +98,7 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
     }
 
     private fun handleRead(call: MethodCall, result: MethodChannel.Result) {
+        val prefs = requireSecurePrefs(result) ?: return
         try {
             val key = call.argument<String>("key")
 
@@ -74,7 +107,7 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
                 return
             }
 
-            val value = sharedPreferences.getString(key, null)
+            val value = prefs.getString(key, null)
             result.success(value)
         } catch (e: Exception) {
             result.error("READ_ERROR", "Failed to read from secure storage: ${e.message}", null)
@@ -82,6 +115,7 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
     }
 
     private fun handleDelete(call: MethodCall, result: MethodChannel.Result) {
+        val prefs = requireSecurePrefs(result) ?: return
         try {
             val key = call.argument<String>("key")
 
@@ -90,7 +124,7 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
                 return
             }
 
-            sharedPreferences.edit().remove(key).apply()
+            prefs.edit().remove(key).apply()
             result.success(null)
         } catch (e: Exception) {
             result.error("DELETE_ERROR", "Failed to delete from secure storage: ${e.message}", null)
@@ -98,8 +132,9 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
     }
 
     private fun handleDeleteAll(call: MethodCall, result: MethodChannel.Result) {
+        val prefs = requireSecurePrefs(result) ?: return
         try {
-            sharedPreferences.edit().clear().apply()
+            prefs.edit().clear().apply()
             result.success(null)
         } catch (e: Exception) {
             result.error("DELETE_ALL_ERROR", "Failed to clear secure storage: ${e.message}", null)
@@ -107,6 +142,7 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
     }
 
     private fun handleContainsKey(call: MethodCall, result: MethodChannel.Result) {
+        val prefs = requireSecurePrefs(result) ?: return
         try {
             val key = call.argument<String>("key")
 
@@ -115,10 +151,14 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
                 return
             }
 
-            val contains = sharedPreferences.contains(key)
+            val contains = prefs.contains(key)
             result.success(contains)
         } catch (e: Exception) {
-            result.error("CONTAINS_KEY_ERROR", "Failed to check key existence: ${e.message}", null)
+            result.error(
+                "CONTAINS_KEY_ERROR",
+                "Failed to check key existence: ${e.message}",
+                null
+            )
         }
     }
 }

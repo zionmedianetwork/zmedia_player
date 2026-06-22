@@ -73,6 +73,13 @@ android {
         // Phase 1: Security - Encrypted storage
         implementation 'androidx.security:security-crypto:1.1.0-alpha06'
 
+        // Certificate pinning for DRM license requests.
+        // OkHttp 4.12.0 targets JVM 8 and is compatible with ExoPlayer 2.19.1 on minSdk 21.
+        // The extension-okhttp artifact replaces DefaultHttpDataSource with OkHttpDataSource
+        // when pinning is configured; the no-pinning path continues to use DefaultHttpDataSource.
+        implementation 'com.google.android.exoplayer:extension-okhttp:2.19.1'
+        implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+
         // Phase 3: Media notifications
         implementation 'androidx.media:media:1.7.0'
 

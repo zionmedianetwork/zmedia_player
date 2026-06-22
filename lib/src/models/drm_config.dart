@@ -1,6 +1,10 @@
 /// DRM (Digital Rights Management) configuration and models
 library;
 
+import '../security/certificate_pinning.dart';
+
+export '../security/certificate_pinning.dart' show CertificatePinningConfig;
+
 /// DRM scheme types
 enum DrmScheme {
   /// Token-based DRM (custom authentication)
@@ -60,6 +64,17 @@ class DrmConfig {
   /// EZDRM configuration
   final EzdrmConfig? ezdrmConfig;
 
+  /// Optional certificate pinning configuration for the DRM license server.
+  ///
+  /// When set, native code (Android: OkHttp CertificatePinner;
+  /// iOS: URLSessionDelegate) enforces SHA-256/SPKI pins on every TLS
+  /// connection made to the license server host.  If the server certificate
+  /// chain does not contain a certificate matching one of the configured pins,
+  /// the connection is rejected and a DRM error is emitted.
+  ///
+  /// Leave null to use the platform's default TLS validation (no pinning).
+  final CertificatePinningConfig? certificatePinning;
+
   const DrmConfig({
     required this.scheme,
     required this.licenseUrl,
@@ -73,6 +88,7 @@ class DrmConfig {
     this.autoRenewLicense = true,
     this.customData,
     this.ezdrmConfig,
+    this.certificatePinning,
   });
 
   /// Create a token-based DRM configuration
@@ -82,6 +98,7 @@ class DrmConfig {
     String? keyId,
     Map<String, String>? headers,
     Map<String, dynamic>? customData,
+    CertificatePinningConfig? certificatePinning,
   }) {
     return DrmConfig(
       scheme: DrmScheme.token,
@@ -90,6 +107,7 @@ class DrmConfig {
       keyId: keyId,
       headers: headers,
       customData: customData,
+      certificatePinning: certificatePinning,
     );
   }
 
@@ -100,6 +118,7 @@ class DrmConfig {
     bool allowOffline = false,
     int? offlineLicenseDuration,
     Map<String, dynamic>? customData,
+    CertificatePinningConfig? certificatePinning,
   }) {
     return DrmConfig(
       scheme: DrmScheme.widevine,
@@ -108,6 +127,7 @@ class DrmConfig {
       allowOffline: allowOffline,
       offlineLicenseDuration: offlineLicenseDuration,
       customData: customData,
+      certificatePinning: certificatePinning,
     );
   }
 
@@ -118,6 +138,7 @@ class DrmConfig {
     String? contentId,
     Map<String, String>? headers,
     Map<String, dynamic>? customData,
+    CertificatePinningConfig? certificatePinning,
   }) {
     return DrmConfig(
       scheme: DrmScheme.fairplay,
@@ -126,6 +147,7 @@ class DrmConfig {
       contentId: contentId,
       headers: headers,
       customData: customData,
+      certificatePinning: certificatePinning,
     );
   }
 
@@ -133,6 +155,7 @@ class DrmConfig {
   factory DrmConfig.ezdrm({
     required EzdrmConfig ezdrmConfig,
     bool allowOffline = false,
+    CertificatePinningConfig? certificatePinning,
   }) {
     return DrmConfig(
       scheme: DrmScheme.ezdrm,
@@ -141,6 +164,7 @@ class DrmConfig {
       headers: ezdrmConfig.headers,
       allowOffline: allowOffline,
       ezdrmConfig: ezdrmConfig,
+      certificatePinning: certificatePinning,
     );
   }
 
@@ -159,11 +183,19 @@ class DrmConfig {
       'autoRenewLicense': autoRenewLicense,
       'customData': customData,
       'ezdrmConfig': ezdrmConfig?.toMap(),
+      'certificatePinning': certificatePinning?.toMap(),
     };
   }
 
   /// Create from map
   factory DrmConfig.fromMap(Map<String, dynamic> map) {
+    final pinningRaw = map['certificatePinning'];
+    final CertificatePinningConfig? pinning = pinningRaw != null
+        ? CertificatePinningConfig.fromMap(
+            Map<String, dynamic>.from(pinningRaw as Map),
+          )
+        : null;
+
     return DrmConfig(
       scheme: DrmScheme.values.firstWhere(
         (e) => e.name == map['scheme'],
@@ -184,6 +216,7 @@ class DrmConfig {
       ezdrmConfig: map['ezdrmConfig'] != null
           ? EzdrmConfig.fromMap(map['ezdrmConfig'] as Map<String, dynamic>)
           : null,
+      certificatePinning: pinning,
     );
   }
 
@@ -200,6 +233,7 @@ class DrmConfig {
     bool? autoRenewLicense,
     Map<String, dynamic>? customData,
     EzdrmConfig? ezdrmConfig,
+    CertificatePinningConfig? certificatePinning,
   }) {
     return DrmConfig(
       scheme: scheme ?? this.scheme,
@@ -215,6 +249,7 @@ class DrmConfig {
       autoRenewLicense: autoRenewLicense ?? this.autoRenewLicense,
       customData: customData ?? this.customData,
       ezdrmConfig: ezdrmConfig ?? this.ezdrmConfig,
+      certificatePinning: certificatePinning ?? this.certificatePinning,
     );
   }
 }

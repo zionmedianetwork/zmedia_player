@@ -1,6 +1,7 @@
 package com.zionmedianetwork.zmedia_player
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import com.google.android.exoplayer2.C
 import com.google.android.exoplayer2.drm.DefaultDrmSessionManager
@@ -8,15 +9,28 @@ import com.google.android.exoplayer2.drm.DrmSessionManager
 import com.google.android.exoplayer2.drm.ExoMediaDrm
 import com.google.android.exoplayer2.drm.FrameworkMediaDrm
 import com.google.android.exoplayer2.drm.HttpMediaDrmCallback
+import com.google.android.exoplayer2.ext.okhttp.OkHttpDataSource
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
 import com.google.android.exoplayer2.upstream.HttpDataSource
 import com.google.android.exoplayer2.util.Util
 import io.flutter.plugin.common.MethodChannel
+import okhttp3.CertificatePinner
+import okhttp3.OkHttpClient
 import java.util.UUID
 
 /**
- * Handles DRM (Digital Rights Management) for media playback
- * Supports Widevine, PlayReady, and ClearKey DRM schemes for ExoPlayer v2
+ * Handles DRM (Digital Rights Management) for media playback.
+ * Supports Widevine, PlayReady, and ClearKey DRM schemes for ExoPlayer v2.
+ *
+ * When [drmConfig] contains a "certificatePinning" map (populated from
+ * [DrmConfig.toMap]), licence requests are made through an OkHttpClient
+ * whose [CertificatePinner] enforces SHA-256 / SPKI pins.  Without that
+ * key the existing [DefaultHttpDataSource] path is used unchanged.
+ *
+ * Pin wire-format: lowercase hex string of SHA-256(DER SubjectPublicKeyInfo).
+ * This is the same format stored in CertificatePinningConfig.pins on the
+ * Dart side.  OkHttp requires "sha256/<base64>" so each hex pin is converted:
+ *     hex bytes → raw bytes → standard Base64 (no padding stripped).
  */
 class DrmHandler(
     private val context: Context,
@@ -35,7 +49,7 @@ class DrmHandler(
     }
 
     /**
-     * Create DRM session manager for ExoPlayer v2
+     * Create DRM session manager for ExoPlayer v2.
      */
     fun createDrmSessionManager(
         drmConfig: Map<String, Any>?
@@ -66,7 +80,9 @@ class DrmHandler(
             // Signal that DRM initialisation is starting.
             notifyDrmSessionState("acquiringLicense")
 
-            // Create HTTP data source factory for license requests
+            // Create HTTP data source factory for license requests.
+            // When certificatePinning is configured this uses OkHttp; otherwise
+            // it falls through to DefaultHttpDataSource (unchanged behaviour).
             val dataSourceFactory = buildHttpDataSourceFactory(drmConfig)
 
             // Create DRM callback
@@ -96,33 +112,152 @@ class DrmHandler(
     }
 
     /**
-     * Build HTTP data source factory with custom headers
+     * Build HTTP data source factory with custom headers and optional certificate pinning.
+     *
+     * When [drmConfig] contains a non-null "certificatePinning" entry (a Map with
+     * key "pins": Map<String, List<String>>), an OkHttpClient with a
+     * [CertificatePinner] is created and wrapped in [OkHttpDataSource.Factory].
+     *
+     * Pin format expected in "pins": domain → list of lowercase hex-encoded
+     * SHA-256 digests of the DER SubjectPublicKeyInfo (SPKI) of certificates in
+     * the server's TLS chain.  Each hex string is 64 characters long.
+     *
+     * OkHttp's [CertificatePinner] accepts pins in the form "sha256/<base64>",
+     * so each hex pin is converted:  hex → raw bytes → Base64 (standard, padded).
+     *
+     * Wildcard host patterns ("*.example.com") are supported by OkHttp natively
+     * and mirror the Dart-side getPinsForDomain wildcard logic.
+     *
+     * When "certificatePinning" is absent or null, the existing
+     * [DefaultHttpDataSource.Factory] path is returned unchanged.
      */
-    private fun buildHttpDataSourceFactory(
+    internal fun buildHttpDataSourceFactory(
         drmConfig: Map<String, Any>
     ): HttpDataSource.Factory {
         val userAgent = Util.getUserAgent(context, USER_AGENT)
-        val dataSourceFactory = DefaultHttpDataSource.Factory().setUserAgent(userAgent)
 
-        // Add custom headers
-        val headers = drmConfig["headers"] as? Map<String, String>
-        val token = drmConfig["token"] as? String
+        // Collect request headers (shared by both code paths)
+        val requestHeaders = buildRequestHeaders(drmConfig)
 
-        val requestHeaders = mutableMapOf<String, String>()
-        headers?.let { requestHeaders.putAll(it) }
-        if (token != null) {
-            requestHeaders["Authorization"] = "Bearer $token"
+        // --- Certificate-pinning path ---
+        val pinningConfig = drmConfig["certificatePinning"] as? Map<*, *>
+        if (pinningConfig != null) {
+            val okHttpClient = buildPinnedOkHttpClient(pinningConfig)
+            if (okHttpClient != null) {
+                val factory = OkHttpDataSource.Factory(okHttpClient)
+                    .setUserAgent(userAgent)
+                if (requestHeaders.isNotEmpty()) {
+                    factory.setDefaultRequestProperties(requestHeaders)
+                }
+                Log.d(TAG, "Using OkHttpDataSource with certificate pinning for DRM requests")
+                return factory
+            }
+            // Pin parsing failed – we refuse to silently fall back to an
+            // unpinned connection because the caller explicitly requested
+            // pinning.  Throw so createDrmSessionManager catches it and
+            // emits a DRM error.
+            throw IllegalStateException(
+                "Certificate pinning was configured but no valid pins could be parsed. " +
+                    "DRM licence requests will not proceed without pinning enforcement."
+            )
         }
 
+        // --- Default path (no pinning configured) ---
+        val dataSourceFactory = DefaultHttpDataSource.Factory().setUserAgent(userAgent)
         if (requestHeaders.isNotEmpty()) {
             dataSourceFactory.setDefaultRequestProperties(requestHeaders)
         }
-
         return dataSourceFactory
     }
 
     /**
-     * Check if Widevine DRM is supported on this device
+     * Collect custom headers and optional Bearer token into a single map.
+     */
+    private fun buildRequestHeaders(drmConfig: Map<String, Any>): Map<String, String> {
+        val requestHeaders = mutableMapOf<String, String>()
+        val headers = drmConfig["headers"] as? Map<*, *>
+        headers?.forEach { (k, v) ->
+            if (k is String && v is String) requestHeaders[k] = v
+        }
+        val token = drmConfig["token"] as? String
+        if (token != null) {
+            requestHeaders["Authorization"] = "Bearer $token"
+        }
+        return requestHeaders
+    }
+
+    /**
+     * Build an [OkHttpClient] with a [CertificatePinner] derived from the
+     * Dart-side CertificatePinningConfig.toMap() payload.
+     *
+     * Expected [pinningConfig] structure:
+     * ```
+     * {
+     *   "pins": {
+     *     "example.com": ["<64-char hex>", ...],
+     *     "*.cdn.example.com": ["<64-char hex>", ...]
+     *   }
+     * }
+     * ```
+     *
+     * Returns null only if the "pins" key is absent or the map is empty,
+     * which is treated as a parse error by the caller.
+     */
+    private fun buildPinnedOkHttpClient(pinningConfig: Map<*, *>): OkHttpClient? {
+        val pinsMap = pinningConfig["pins"] as? Map<*, *> ?: return null
+        if (pinsMap.isEmpty()) return null
+
+        val pinnerBuilder = CertificatePinner.Builder()
+        var validPinCount = 0
+
+        for ((hostKey, pinListValue) in pinsMap) {
+            val host = hostKey as? String ?: continue
+            val pinList = pinListValue as? List<*> ?: continue
+
+            for (hexPin in pinList) {
+                val hexStr = (hexPin as? String)?.lowercase() ?: continue
+                // Each hex pin must be 64 characters (32 bytes = SHA-256)
+                if (hexStr.length != 64 || !hexStr.all { it in '0'..'9' || it in 'a'..'f' }) {
+                    Log.w(TAG, "Skipping malformed pin for host '$host': '$hexStr'")
+                    continue
+                }
+                val okHttpPin = hexToOkHttpPin(hexStr)
+                pinnerBuilder.add(host, okHttpPin)
+                validPinCount++
+                Log.d(TAG, "Registered pin for '$host': $okHttpPin")
+            }
+        }
+
+        if (validPinCount == 0) {
+            Log.e(TAG, "Certificate pinning config contained no valid pins")
+            return null
+        }
+
+        return OkHttpClient.Builder()
+            .certificatePinner(pinnerBuilder.build())
+            .build()
+    }
+
+    /**
+     * Convert a 64-character lowercase hex string (32 raw bytes, SHA-256 of SPKI)
+     * into the "sha256/<base64>" format required by [CertificatePinner].
+     *
+     * Steps:
+     *   1. Parse hex pairs → ByteArray (32 bytes)
+     *   2. Base64-encode with standard alphabet and padding (no URL-safe, no NO_WRAP flags
+     *      that would strip the trailing '=' – OkHttp accepts padded Base64)
+     *   3. Prepend "sha256/"
+     */
+    private fun hexToOkHttpPin(hex: String): String {
+        val bytes = ByteArray(hex.length / 2) { i ->
+            hex.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+        }
+        val base64 = Base64.encodeToString(bytes, Base64.DEFAULT).trim()
+        return "sha256/$base64"
+    }
+
+    /**
+     * Check if Widevine DRM is supported on this device.
      */
     fun isWidevineSupported(): Boolean {
         return try {
@@ -136,7 +271,7 @@ class DrmHandler(
     }
 
     /**
-     * Get Widevine security level
+     * Get Widevine security level.
      */
     fun getWidevineSecurityLevel(): String {
         return try {
@@ -151,7 +286,7 @@ class DrmHandler(
     }
 
     /**
-     * Check if PlayReady is supported
+     * Check if PlayReady is supported.
      */
     fun isPlayReadySupported(): Boolean {
         return try {
@@ -165,7 +300,7 @@ class DrmHandler(
     }
 
     /**
-     * Check if ClearKey is supported
+     * Check if ClearKey is supported.
      */
     fun isClearKeySupported(): Boolean {
         return try {
@@ -179,7 +314,7 @@ class DrmHandler(
     }
 
     /**
-     * Acquire offline license (placeholder for future implementation)
+     * Acquire offline license (placeholder for future implementation).
      */
     fun acquireOfflineLicense(
         drmConfig: Map<String, Any>,
@@ -192,7 +327,7 @@ class DrmHandler(
     }
 
     /**
-     * Release offline license (placeholder)
+     * Release offline license (placeholder).
      */
     fun releaseOfflineLicense(licenseId: String) {
         // TODO: Implement offline license release
@@ -200,7 +335,7 @@ class DrmHandler(
     }
 
     /**
-     * Renew offline license (placeholder)
+     * Renew offline license (placeholder).
      */
     fun renewOfflineLicense(licenseId: String) {
         // TODO: Implement offline license renewal
@@ -269,20 +404,6 @@ class DrmHandler(
     /**
      * Build the argument map that matches DrmSession.fromMap.
      *
-     * DrmSession.fromMap reads:
-     *   map['id']           as String
-     *   map['state']        as String  → DrmSessionState.name
-     *   map['license']      as Map?    → DrmLicense.fromMap (nullable)
-     *   map['errorMessage'] as String? (nullable)
-     *   map['createdAt']    as int     → DateTime.fromMillisecondsSinceEpoch
-     *   map['updatedAt']    as int     → DateTime.fromMillisecondsSinceEpoch
-     *
-     * The static Dart dispatcher additionally reads map['playerId'] to route to the
-     * correct MediaPlayer instance before calling _handleDrmSessionUpdate.
-     */
-    /**
-     * Build the argument map that matches DrmSession.fromMap.
-     *
      * Uses Map<String, Any> (non-nullable values) so Flutter's StandardMessageCodec
      * serialises it correctly.  Nullable fields are omitted when null; DrmSession.fromMap
      * handles missing nullable keys via `as String?` / `as Map?` casts which return null.
@@ -310,7 +431,7 @@ class DrmHandler(
     }
 
     /**
-     * Get DRM system info
+     * Get DRM system info.
      */
     fun getDrmSystemInfo(): Map<String, Any> {
         val info = mutableMapOf<String, Any>()
@@ -332,7 +453,7 @@ class DrmHandler(
     }
 
     /**
-     * Validate DRM configuration
+     * Validate DRM configuration.
      */
     fun validateDrmConfig(drmConfig: Map<String, Any>): Pair<Boolean, String?> {
         val scheme = drmConfig["scheme"] as? String
@@ -372,7 +493,7 @@ class DrmHandler(
 }
 
 /**
- * Extension to FrameworkMediaDrm for easier instantiation
+ * Extension to FrameworkMediaDrm for easier instantiation.
  */
 object FrameworkMediaDrm {
     val DEFAULT_PROVIDER = com.google.android.exoplayer2.drm.FrameworkMediaDrm.DEFAULT_PROVIDER
