@@ -176,6 +176,12 @@ The package follows **clean architecture** with clear separation between Flutter
 
 Both managers follow identical interface patterns defined by the MethodChannel protocol.
 
+**Native code is decomposed into per-feature handlers** (mirrored across `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and `ios/Classes/`): `MediaPlayerManager`, `DrmHandler`, `PipHandler`, `NotificationHandler`, `BufferingHandler`, `CrashHandler`, `NetworkMonitor`, `SecureStorageHandler`, plus the platform view (`MediaPlayerView`/`MediaPlayerViewFactory`). Casting/AirPlay handlers are platform-specific (`CastHandler`/`CastOptionsProvider` on Android; `AirPlayHandler`/`AirPlayButtonFactory` on iOS). The plugin entry points are `ZMediaPlayerPlugin.kt` / `ZMediaPlayerPlugin.swift`. When adding a native capability, add the same handler on both platforms to keep the MethodChannel contract symmetric.
+
+### Public API Surface
+
+`lib/zmedia_player.dart` is the single barrel file that defines the package's public API — **everything a consumer can use is exported here**. When adding a new public class, export it from this file; anything not exported is internal. The file is organized by the PLAN.md phase that introduced each piece (Core, Models, Services, Widgets, Security), which is the fastest map of what exists.
+
 ### Data Flow Patterns
 
 #### Playback State Flow
@@ -228,6 +234,24 @@ MediaItem(drmConfig) → MediaPlayer.load()
 - Device discovery (Chromecast/AirPlay)
 - Connection management
 - Media session control on cast devices
+
+**BufferingService** (`lib/src/services/buffering_service.dart`)
+- Buffer health tracking (`BufferHealth`) and adaptive buffering config (`BufferingConfig`)
+- Drives the buffering indicators/badges in the UI layer
+
+**NetworkResilienceService** (`lib/src/services/network_resilience_service.dart`)
+- Network status monitoring (`NetworkStatus`) and reconnection/retry logic
+- Backed natively by `NetworkMonitor` on each platform
+
+**AnalyticsService** (`lib/src/services/analytics_service.dart`)
+- Playback analytics/QoE metrics (`AnalyticsMetrics`): startup time, rebuffering, bitrate
+
+### Security Layer (`lib/src/security/`)
+
+A separate exported module — not to be confused with `CrashReporter` in core:
+- **CertificatePinning** (`certificate_pinning.dart`) — pins TLS certs for license/media endpoints
+- **SecureStorage** (`secure_storage.dart`) — Dart wrapper over native `SecureStorageHandler` (Keychain/Keystore) for DRM tokens and credentials
+- **InputValidation** (`input_validation.dart`) — validates/sanitizes URLs and config before they reach native code (enforces the HTTPS-for-DRM rule)
 
 ## Key Patterns and Conventions
 
