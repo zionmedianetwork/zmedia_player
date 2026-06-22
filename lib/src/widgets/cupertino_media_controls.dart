@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart' show Colors;
@@ -70,6 +71,9 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
   BufferHealth? _currentBufferHealth;
   List<QualityTrack>? _qualityTracks;
 
+  StreamSubscription<BufferHealth>? _bufferHealthSubscription;
+  StreamSubscription<List<QualityTrack>>? _qualityTracksSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -78,8 +82,9 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
   }
 
   void _setupListeners() {
-    // Listen to buffer health updates
-    widget.controller.player.bufferHealthStream.listen((health) {
+    // Listen to buffer health updates — store subscription for cancellation
+    _bufferHealthSubscription =
+        widget.controller.player.bufferHealthStream.listen((health) {
       if (mounted) {
         setState(() {
           _currentBufferHealth = health;
@@ -87,8 +92,9 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
       }
     });
 
-    // Listen to quality track updates
-    widget.controller.player.qualityTracksStream.listen((tracks) {
+    // Listen to quality track updates — store subscription for cancellation
+    _qualityTracksSubscription =
+        widget.controller.player.qualityTracksStream.listen((tracks) {
       if (mounted) {
         setState(() {
           _qualityTracks = tracks;
@@ -111,6 +117,8 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
 
   @override
   void dispose() {
+    _bufferHealthSubscription?.cancel();
+    _qualityTracksSubscription?.cancel();
     _fadeController.dispose();
     super.dispose();
   }

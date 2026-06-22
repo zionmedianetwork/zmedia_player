@@ -76,6 +76,7 @@ class PlaybackState {
     bool? isMuted,
     bool? isBuffering,
     double? bufferPercentage,
+    Duration? bufferedPosition,
     String? errorMessage,
   }) {
     return PlaybackState(
@@ -87,6 +88,7 @@ class PlaybackState {
       isMuted: isMuted ?? this.isMuted,
       isBuffering: isBuffering ?? this.isBuffering,
       bufferPercentage: bufferPercentage ?? this.bufferPercentage,
+      bufferedPosition: bufferedPosition ?? this.bufferedPosition,
       errorMessage: errorMessage ?? this.errorMessage,
     );
   }
@@ -121,6 +123,7 @@ class PlaybackState {
         other.isMuted == isMuted &&
         other.isBuffering == isBuffering &&
         other.bufferPercentage == bufferPercentage &&
+        other.bufferedPosition == bufferedPosition &&
         other.errorMessage == errorMessage;
   }
 
@@ -135,6 +138,7 @@ class PlaybackState {
       isMuted,
       isBuffering,
       bufferPercentage,
+      bufferedPosition,
       errorMessage,
     );
   }

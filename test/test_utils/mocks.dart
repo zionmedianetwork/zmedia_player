@@ -229,6 +229,7 @@ class TestHelpers {
     String apiKey = 'test-api-key',
     String contentId = 'test-content',
     bool isWidevine = true,
+    String? certificateUrl,
   }) {
     return EzdrmConfig(
       customerId: customerId,
@@ -236,6 +237,8 @@ class TestHelpers {
       contentId: contentId,
       isWidevine: isWidevine,
       isFairPlay: !isWidevine,
+      certificateUrl:
+          !isWidevine ? (certificateUrl ?? 'https://test.com/cert.cer') : null,
     );
   }
 

@@ -26,6 +26,9 @@ class MediaPlayer {
   static const MethodChannel _channel = MethodChannel('zmedia_player');
   static final Map<String, MediaPlayer> _instances = {};
 
+  /// Guard that ensures the static method call handler is registered only once.
+  static bool _channelHandlerRegistered = false;
+
   /// Activity tracking for memory leak prevention
   static final Map<String, DateTime> _lastActivity = {};
   static Timer? _cleanupTimer;
@@ -1494,16 +1497,42 @@ class MediaPlayer {
     }
   }
 
-  /// Setup method call handler for platform events
+  /// Setup method call handler for platform events.
+  ///
+  /// Registers the static dispatch handler once at the class level, then
+  /// routes each incoming call to the correct instance via playerId.
   void _setupMethodCallHandler() {
-    _channel.setMethodCallHandler(_handleMethodCall);
+    if (!_channelHandlerRegistered) {
+      _channelHandlerRegistered = true;
+      _channel.setMethodCallHandler(_staticMethodCallHandler);
+    }
   }
 
-  /// Handle method calls from platform
-  Future<void> _handleMethodCall(MethodCall call) async {
-    // Only handle calls for this instance
+  /// Static handler registered once on the channel.
+  /// Dispatches each call to the matching MediaPlayer instance.
+  static Future<void> _staticMethodCallHandler(MethodCall call) async {
     final arguments = call.arguments as Map<dynamic, dynamic>?;
-    if (arguments?['playerId'] != playerId) return;
+    final playerId = arguments?['playerId'] as String?;
+
+    if (playerId == null) {
+      debugPrint(
+          'MediaPlayer: incoming call "${call.method}" missing playerId');
+      return;
+    }
+
+    final instance = _instances[playerId];
+    if (instance == null) {
+      debugPrint(
+          'MediaPlayer: no instance for playerId "$playerId" (call: ${call.method})');
+      return;
+    }
+
+    await instance._handleMethodCall(call);
+  }
+
+  /// Handle method calls from platform for THIS instance.
+  Future<void> _handleMethodCall(MethodCall call) async {
+    final arguments = call.arguments as Map<dynamic, dynamic>?;
 
     try {
       switch (call.method) {
@@ -1539,6 +1568,9 @@ class MediaPlayer {
           break;
         case 'onBandwidthChanged':
           _handleBandwidthChanged(arguments!);
+          break;
+        case 'onDrmSessionUpdate':
+          _handleDrmSessionUpdate(arguments!);
           break;
         case 'onError':
           _handleError(arguments!);
@@ -1682,6 +1714,21 @@ class MediaPlayer {
       }
     } catch (e) {
       debugPrint('Error processing audio tracks: $e');
+    }
+  }
+
+  /// Handle DRM session update events from platform
+  void _handleDrmSessionUpdate(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final session = DrmSession.fromMap(Map<String, dynamic>.from(arguments));
+
+      if (!_drmSessionController.isClosed) {
+        _drmSessionController.add(session);
+      }
+    } catch (e) {
+      debugPrint('Error processing DRM session update: $e');
     }
   }
 

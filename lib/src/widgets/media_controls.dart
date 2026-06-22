@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -73,6 +74,8 @@ class _MediaControlsState extends State<MediaControls>
   double _dragValue = 0.0;
   List<CastDevice> _castDevices = [];
 
+  StreamSubscription<List<CastDevice>>? _castDevicesSubscription;
+
   late AnimationController _fadeController;
   late AnimationController _scaleController;
   late AnimationController _overlayController;
@@ -119,8 +122,9 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   void _initializeCastDevices() {
-    // Listen to cast devices stream
-    widget.controller.player.castDevicesStream.listen((devices) {
+    // Listen to cast devices stream — store subscription for cancellation
+    _castDevicesSubscription =
+        widget.controller.player.castDevicesStream.listen((devices) {
       if (mounted) {
         setState(() {
           _castDevices = devices;
@@ -131,6 +135,7 @@ class _MediaControlsState extends State<MediaControls>
 
   @override
   void dispose() {
+    _castDevicesSubscription?.cancel();
     _fadeController.dispose();
     _scaleController.dispose();
     _overlayController.dispose();

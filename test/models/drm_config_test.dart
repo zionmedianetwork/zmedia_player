@@ -171,6 +171,7 @@ void main() {
         customerId: 'customer123',
         apiKey: 'api_key',
         contentId: 'content456',
+        certificateUrl: 'https://example.com/fairplay.cer',
       );
 
       expect(
@@ -180,15 +181,17 @@ void main() {
       expect(config.licenseUrl, contains('customer123'));
     });
 
-    test('provides FairPlay certificate URL', () {
+    test('provides FairPlay certificate URL from required parameter', () {
+      const expectedCertUrl = 'https://example.com/fairplay.cer';
       final config = EzdrmConfig.fairplay(
         customerId: 'customer123',
         apiKey: 'api_key',
         contentId: 'content456',
+        certificateUrl: expectedCertUrl,
       );
 
       expect(config.certificateUrl, isNotNull);
-      expect(config.certificateUrl, contains('fps.ezdrm.com'));
+      expect(config.certificateUrl, expectedCertUrl);
     });
 
     test('includes correct headers', () {
