@@ -3,6 +3,14 @@
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 a step by step roadmap is available in PLAN.md. Always follow this file for implementation guidance
 
+## Required Agent: flutter-expert
+
+**ALWAYS delegate Flutter/Dart implementation work in this repository to the `flutter-expert` subagent** (via the Agent tool with `subagent_type: "flutter-expert"`). This is mandatory, not optional.
+
+Applies to any task touching `lib/`, `test/`, `example/`, widgets, controllers, services, models, state management, or the native plugin layer (`android/`, `ios/`) — i.e. writing, editing, refactoring, debugging, or reviewing code. Pass the full task context (relevant files, the PLAN.md task, and the UI/UX spec section below) to the agent so it has what it needs.
+
+Narrow exceptions where you may act directly without the agent: pure documentation edits (e.g. this file, `docs/`, `README.md`), git/branch/release operations, and answering questions that require no code changes.
+
 ## Project Overview
 
 ZMedia Player is a comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms. It provides enterprise-grade capabilities including DRM support, adaptive streaming (HLS/DASH), Picture-in-Picture, casting (Chromecast/AirPlay), and live streaming.
