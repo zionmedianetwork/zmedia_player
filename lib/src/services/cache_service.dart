@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 import 'package:http/http.dart' as http;
 import '../models/media_item.dart';
 import '../core/media_config.dart';
@@ -301,11 +302,17 @@ class CacheService {
     }
   }
 
-  /// Get app cache directory
+  /// Get app cache directory.
+  ///
+  /// Honors an explicit [CacheConfig.cacheDirectory] override (already handled
+  /// by the caller).  For the default case we use
+  /// [getApplicationSupportDirectory], which is a persistent, app-private
+  /// location on both Android (files dir) and iOS (Application Support).
+  /// [getTemporaryDirectory] is intentionally avoided because the OS may
+  /// purge it at any time, which would silently invalidate cached media.
   Future<Directory> _getAppCacheDirectory() async {
-    // This would typically use path_provider package
-    // For now, return a default directory
-    return Directory(path.join(Directory.current.path, '.cache'));
+    final base = await getApplicationSupportDirectory();
+    return base;
   }
 
   /// Download media data with progress tracking
@@ -496,8 +503,9 @@ class CacheInfo {
   String _formatBytes(int bytes) {
     if (bytes < 1024) return '${bytes}B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)}KB';
-    if (bytes < 1024 * 1024 * 1024)
+    if (bytes < 1024 * 1024 * 1024) {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)}MB';
+    }
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)}GB';
   }
 }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../core/media_controller.dart';
 import '../models/player_state.dart';
 import '../models/buffer_health.dart';
@@ -9,7 +10,9 @@ import 'components/time_display.dart';
 import 'components/live_badge.dart';
 import 'components/quality_badge.dart';
 import 'components/buffer_health_badge.dart';
+import 'components/volume_slider.dart';
 import 'menus/settings_menu.dart';
+import 'media_player_widget.dart';
 
 /// Material Design 3 media controls widget
 ///
@@ -64,6 +67,7 @@ class MaterialMediaControls extends StatefulWidget {
 class _MaterialMediaControlsState extends State<MaterialMediaControls>
     with SingleTickerProviderStateMixin {
   bool _showControls = true;
+  bool _showVolumeSlider = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
   BufferHealth? _currentBufferHealth;
@@ -149,6 +153,29 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
     );
   }
 
+  void _toggleVolumeSlider() {
+    setState(() {
+      _showVolumeSlider = !_showVolumeSlider;
+    });
+    HapticFeedback.lightImpact();
+  }
+
+  void _toggleFullscreen() {
+    HapticFeedback.mediumImpact();
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            _FullscreenPlayerRoute(
+          controller: widget.controller,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 300),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -221,6 +248,26 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
               );
             },
           ),
+
+          // Volume overlay — shown above the bottom bar when toggled
+          if (_showVolumeSlider)
+            Positioned(
+              left: 16,
+              bottom: 96,
+              child: AnimatedBuilder(
+                animation: widget.controller,
+                builder: (context, child) => VolumeSlider(
+                  value: widget.controller.volume,
+                  isMuted: widget.controller.isMuted,
+                  onChanged: (value) => widget.controller.setVolume(value),
+                  onMuteToggle: () => widget.controller.toggleMute(),
+                  orientation: VolumeSliderOrientation.horizontal,
+                  activeColor: Theme.of(context).colorScheme.primary,
+                  sliderLength: 120,
+                  showPercentage: false,
+                ),
+              ),
+            ),
 
           // Main controls
           AnimatedBuilder(
@@ -472,37 +519,51 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
             const SizedBox(height: 16),
 
             // Control buttons row
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
+            AnimatedBuilder(
+              animation: widget.controller,
+              builder: (context, child) {
+                final isMuted = widget.controller.isMuted;
+                final vol = widget.controller.volume;
+                final IconData volumeIcon;
+                if (isMuted || vol == 0.0) {
+                  volumeIcon = Icons.volume_off;
+                } else if (vol < 0.4) {
+                  volumeIcon = Icons.volume_down;
+                } else {
+                  volumeIcon = Icons.volume_up;
+                }
+                return Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Volume button
-                    _buildM3IconButton(
-                      icon: Icons.volume_up,
-                      onPressed: () {
-                        // Volume control (placeholder)
-                      },
-                      tooltip: 'Volume',
-                      colorScheme: colorScheme,
+                    Row(
+                      children: [
+                        // Volume button — toggles a horizontal VolumeSlider
+                        // overlay anchored above the bottom bar.
+                        _buildM3IconButton(
+                          icon: volumeIcon,
+                          onPressed: _toggleVolumeSlider,
+                          tooltip: isMuted ? 'Unmute' : 'Volume',
+                          colorScheme: colorScheme,
+                        ),
+                      ],
+                    ),
+                    Row(
+                      children: [
+                        // Fullscreen button — mirrors MediaControls._toggleFullscreen:
+                        // pushes _FullscreenPlayerRoute via Navigator.push with a
+                        // FadeTransition, which handles orientation + system UI.
+                        if (widget.showFullscreen)
+                          _buildM3IconButton(
+                            icon: Icons.fullscreen,
+                            onPressed: _toggleFullscreen,
+                            tooltip: 'Fullscreen',
+                            colorScheme: colorScheme,
+                          ),
+                      ],
                     ),
                   ],
-                ),
-                Row(
-                  children: [
-                    // Fullscreen button
-                    if (widget.showFullscreen)
-                      _buildM3IconButton(
-                        icon: Icons.fullscreen,
-                        onPressed: () {
-                          // Fullscreen toggle (placeholder)
-                        },
-                        tooltip: 'Fullscreen',
-                        colorScheme: colorScheme,
-                      ),
-                  ],
-                ),
-              ],
+                );
+              },
             ),
           ],
         ),
@@ -558,6 +619,99 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
             color: onPressed != null
                 ? colorScheme.onSecondaryContainer
                 : colorScheme.onSecondaryContainer.withValues(alpha: 0.38),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Private fullscreen route used by [MaterialMediaControls].
+///
+/// Mirrors the mechanism in MediaControls._toggleFullscreen: pushes a
+/// PageRoute that forces landscape, hides system UI, and shows
+/// [FullscreenMediaPlayer].  The controls' own top bar (rendered by
+/// FullscreenMediaPlayer) owns the single header — no duplicate title or
+/// dead PiP button are added here.
+class _FullscreenPlayerRoute extends StatefulWidget {
+  final MediaController controller;
+
+  const _FullscreenPlayerRoute({required this.controller});
+
+  @override
+  State<_FullscreenPlayerRoute> createState() => _FullscreenPlayerRouteState();
+}
+
+class _FullscreenPlayerRouteState extends State<_FullscreenPlayerRoute>
+    with TickerProviderStateMixin {
+  late AnimationController _slideController;
+  late Animation<Offset> _slideAnimation;
+  bool _isExiting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
+    _slideController = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideController,
+      curve: Curves.easeOutCubic,
+    ));
+    _slideController.forward();
+  }
+
+  @override
+  void dispose() {
+    _restoreSystemSettings();
+    _slideController.dispose();
+    super.dispose();
+  }
+
+  void _restoreSystemSettings() {
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
+
+  Future<void> _exitFullscreen() async {
+    if (_isExiting) return;
+    setState(() => _isExiting = true);
+    HapticFeedback.lightImpact();
+    await _slideController.reverse();
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop) await _exitFullscreen();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SlideTransition(
+          position: _slideAnimation,
+          child: FullscreenMediaPlayer(
+            controller: widget.controller,
+            backgroundColor: Colors.black,
           ),
         ),
       ),

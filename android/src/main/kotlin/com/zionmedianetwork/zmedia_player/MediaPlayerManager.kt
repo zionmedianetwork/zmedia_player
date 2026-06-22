@@ -10,6 +10,7 @@ import com.google.android.exoplayer2.source.ProgressiveMediaSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
 import com.google.android.exoplayer2.trackselection.TrackSelectionOverride
+import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
 import com.google.android.exoplayer2.upstream.DefaultDataSource
 import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
 import com.google.android.exoplayer2.upstream.DataSource
@@ -248,6 +249,15 @@ class MediaPlayerInstance(
 ) {
     private var exoPlayer: ExoPlayer? = null
     private var playerView: MediaPlayerView? = null
+    // Shared bandwidth meter — passed to ExoPlayer.Builder so that ExoPlayer
+    // uses it for adaptive track selection AND we can read its bitrateEstimate
+    // (measured bits/sec) at any time.  This replaces the previous approach of
+    // reading format.bitrate (declared bitrate of the current track), which
+    // never reflects actual network throughput.
+    // NOTE: requires device verification — bitrateEstimate returns 0 until the
+    // meter has observed at least one download chunk.
+    private val bandwidthMeter: DefaultBandwidthMeter =
+        DefaultBandwidthMeter.getSingletonInstance(context)
     private val dataSourceFactory: DefaultDataSource.Factory
     private val bufferingHandler: BufferingHandler = BufferingHandler()
     private var currentMediaSource: MediaSource? = null
@@ -329,6 +339,7 @@ class MediaPlayerInstance(
 
         exoPlayer = ExoPlayer.Builder(context)
             .setLoadControl(loadControl)
+            .setBandwidthMeter(bandwidthMeter)
             .build()
             .apply {
                 addListener(playerListener)
@@ -685,7 +696,7 @@ class MediaPlayerInstance(
     }
 
     fun getBufferHealth(): Map<String, Any> {
-        return bufferingHandler.getBufferHealth(exoPlayer)
+        return bufferingHandler.getBufferHealth(exoPlayer, bandwidthMeter)
     }
 
     fun dispose() {
@@ -804,30 +815,22 @@ class MediaPlayerInstance(
         bandwidthUpdateHandler = null
     }
 
-    private fun getCurrentBandwidthEstimate(player: ExoPlayer): Long {
-        // ExoPlayer's bandwidth estimate is available through the LoadControl
-        // We can access it via the player's current tracks selection
-        try {
-            // Get bandwidth estimate from current adaptive track selection
-            val trackSelector = player.currentTracks
-            // ExoPlayer internally maintains bandwidth estimates
-            // For now, we'll use a workaround by checking video/audio bitrate
-            var estimatedBandwidth: Long = 0
-
-            for (trackGroup in trackSelector.groups) {
-                if (trackGroup.isSelected) {
-                    val format = trackGroup.getTrackFormat(0)
-                    if (format.bitrate != com.google.android.exoplayer2.Format.NO_VALUE) {
-                        estimatedBandwidth += format.bitrate.toLong()
-                    }
-                }
-            }
-
-            // If we have a valid estimate, return it; otherwise return 0
-            return if (estimatedBandwidth > 0) estimatedBandwidth else 0
+    private fun getCurrentBandwidthEstimate(@Suppress("UNUSED_PARAMETER") player: ExoPlayer): Long {
+        // Read measured network throughput from the DefaultBandwidthMeter that
+        // was supplied to ExoPlayer.Builder.  bitrateEstimate is in bits/sec,
+        // which matches what the Dart side expects (onBandwidthChanged delivers
+        // bits/sec and StreamingService.updateBandwidth() stores it as-is).
+        //
+        // The estimate returns 0 until the meter has observed at least one
+        // download; that is expected and matches previous behaviour.
+        //
+        // DEVICE VERIFICATION REQUIRED: confirm bitrateEstimate tracks actual
+        // network changes (e.g. simulate throttling) on a real device.
+        return try {
+            bandwidthMeter.bitrateEstimate
         } catch (e: Exception) {
             android.util.Log.e("MediaPlayerInstance", "Error getting bandwidth estimate: ${e.message}")
-            return 0
+            0L
         }
     }
 
