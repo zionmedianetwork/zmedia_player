@@ -103,14 +103,14 @@ void main() {
         title: 'Test Playlist',
         items: _items,
         currentIndex: 2, // last item
-        repeatMode: RepeatMode.none,
+        repeatMode: MediaRepeatMode.none,
       );
       await player.setPlaylist(playlist);
 
       await expectLater(
         player.skipToNext(),
         throwsA(isA<InvalidStateException>()),
-        reason: 'skipToNext at last item with RepeatMode.none must throw',
+        reason: 'skipToNext at last item with MediaRepeatMode.none must throw',
       );
 
       player.dispose();
@@ -125,7 +125,7 @@ void main() {
         title: 'Test Playlist',
         items: _items,
         currentIndex: 0,
-        repeatMode: RepeatMode.none,
+        repeatMode: MediaRepeatMode.none,
       );
       await player.setPlaylist(playlist);
 
@@ -138,7 +138,7 @@ void main() {
       player.dispose();
     });
 
-    test('skipToNext wraps around when RepeatMode.all', () async {
+    test('skipToNext wraps around when MediaRepeatMode.all', () async {
       final player = MediaPlayer(playerId: 'pl-skip-wrap');
       await player.initialize();
 
@@ -147,14 +147,14 @@ void main() {
         title: 'Test Playlist',
         items: _items,
         currentIndex: 2, // last item
-        repeatMode: RepeatMode.all,
+        repeatMode: MediaRepeatMode.all,
       );
       await player.setPlaylist(playlist);
 
       await player.skipToNext();
 
       expect(player.currentPlaylist?.currentIndex, 0,
-          reason: 'RepeatMode.all must wrap to index 0');
+          reason: 'MediaRepeatMode.all must wrap to index 0');
 
       player.dispose();
     });
@@ -294,7 +294,7 @@ void main() {
 
       await player.skipToIndex(2);
 
-      // At last index: hasNext = false (RepeatMode.none)
+      // At last index: hasNext = false (MediaRepeatMode.none)
       expect(player.currentPlaylist?.hasNext, isFalse);
       expect(player.currentPlaylist?.hasPrevious, isTrue);
 
@@ -307,34 +307,34 @@ void main() {
   // =========================================================================
 
   group('Playlist model — edge cases not covered in playlist_test.dart', () {
-    test('RepeatMode.single repeats current item indefinitely', () {
+    test('MediaRepeatMode.single repeats current item indefinitely', () {
       const playlist = Playlist(
         id: 'pl-single',
         title: 'Single Repeat',
         items: _items,
         currentIndex: 1,
-        repeatMode: RepeatMode.single,
+        repeatMode: MediaRepeatMode.single,
       );
 
       // nextIndex should return the same index.
       expect(playlist.nextIndex, 1,
-          reason: 'RepeatMode.single must return the same index on next');
+          reason: 'MediaRepeatMode.single must return the same index on next');
     });
 
-    test('RepeatMode.all wraps previous at first item back to last', () {
+    test('MediaRepeatMode.all wraps previous at first item back to last', () {
       const playlist = Playlist(
         id: 'pl-all-bwd',
         title: 'All Repeat Backwards',
         items: _items,
         currentIndex: 0,
-        repeatMode: RepeatMode.all,
+        repeatMode: MediaRepeatMode.all,
       );
 
-      // RepeatMode.all at index 0 going backwards → last index
+      // MediaRepeatMode.all at index 0 going backwards → last index
       expect(playlist.hasPrevious, isTrue);
       expect(playlist.previousIndex, _items.length - 1,
           reason:
-              'RepeatMode.all must wrap previousIndex to last when at first item');
+              'MediaRepeatMode.all must wrap previousIndex to last when at first item');
     });
 
     test('currentItem returns correct item at each index', () {

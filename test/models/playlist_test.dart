@@ -34,7 +34,7 @@ void main() {
       expect(playlist.items.length, 3);
       expect(playlist.currentIndex, 0);
       expect(playlist.mode, PlaybackMode.sequential);
-      expect(playlist.repeatMode, RepeatMode.none);
+      expect(playlist.repeatMode, MediaRepeatMode.none);
     });
 
     test('creates playlist with custom index', () {
@@ -140,38 +140,38 @@ void main() {
     });
 
     group('Repeat Modes', () {
-      test('RepeatMode.none ends at last item', () {
+      test('MediaRepeatMode.none ends at last item', () {
         final playlist = Playlist(
           id: 'p1',
           title: 'Playlist',
           items: testItems,
           currentIndex: 2,
-          repeatMode: RepeatMode.none,
+          repeatMode: MediaRepeatMode.none,
         );
 
         expect(playlist.nextIndex, null);
       });
 
-      test('RepeatMode.all loops to start', () {
+      test('MediaRepeatMode.all loops to start', () {
         final playlist = Playlist(
           id: 'p1',
           title: 'Playlist',
           items: testItems,
           currentIndex: 2,
-          repeatMode: RepeatMode.all,
+          repeatMode: MediaRepeatMode.all,
         );
 
         expect(playlist.hasNext, true);
         expect(playlist.nextIndex, 0);
       });
 
-      test('RepeatMode.single stays on current item', () {
+      test('MediaRepeatMode.single stays on current item', () {
         final playlist = Playlist(
           id: 'p1',
           title: 'Playlist',
           items: testItems,
           currentIndex: 1,
-          repeatMode: RepeatMode.single,
+          repeatMode: MediaRepeatMode.single,
         );
 
         expect(playlist.hasNext, true);
@@ -239,12 +239,12 @@ void main() {
           id: 'p1',
           title: 'Playlist',
           items: testItems,
-          repeatMode: RepeatMode.none,
+          repeatMode: MediaRepeatMode.none,
         );
 
-        final updated = original.copyWith(repeatMode: RepeatMode.all);
+        final updated = original.copyWith(repeatMode: MediaRepeatMode.all);
 
-        expect(updated.repeatMode, RepeatMode.all);
+        expect(updated.repeatMode, MediaRepeatMode.all);
       });
 
       test('updates playlist mode', () {
