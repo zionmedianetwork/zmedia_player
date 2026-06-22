@@ -138,7 +138,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// Force resize the native view to fix sizing issues
   void _forceResizeNativeView() {
     if (!_isDisposed && mounted) {
-      debugPrint('Force resizing native view...');
       setState(() {
         // Force a rebuild to ensure proper sizing
       });
@@ -167,7 +166,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
     // Force resize if we detect potential sizing issues
     if (oldWidget.key != widget.key) {
-      debugPrint('Widget key changed, forcing resize...');
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!_isDisposed && mounted) {
           _forceResizeNativeView();
@@ -205,11 +203,8 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       _currentMediaId = currentMediaId;
 
       if (currentItem != null && !_hasNativeView && !_isCreatingNativeView) {
-        debugPrint(
-            'Media changed, creating native view for: ${currentItem.title}');
         _createNativeView();
       } else if (currentItem == null) {
-        debugPrint('No media item, cleaning up native view');
         _cleanupNativeView();
       }
     }
@@ -220,8 +215,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
   void _refreshVideoSurface() {
     if (_isDisposed) return;
-
-    debugPrint('Refreshing video surface...');
 
     // Only cleanup and recreate if we don't have a valid native view
     // This prevents unnecessary surface destruction during orientation changes
@@ -237,9 +230,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
           }
         });
       }
-    } else {
-      debugPrint(
-          'Native view already exists, skipping refresh to preserve surface');
     }
   }
 
@@ -250,9 +240,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       if (!widget.controller.player.isInitialized) {
         await widget.controller.initialize();
       }
-
-      debugPrint(
-          'Player initialized, current item: ${widget.controller.currentItem?.title}');
 
       // Create native view if we have media
       if (widget.controller.currentItem != null && !_hasNativeView) {
@@ -290,10 +277,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
   Widget _buildPlayerContent() {
     Widget content;
-
-    // Add debugging information
-    debugPrint(
-        'Building player content - State: ${widget.controller.state.state}, HasNativeView: $_hasNativeView, NativeView: ${_nativeView != null}');
 
     // Determine what content to show based on player state and native view availability
     final playerState = widget.controller.state.state;
@@ -398,9 +381,8 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       position: widget.controller.state.position,
       config: widget.controller.config.subtitleConfig ?? const SubtitleConfig(),
       enabled: widget.controller.config.enableSubtitles,
-      onTrackChanged: (track) {
-        // Handle subtitle track change
-        debugPrint('Subtitle track changed to: ${track.title}');
+      onTrackChanged: (_) {
+        // Subtitle track change is handled internally by SubtitleView
       },
     );
   }
@@ -408,31 +390,23 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   Widget _buildVideoSurface() {
     // Check if we have media loaded
     if (widget.controller.currentItem == null) {
-      debugPrint('No media loaded, showing placeholder...');
       return _buildPlaceholder();
     }
 
     final playerState = widget.controller.state.state;
-    debugPrint(
-        'Building video surface - State: $playerState, HasNativeView: $_hasNativeView, NativeView: ${_nativeView != null}');
 
     // Show error state if there's an error
     if (playerState == PlayerState.error) {
-      debugPrint('Player has error, showing error...');
       return _buildError();
     }
 
     // Only show buffering if we truly don't have a native view yet
     if (!_hasNativeView || _nativeView == null) {
-      debugPrint('No native view available, showing buffering...');
       return _buildBuffering();
     }
 
     // We have a native view - show it regardless of buffering state
     // The native player will handle its own buffering overlay if needed
-    debugPrint('Returning native view with type: ${_nativeView.runtimeType}');
-
-    // If we have a native view, return it with proper sizing and ensure it's visible
     return Container(
       color: Colors.black, // Ensure background is black for video
       child: SizedBox.expand(
@@ -447,20 +421,15 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     _isCreatingNativeView = true;
 
     try {
-      debugPrint('Creating native view...');
-
       // Ensure player is initialized before creating native view
       if (!widget.controller.player.isInitialized) {
-        debugPrint('Player not initialized, initializing...');
         await widget.controller.initialize();
         if (_isDisposed) return;
-        debugPrint('Player initialized successfully');
       }
 
       // Check if we have a current media item
       final currentItem = widget.controller.currentItem;
       if (currentItem == null) {
-        debugPrint('No current media item, cannot create native view');
         if (mounted && !_isDisposed) {
           setState(() {
             _hasNativeView = false;
@@ -473,8 +442,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       // Add a small delay to ensure media is properly loaded
       await Future.delayed(const Duration(milliseconds: 100));
 
-      debugPrint('Creating platform view for media: ${currentItem.title}');
-
       // Create platform-specific video surface
       const viewType = 'zmedia_player_view';
       final creationParams = {
@@ -483,13 +450,10 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
             _boxFitToString(widget.boxFit ?? widget.controller.config.boxFit),
       };
 
-      debugPrint('View type: $viewType, params: $creationParams');
-
       Widget nativeView;
       final platform = Theme.of(context).platform;
 
       if (platform == TargetPlatform.android) {
-        debugPrint('Creating Android view...');
         nativeView = AndroidView(
           viewType: viewType,
           creationParams: creationParams,
@@ -497,7 +461,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
           onPlatformViewCreated: _onPlatformViewCreated,
         );
       } else if (platform == TargetPlatform.iOS) {
-        debugPrint('Creating iOS view...');
         nativeView = UiKitView(
           viewType: viewType,
           creationParams: creationParams,
@@ -505,11 +468,8 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
           onPlatformViewCreated: _onPlatformViewCreated,
         );
       } else {
-        debugPrint('Unsupported platform: $platform');
         return;
       }
-
-      debugPrint('Native view created successfully, setting state...');
 
       // Set the native view with proper sizing and ensure it's visible
       if (mounted && !_isDisposed) {
@@ -523,9 +483,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
           );
         });
       }
-
-      debugPrint(
-          'Native view state set: _hasNativeView=$_hasNativeView, _nativeView=${_nativeView != null}');
     } catch (e) {
       debugPrint('Error creating native view: $e');
       // Set error state if platform view creation fails
@@ -541,8 +498,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   void _cleanupNativeView() {
-    debugPrint('Cleaning up native view...');
-
     if (mounted && !_isDisposed) {
       setState(() {
         _hasNativeView = false;
@@ -556,8 +511,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
   void _onPlatformViewCreated(int viewId) {
     if (_isDisposed) return;
-
-    debugPrint('Platform view created with ID: $viewId');
 
     // Platform view is ready - trigger a rebuild to ensure it's displayed
     if (mounted && !_isDisposed) {
@@ -759,8 +712,8 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
         // You could potentially add aspectRatio as a property to MediaItem
         // and return currentItem.aspectRatio ?? (16 / 9);
       }
-    } catch (e) {
-      debugPrint('Error getting video aspect ratio: $e');
+    } catch (_) {
+      // Ignore aspect ratio retrieval errors; fall back to 16:9 below
     }
 
     // Return 16:9 as default (most common video aspect ratio)
@@ -789,7 +742,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// Force recreate the native view (useful for debugging video display issues)
   void forceRecreateNativeView() {
     if (!_isDisposed) {
-      debugPrint('Force recreating native view...');
       _cleanupNativeView();
       _createNativeView();
     }
@@ -798,7 +750,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// Refresh video surface (useful after returning from fullscreen)
   void refreshVideoSurface() {
     if (!_isDisposed && mounted) {
-      debugPrint('Refreshing video surface...');
       setState(() {
         // Force rebuild of video surface
       });
@@ -818,8 +769,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   Future<void> updateBoxFit(BoxFit newBoxFit) async {
     if (_isDisposed || !_hasNativeView) return;
 
-    debugPrint('Updating box fit to: $newBoxFit');
-
     try {
       // Update the box fit through the method channel
       await widget.controller.player.setBoxFit(newBoxFit);
@@ -834,8 +783,6 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// Force refresh video surface to fix black screen issues
   Future<void> _forceRefreshVideoSurface() async {
     if (_isDisposed) return;
-
-    debugPrint('Force refreshing video surface...');
 
     // Clean up existing view
     _cleanupNativeView();
@@ -911,8 +858,8 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
-    } catch (e) {
-      debugPrint('Error entering fullscreen: $e');
+    } catch (_) {
+      // Ignore system UI / orientation errors on platforms that do not support them
     }
   }
 
@@ -930,8 +877,8 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
         DeviceOrientation.landscapeLeft,
         DeviceOrientation.landscapeRight,
       ]);
-    } catch (e) {
-      debugPrint('Error exiting fullscreen: $e');
+    } catch (_) {
+      // Ignore system UI / orientation errors on platforms that do not support them
     }
   }
 

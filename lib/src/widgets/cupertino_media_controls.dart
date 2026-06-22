@@ -75,6 +75,10 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
   BufferHealth? _currentBufferHealth;
   List<QualityTrack>? _qualityTracks;
 
+  /// Local drag value for the position slider.
+  /// Non-null while the user is dragging; null otherwise.
+  double? _seekDragValue;
+
   StreamSubscription<BufferHealth>? _bufferHealthSubscription;
   StreamSubscription<List<QualityTrack>>? _qualityTracksSubscription;
 
@@ -362,20 +366,28 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
 
                   // PiP button
                   if (widget.showPip)
-                    _buildIOSButton(
-                      icon: CupertinoIcons.rectangle_on_rectangle,
-                      onPressed: () async {
-                        await widget.controller.enterPictureInPicture();
-                      },
+                    Semantics(
+                      button: true,
+                      label: 'Picture in picture',
+                      child: _buildIOSButton(
+                        icon: CupertinoIcons.rectangle_on_rectangle,
+                        onPressed: () async {
+                          await widget.controller.enterPictureInPicture();
+                        },
+                      ),
                     ),
 
                   const SizedBox(width: 8),
 
                   // Settings button
                   if (widget.showSettings)
-                    _buildIOSButton(
-                      icon: CupertinoIcons.settings,
-                      onPressed: _toggleSettings,
+                    Semantics(
+                      button: true,
+                      label: 'Settings',
+                      child: _buildIOSButton(
+                        icon: CupertinoIcons.settings,
+                        onPressed: _toggleSettings,
+                      ),
                     ),
                 ],
               ),
@@ -409,43 +421,47 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
             const SizedBox(width: 16),
 
             // Play/Pause button (large, with blur)
-            ClipOval(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-                child: Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: CupertinoColors.white.withValues(alpha: 0.25),
-                    border: Border.all(
-                      color: CupertinoColors.white.withValues(alpha: 0.5),
-                      width: 1,
+            Semantics(
+              button: true,
+              label: isPlaying ? 'Pause' : 'Play',
+              child: ClipOval(
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+                  child: Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: CupertinoColors.white.withValues(alpha: 0.25),
+                      border: Border.all(
+                        color: CupertinoColors.white.withValues(alpha: 0.5),
+                        width: 1,
+                      ),
                     ),
-                  ),
-                  child: CupertinoButton(
-                    padding: EdgeInsets.zero,
-                    onPressed: isLoading
-                        ? null
-                        : () {
-                            if (isPlaying) {
-                              widget.controller.pause();
-                            } else {
-                              widget.controller.play();
-                            }
-                          },
-                    child: isLoading
-                        ? const CupertinoActivityIndicator(
-                            color: CupertinoColors.white,
-                            radius: 12,
-                          )
-                        : Icon(
-                            isPlaying
-                                ? CupertinoIcons.pause_fill
-                                : CupertinoIcons.play_fill,
-                            size: 28,
-                            color: CupertinoColors.white,
-                          ),
+                    child: CupertinoButton(
+                      padding: EdgeInsets.zero,
+                      onPressed: isLoading
+                          ? null
+                          : () {
+                              if (isPlaying) {
+                                widget.controller.pause();
+                              } else {
+                                widget.controller.play();
+                              }
+                            },
+                      child: isLoading
+                          ? const CupertinoActivityIndicator(
+                              color: CupertinoColors.white,
+                              radius: 12,
+                            )
+                          : Icon(
+                              isPlaying
+                                  ? CupertinoIcons.pause_fill
+                                  : CupertinoIcons.play_fill,
+                              size: 28,
+                              color: CupertinoColors.white,
+                            ),
+                    ),
                   ),
                 ),
               ),
@@ -497,15 +513,21 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
                       // For non-live content, show seek bar
                       final position = widget.controller.position;
                       final duration = widget.controller.duration;
-                      final value = duration.inMilliseconds > 0
+                      final rawValue = duration.inMilliseconds > 0
                           ? position.inMilliseconds / duration.inMilliseconds
                           : 0.0;
+                      // While dragging, show drag position in the time label
+                      final displayValue =
+                          (_seekDragValue ?? rawValue).clamp(0.0, 1.0);
+                      final displayPosition = _seekDragValue != null
+                          ? duration * _seekDragValue!
+                          : position;
 
                       return Row(
                         children: [
                           // Current time
                           TimeDisplay(
-                            position: position,
+                            position: displayPosition,
                             format: TimeDisplayFormat.currentOnly,
                             style: TextStyle(
                               color: textColor,
@@ -516,21 +538,36 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
 
                           const SizedBox(width: 12),
 
-                          // Seek bar
+                          // Seek bar — seekTo fires once in onChangeEnd, not per drag frame
                           Expanded(
-                            child: SeekBar(
-                              value: value.clamp(0.0, 1.0),
-                              duration: duration,
-                              onChanged: (newValue) {
-                                final seekTo = duration * newValue;
-                                widget.controller.seekTo(seekTo);
-                              },
-                              activeColor: CupertinoColors.white,
-                              inactiveColor:
-                                  CupertinoColors.white.withValues(alpha: 0.3),
-                              thumbColor: CupertinoColors.white,
-                              trackHeight: 3.0,
-                              thumbRadius: 7.0,
+                            child: Semantics(
+                              label: 'Seek',
+                              value: widget.controller.formattedPosition,
+                              child: SeekBar(
+                                value: displayValue,
+                                duration: duration,
+                                onChanged: (newValue) {
+                                  // Update local drag state for visual feedback only —
+                                  // do NOT call seekTo here (would fire 60x/s during drag)
+                                  setState(() {
+                                    _seekDragValue = newValue;
+                                  });
+                                },
+                                onChangeEnd: (newValue) {
+                                  // Fire seekTo exactly once when the gesture ends
+                                  final seekTo = duration * newValue;
+                                  widget.controller.seekTo(seekTo);
+                                  setState(() {
+                                    _seekDragValue = null;
+                                  });
+                                },
+                                activeColor: CupertinoColors.white,
+                                inactiveColor: CupertinoColors.white
+                                    .withValues(alpha: 0.3),
+                                thumbColor: CupertinoColors.white,
+                                trackHeight: 3.0,
+                                thumbRadius: 7.0,
+                              ),
                             ),
                           ),
 
@@ -583,13 +620,15 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
                           ),
                           Row(
                             children: [
-                              // Fullscreen button — mirrors MediaControls._toggleFullscreen:
-                              // pushes _CupertinoFullscreenPlayerRoute via Navigator.push
-                              // with a FadeTransition, which handles orientation + system UI.
+                              // Fullscreen button
                               if (widget.showFullscreen)
-                                _buildIOSButton(
-                                  icon: CupertinoIcons.fullscreen,
-                                  onPressed: _toggleFullscreen,
+                                Semantics(
+                                  button: true,
+                                  label: 'Fullscreen',
+                                  child: _buildIOSButton(
+                                    icon: CupertinoIcons.fullscreen,
+                                    onPressed: _toggleFullscreen,
+                                  ),
                                 ),
                             ],
                           ),
@@ -606,14 +645,17 @@ class _CupertinoMediaControlsState extends State<CupertinoMediaControls>
     );
   }
 
-  /// iOS-style button with minimal styling
+  /// iOS-style button with minimum 48x48 touch target
   Widget _buildIOSButton({
     required IconData icon,
     required VoidCallback? onPressed,
   }) {
+    // Padding is sized so the button's tap target is at least 48×48 logical px.
+    // The icon is 22px; adding 13px on each side yields 22+26 = 48px.
+    // minimumSize: Size.zero is intentionally omitted to restore the default
+    // (44pt on iOS / 48dp on Material), ensuring WCAG touch-target compliance.
     return CupertinoButton(
-      padding: const EdgeInsets.all(8),
-      minimumSize: Size.zero,
+      padding: const EdgeInsets.all(13),
       onPressed: onPressed,
       child: Icon(
         icon,

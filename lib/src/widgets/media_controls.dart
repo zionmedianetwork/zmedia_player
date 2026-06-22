@@ -146,123 +146,156 @@ class _MediaControlsState extends State<MediaControls>
   Widget build(BuildContext context) {
     final theme = widget.theme ?? MediaControlsTheme.defaultTheme;
 
-    return AnimatedBuilder(
-      animation: widget.controller,
-      builder: (context, child) {
-        return FadeTransition(
-          opacity: _fadeAnimation,
-          child: Container(
-            width: double.infinity,
-            height: double.infinity,
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                center: Alignment.center,
-                radius: 1.5,
-                colors: [
-                  Colors.transparent,
-                  Colors.black.withValues(alpha: 0.1),
-                  Colors.black.withValues(alpha: 0.6),
-                ],
-              ),
-            ),
-            child: Stack(
-              children: [
-                // Gesture detector for tap to show/hide controls
-                GestureDetector(
-                  onTap: () => widget.controller.showControlsTemporarily(),
-                  child: Container(
-                    width: double.infinity,
-                    height: double.infinity,
-                    color: Colors.transparent,
-                  ),
-                ),
-
-                // Main controls with glassmorphism effect
-                _buildMainControls(theme),
-
-                // Top controls with modern layout
-                _buildTopControls(theme),
-
-                // Bottom controls with enhanced design
-                _buildBottomControls(theme),
-
-                // Animated overlays
-                if (_showVolumeSlider) _buildVolumeOverlay(theme),
-                if (_showSpeedMenu) _buildSpeedMenu(theme),
-                if (_showSubtitleMenu) _buildSubtitleMenu(theme),
-                if (_showCastMenu) _buildCastMenu(theme),
-
-                // Loading overlay
-                if (widget.controller.state.state == PlayerState.buffering)
-                  _buildBufferingOverlay(theme),
+    // Static chrome (gradient background + top bar + overlays) is built once
+    // and does NOT rebuild on every position tick.  Only the sub-trees that
+    // actually depend on frequently-changing controller state are wrapped in
+    // their own ListenableBuilder: the center play/pause button (play state)
+    // and the bottom seek-bar + time display (position/buffered).
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: RepaintBoundary(
+        child: Container(
+          width: double.infinity,
+          height: double.infinity,
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: Alignment.center,
+              radius: 1.5,
+              colors: [
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.1),
+                Colors.black.withValues(alpha: 0.6),
               ],
             ),
           ),
-        );
-      },
+          child: Stack(
+            children: [
+              // Gesture detector for tap to show/hide controls
+              GestureDetector(
+                onTap: () => widget.controller.showControlsTemporarily(),
+                child: Container(
+                  width: double.infinity,
+                  height: double.infinity,
+                  color: Colors.transparent,
+                ),
+              ),
+
+              // Center controls — only rebuilds when play state changes
+              _buildMainControls(theme),
+
+              // Top controls — static chrome, no per-tick rebuild
+              _buildTopControls(theme),
+
+              // Bottom controls — the inner seek bar + time text use their
+              // own scoped ListenableBuilder; the outer gradient shell is const
+              _buildBottomControls(theme),
+
+              // Animated overlays
+              if (_showVolumeSlider) _buildVolumeOverlay(theme),
+              if (_showSpeedMenu) _buildSpeedMenu(theme),
+              if (_showSubtitleMenu) _buildSubtitleMenu(theme),
+              if (_showCastMenu) _buildCastMenu(theme),
+
+              // Loading overlay — scoped to buffering state
+              ListenableBuilder(
+                listenable: widget.controller,
+                builder: (context, _) {
+                  if (widget.controller.state.state == PlayerState.buffering) {
+                    return _buildBufferingOverlay(theme);
+                  }
+                  return const SizedBox.shrink();
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   Widget _buildMainControls(MediaControlsTheme theme) {
+    // Playlist-nav buttons and seek-10 buttons do not depend on the position
+    // tick; only the play/pause icon changes when play state changes.
+    // Wrap only that button in a ListenableBuilder so the surrounding row
+    // is not rebuilt on every 500 ms position tick.
     return Center(
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Previous track
-          if (widget.showPlaylistControls && widget.controller.hasPrevious)
-            _buildCenterControlButton(
-              icon: FluentIcons.previous_20_regular,
-              onTap: () {
-                HapticFeedback.lightImpact();
-                widget.controller.skipToPrevious();
-              },
-              tooltip: 'Previous',
-            ),
+      child: ListenableBuilder(
+        listenable: widget.controller,
+        builder: (context, _) {
+          return Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Previous track
+              if (widget.showPlaylistControls &&
+                  widget.controller.hasPrevious) ...[
+                Semantics(
+                  button: true,
+                  label: 'Previous track',
+                  child: _buildCenterControlButton(
+                    icon: FluentIcons.previous_20_regular,
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      widget.controller.skipToPrevious();
+                    },
+                    tooltip: 'Previous',
+                  ),
+                ),
+                const SizedBox(width: 32),
+              ],
 
-          if (widget.showPlaylistControls && widget.controller.hasPrevious)
-            const SizedBox(width: 32),
+              // Seek backward
+              Semantics(
+                button: true,
+                label: 'Rewind 10 seconds',
+                child: _buildCenterControlButton(
+                  icon: FluentIcons.rewind_20_regular,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    widget.controller.seekBackward();
+                  },
+                  tooltip: 'Rewind 10s',
+                ),
+              ),
 
-          // Seek backward
-          _buildCenterControlButton(
-            icon: FluentIcons.rewind_20_regular,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              widget.controller.seekBackward();
-            },
-            tooltip: 'Rewind 10s',
-          ),
+              const SizedBox(width: 40),
 
-          const SizedBox(width: 40),
+              // Play/Pause button — only this part changes per-tick (play state)
+              _buildPlayPauseButton(theme),
 
-          // Play/Pause button - larger and more prominent
-          _buildPlayPauseButton(theme),
+              const SizedBox(width: 40),
 
-          const SizedBox(width: 40),
+              // Seek forward
+              Semantics(
+                button: true,
+                label: 'Forward 10 seconds',
+                child: _buildCenterControlButton(
+                  icon: FluentIcons.fast_forward_20_regular,
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    widget.controller.seekForward();
+                  },
+                  tooltip: 'Forward 10s',
+                ),
+              ),
 
-          // Seek forward
-          _buildCenterControlButton(
-            icon: FluentIcons.fast_forward_20_regular,
-            onTap: () {
-              HapticFeedback.selectionClick();
-              widget.controller.seekForward();
-            },
-            tooltip: 'Forward 10s',
-          ),
-
-          if (widget.showPlaylistControls && widget.controller.hasNext)
-            const SizedBox(width: 32),
-
-          // Next track
-          if (widget.showPlaylistControls && widget.controller.hasNext)
-            _buildCenterControlButton(
-              icon: FluentIcons.next_20_regular,
-              onTap: () {
-                HapticFeedback.lightImpact();
-                widget.controller.skipToNext();
-              },
-              tooltip: 'Next',
-            ),
-        ],
+              if (widget.showPlaylistControls && widget.controller.hasNext) ...[
+                const SizedBox(width: 32),
+                Semantics(
+                  button: true,
+                  label: 'Next track',
+                  child: _buildCenterControlButton(
+                    icon: FluentIcons.next_20_regular,
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      widget.controller.skipToNext();
+                    },
+                    tooltip: 'Next',
+                  ),
+                ),
+              ],
+            ],
+          );
+        },
       ),
     );
   }
@@ -292,42 +325,50 @@ class _MediaControlsState extends State<MediaControls>
   Widget _buildPlayPauseButton(MediaControlsTheme theme) {
     switch (widget.controller.state.state) {
       case PlayerState.playing:
-        return GestureDetector(
-          onTap: () {
-            HapticFeedback.mediumImpact();
-            widget.controller.pause();
-          },
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(32),
-            ),
-            child: Icon(
-              FluentIcons.pause_24_regular,
-              color: Colors.white,
-              size: 32,
+        return Semantics(
+          button: true,
+          label: 'Pause',
+          child: GestureDetector(
+            onTap: () {
+              HapticFeedback.mediumImpact();
+              widget.controller.pause();
+            },
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(32),
+              ),
+              child: Icon(
+                FluentIcons.pause_24_regular,
+                color: Colors.white,
+                size: 32,
+              ),
             ),
           ),
         );
       case PlayerState.paused:
       case PlayerState.ready:
       case PlayerState.completed:
-        return GestureDetector(
-          onTap: () {
-            HapticFeedback.mediumImpact();
-            widget.controller.play();
-          },
-          child: Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.3),
-              borderRadius: BorderRadius.circular(32),
-            ),
-            child: Icon(
-              FluentIcons.play_24_regular,
-              color: Colors.white,
-              size: 32,
+        return Semantics(
+          button: true,
+          label: 'Play',
+          child: GestureDetector(
+            onTap: () {
+              HapticFeedback.mediumImpact();
+              widget.controller.play();
+            },
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(32),
+              ),
+              child: Icon(
+                FluentIcons.play_24_regular,
+                color: Colors.white,
+                size: 32,
+              ),
             ),
           ),
         );
@@ -338,7 +379,7 @@ class _MediaControlsState extends State<MediaControls>
             color: Colors.black.withValues(alpha: 0.3),
             borderRadius: BorderRadius.circular(32),
           ),
-          child: SizedBox(
+          child: const SizedBox(
             width: 32,
             height: 32,
             child: CircularProgressIndicator(
@@ -349,118 +390,139 @@ class _MediaControlsState extends State<MediaControls>
           ),
         );
       default:
-        return Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.3),
-            borderRadius: BorderRadius.circular(32),
-          ),
-          child: Icon(
-            FluentIcons.play_24_regular,
-            color: Colors.white.withValues(alpha: 0.5),
-            size: 32,
+        return Semantics(
+          button: true,
+          label: 'Play',
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(32),
+            ),
+            child: Icon(
+              FluentIcons.play_24_regular,
+              color: Colors.white.withValues(alpha: 0.5),
+              size: 32,
+            ),
           ),
         );
     }
   }
 
   Widget _buildTopControls(MediaControlsTheme theme) {
-    final isCasting = widget.controller.isCasting;
-    // Always show cast button when enabled
-    // iOS: Native AirPlay button (discovery through system UI)
-    // Android: Opens cast menu that starts discovery automatically
-    final showCastButton = widget.showCastButton;
+    // Top bar does not depend on position ticks — built once, no scoped builder.
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) {
+        final isCasting = widget.controller.isCasting;
+        final showCastButton = widget.showCastButton;
 
-    return Positioned(
-      top: 0,
-      left: 0,
-      right: 0,
-      child: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Colors.black.withValues(alpha: 0.8),
-                Colors.black.withValues(alpha: 0.4),
-                Colors.transparent,
-              ],
-              stops: const [0.0, 0.6, 1.0],
-            ),
-          ),
-          child: Row(
-            children: [
-              // Back button - clean and minimal
-              GestureDetector(
-                onTap: () {
-                  if (Navigator.canPop(context)) {
-                    Navigator.of(context).pop();
-                  }
-                },
-                child: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Icon(
-                    FluentIcons.arrow_left_20_regular,
-                    color: Colors.white,
-                    size: 20,
-                  ),
+        return Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: SafeArea(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.8),
+                    Colors.black.withValues(alpha: 0.4),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.6, 1.0],
                 ),
               ),
-
-              const Spacer(),
-
-              // Action buttons - right aligned, clean spacing
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              child: Row(
                 children: [
-                  // Cast button (Android) or AirPlay button (iOS)
-                  if (showCastButton)
-                    Platform.isIOS
-                        ? const AirPlayButton(
-                            size: 24,
-                          )
-                        : _buildTopActionButton(
-                            icon: isCasting
-                                ? FluentIcons.cast_20_filled
-                                : FluentIcons.cast_20_regular,
-                            isActive: isCasting,
-                            onTap: _toggleCastMenu,
-                            tooltip: isCasting ? 'Connected' : 'Cast',
+                  // Back / collapse button
+                  Semantics(
+                    button: true,
+                    label: 'Exit fullscreen',
+                    child: GestureDetector(
+                      onTap: () {
+                        if (Navigator.canPop(context)) {
+                          Navigator.of(context).pop();
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: const Icon(
+                          FluentIcons.arrow_left_20_regular,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  // Action buttons — right aligned
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Cast button (Android) or AirPlay button (iOS)
+                      if (showCastButton)
+                        Platform.isIOS
+                            ? const AirPlayButton(size: 24)
+                            : Semantics(
+                                button: true,
+                                label: isCasting ? 'Disconnect cast' : 'Cast',
+                                child: _buildTopActionButton(
+                                  icon: isCasting
+                                      ? FluentIcons.cast_20_filled
+                                      : FluentIcons.cast_20_regular,
+                                  isActive: isCasting,
+                                  onTap: _toggleCastMenu,
+                                  tooltip: isCasting ? 'Connected' : 'Cast',
+                                ),
+                              ),
+
+                      if (showCastButton) const SizedBox(width: 12),
+
+                      // PiP button
+                      if (widget.showPipButton &&
+                          widget.controller.isPipAvailable) ...[
+                        Semantics(
+                          button: true,
+                          label: 'Picture in picture',
+                          child: _buildTopActionButton(
+                            icon: FluentIcons.picture_in_picture_20_regular,
+                            onTap: _enterPictureInPicture,
+                            tooltip: 'Picture in Picture',
                           ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
 
-                  if (showCastButton) const SizedBox(width: 12),
-
-                  // PiP button
-                  if (widget.showPipButton && widget.controller.isPipAvailable)
-                    _buildTopActionButton(
-                      icon: FluentIcons.picture_in_picture_20_regular,
-                      onTap: _enterPictureInPicture,
-                      tooltip: 'Picture in Picture',
-                    ),
-
-                  if (widget.showPipButton && widget.controller.isPipAvailable)
-                    const SizedBox(width: 12),
-
-                  // Settings button
-                  if (widget.showSettingsButton)
-                    _buildTopActionButton(
-                      icon: FluentIcons.settings_20_regular,
-                      isActive: false,
-                      onTap: _toggleSettingsMenu,
-                      tooltip: 'Settings',
-                    ),
+                      // Settings button
+                      if (widget.showSettingsButton)
+                        Semantics(
+                          button: true,
+                          label: 'Settings',
+                          child: _buildTopActionButton(
+                            icon: FluentIcons.settings_20_regular,
+                            isActive: false,
+                            onTap: _toggleSettingsMenu,
+                            tooltip: 'Settings',
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -501,8 +563,9 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildBottomControls(MediaControlsTheme theme) {
-    final isLive = widget.controller.player.isLive;
-
+    // The gradient container and fullscreen button are static chrome;
+    // only the seek bar and time text change per position tick.
+    // Wrap only those in a scoped ListenableBuilder + RepaintBoundary.
     return Positioned(
       bottom: 0,
       left: 0,
@@ -524,53 +587,72 @@ class _MediaControlsState extends State<MediaControls>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Progress bar (hidden for live streams without DVR)
-                if (!isLive)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: _buildModernProgressBar(theme),
-                  )
-                else
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: _buildLiveIndicator(theme),
+                // Seek bar + live indicator — scoped rebuild + repaint boundary
+                RepaintBoundary(
+                  child: ListenableBuilder(
+                    listenable: widget.controller,
+                    builder: (context, _) {
+                      final isLive = widget.controller.player.isLive;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        child: isLive
+                            ? _buildLiveIndicator(theme)
+                            : _buildModernProgressBar(theme),
+                      );
+                    },
                   ),
+                ),
 
                 const SizedBox(height: 2),
 
-                // Time display and fullscreen button - at the very bottom
+                // Time display (per-tick) + fullscreen button (static)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   child: Row(
                     children: [
-                      // Current time / Duration
-                      if (!isLive)
-                        Text(
-                          '${_isDraggingProgress ? _formatDuration(widget.controller.duration * _dragValue) : widget.controller.formattedPosition} / ${widget.controller.formattedDuration}',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                            fontFeatures: [FontFeature.tabularFigures()],
-                          ),
+                      // Time text — only this Text rebuilds per tick
+                      RepaintBoundary(
+                        child: ListenableBuilder(
+                          listenable: widget.controller,
+                          builder: (context, _) {
+                            final isLive = widget.controller.player.isLive;
+                            if (isLive) return const SizedBox.shrink();
+                            final timeText = _isDraggingProgress
+                                ? '${_formatDuration(widget.controller.duration * _dragValue)} / ${widget.controller.formattedDuration}'
+                                : '${widget.controller.formattedPosition} / ${widget.controller.formattedDuration}';
+                            return Text(
+                              timeText,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            );
+                          },
                         ),
+                      ),
 
                       const Spacer(),
 
-                      // Fullscreen button
+                      // Fullscreen button — static, no rebuild needed
                       if (widget.allowFullscreen)
-                        GestureDetector(
-                          onTap: _toggleFullscreen,
-                          child: Container(
-                            padding: const EdgeInsets.all(8),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.3),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Icon(
-                              FluentIcons.full_screen_maximize_20_regular,
-                              color: Colors.white,
-                              size: 20,
+                        Semantics(
+                          button: true,
+                          label: 'Fullscreen',
+                          child: GestureDetector(
+                            onTap: _toggleFullscreen,
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.3),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: const Icon(
+                                FluentIcons.full_screen_maximize_20_regular,
+                                color: Colors.white,
+                                size: 20,
+                              ),
                             ),
                           ),
                         ),
@@ -633,7 +715,7 @@ class _MediaControlsState extends State<MediaControls>
     final progress =
         _isDraggingProgress ? _dragValue : widget.controller.progress;
 
-    return Container(
+    return SizedBox(
       height: 32,
       child: SliderTheme(
         data: SliderTheme.of(context).copyWith(
