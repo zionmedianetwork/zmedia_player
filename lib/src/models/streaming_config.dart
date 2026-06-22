@@ -145,6 +145,15 @@ class QualityTrack {
   }
 
   @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is QualityTrack && other.id == id;
+  }
+
+  @override
+  int get hashCode => id.hashCode;
+
+  @override
   String toString() {
     return 'QualityTrack(id: $id, name: $name, bitrate: ${bitrate ~/ 1000}kbps, resolution: ${width}x$height)';
   }
@@ -209,6 +218,15 @@ class AudioTrack {
       sampleRate: sampleRate ?? this.sampleRate,
     );
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is AudioTrack && other.id == id;
+  }
+
+  @override
+  int get hashCode => id.hashCode;
 
   @override
   String toString() {

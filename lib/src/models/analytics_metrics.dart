@@ -157,6 +157,46 @@ class QoEMetrics {
   }
 
   @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is QoEMetrics &&
+        other.totalPlayTime == totalPlayTime &&
+        other.bufferCount == bufferCount &&
+        other.totalBufferTime == totalBufferTime &&
+        other.averageBitrate == averageBitrate &&
+        other.qualitySwitches == qualitySwitches &&
+        other.startupTime == startupTime &&
+        other.rebufferRatio == rebufferRatio &&
+        other.seekCount == seekCount &&
+        other.averageSeekLatency == averageSeekLatency &&
+        other.completionRate == completionRate &&
+        other.errorCount == errorCount &&
+        other.sessionStart == sessionStart &&
+        other.sessionEnd == sessionEnd &&
+        other.mediaUrl == mediaUrl &&
+        other.sessionDuration == sessionDuration;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        totalPlayTime,
+        bufferCount,
+        totalBufferTime,
+        averageBitrate,
+        qualitySwitches,
+        startupTime,
+        rebufferRatio,
+        seekCount,
+        averageSeekLatency,
+        completionRate,
+        errorCount,
+        sessionStart,
+        sessionEnd,
+        mediaUrl,
+        sessionDuration,
+      );
+
+  @override
   String toString() {
     return 'QoEMetrics(score: $qualityScore, playTime: ${totalPlayTime.inSeconds}s, '
         'buffers: $bufferCount, startup: ${startupTime.toStringAsFixed(2)}s)';
@@ -266,6 +306,18 @@ class PerformanceMetrics {
   }
 
   @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is PerformanceMetrics &&
+        other.operation == operation &&
+        other.duration == duration &&
+        other.timestamp == timestamp;
+  }
+
+  @override
+  int get hashCode => Object.hash(operation, duration, timestamp);
+
+  @override
   String toString() {
     return 'PerformanceMetrics($operation: ${duration.toStringAsFixed(2)}ms)';
   }
@@ -342,6 +394,28 @@ class EngagementMetrics {
       'engagementScore': engagementScore,
     };
   }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is EngagementMetrics &&
+        other.watchTime == watchTime &&
+        other.sessionTime == sessionTime &&
+        other.pauseCount == pauseCount &&
+        other.seekCount == seekCount &&
+        other.percentageWatched == percentageWatched &&
+        other.completed == completed;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        watchTime,
+        sessionTime,
+        pauseCount,
+        seekCount,
+        percentageWatched,
+        completed,
+      );
 
   @override
   String toString() {

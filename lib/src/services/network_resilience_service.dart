@@ -6,6 +6,7 @@
 library;
 
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/foundation.dart';
 import '../models/network_status.dart';
 import '../core/exceptions.dart';
@@ -68,14 +69,26 @@ class RetryConfig {
     return const RetryConfig(maxRetries: 0);
   }
 
-  /// Calculates delay for a given attempt number
+  /// Calculates delay for a given attempt number using true exponential backoff.
+  ///
+  /// Attempt numbering (1-based):
+  ///   attempt 1 → initialDelay
+  ///   attempt 2 → initialDelay * backoffMultiplier
+  ///   attempt 3 → initialDelay * backoffMultiplier²
+  ///   …
+  /// The result is capped at [maxDelay].
   Duration calculateDelay(int attemptNumber) {
     if (attemptNumber <= 0) return Duration.zero;
 
     final delayMs =
-        initialDelay.inMilliseconds * (backoffMultiplier * (attemptNumber - 1));
-    final delay = Duration(milliseconds: delayMs.toInt());
+        initialDelay.inMilliseconds * pow(backoffMultiplier, attemptNumber - 1);
 
+    // Guard against double overflow before converting to int.  If the
+    // computed delay already exceeds maxDelay (as a double) return maxDelay
+    // directly to avoid calling .toInt() on a value that overflows int64.
+    if (delayMs >= maxDelay.inMilliseconds) return maxDelay;
+
+    final delay = Duration(milliseconds: delayMs.toInt());
     return delay > maxDelay ? maxDelay : delay;
   }
 }

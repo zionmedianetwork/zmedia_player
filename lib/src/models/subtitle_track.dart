@@ -159,6 +159,32 @@ class SubtitleConfig {
     this.horizontalAlignment = SubtitleAlignment.center,
   });
 
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is SubtitleConfig &&
+        other.fontSize == fontSize &&
+        other.fontColor == fontColor &&
+        other.backgroundColor == backgroundColor &&
+        other.fontFamily == fontFamily &&
+        other.showOutline == showOutline &&
+        other.outlineColor == outlineColor &&
+        other.verticalPosition == verticalPosition &&
+        other.horizontalAlignment == horizontalAlignment;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        fontSize,
+        fontColor,
+        backgroundColor,
+        fontFamily,
+        showOutline,
+        outlineColor,
+        verticalPosition,
+        horizontalAlignment,
+      );
+
   /// Creates a copy of this subtitle config with updated values
   SubtitleConfig copyWith({
     double? fontSize,
