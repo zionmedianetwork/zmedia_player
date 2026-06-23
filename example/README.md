@@ -9,6 +9,11 @@ built against the **real public API** only (everything exported from
 `package:zmedia_player/zmedia_player.dart`), initialize/dispose their controllers
 correctly, and surface loading/error states.
 
+> **Layout:** pages set `MediaConfig(respectSafeArea: true)` so the video is inset
+> below the status bar/notch, and landscape fills the screen. Clients that want a
+> fully immersive landscape can pass `immersiveLandscape: true` to hide the system
+> status bar (it is restored on return to portrait / on dispose).
+
 > This example has been exercised on a **physical iPhone (iOS 26)** — playback,
 > fullscreen, custom controls, adaptive streaming/quality, subtitles, background
 > audio, and lock‑screen notification controls were all verified on-device. The
@@ -55,7 +60,7 @@ select your Team).
 | Page | File | Public API exercised |
 |------|------|----------------------|
 | **Simple Playback** | `pages/simple_playback_page.dart` | `MediaController.create` · `initialize` · `load(MediaItem)` · `play`/`pause`/`stop` · `seekForward`/`seekBackward` · `setVolume` · `toggleMute` |
-| **Playlist** | `pages/playlist_page.dart` | `setPlaylist(Playlist)` · `skipToNext`/`skipToPrevious`/`skipToIndex` · `RepeatMode` (none/all/single) · `PlaybackMode` (sequential/shuffle) · auto-advance on completion |
+| **Playlist** | `pages/playlist_page.dart` | `setPlaylist(Playlist)` · `skipToNext`/`skipToPrevious`/`skipToIndex` · `MediaRepeatMode` (none/all/single) · `PlaybackMode` (sequential/shuffle) · auto-advance on completion |
 | **Adaptive Streaming & Quality** | `pages/streaming_quality_page.dart` | `player.qualityTracksStream` · `setQualityTrack` · `enableAutoQuality` · `player.bandwidthStream` · HLS & DASH sources |
 | **Subtitles** | `pages/subtitles_page.dart` | `setSubtitleTrack` · `disableSubtitles` · `player.subtitleTracksStream` · `selectedSubtitleTrack` · `SubtitleConfig` |
 | **DRM (Widevine / FairPlay / EZDRM)** | `pages/drm_page.dart` | `DrmConfig.widevine` · `DrmConfig.fairplay(certificateUrl:)` · `DrmConfig.ezdrm` · `EzdrmConfig` · `CertificatePinningConfig` · `player.drmSessionStream` |
@@ -119,6 +124,9 @@ meaningful):
   and the app sets the audio session to `.playback` on play so audio is audible
   with the **silent switch on** and continues in the background.
 - **Android 13+:** `POST_NOTIFICATIONS` runtime permission.
+- **Artwork:** when a `MediaItem` has no `artworkUrl`, the notification artwork falls
+  back to an **auto-generated frame** grabbed from the video (iOS
+  `AVAssetImageGenerator`, Android `MediaMetadataRetriever`).
 - The demo loads a short **playlist** so all lock-screen controls are exercisable:
   play/pause, next/previous, and ±10s skip.
 

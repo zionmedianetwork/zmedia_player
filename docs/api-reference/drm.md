@@ -4,8 +4,11 @@
 
 ZMedia Player provides comprehensive DRM support for protected content playback on both iOS and Android platforms.
 
-**Current Status:** ✅ **Online DRM Fully Supported**
-**Offline DRM:** 📅 **Planned for v0.2.0** (see [Roadmap](#offline-drm-roadmap))
+**Current Status:** Online DRM is wired on both platforms — Widevine via ExoPlayer's
+`DefaultDrmSessionManager` (Android) and FairPlay via `AVContentKeySession` (iOS). The Dart API
+and native wiring are complete; **end-to-end decryption still warrants on-device verification**
+with your own protected stream + license server (there are no native automated tests yet).
+**Offline DRM:** Planned for a future release (see [Roadmap](#offline-drm-roadmap)).
 
 ---
 
@@ -240,11 +243,11 @@ const testCert = 'https://fps.example.com/cert.cer';
 
 ## Offline DRM Roadmap
 
-### ⚠️ Current Status: Not Available
+### Current Status: Not Available
 
 Offline DRM (download and offline playback of DRM-protected content) is **not currently supported** in v0.1.x.
 
-### 📅 Planned for v0.2.0 (Q1 2026)
+### Planned for v0.2.0 (Q1 2026)
 
 **Estimated Timeline:** 4-6 weeks development
 **Target Release:** January-February 2026
@@ -518,14 +521,14 @@ await controller.load(MediaItem(
 
 ## Security Audit
 
-✅ **Best Practices Implemented:**
+**Best Practices Implemented:**
 - Secure key exchange via HTTPS
 - Certificate pinning support
 - No keys stored in plain text
 - Automatic license rotation
 - Secure memory handling
 
-⚠️ **Recommendations:**
+**Recommendations:**
 - Use hardware-backed DRM when available (Widevine L1)
 - Implement certificate pinning for production
 - Rotate licenses regularly
@@ -555,19 +558,19 @@ await controller.load(MediaItem(
 ## Changelog
 
 ### v0.1.0 (Current)
-- ✅ Widevine support (Android)
-- ✅ FairPlay support (iOS)
-- ✅ EZDRM integration
-- ✅ Custom headers and authentication
-- ✅ License renewal
-- ✅ DRM session monitoring
-- ✅ Comprehensive error handling
+- Widevine support (Android)
+- FairPlay support (iOS)
+- EZDRM integration
+- Custom headers and authentication
+- License renewal
+- DRM session monitoring
+- Comprehensive error handling
 
 ### v0.2.0 (Planned - Q1 2026)
-- 📅 Offline DRM support
-- 📅 Download management
-- 📅 License persistence
-- 📅 Storage management
+- Offline DRM support
+- Download management
+- License persistence
+- Storage management
 
 ---
 

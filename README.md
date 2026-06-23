@@ -3,63 +3,60 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/zionmedianetwork/zmedia_player)
-[![Tests](https://img.shields.io/badge/tests-113%2F113-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-578%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
-## 📑 Table of Contents
+> **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
+> a machine-oriented map of the public API, snippets, conventions, and gotchas.
 
-- [Features](#features) - All implemented features by phase
-- [Installation](#installation) - Setup instructions
-- [Quick Start](#quick-start) - Basic usage examples
-- [📚 Documentation](#-documentation) - Complete guides and API reference
-  - [For Users](docs/api-reference/) - API reference and usage guides
-  - [For Developers](docs/implementation/) - Architecture and testing
-  - [For Stakeholders](docs/summary/) - Status and metrics
-- [API Reference](#api-reference) - Core classes and methods
-- [Platform Setup](#platform-setup) - Android and iOS configuration
-- [Example App](#example-app) - Demo application
-- [Project Status](#project-status) - Current state and metrics
-- [Support](#support) - Get help
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Documentation](#documentation)
+- [API Reference](#api-reference)
+- [Platform Setup](#platform-setup)
+- [Example App](#example-app)
+- [Project Status](#project-status)
+- [Support](#support)
 
 ## Features
 
-### Phase 1 (Complete) - Core Features ✅
-- ✅ **Basic Media Playback**: Play, pause, stop, seek operations with volume control
-- ✅ **Cross-Platform Support**: Android (ExoPlayer) and iOS (AVPlayer) implementations
-- ✅ **Flutter Widget Integration**: Easy-to-use widgets with customizable controls
-- ✅ **HTTP Headers Support**: Custom headers for authenticated media requests
-- ✅ **BoxFit Support**: Multiple video scaling options (contain, cover, fill, etc.)
-- ✅ **Playback Speed Control**: Variable speed from 0.25x to 4.0x
-- ✅ **Playlist Management**: Basic playlist support with sequential playback
-- ✅ **State Management**: Comprehensive state tracking and event streaming
-- ✅ **Error Handling**: Robust error handling and recovery mechanisms
+A comprehensive feature set across playback, streaming, subtitles, DRM, casting, PiP, and
+notifications. See the [complete feature list](docs/summary/features.md) for the full breakdown.
 
-### Phase 2 (Complete) - Streaming & Subtitles ✅
-- ✅ **HLS/DASH Support**: Adaptive streaming with automatic quality switching
-- ✅ **Live Streaming**: HLS/DASH live streams with DVR functionality
-- ✅ **Low-Latency Live**: Configurable latency targets for live content
-- ✅ **Subtitle Support**: Multiple formats (SRT, WebVTT, ASS/SSA, embedded)
-- ✅ **Quality Selection**: Manual and automatic quality/resolution selection
-- ✅ **Cache System**: Progressive download with offline playback support
-- ✅ **Bandwidth Monitoring**: Real-time bandwidth estimation
-- ✅ **Audio Tracks**: Multiple audio language support
-- ✅ **Streaming Service**: Smart quality selection algorithms
+**Core playback**
+- Play / pause / stop / seek with volume, mute, and variable speed (0.25x–4.0x)
+- Cross-platform: Android (ExoPlayer) and iOS (AVPlayer)
+- Custom HTTP headers for authenticated requests
+- `BoxFit` video scaling (contain, cover, fill, …), applied to the native layer at runtime
+- Playlist management with sequential/shuffle modes and `MediaRepeatMode` (none/single/all)
+- Broadcast-stream state model with typed exceptions and error recovery
 
-### Phase 3 (Complete) - Advanced Features ✅
-- ✅ **Notifications**: Media playback notifications with controls (Dart API ready)
-- ✅ **Picture in Picture**: PiP mode for video playback (Dart API ready)
-- ✅ **ListView Integration**: Auto play/pause in scrollable lists
-- ✅ **Screencast Support**: Chromecast and AirPlay integration (Dart API ready)
+**Streaming & subtitles**
+- HLS/DASH adaptive streaming with automatic quality switching
+- Live streaming with DVR (time-shifting), configurable low-latency targets, live-edge seeking
+- Subtitles: SRT, WebVTT, ASS/SSA, and embedded tracks with customizable styling
+- Manual and automatic quality/resolution selection; multiple audio tracks
+- Progressive download/caching; real-time bandwidth estimation
 
-### Phase 4 (Complete) - DRM & Polish ✅
-- ✅ **DRM Support**: Widevine (Android), FairPlay (iOS), EZDRM integration
-- ✅ **Token-Based DRM**: Custom authentication with JWT tokens
-- ✅ **Comprehensive Documentation**: DRM setup guide and best practices
-- ✅ **Example App**: Full DRM demo with test content
+**Advanced**
+- Lock-screen / Control Center notifications with media controls; artwork falls back to an
+  auto-generated video frame when no `artworkUrl` is provided
+- Picture-in-Picture (iOS AVPictureInPictureController, Android `enterPictureInPictureMode`)
+- Visibility-aware `ListView` playback (`MediaListPlayer`)
+- Casting: Chromecast and AirPlay
+- Configurable fullscreen display: `respectSafeArea` and `immersiveLandscape`
+
+**DRM & security**
+- Widevine (Android), FairPlay (iOS), EZDRM, and token-based DRM
+- Native certificate pinning for license/CDN endpoints
+- Keychain/Keystore-backed secure storage; HTTPS-for-DRM enforcement
 
 ## Installation
 
-Add this to your package's `pubspec.yaml` file:
+Add this to your package's `pubspec.yaml`:
 
 ```yaml
 dependencies:
@@ -67,6 +64,10 @@ dependencies:
     git:
       url: https://github.com/zionmedianetwork/zmedia_player.git
 ```
+
+**Requirements:** Flutter `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**),
+iOS **13.0+**, Android **minSdk 21**. On iOS the plugin builds with **Swift Package Manager
+or CocoaPods** (see [Platform Setup](#ios)).
 
 ## Quick Start
 
@@ -78,11 +79,11 @@ import 'package:zmedia_player/zmedia_player.dart';
 
 class SimplePlayerPage extends StatefulWidget {
   @override
-  _SimplePlayerPageState createState() => _SimplePlayerPageState();
+  State<SimplePlayerPage> createState() => _SimplePlayerPageState();
 }
 
 class _SimplePlayerPageState extends State<SimplePlayerPage> {
-  late MediaController _controller;
+  late final MediaController _controller;
 
   @override
   void initState() {
@@ -91,32 +92,22 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
     _loadMedia();
   }
 
-  void _loadMedia() async {
-    final mediaItem = MediaItem(
+  Future<void> _loadMedia() async {
+    await _controller.load(const MediaItem(
       id: '1',
       title: 'Sample Video',
       url: 'https://example.com/video.mp4',
       mediaType: MediaType.video,
-    );
-
-    await _controller.load(mediaItem);
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('Media Player')),
-      body: Column(
-        children: [
-          AspectRatio(
-            aspectRatio: 16/9,
-            child: MediaPlayerWidget(
-              controller: _controller,
-              showControls: true,
-            ),
-          ),
-          // Add your custom controls here
-        ],
+      appBar: AppBar(title: const Text('Media Player')),
+      body: AspectRatio(
+        aspectRatio: 16 / 9,
+        child: MediaPlayerWidget(controller: _controller, showControls: true),
       ),
     );
   }
@@ -129,547 +120,243 @@ class _SimplePlayerPageState extends State<SimplePlayerPage> {
 }
 ```
 
-### Advanced Usage with Playlist
+### Playlists
 
 ```dart
-// Create a playlist
 final playlist = Playlist(
   id: 'my_playlist',
   title: 'My Videos',
   items: [
-    MediaItem(
-      id: '1',
-      title: 'Video 1',
-      url: 'https://example.com/video1.mp4',
-      mediaType: MediaType.video,
-    ),
-    MediaItem(
-      id: '2',
-      title: 'Video 2',
-      url: 'https://example.com/video2.mp4',
-      mediaType: MediaType.video,
-    ),
+    const MediaItem(id: '1', title: 'Video 1', url: 'https://example.com/video1.mp4'),
+    const MediaItem(id: '2', title: 'Video 2', url: 'https://example.com/video2.mp4'),
   ],
-  mode: PlaybackMode.sequential,
-  repeatMode: MediaRepeatMode.all,
+  mode: PlaybackMode.sequential,     // or PlaybackMode.shuffle
+  repeatMode: MediaRepeatMode.all,   // none | single | all
 );
 
-// Set the playlist
 await _controller.setPlaylist(playlist);
+await _controller.skipToNext(); // skipToPrevious() / skipToIndex(i)
 ```
 
 ### Custom Configuration
 
 ```dart
 final controller = MediaController.create(
-  config: MediaConfig(
+  config: const MediaConfig(
     autoPlay: true,
     volume: 0.8,
-    speed: 1.0,
     boxFit: BoxFit.contain,
     showControls: true,
     allowBackgroundPlayback: true,
-    httpHeaders: {
-      'Authorization': 'Bearer your-token',
-      'User-Agent': 'YourApp/1.0',
-    },
+    respectSafeArea: true,        // inset video below status bar / notch
+    immersiveLandscape: false,    // set true to hide the status bar in landscape
+    httpHeaders: {'Authorization': 'Bearer your-token'},
   ),
 );
 ```
 
-### Phase 2 Features - Streaming & Quality Selection
-
-#### HLS/DASH Adaptive Streaming
+### HLS/DASH Adaptive Streaming
 
 ```dart
-// Configure HLS streaming
 final controller = MediaController.create(
-  config: MediaConfig(
-    hlsConfig: const HlsConfig(
+  config: const MediaConfig(
+    hlsConfig: HlsConfig(
       enableAdaptiveBitrate: true,
       bitrateStrategy: BitrateSelectionStrategy.auto,
       enableSegmentPrefetch: true,
-      maxPrefetchSegments: 3,
     ),
   ),
 );
 
-// Load HLS stream
-final hlsVideo = MediaItem(
-  id: 'hls_video',
-  title: 'HLS Stream',
-  url: 'https://example.com/playlist.m3u8',
-  mediaType: MediaType.video,
-);
-
-await controller.load(hlsVideo);
+await controller.load(const MediaItem(
+  id: 'hls', title: 'HLS Stream', url: 'https://example.com/playlist.m3u8',
+));
 ```
 
-#### Quality Track Selection
+### Quality, Subtitles & Audio Tracks
+
+> Tracks are reported by the native player **after `play()`** and buffering begins.
 
 ```dart
-// Get available quality tracks
-final qualityTracks = controller.player.qualityTracks;
+// Quality
+await controller.setQualityTrack(controller.qualityTracks.first);
+await controller.enableAutoQuality();
+controller.player.qualityTracksStream.listen((tracks) => print(tracks.length));
 
-// Manual quality selection
-await controller.player.setQualityTrack(qualityTracks[0]);
-
-// Enable automatic quality (adaptive bitrate)
-await controller.player.enableAutoQuality();
-
-// Listen to quality changes
-controller.player.qualityTracksStream.listen((tracks) {
-  print('Available qualities: ${tracks.length}');
-});
-```
-
-#### Subtitle Support
-
-```dart
-// Configure subtitle styling
-final controller = MediaController.create(
-  config: MediaConfig(
-    subtitleConfig: const SubtitleConfig(
-      fontSize: 18.0,
-      fontColor: 0xFFFFFFFF,
-      backgroundColor: 0x80000000,
-      showOutline: true,
-      verticalPosition: 0.9,
-    ),
-  ),
-);
-
-// Set subtitle track
-await controller.setSubtitleTrack(subtitleTracks[0]);
-
-// Disable subtitles
+// Subtitles
+await controller.setSubtitleTrack(controller.subtitleTracks.first); // pass null to disable
 await controller.disableSubtitles();
 
-// Cycle through available subtitles
-await controller.cycleSubtitleTrack();
+// Audio
+await controller.setAudioTrack(controller.audioTracks.first);
 ```
 
-#### Offline Download & Caching
+### Live Streaming (HLS/DASH with DVR)
 
 ```dart
-// Initialize cache service
-final cacheService = CacheService(
-  const CacheConfig(
-    maxCacheSize: 200 * 1024 * 1024, // 200MB
-    cacheExpiration: Duration(days: 7),
-    enabled: true,
-  ),
-);
-
-// Download with progress tracking
-cacheService.downloadProgressStream.listen((progress) {
-  print('Download: ${progress.formattedProgress}');
-});
-
-await cacheService.downloadAndCache(mediaItem);
-
-// Check if cached
-final isCached = await cacheService.isCached(mediaItem.id);
-```
-
-#### Bandwidth Monitoring
-
-```dart
-// Create streaming service
-final streamingService = StreamingService(
-  const StreamingConfig(
-    enableBandwidthEstimation: true,
-    enableAutoQualitySwitch: true,
-    qualitySwitchThreshold: 0.8,
-  ),
-);
-
-// Monitor bandwidth
-streamingService.bandwidthStream.listen((bandwidth) {
-  print('Bandwidth: ${streamingService.getFormattedBandwidth()}');
-});
-
-// Get recommended quality
-final recommended = streamingService.getRecommendedQuality();
-```
-
-#### Live Streaming (HLS/DASH)
-
-ZMedia Player supports live streaming with DVR functionality:
-
-```dart
-// HLS Live Streaming
-final hlsLiveController = MediaController.create(
-  config: MediaConfig(
+final live = MediaController.create(
+  config: const MediaConfig(
     hlsConfig: HlsConfig(
-      enableLiveStream: true,          // Enable live streaming
-      enableDvr: true,                 // Allow time-shifting/seeking
-      liveLatency: Duration(seconds: 3), // Low-latency target
+      enableLiveStream: true,
+      enableDvr: true,                        // time-shifting / seeking
+      liveLatency: Duration(seconds: 3),      // low-latency target
       enableAdaptiveBitrate: true,
-      enableSegmentPrefetch: true,
     ),
   ),
 );
-
-// DASH Live Streaming
-final dashLiveController = MediaController.create(
-  config: MediaConfig(
-    dashConfig: DashConfig(
-      enableLiveStream: true,          // Enable live streaming
-      enableDvr: true,                 // Allow time-shifting/seeking
-      liveLatency: Duration(seconds: 3), // Low-latency target
-      enableAdaptiveBitrate: true,
-      enableMpdCaching: true,
-    ),
-  ),
-);
-
-// Load and play live stream
-final liveStream = MediaItem(
-  id: 'live_event',
-  title: 'Live Event',
-  url: 'https://example.com/live/stream.m3u8', // HLS
-  // url: 'https://example.com/live/stream.mpd', // DASH
-);
-
-await hlsLiveController.load(liveStream);
-await hlsLiveController.play();
+await live.load(const MediaItem(id: 'live', title: 'Live Event', url: 'https://example.com/live.m3u8'));
+await live.play();
 ```
 
-**Live Streaming Features:**
-- ✅ Low-latency live playback
-- ✅ DVR functionality (time-shifting)
-- ✅ Live edge seeking
-- ✅ Adaptive bitrate for live
-- ✅ Configurable latency targets
-
-### Phase 3 Features - Advanced Capabilities
-
-#### Media Notifications
-
-Display playback controls in system notifications:
+### Media Notifications
 
 ```dart
-final notificationConfig = NotificationConfig(
+final notifications = NotificationService(const NotificationConfig(
   enabled: true,
   channelId: 'media_playback',
-  channelName: 'Media Playback',
   showPlayPause: true,
   showNext: true,
   showPrevious: true,
-  seekInterval: 10,
-);
+));
 
-final notificationService = NotificationService(notificationConfig);
-await notificationService.initialize(playerId);
+// Pass the player so lock-screen state stays in sync:
+await notifications.initialize(controller.playerId, mediaPlayer: controller.player);
 
-// Show notification
-await notificationService.show(
+await notifications.show(
   mediaItem: mediaItem,
-  state: playbackState,
-  playerId: playerId,
+  state: controller.state,
+  playerId: controller.playerId,
 );
 
-// Listen to notification actions
-notificationService.actionStream.listen((action) {
-  if (action == NotificationActions.play) {
-    controller.play();
-  } else if (action == NotificationActions.pause) {
-    controller.pause();
-  }
+notifications.actionStream.listen((action) {
+  // 'play' | 'pause' | 'next' | 'previous' | 'seekForward' | 'seekBackward'
 });
 ```
 
-#### Picture-in-Picture
+When `MediaItem.artworkUrl` is null, the notification artwork is generated from a video frame
+(iOS `AVAssetImageGenerator`, Android `MediaMetadataRetriever`).
 
-Enable PiP mode for floating video playback:
+### Picture-in-Picture
 
 ```dart
-// Check if PiP is available
-final isAvailable = await controller.player.checkPipAvailability();
-
-// Enter PiP mode
-if (isAvailable) {
-  await controller.player.enterPictureInPicture();
+if (await controller.checkPipAvailability()) {
+  await controller.enterPictureInPicture();
 }
-
-// Exit PiP mode
-await controller.player.exitPictureInPicture();
-
-// Listen to PiP status
-controller.player.pipStatusStream.listen((status) {
-  print('PiP Active: ${status.isActive}');
-});
+controller.pipStatusStream.listen((status) => print('PiP active: ${status.isActive}'));
 ```
 
-#### ListView Integration
-
-Auto-play/pause videos in scrollable lists:
+### Casting (Chromecast / AirPlay)
 
 ```dart
-ListView.builder(
-  itemCount: videos.length,
-  itemBuilder: (context, index) {
-    final controller = MediaController.create();
-    controller.load(videos[index]);
-
-    return MediaListPlayer(
-      controller: controller,
-      config: MediaListPlayerConfig(
-        visibilityThreshold: 0.6, // 60% visible to play
-        autoPlay: true,
-        autoPause: true,
-      ),
-      aspectRatio: 16 / 9,
-      showControls: true,
-    );
-  },
-)
+await controller.startCastDiscovery();
+controller.player.castDevicesStream.listen((devices) => print('Found ${devices.length}'));
+await controller.connectAndLoadMedia(selectedDevice);
 ```
 
-#### Screencast (Chromecast/AirPlay)
+### DRM-Protected Content
 
-Cast media to external devices:
-
-```dart
-final castService = CastService(
-  CastConfig(
-    enabled: true,
-    enableChromecast: true,
-    enableAirPlay: true,
-  ),
-);
-await castService.initialize(playerId);
-
-// Start discovery
-await castService.startDiscovery(playerId);
-
-// Listen to available devices
-castService.devicesStream.listen((devices) {
-  print('Found ${devices.length} devices');
-});
-
-// Connect to a device
-await castService.connect(
-  device: selectedDevice,
-  playerId: playerId,
-);
-
-// Load media on cast device
-await castService.loadMedia(
-  mediaItem: mediaItem,
-  playerId: playerId,
-);
-```
-
-### Phase 4 Features - DRM Content Protection
-
-#### DRM-Protected Content Playback
-
-ZMedia Player supports industry-standard DRM systems:
+DRM requires HTTPS for both the license and media URLs.
 
 ```dart
-// Android: Widevine DRM
-final androidDrmConfig = DrmConfig.widevine(
+// Android: Widevine
+final widevine = DrmConfig.widevine(
   licenseUrl: 'https://your-license-server.com/widevine',
-  headers: {
-    'Authorization': 'Bearer YOUR_TOKEN',
-  },
+  headers: {'Authorization': 'Bearer YOUR_TOKEN'},
 );
 
-// iOS: FairPlay DRM
-final iosDrmConfig = DrmConfig.fairplay(
+// iOS: FairPlay (certificateUrl is required)
+final fairplay = DrmConfig.fairplay(
   licenseUrl: 'https://your-license-server.com/fairplay',
   certificateUrl: 'https://your-server.com/certificate.cer',
 );
 
-// Create media item with DRM
-final protectedMedia = MediaItem(
-  id: 'protected_video',
+await controller.load(MediaItem(
+  id: 'protected',
   title: 'Protected Content',
-  url: 'https://your-cdn.com/video.mpd',  // DASH for Android
-  drmConfig: Platform.isAndroid ? androidDrmConfig : iosDrmConfig,
-);
+  url: 'https://your-cdn.com/video.mpd',
+  drmConfig: Platform.isAndroid ? widevine : fairplay,
+));
 
-await controller.load(protectedMedia);
-await controller.play();
+controller.player.drmSessionStream.listen((session) => print('DRM: ${session.state}'));
 ```
 
-#### EZDRM Integration
+For EZDRM, token-based DRM, offline licenses, and troubleshooting, see the
+[DRM Guide](docs/api-reference/drm.md).
 
-Simplified DRM setup with EZDRM service:
+## Documentation
 
-```dart
-// Android Widevine via EZDRM
-final ezdrmConfig = EzdrmConfig.widevine(
-  customerId: 'YOUR_EZDRM_CUSTOMER_ID',
-  apiKey: 'YOUR_EZDRM_API_KEY',
-  contentId: 'unique_content_id',
-);
+- **[Documentation Hub](docs/)** — all guides and references
+- **[AGENTS.md](AGENTS.md)** — machine-oriented API map for AI agents and tools
 
-final drmConfig = DrmConfig.ezdrm(
-  ezdrmConfig: ezdrmConfig,
-  allowOffline: true,
-);
+**API Reference** — [`docs/api-reference/`](docs/api-reference/)
+- [Getting Started](docs/api-reference/getting-started.md) — install, setup, first player
+- [Player API](docs/api-reference/player-api.md) — `MediaController` / `MediaPlayer` methods and getters
+- [Models](docs/api-reference/models.md) — `MediaItem`, `Playlist`, `MediaConfig`, DRM, and other types
+- [Events & Streams](docs/api-reference/events.md) — every stream and callback
+- [Advanced Features](docs/api-reference/advanced-features.md) — PiP, casting, notifications, caching
+- [Live Streaming](docs/api-reference/live-streaming.md) — HLS/DASH live with DVR
+- [DRM Configuration](docs/api-reference/drm.md) — Widevine, FairPlay, EZDRM
+- [AirPlay & Chromecast](docs/api-reference/airplay.md) — casting guide
 
-final mediaItem = MediaItem(
-  id: 'ezdrm_video',
-  title: 'EZDRM Protected',
-  url: 'https://your-content-url.com/video.mpd',
-  drmConfig: drmConfig,
-);
-```
+**Implementation** — [`docs/implementation/`](docs/implementation/)
+- [Architecture Overview](docs/implementation/README.md)
+- [Testing Guide](docs/implementation/testing.md)
+- [Security](docs/implementation/security.md)
 
-#### Token-Based DRM
-
-Custom authentication with JWT tokens:
-
-```dart
-final drmConfig = DrmConfig.token(
-  licenseUrl: 'https://license-server.com/license',
-  token: 'your_jwt_token',
-  keyId: 'content_key_id',
-  headers: {
-    'X-Session-ID': 'session_123',
-  },
-);
-```
-
-#### Monitor DRM Sessions
-
-Listen to DRM session state changes:
-
-```dart
-controller.player.drmSessionStream.listen((session) {
-  print('DRM State: ${session.state}');
-
-  switch (session.state) {
-    case DrmSessionState.acquiringLicense:
-      showLoadingIndicator();
-      break;
-    case DrmSessionState.licensed:
-      hideLoadingIndicator();
-      if (session.license != null) {
-        print('License expires: ${session.license!.expirationTime}');
-      }
-      break;
-    case DrmSessionState.error:
-      showError('DRM Error: ${session.errorMessage}');
-      break;
-    default:
-      break;
-  }
-});
-```
-
-**For detailed DRM setup and troubleshooting, see [DRM Guide](docs/api-reference/drm.md)**
-
-## 📚 Documentation
-
-**[📖 Complete Documentation Hub](docs/)** - All guides, references, and resources
-
-### 🎯 For Users - API Reference
-
-**[docs/api-reference/](docs/api-reference/)** - Everything you need to use ZMedia Player
-
-- **[Getting Started](docs/api-reference/README.md)** - Installation, setup, and first steps
-- **[Events & Callbacks](docs/api-reference/events.md)** - All available events and streams
-- **[Live Streaming](docs/api-reference/live-streaming.md)** - HLS/DASH live with DVR support
-- **[DRM Configuration](docs/api-reference/drm.md)** - Widevine, FairPlay, EZDRM setup
-- **[AirPlay & Chromecast](docs/api-reference/airplay.md)** - Casting implementation guide
-
-### 🔧 For Developers - Implementation Guide
-
-**[docs/implementation/](docs/implementation/)** - Architecture, testing, and contribution guides
-
-- **[Architecture Overview](docs/implementation/README.md)** - System design and patterns
-- **[Testing Guide](docs/implementation/testing.md)** - Running and writing tests
-- **[Security Audit](docs/implementation/security.md)** - Security best practices
-- **[Better Player Comparison](docs/implementation/better-player-comparison.md)** - Feature parity analysis
-
-### 📊 For Stakeholders - Project Summary
-
-**[docs/summary/](docs/summary/)** - Status, metrics, and achievements
-
-- **[Complete Feature List](docs/summary/features.md)** - All 172 implemented features
-- **[Development Phases](docs/summary/phases.md)** - Phases 1-4 detailed summaries
-- **[Test Coverage Report](docs/summary/test-coverage.md)** - Dart test suite overview
-- **[Production Readiness](docs/summary/production-readiness.md)** - Deployment checklist
-
-### 🚀 Quick Start
-
-- **[Quick Start Guide](docs/QUICK_START.md)** - Find what you need fast
-- **[Documentation Index](docs/README.md)** - Main documentation hub
+**Project Summary** — [`docs/summary/`](docs/summary/)
+- [Feature List](docs/summary/features.md) · [Test Coverage](docs/summary/test-coverage.md) · [Production Readiness](docs/summary/production-readiness.md)
 
 ## API Reference
 
 ### MediaController
 
-The main controller class for media playback operations.
+The reactive `ChangeNotifier` facade — use this for UI. Created with
+`MediaController.create({String? playerId, MediaConfig? config})`.
 
-#### Methods
+**Key methods:** `load`, `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `seekForward`,
+`seekBackward`, `setVolume`, `toggleMute`, `setSpeed`, `skipToNext`, `skipToPrevious`,
+`skipToIndex`, `setQualityTrack`, `enableAutoQuality`, `setSubtitleTrack`, `setAudioTrack`,
+`checkPipAvailability`, `enterPictureInPicture`, `startCastDiscovery`, `dispose`.
 
-- `load(MediaItem item)` - Load a single media item
-- `setPlaylist(Playlist playlist)` - Set and load a playlist
-- `play()` - Start playback
-- `pause()` - Pause playback
-- `stop()` - Stop playback
-- `seekTo(Duration position)` - Seek to specific position
-- `setVolume(double volume)` - Set volume (0.0 to 1.0)
-- `setSpeed(double speed)` - Set playback speed (0.25x to 4.0x)
-- `skipToNext()` - Skip to next item in playlist
-- `skipToPrevious()` - Skip to previous item in playlist
+**Key getters:** `state`, `position`, `duration`, `volume`, `speed`, `isPlaying`, `isPaused`,
+`isBuffering`, `hasError`, `bufferedProgress`, `hasNext`, `hasPrevious`, `qualityTracks`,
+`subtitleTracks`, `audioTracks`, `player` (the underlying `MediaPlayer`).
 
-#### Properties
-
-- `state` - Current playback state
-- `position` - Current playback position
-- `duration` - Total media duration
-- `volume` - Current volume level
-- `speed` - Current playback speed
-- `isPlaying` - Whether media is currently playing
-- `isPaused` - Whether media is paused
-- `hasNext` - Whether there's a next item in playlist
-- `hasPrevious` - Whether there's a previous item in playlist
+See the [Player API](docs/api-reference/player-api.md) for full signatures.
 
 ### MediaPlayerWidget
-
-The main widget for displaying video content.
 
 ```dart
 MediaPlayerWidget(
   controller: _controller,
-  showControls: true,                    // Show default controls
-  customControls: MyCustomControls(),    // Use custom controls
-  placeholder: MyPlaceholderWidget(),    // Custom placeholder
-  errorWidget: MyErrorWidget(),          // Custom error widget
-  boxFit: BoxFit.contain,               // Video scaling mode
-  allowFullscreen: true,                // Enable fullscreen
-  onTap: () => print('Player tapped'),  // Tap callback
+  showControls: true,
+  customControls: MyCustomControls(),   // optional; overrides built-in controls
+  placeholder: MyPlaceholderWidget(),
+  errorWidget: MyErrorWidget(),
+  boxFit: BoxFit.contain,
+  allowFullscreen: true,
+  onTap: () {},
 )
 ```
 
 ### MediaItem
 
-Represents a media item that can be played.
-
 ```dart
 MediaItem(
   id: 'unique_id',
   title: 'Media Title',
-  artist: 'Artist Name',
   url: 'https://example.com/media.mp4',
+  artist: 'Artist Name',
   artworkUrl: 'https://example.com/artwork.jpg',
-  duration: Duration(minutes: 5),
+  duration: const Duration(minutes: 5),
   mediaType: MediaType.video,
-  httpHeaders: {'Authorization': 'Bearer token'},
-  metadata: {'custom': 'data'},
+  httpHeaders: const {'Authorization': 'Bearer token'},
+  drmConfig: null,
+  isLive: false,
 )
 ```
 
 ### Playlist
-
-Represents a collection of media items.
 
 ```dart
 Playlist(
@@ -677,8 +364,8 @@ Playlist(
   title: 'Playlist Title',
   items: [mediaItem1, mediaItem2],
   currentIndex: 0,
-  mode: PlaybackMode.sequential,  // or PlaybackMode.shuffle
-  repeatMode: MediaRepeatMode.none,    // none, single, or all
+  mode: PlaybackMode.sequential,   // or PlaybackMode.shuffle
+  repeatMode: MediaRepeatMode.none, // none, single, or all
 )
 ```
 
@@ -686,16 +373,26 @@ Playlist(
 
 ### Android
 
-Add the following permissions to your `android/app/src/main/AndroidManifest.xml`:
+Add to `android/app/src/main/AndroidManifest.xml`:
 
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
+Picture-in-Picture requires API 26+. Chromecast requires Google Play Services. For
+notifications on Android 13+, request the `POST_NOTIFICATIONS` runtime permission.
+
 ### iOS
 
-Add the following to your `ios/Runner/Info.plist`:
+Minimum iOS **13.0**. The plugin supports **both Swift Package Manager and CocoaPods**.
+Flutter uses CocoaPods by default; to build via SPM, enable it once:
+
+```bash
+flutter config --enable-swift-package-manager
+```
+
+Add to `ios/Runner/Info.plist` for HTTP media (adjust to your security needs):
 
 ```xml
 <key>NSAppTransportSecurity</key>
@@ -705,7 +402,7 @@ Add the following to your `ios/Runner/Info.plist`:
 </dict>
 ```
 
-For background audio playback, add:
+For background audio:
 
 ```xml
 <key>UIBackgroundModes</key>
@@ -714,80 +411,81 @@ For background audio playback, add:
 </array>
 ```
 
+FairPlay DRM requires a physical device and a valid Apple FPS certificate.
+
 ## Example App
 
-Run the example app to see all features in action:
+A feature-per-page gallery app demonstrating the public API lives in [`example/`](example/):
 
 ```bash
 cd example
 flutter run
 ```
 
-The example app demonstrates:
-- Basic video playback
-- Playlist management
-- Custom controls
-- Settings configuration
-- Error handling
+It covers simple playback, playlists, adaptive streaming/quality, subtitles, DRM, PiP,
+casting, notifications, fullscreen, adaptive and fully custom controls, and error handling.
+See the [example README](example/README.md). It has been verified on a physical iPhone.
 
 ## Architecture
 
-The package follows clean architecture principles with clear separation of concerns:
+Clean architecture with a clear split between the Flutter/Dart layer and native platforms:
 
 ```
 lib/
-├── src/
-│   ├── core/           # Core player logic
-│   ├── models/         # Data models
-│   ├── widgets/        # Flutter widgets
-│   └── platform/       # Platform-specific code
-├── android/            # Android native implementation (ExoPlayer)
-├── ios/                # iOS native implementation (AVPlayer)
-└── example/            # Example application
+  zmedia_player.dart   # public API barrel
+  src/
+    core/              # MediaPlayer, MediaController, MediaConfig, exceptions
+    models/            # data models (MediaItem, Playlist, DrmConfig, ...)
+    services/          # Notification, Cast, Streaming, Cache, Subtitle, Buffering, ...
+    widgets/           # MediaPlayerWidget, controls, menus, components, overlays
+    security/          # CertificatePinning, SecureStorage, InputValidation
+android/               # Kotlin (ExoPlayer) — per-feature handlers
+ios/                   # Swift (AVPlayer) — per-feature handlers (SPM + CocoaPods)
+example/               # demo application
 ```
+
+Dart communicates with native over a single `MethodChannel` (`zmedia_player`), routed per
+`playerId` so multiple players can run concurrently. See [`CLAUDE.md`](CLAUDE.md) and
+[`docs/implementation/`](docs/implementation/) for the full architecture.
 
 ## Contributing
 
-We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
+`flutter analyze` clean and `flutter test` green (currently 578), and open a PR.
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+MIT License — see [LICENSE](LICENSE).
 
 ## Project Status
 
-🚧 **Active development — feature-complete, hardening in progress**
+**Active development — feature-complete, hardening in progress.**
 
-The full feature set (core playback, streaming/subtitles, notifications, PiP,
-casting, DRM) is implemented across the Dart and native layers. The codebase is
-currently undergoing audit-driven correctness, security, and robustness remediation
-(see [Codebase Audit & Remediation Roadmap](docs/implementation/codebase-audit.md)).
-
-- **Phase 1** ✅ - Core playback features
-- **Phase 2** ✅ - Streaming and subtitles
-- **Phase 3** ✅ - Advanced features (Notifications, PiP, Casting)
-- **Phase 4** ✅ - DRM and enterprise features
+The full feature set (core playback, streaming/subtitles, notifications, PiP, casting, DRM)
+is implemented across the Dart and native layers, and the audit-driven P0–P3 remediation has
+landed (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure
+storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
 
 ### Quality Metrics
 
-- **Tests:** 350+ automated tests — run `flutter test` for the current count
-- **Coverage:** strong in the Dart layer (state, models, MethodChannel routing,
-  subtitle parsing, retry/backoff). **Native (Kotlin/Swift) code has no automated
-  tests yet**, and several native features (DRM decryption, certificate pinning,
-  casting, bandwidth metering) require **on-device verification**.
+- **Tests:** 578 automated tests — run `flutter test` for the current count.
+- **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
+  parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
+  tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth
+  metering) warrant **on-device verification**.
+- **Verified on-device (physical iPhone):** playback, fullscreen, custom controls,
+  quality/subtitles, background audio, lock-screen notifications.
 - **Version:** 0.1.0
 
-> **Not yet validated as production-ready end-to-end.** The native platform layers
-> are implemented but unverified on real devices — verify DRM, casting, and security
-> features on Android and iOS before relying on them in production.
+> Not yet validated as production-ready end-to-end. Verify DRM, casting, and security features
+> on real Android and iOS devices before relying on them in production.
 
 ## Support
 
-For questions and support:
-- 📖 Check the [documentation](docs/)
-- 🐛 Report bugs on [GitHub Issues](https://github.com/zionmedianetwork/zmedia_player/issues)
-- 💬 Start a [Discussion](https://github.com/zionmedianetwork/zmedia_player/discussions)
+- Documentation: [docs/](docs/)
+- Bugs: [GitHub Issues](https://github.com/zionmedianetwork/zmedia_player/issues)
+- Questions: [GitHub Discussions](https://github.com/zionmedianetwork/zmedia_player/discussions)
 
 ---
 
-Made with ❤️ by the Zion Media Network team
+Made by the Zion Media Network team.

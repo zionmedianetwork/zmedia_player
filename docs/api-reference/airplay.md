@@ -5,14 +5,14 @@
 ### The Key Difference
 
 **Android (Chromecast):**
-- ✅ Apps can enumerate available devices
-- ✅ Apps can show a custom device list
-- ✅ Users select from app's UI
+- Apps can enumerate available devices
+- Apps can show a custom device list
+- Users select from app's UI
 
 **iOS (AirPlay):**
-- ❌ Apps **cannot** enumerate devices programmatically
-- ✅ System manages device discovery automatically
-- ✅ Users select via system AirPlay picker (AVRoutePickerView)
+- Apps **cannot** enumerate devices programmatically
+- System manages device discovery automatically
+- Users select via system AirPlay picker (AVRoutePickerView)
 
 ### Technical Limitation
 
@@ -23,10 +23,10 @@ Apple **intentionally restricts** programmatic access to AirPlay device lists fo
 
 ### What IS Possible
 
-✅ **Detect if AirPlay is available** (system has discovered devices)
-✅ **Detect when AirPlay connection changes** (connected/disconnected)
-✅ **Get info about currently connected device** (after user selects it)
-✅ **Show native AirPlay picker button** (`AVRoutePickerView`)
+**Detect if AirPlay is available** (system has discovered devices)
+**Detect when AirPlay connection changes** (connected/disconnected)
+**Get info about currently connected device** (after user selects it)
+**Show native AirPlay picker button** (`AVRoutePickerView`)
 
 ## Implementation in zmediaplayer
 
@@ -62,7 +62,7 @@ System Settings → General → AirDrop & Handoff → Enable "AirPlay Receiver"
 Both iPhone and Mac must be on the same network.
 
 #### Step 3: Use Native Player Controls
-The AirPlay button (📡) appears automatically in the native video player when:
+The AirPlay button () appears automatically in the native video player when:
 - AirPlay receivers are available on the network
 - Video is playing
 - Audio session is configured for AirPlay (done automatically by zmediaplayer)
@@ -184,13 +184,13 @@ class AVRoutePickerViewController: NSObject, FlutterPlatformView {
 
 ## Best Practices
 
-### ✅ DO:
+### DO:
 - Show informative messages about how AirPlay works on iOS
 - Guide users to the native AirPlay button in player controls
 - Detect and display currently connected AirPlay device
 - Handle AirPlay connection state changes
 
-### ❌ DON'T:
+### DON'T:
 - Try to enumerate devices programmatically
 - Promise device list functionality on iOS
 - Create custom device pickers (won't show actual devices)
@@ -218,12 +218,12 @@ class AVRoutePickerViewController: NSObject, FlutterPlatformView {
 
 iOS AirPlay is **fundamentally different** from Android Chromecast. The current implementation:
 
-✅ Properly configures audio session for AirPlay
-✅ Detects connection state changes
-✅ Provides clear user guidance
-✅ Works with native player controls
+Properly configures audio session for AirPlay
+Detects connection state changes
+Provides clear user guidance
+Works with native player controls
 
-❌ Cannot show device list (Apple limitation)
-❌ Cannot programmatically trigger picker (Apple limitation)
+Cannot show device list (Apple limitation)
+Cannot programmatically trigger picker (Apple limitation)
 
 This is **not a bug** - it's how Apple designed AirPlay to work for all iOS apps.

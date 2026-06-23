@@ -17,7 +17,14 @@ This document provides a comprehensive security audit checklist for DRM implemen
 - [ ] Certificate URLs use HTTPS (iOS FairPlay)
 - [ ] No fallback to HTTP for DRM endpoints
 - [ ] TLS 1.2+ is enforced
-- [ ] Certificate pinning implemented (recommended)
+- [x] Certificate pinning **enforced natively** — OkHttp `CertificatePinner` on
+  Android and `URLSession` server-trust evaluation on iOS. Pins are expressed as
+  `hex(SHA-256(SPKI))` (the SHA-256 of the certificate's Subject Public Key Info).
+
+> **Note:** HTTPS-for-DRM is enforced — input validation rejects non-HTTPS license
+> and media URLs before they reach native code. Certificate pinning is no longer
+> config-only/advisory: when pins are configured, native transport actually rejects
+> connections whose leaf/intermediate SPKI hash does not match.
 
 **Test:**
 ```dart
@@ -29,7 +36,7 @@ test('DRM endpoints use HTTPS', () {
 });
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -43,15 +50,20 @@ test('DRM endpoints use HTTPS', () {
 - [ ] Tokens are stored securely (KeyChain/KeyStore)
 - [ ] Tokens are not logged or printed
 
+> **Note:** `SecureStorage` (backed by the native `SecureStorageHandler`) uses the
+> iOS Keychain / Android Keystore (EncryptedSharedPreferences). It **no longer
+> silently falls back to plaintext** — if secure storage is unavailable the
+> operation fails loudly rather than persisting credentials in the clear.
+
 **Code Review Checklist:**
 ```dart
-// ❌ BAD: Hardcoded tokens
+// BAD: Hardcoded tokens
 final config = DrmConfig.token(
   licenseUrl: 'https://server.com/license',
   token: 'hardcoded-jwt-token-12345',  // SECURITY RISK
 );
 
-// ✅ GOOD: Dynamic token retrieval
+// GOOD: Dynamic token retrieval
 final token = await secureStorage.read(key: 'drm_token');
 final config = DrmConfig.token(
   licenseUrl: 'https://server.com/license',
@@ -59,7 +71,7 @@ final config = DrmConfig.token(
 );
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -86,7 +98,7 @@ test('License keyData is not exposed in logs', () {
 });
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -102,14 +114,14 @@ test('License keyData is not exposed in logs', () {
 
 **Code Review:**
 ```dart
-// ❌ BAD: Exposes sensitive data
+// BAD: Exposes sensitive data
 print('License acquisition failed: $licenseKeyData');
 
-// ✅ GOOD: Generic error message
+// GOOD: Generic error message
 debugPrint('DRM: License acquisition failed');
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -125,7 +137,7 @@ debugPrint('DRM: License acquisition failed');
 
 **AndroidManifest.xml Check:**
 ```xml
-<!-- ✅ GOOD: Not debuggable -->
+<!-- GOOD: Not debuggable -->
 <application
     android:debuggable="false"
     ...>
@@ -139,7 +151,7 @@ debugPrint('DRM: License acquisition failed');
 -keep class com.zionmedianetwork.zmedia_player.DrmHandler { *; }
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -153,7 +165,7 @@ debugPrint('DRM: License acquisition failed');
 
 **Info.plist Check:**
 ```xml
-<!-- ✅ Secure transport settings -->
+<!-- Secure transport settings -->
 <key>NSAppTransportSecurity</key>
 <dict>
     <key>NSAllowsArbitraryLoads</key>
@@ -165,7 +177,7 @@ debugPrint('DRM: License acquisition failed');
 </dict>
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -185,7 +197,7 @@ debugPrint('DRM: License acquisition failed');
 // iOS: isExternalPlaybackActive monitoring
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -210,7 +222,7 @@ for i in {1..100}; do
 done
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -226,19 +238,19 @@ done
 
 **Configuration Check:**
 ```dart
-// ❌ BAD: Hardcoded credentials
+// BAD: Hardcoded credentials
 final ezdrmConfig = EzdrmConfig.widevine(
   customerId: 'customer123',      // SECURITY RISK
   apiKey: 'hardcoded-api-key',    // SECURITY RISK
   contentId: 'content456',
 );
 
-// ✅ GOOD: Retrieved from secure storage
+// GOOD: Retrieved from secure storage
 final customerId = await secureStorage.read(key: 'ezdrm_customer_id');
 final apiKey = await secureStorage.read(key: 'ezdrm_api_key');
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -256,13 +268,13 @@ final apiKey = await secureStorage.read(key: 'ezdrm_api_key');
 ```dart
 // Don't send unnecessary user data in DRM requests
 final customData = {
-  'userId': anonymizedUserId,      // ✅ Hashed/anonymized
-  // 'email': user.email,          // ❌ Don't send PII
-  // 'location': user.location,    // ❌ Don't send location
+  'userId': anonymizedUserId,      // Hashed/anonymized
+  // 'email': user.email,          // Don't send PII
+  // 'location': user.location,    // Don't send location
 };
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -286,7 +298,7 @@ flutter pub audit  # Future Flutter feature
 flutter pub deps
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -307,7 +319,7 @@ flutter build apk --release --obfuscate --split-debug-info=build/debug-info
 flutter build ios --release --obfuscate --split-debug-info=build/debug-info
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -330,7 +342,7 @@ group('Security Tests', () {
 });
 ```
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -349,7 +361,7 @@ group('Security Tests', () {
 - Security contact: ________________
 - Last audit date: ________________
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -369,7 +381,7 @@ group('Security Tests', () {
 - [ ] Regional content restrictions
 - [ ] Export control compliance
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -390,7 +402,7 @@ group('Security Tests', () {
 - [ ] Privacy Policy
 - [ ] Terms of Service
 
-**Status:** ☐ Pass ☐ Fail ☐ N/A
+**Status:** Pass Fail N/A
 **Notes:**
 
 ---
@@ -404,7 +416,7 @@ group('Security Tests', () {
 **Failed:** _____
 **N/A:** _____
 
-**Overall Status:** ☐ Ready for Production ☐ Needs Improvement ☐ Not Ready
+**Overall Status:** Ready for Production Needs Improvement Not Ready
 
 ### Critical Issues
 
@@ -456,6 +468,6 @@ Priority recommendations for improving security:
 
 ---
 
-**Last Updated:** October 19, 2025
+**Last Updated:** June 22, 2026
 **Version:** 1.0
 **Next Audit Due:** _______________

@@ -1,5 +1,15 @@
 # Codebase Audit & Remediation Roadmap
 
+> **Update (June 22, 2026):** The P0–P3 remediation described in this document has
+> since been **IMPLEMENTED and merged**. DRM is now wired on both platforms,
+> multi-instance MethodChannel routing dispatches by `playerId`, certificate pinning
+> is enforced natively, `SecureStorage` no longer downgrades to plaintext,
+> `PlaybackState` carries `bufferedPosition`, control widgets cancel their stream
+> subscriptions, and HTTPS-for-DRM is enforced. **This document is now a historical
+> record of the original findings, not current state.** The remaining gate is native
+> on-device verification (no automated native tests yet). The findings below are
+> preserved unchanged.
+
 > **Status:** Principal-level engineering assessment of ZMedia Player v0.1.0.
 > **Method:** Four independent deep-dive reviews covering the four layers — core Dart, services/models/security, widgets/UI, and the native platform + test suite.
 > **Scope:** Findings and a prioritized remediation roadmap. This is an assessment document, not a changelog.

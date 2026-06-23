@@ -34,7 +34,7 @@ docs/
 
 ## Documentation Categories
 
-### 📚 API Reference (`docs/api-reference/`)
+### API Reference (`docs/api-reference/`)
 **Purpose:** Help users integrate ZMedia Player into their apps
 
 **Contents:**
@@ -49,7 +49,7 @@ docs/
 
 ---
 
-### 🔧 Implementation (`docs/implementation/`)
+### Implementation (`docs/implementation/`)
 **Purpose:** Help developers understand and contribute to the codebase
 
 **Contents:**
@@ -65,7 +65,7 @@ docs/
 
 ---
 
-### 📊 Summary (`docs/summary/`)
+### Summary (`docs/summary/`)
 **Purpose:** Provide high-level project status and achievements
 
 **Contents:**
@@ -174,27 +174,27 @@ The following files remain in the project root:
 
 ## Benefits of New Structure
 
-### 1. **Clear Organization** 🗂️
+### 1. **Clear Organization**
 - Three distinct categories: API, Implementation, Summary
 - Easy to find relevant documentation
 - Logical grouping by audience and purpose
 
-### 2. **Reduced Clutter** 🧹
+### 2. **Reduced Clutter**
 - Root directory is cleaner
 - All docs in one place
 - Old files archived for reference
 
-### 3. **Better Navigation** 🧭
+### 3. **Better Navigation**
 - Index pages for each section
 - Clear documentation hierarchy
 - Cross-references between sections
 
-### 4. **Consolidated Content** 📋
+### 4. **Consolidated Content**
 - Single source of truth for each topic
 - No duplicate information
 - Comprehensive coverage in fewer files
 
-### 5. **Easier Maintenance** 🔧
+### 5. **Easier Maintenance**
 - Centralized documentation
 - Consistent structure
 - Easier to update
@@ -261,6 +261,11 @@ If you have questions about the new documentation structure:
 2. Look in `docs-archive/` for original files
 3. File an issue on GitHub for clarifications
 4. Suggest improvements via pull request
+
+---
+
+> **Historical — last reorganization Oct 2025; subsequent doc refresh June 22, 2026.**
+> This summary is archival and describes the original reorganization only.
 
 ---
 

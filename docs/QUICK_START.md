@@ -4,7 +4,7 @@ Welcome! This guide will help you find the right documentation for your needs.
 
 ---
 
-## 🎯 I Want To...
+## I Want To...
 
 ### Use ZMedia Player in My App
 **→ Go to [`docs/api-reference/`](api-reference/)**
@@ -40,7 +40,7 @@ You'll find:
 **→ Go to [`docs/summary/`](summary/)**
 
 You'll find:
-- Complete feature list (179 features)
+- Complete feature list
 - All phase summaries
 - Test coverage report
 - Production readiness status
@@ -50,7 +50,7 @@ You'll find:
 
 ---
 
-## 📚 Quick Links
+## Quick Links
 
 ### Most Common Needs
 
@@ -58,7 +58,7 @@ You'll find:
 |--------------|---------|
 | Get started with basic playback | [API Reference](api-reference/) |
 | Set up DRM protection | [DRM Guide](api-reference/drm.md) |
-| Enable Picture-in-Picture | [Advanced Features](api-reference/README.md#advanced-features) |
+| Enable Picture-in-Picture | [API Reference](api-reference/README.md) |
 | Add Chromecast/AirPlay | [AirPlay Guide](api-reference/airplay.md) |
 | Understand the architecture | [Implementation](implementation/README.md) |
 | Run tests | [Testing Guide](implementation/testing.md) |
@@ -67,7 +67,7 @@ You'll find:
 
 ---
 
-## 🗂️ Documentation Structure
+## Documentation Structure
 
 ```
 docs/
@@ -88,7 +88,7 @@ docs/
 │
 └── summary/                     ← For overview
     ├── README.md               ← Summary hub
-    ├── features.md             ← All 179 features
+    ├── features.md             ← Complete feature list
     ├── phases.md               ← Development phases
     ├── test-coverage.md        ← Test results
     └── production-readiness.md ← Go-live checklist
@@ -96,7 +96,7 @@ docs/
 
 ---
 
-## 🚀 Quick Examples
+## Quick Examples
 
 ### Basic Playback
 ```dart
@@ -138,12 +138,12 @@ await controller.load(drmItem);
 
 ---
 
-## 📖 Documentation by Role
+## Documentation by Role
 
 ### For Flutter Developers
-1. [Getting Started](api-reference/)
-2. [Player API](api-reference/)
-3. [Advanced Features](api-reference/README.md#advanced-features)
+1. [Getting Started](api-reference/README.md)
+2. [Player API](api-reference/README.md)
+3. [Advanced Features](api-reference/README.md)
 4. Example app in `/example` folder
 
 ### For Contributors
@@ -153,14 +153,14 @@ await controller.load(drmItem);
 4. [Security Audit](implementation/security.md)
 
 ### For Project Managers
-1. [Feature List](summary/features.md) - All 179 features
+1. [Feature List](summary/features.md) - Complete feature list
 2. [Phase Summaries](summary/phases.md) - What was built
 3. [Production Readiness](summary/production-readiness.md) - Go-live status
 4. [Test Coverage](summary/test-coverage.md) - Quality metrics
 
 ---
 
-## 🔍 Can't Find What You Need?
+## Can't Find What You Need?
 
 1. Check the main index: [`docs/README.md`](README.md)
 2. Look in the archive: `docs-archive/` (old files)
@@ -169,23 +169,29 @@ await controller.load(drmItem);
 
 ---
 
-## 📝 Documentation Status
+## Documentation Status
 
-**Status:** ✅ Complete and up-to-date
-**Last Updated:** October 19, 2025
+**Status:** Complete and up-to-date
+**Last Updated:** June 22, 2026
 **Version:** 0.1.0
 
 ### Coverage
-- ✅ All features documented
-- ✅ All APIs explained
-- ✅ Examples provided
-- ✅ Architecture detailed
-- ✅ Testing guide complete
-- ✅ Security checklist done
+- All features documented
+- All APIs explained
+- Examples provided
+- Architecture detailed
+- Testing guide complete
+- Security checklist done
+
+### Platform Notes
+- **iOS:** minimum iOS 13.0; the plugin supports both Swift Package Manager
+  (`ios/zmedia_player/Package.swift`) and CocoaPods. Enable SPM once with
+  `flutter config --enable-swift-package-manager`.
+- **Android:** minimum SDK 21.
 
 ---
 
-## 🎓 Learning Paths
+## Learning Paths
 
 ### Path 1: Quick Start (30 minutes)
 1. Read [API Reference README](api-reference/README.md)
@@ -207,7 +213,7 @@ await controller.load(drmItem);
 
 ---
 
-## 💡 Tips
+## Tips
 
 - **Use the README files** - Each folder has a README with an index
 - **Follow the examples** - Code examples show best practices
@@ -216,7 +222,7 @@ await controller.load(drmItem);
 
 ---
 
-## 🔗 External Resources
+## External Resources
 
 - [Flutter Documentation](https://docs.flutter.dev/)
 - [ExoPlayer Docs](https://exoplayer.dev/)
@@ -225,7 +231,7 @@ await controller.load(drmItem);
 
 ---
 
-**Happy coding!** 🚀
+**Happy coding!**
 
 For questions or issues:
 - [GitHub Issues](https://github.com/zionmedianetwork/zmedia_player/issues)

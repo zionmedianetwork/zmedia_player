@@ -4,7 +4,7 @@ Technical documentation covering architecture, native implementations, and devel
 
 ---
 
-## 📐 Documentation Index
+## Documentation Index
 
 ### [Architecture Overview](architecture.md)
 System design, component interactions, and architectural decisions.
@@ -63,7 +63,7 @@ ZMediaPlayerPlugin
 
 ## Development Status
 
-### ✅ Completed Phases
+### Completed Phases
 
 1. **Phase 1 - Core Functionality**
    - Basic playback controls
@@ -106,6 +106,8 @@ ZMediaPlayerPlugin
 - **Google Cast SDK:** Chromecast support
 
 ### iOS
+- **Minimum iOS:** 13.0 (Swift concurrency; Flutter 3.44 dropped iOS 12)
+- **Packaging:** Swift Package Manager (`ios/zmedia_player/Package.swift`) and CocoaPods
 - **AVFoundation:** AVPlayer, AVKit
 - **Swift:** Modern iOS development
 - **AVAudioSession:** Background playback
@@ -153,7 +155,7 @@ ZMediaPlayerPlugin
 
 ## Testing Strategy
 
-### Unit Tests (Dart — 350+ and growing; run `flutter test` for the count)
+### Unit Tests (Dart — 578 passing; run `flutter test` for the live count)
 - Model validation
 - Serialization/deserialization
 - Configuration handling
@@ -207,4 +209,4 @@ flutter run
 ---
 
 **Version:** 0.1.0
-**Last Updated:** October 19, 2025
+**Last Updated:** June 22, 2026

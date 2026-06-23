@@ -26,23 +26,23 @@ ZMedia Player provides comprehensive support for live streaming via both HLS (HT
 
 ### What's Supported
 
-- ✅ **HLS Live Streams** - Apple's HTTP Live Streaming protocol
-- ✅ **DASH Live Streams** - MPEG-DASH for live content
-- ✅ **Low-Latency Mode** - Configurable latency targets (2-10 seconds)
-- ✅ **DVR/Time-Shifting** - Seek within live streams
-- ✅ **Live Edge Detection** - Automatic positioning at live edge
-- ✅ **Adaptive Bitrate** - Quality adaptation for live content
-- ✅ **Segment Prefetching** - Smooth playback with buffering
-- ✅ **Live Catchup** - Jump to live after seeking backwards
+- **HLS Live Streams** - Apple's HTTP Live Streaming protocol
+- **DASH Live Streams** - MPEG-DASH for live content
+- **Low-Latency Mode** - Configurable latency targets (2-10 seconds)
+- **DVR/Time-Shifting** - Seek within live streams
+- **Live Edge Detection** - Automatic positioning at live edge
+- **Adaptive Bitrate** - Quality adaptation for live content
+- **Segment Prefetching** - Smooth playback with buffering
+- **Live Catchup** - Jump to live after seeking backwards
 
 ### Platform Support
 
 | Feature | Android | iOS |
 |---------|---------|-----|
-| HLS Live | ✅ | ✅ |
-| DASH Live | ✅ | ✅ |
-| DVR | ✅ | ✅ |
-| Low-Latency | ✅ | ✅ |
+| HLS Live | Yes | Yes |
+| DASH Live | Yes | Yes |
+| DVR | Yes | Yes |
+| Low-Latency | Yes | Yes |
 
 ---
 
@@ -173,14 +173,14 @@ HlsConfig(
 ```
 
 **When to Enable:**
-- ✅ Sports events with replay needs
-- ✅ News broadcasts with scrubbing
-- ✅ Events where users may join late
+- Sports events with replay needs
+- News broadcasts with scrubbing
+- Events where users may join late
 
 **When to Disable:**
-- ❌ Ultra-low latency streams
-- ❌ Real-time betting/trading apps
-- ❌ Interactive live content
+- Ultra-low latency streams
+- Real-time betting/trading apps
+- Interactive live content
 
 #### `liveLatency` (Duration?)
 **Default:** `null` (auto)
@@ -505,10 +505,10 @@ HlsConfig(
 **Problem:** Cannot seek within live stream
 
 **Checklist:**
-- ✅ `enableLiveStream: true`
-- ✅ `enableDvr: true`
-- ✅ Stream manifest supports DVR (EXT-X-PLAYLIST-TYPE:EVENT for HLS)
-- ✅ Sufficient DVR window on server
+- `enableLiveStream: true`
+- `enableDvr: true`
+- Stream manifest supports DVR (EXT-X-PLAYLIST-TYPE:EVENT for HLS)
+- Sufficient DVR window on server
 
 ### Sync Issues
 
@@ -543,4 +543,4 @@ HlsConfig(
 ---
 
 **Version:** 0.1.0
-**Status:** 🚧 Active development — feature-complete, native layers need on-device verification
+**Status:** Active development — feature-complete, native layers need on-device verification
