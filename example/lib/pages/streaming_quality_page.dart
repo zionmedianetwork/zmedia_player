@@ -39,7 +39,13 @@ class _StreamingQualityPageState extends State<StreamingQualityPage> {
   @override
   void initState() {
     super.initState();
-    _controller = MediaController.create(playerId: 'streaming_quality');
+    _controller = MediaController.create(
+      playerId: 'streaming_quality',
+      // respectSafeArea keeps the video below the status bar / notch in
+      // landscape so content is never obscured. Set immersiveLandscape: true
+      // instead if you want the status bar hidden in landscape.
+      config: const MediaConfig(respectSafeArea: true),
+    );
     _initAndLoad();
   }
 

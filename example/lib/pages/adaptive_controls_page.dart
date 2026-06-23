@@ -29,7 +29,13 @@ class _AdaptiveControlsPageState extends State<AdaptiveControlsPage> {
   @override
   void initState() {
     super.initState();
-    _controller = MediaController.create(playerId: 'adaptive_controls');
+    _controller = MediaController.create(
+      playerId: 'adaptive_controls',
+      // respectSafeArea keeps the video below the status bar / notch in
+      // landscape so content is never obscured. Set immersiveLandscape: true
+      // instead if you want the status bar hidden in landscape.
+      config: const MediaConfig(respectSafeArea: true),
+    );
     _initAndLoad();
   }
 

@@ -209,5 +209,169 @@ void main() {
         expect(config1 == config2, false);
       });
     });
+
+    // -------------------------------------------------------------------------
+    // respectSafeArea
+    // -------------------------------------------------------------------------
+    group('respectSafeArea', () {
+      test('defaults to false', () {
+        const config = MediaConfig();
+        expect(config.respectSafeArea, false);
+      });
+
+      test('can be set to true', () {
+        const config = MediaConfig(respectSafeArea: true);
+        expect(config.respectSafeArea, true);
+      });
+
+      test('copyWith updates respectSafeArea', () {
+        const original = MediaConfig(respectSafeArea: false);
+        final updated = original.copyWith(respectSafeArea: true);
+        expect(updated.respectSafeArea, true);
+        // Other fields preserved
+        expect(updated.autoPlay, original.autoPlay);
+        expect(updated.volume, original.volume);
+      });
+
+      test('copyWith preserves respectSafeArea when not specified', () {
+        const original = MediaConfig(respectSafeArea: true);
+        final copy = original.copyWith();
+        expect(copy.respectSafeArea, true);
+      });
+
+      test(
+          'equality: same respectSafeArea value produces equal const instances',
+          () {
+        const a = MediaConfig(respectSafeArea: true);
+        const b = MediaConfig(respectSafeArea: true);
+        expect(a == b, true);
+      });
+
+      test('equality: differing respectSafeArea produces unequal instances',
+          () {
+        const a = MediaConfig(respectSafeArea: false);
+        const b = MediaConfig(respectSafeArea: true);
+        expect(a == b, false);
+      });
+
+      test('toString includes respectSafeArea', () {
+        const config = MediaConfig(respectSafeArea: true);
+        expect(config.toString(), contains('respectSafeArea: true'));
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // immersiveLandscape
+    // -------------------------------------------------------------------------
+    group('immersiveLandscape', () {
+      test('defaults to false', () {
+        const config = MediaConfig();
+        expect(config.immersiveLandscape, false);
+      });
+
+      test('can be set to true', () {
+        const config = MediaConfig(immersiveLandscape: true);
+        expect(config.immersiveLandscape, true);
+      });
+
+      test('copyWith updates immersiveLandscape', () {
+        const original = MediaConfig(immersiveLandscape: false);
+        final updated = original.copyWith(immersiveLandscape: true);
+        expect(updated.immersiveLandscape, true);
+        // Other fields preserved
+        expect(updated.autoPlay, original.autoPlay);
+        expect(updated.looping, original.looping);
+      });
+
+      test('copyWith preserves immersiveLandscape when not specified', () {
+        const original = MediaConfig(immersiveLandscape: true);
+        final copy = original.copyWith();
+        expect(copy.immersiveLandscape, true);
+      });
+
+      test(
+          'equality: same immersiveLandscape value produces equal const instances',
+          () {
+        const a = MediaConfig(immersiveLandscape: true);
+        const b = MediaConfig(immersiveLandscape: true);
+        expect(a == b, true);
+      });
+
+      test('equality: differing immersiveLandscape produces unequal instances',
+          () {
+        const a = MediaConfig(immersiveLandscape: false);
+        const b = MediaConfig(immersiveLandscape: true);
+        expect(a == b, false);
+      });
+
+      test('toString includes immersiveLandscape', () {
+        const config = MediaConfig(immersiveLandscape: true);
+        expect(config.toString(), contains('immersiveLandscape: true'));
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Both flags together
+    // -------------------------------------------------------------------------
+    group('respectSafeArea + immersiveLandscape together', () {
+      test('both flags can be set independently', () {
+        const config = MediaConfig(
+          respectSafeArea: true,
+          immersiveLandscape: true,
+        );
+        expect(config.respectSafeArea, true);
+        expect(config.immersiveLandscape, true);
+      });
+
+      test('copyWith can update both flags independently', () {
+        const original = MediaConfig();
+        final updated =
+            original.copyWith(respectSafeArea: true, immersiveLandscape: true);
+        expect(updated.respectSafeArea, true);
+        expect(updated.immersiveLandscape, true);
+      });
+
+      test('copyWith updates one flag without touching the other', () {
+        const original =
+            MediaConfig(respectSafeArea: true, immersiveLandscape: false);
+        final updated = original.copyWith(immersiveLandscape: true);
+        expect(updated.respectSafeArea, true); // unchanged
+        expect(updated.immersiveLandscape, true); // changed
+      });
+
+      test('equality: two const instances with same flag combo are equal', () {
+        const a = MediaConfig(respectSafeArea: true, immersiveLandscape: true);
+        const b = MediaConfig(respectSafeArea: true, immersiveLandscape: true);
+        expect(a == b, true);
+      });
+
+      test('equality: differing flag combo produces unequal instances', () {
+        const a = MediaConfig(respectSafeArea: true, immersiveLandscape: false);
+        const b = MediaConfig(respectSafeArea: true, immersiveLandscape: true);
+        expect(a == b, false);
+      });
+
+      test('toString includes both flags', () {
+        const config =
+            MediaConfig(respectSafeArea: true, immersiveLandscape: true);
+        final str = config.toString();
+        expect(str, contains('respectSafeArea: true'));
+        expect(str, contains('immersiveLandscape: true'));
+      });
+
+      test('existing fields (boxFit, volume) are unaffected when new flags set',
+          () {
+        const config = MediaConfig(
+          boxFit: BoxFit.cover,
+          volume: 0.5,
+          respectSafeArea: true,
+          immersiveLandscape: true,
+        );
+        expect(config.boxFit, BoxFit.cover);
+        expect(config.volume, 0.5);
+        expect(config.respectSafeArea, true);
+        expect(config.immersiveLandscape, true);
+      });
+    });
   });
 }

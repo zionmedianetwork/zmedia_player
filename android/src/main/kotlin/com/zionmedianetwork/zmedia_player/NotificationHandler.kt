@@ -59,6 +59,7 @@ class NotificationHandler(
     private var currentTitle: String? = null
     private var currentArtist: String? = null
     private var currentArtworkUrl: String? = null
+    private var currentMediaUrl: String? = null
     private var currentArtworkBitmap: Bitmap? = null
     private var isPlaying: Boolean = false
     private var position: Long = 0
@@ -144,10 +145,22 @@ class NotificationHandler(
     fun showNotification(mediaItem: Map<String, Any>, state: Map<String, Any>) {
         android.util.Log.d(TAG, "Showing notification")
 
+        val newArtworkUrl = mediaItem["artworkUrl"] as? String
+        val newMediaUrl = mediaItem["url"] as? String
+
+        // Detect when the media item changes so a stale bitmap is not reused
+        // for a different video.  A change is identified by either the artworkUrl
+        // or the media URL changing.
+        val mediaChanged = (newArtworkUrl != currentArtworkUrl) || (newMediaUrl != currentMediaUrl)
+        if (mediaChanged) {
+            currentArtworkBitmap = null
+        }
+
         // Update media info
         currentTitle = mediaItem["title"] as? String ?: "Unknown Title"
         currentArtist = mediaItem["artist"] as? String ?: "Unknown Artist"
-        currentArtworkUrl = mediaItem["artworkUrl"] as? String
+        currentArtworkUrl = newArtworkUrl
+        currentMediaUrl = newMediaUrl
 
         // Update playback state
         isPlaying = state["isPlaying"] as? Boolean ?: false
@@ -160,9 +173,14 @@ class NotificationHandler(
         // Update playback state
         updateMediaSessionPlaybackState()
 
-        // Load artwork if needed
+        // Artwork resolution:
+        // 1. If an artworkUrl is provided, load from URL (takes priority).
+        // 2. Otherwise, if the media URL is present, generate a thumbnail frame.
         if (currentArtworkUrl != null && currentArtworkBitmap == null) {
             loadArtwork(currentArtworkUrl!!)
+        } else if (currentArtworkUrl.isNullOrEmpty() && currentArtworkBitmap == null
+            && !currentMediaUrl.isNullOrEmpty()) {
+            generateThumbnail(currentMediaUrl!!)
         }
 
         // Build and show notification
@@ -366,6 +384,100 @@ class NotificationHandler(
                 }
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Failed to load artwork: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * Generates a thumbnail from the video at [url] and sets it as the
+     * notification artwork.  Called only when artworkUrl is absent.
+     * Works with remote URLs; MediaMetadataRetriever reads just the range
+     * it needs so it does not download the entire file.
+     *
+     * Black-frame avoidance strategy
+     * ─────────────────────────────
+     * Many videos (e.g. Big Buck Bunny) open with a black fade-in.
+     * The previous implementation called getFrameAtTime(1_000_000,
+     * OPTION_CLOSEST_SYNC), which snaps to the nearest sync (I-frame)
+     * at or before the requested time — often frame 0 (black).
+     *
+     * The fix has two parts:
+     *   1. Read the actual duration before choosing the target position so we
+     *      can pick a time well inside real content.
+     *   2. Use OPTION_CLOSEST instead of OPTION_CLOSEST_SYNC so the decoder
+     *      returns the actual frame at the target time rather than the nearest
+     *      (possibly distant, possibly black) sync keyframe.
+     *
+     * Target time calculation (same formula as iOS):
+     *   • durationMs ≥ 3 000 ms → clamp(durationMs × 0.1, 3 000 ms, 10 000 ms)
+     *   • 0 < durationMs < 3 000 ms  → durationMs / 2   (short clip, midpoint)
+     *   • fallback (unknown / 0)      → 5 000 ms fixed
+     */
+    private fun generateThumbnail(url: String) {
+        scope.launch(Dispatchers.IO) {
+            val retriever = android.media.MediaMetadataRetriever()
+            try {
+                // Pass an empty headers map so the overload that accepts headers
+                // is used — this avoids the deprecated single-argument setDataSource.
+                retriever.setDataSource(url, emptyMap<String, String>())
+
+                // Read the actual duration so we can pick a meaningful target time.
+                val durationMs = retriever
+                    .extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    ?.toLongOrNull() ?: 0L
+
+                // Compute target time in milliseconds, then convert to microseconds.
+                val targetMs: Long = when {
+                    durationMs >= 3_000L -> {
+                        // 10 % of duration, clamped to [3 s, 10 s]
+                        val tenPercent = (durationMs * 0.1).toLong()
+                        tenPercent.coerceIn(3_000L, 10_000L)
+                    }
+                    durationMs > 0L -> {
+                        // Very short clip — use the midpoint
+                        durationMs / 2
+                    }
+                    else -> {
+                        // Unknown duration — fixed 5-second offset
+                        5_000L
+                    }
+                }
+                val targetUs = targetMs * 1_000L
+
+                android.util.Log.d(TAG, "Thumbnail: duration=${durationMs}ms → target=${targetMs}ms")
+
+                // OPTION_CLOSEST returns the actual decoded frame nearest the
+                // requested time, not the nearest sync keyframe.  This means
+                // we get the frame at ~targetMs even if it is a P- or B-frame,
+                // rather than snapping back to the (potentially black) keyframe
+                // at t=0.
+                val bitmap = retriever.getFrameAtTime(
+                    targetUs,
+                    android.media.MediaMetadataRetriever.OPTION_CLOSEST
+                )
+
+                withContext(Dispatchers.Main) {
+                    // Only apply if the media item hasn't changed while we were
+                    // generating (guard by comparing the URL captured at trigger time).
+                    if (currentMediaUrl == url && currentArtworkBitmap == null) {
+                        currentArtworkBitmap = bitmap
+                        if (isShowing && bitmap != null) {
+                            updateMediaSessionMetadata()
+                            buildAndShowNotification()
+                            android.util.Log.d(TAG, "Video thumbnail generated and applied")
+                        }
+                    } else {
+                        android.util.Log.d(TAG, "Thumbnail discarded — media changed during generation")
+                    }
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Failed to generate thumbnail: ${e.message}")
+            } finally {
+                try {
+                    retriever.release()
+                } catch (ignore: Exception) {
+                    // release() itself can throw on some older API levels; ignore.
+                }
             }
         }
     }
