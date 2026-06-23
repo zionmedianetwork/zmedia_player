@@ -4,6 +4,10 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
+> **Current status:** **578 tests passing** in the Dart layer (run `flutter test` for
+> the live count). Native Kotlin/Swift code still has **no automated tests** — those
+> paths require on-device verification.
+
 ## Test Structure
 
 ```
@@ -213,11 +217,11 @@ flutter drive --target=test_driver/fairplay_test.dart
 
 | Component | Target | Current |
 |-----------|--------|---------|
-| Models | 90% | ✅ 95% |
-| Core Logic | 85% | 🔄 TBD |
-| Widgets | 75% | 🔄 TBD |
-| Services | 80% | 🔄 TBD |
-| Overall | 80% | 🔄 TBD |
+| Models | 90% | Yes 95% |
+| Core Logic | 85% | TBD |
+| Widgets | 75% | TBD |
+| Services | 80% | TBD |
+| Overall | 80% | TBD |
 
 ### Generate Coverage Report
 
@@ -343,10 +347,10 @@ jobs:
 Use descriptive test names:
 
 ```dart
-// ✅ Good
+// Good
 test('creates Widevine config with custom headers', () { ... });
 
-// ❌ Bad
+// Bad
 test('test1', () { ... });
 ```
 
@@ -355,7 +359,7 @@ test('test1', () { ... });
 Each test should be independent:
 
 ```dart
-// ✅ Good
+// Good
 setUp(() {
   // Fresh state for each test
   testConfig = DrmConfig.widevine(
@@ -363,7 +367,7 @@ setUp(() {
   );
 });
 
-// ❌ Bad
+// Bad
 final sharedConfig = DrmConfig.widevine(...);  // Shared mutable state
 ```
 
@@ -372,12 +376,12 @@ final sharedConfig = DrmConfig.widevine(...);  // Shared mutable state
 Leverage Flutter's matchers:
 
 ```dart
-// ✅ Good
+// Good
 expect(config.scheme, DrmScheme.widevine);
 expect(license.isExpired, isFalse);
 expect(items, hasLength(3));
 
-// ❌ Bad
+// Bad
 expect(config.scheme == DrmScheme.widevine, true);
 ```
 
@@ -430,9 +434,9 @@ flutter test test/performance/ --reporter expanded
 ### Interpret Results
 
 ```
-DrmConfig creation: 45.23μs avg ✅
-Serialization: 32.15μs avg ✅
-License check: 5.67μs avg ✅
+DrmConfig creation: 45.23μs avg
+Serialization: 32.15μs avg
+License check: 5.67μs avg
 ```
 
 ### Performance Regression Detection
@@ -501,5 +505,6 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** strong in the Dart layer; **no automated native tests yet**
-**Status:** 🚧 Active development — native layers need on-device verification
+**Test Coverage:** 578 tests passing in the Dart layer; **no automated native tests yet**
+**Status:** Active development — native layers need on-device verification
+**Last Updated:** June 22, 2026

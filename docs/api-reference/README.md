@@ -4,7 +4,7 @@ Complete API documentation for the ZMedia Player Flutter package.
 
 ---
 
-## 📚 Documentation Index
+## Documentation Index
 
 ### [Getting Started](getting-started.md)
 Quick start guide, installation, and basic usage examples.
@@ -49,14 +49,14 @@ MediaPlayerWidget  // UI widget with controls
 
 ### Key Features
 
-- ✅ **Basic Playback** - Play, pause, seek, volume, speed
-- ✅ **Playlists** - Sequential, shuffle, repeat modes
-- ✅ **Adaptive Streaming** - HLS/DASH with quality selection
-- ✅ **Subtitles** - SRT, WebVTT, ASS/SSA formats
-- ✅ **DRM** - Widevine, FairPlay, token-based
-- ✅ **Notifications** - Media controls in system tray
-- ✅ **Picture-in-Picture** - Floating video playback
-- ✅ **Casting** - AirPlay (iOS) and Chromecast (Android)
+- **Basic Playback** - Play, pause, seek, volume, speed
+- **Playlists** - Sequential, shuffle, repeat modes
+- **Adaptive Streaming** - HLS/DASH with quality selection
+- **Subtitles** - SRT, WebVTT, ASS/SSA formats
+- **DRM** - Widevine, FairPlay, token-based
+- **Notifications** - Media controls in system tray
+- **Picture-in-Picture** - Floating video playback
+- **Casting** - AirPlay (iOS) and Chromecast (Android)
 
 ---
 
@@ -64,25 +64,25 @@ MediaPlayerWidget  // UI widget with controls
 
 | Feature | Android | iOS |
 |---------|---------|-----|
-| Basic Playback | ✅ | ✅ |
-| HLS/DASH | ✅ | ✅ |
-| Subtitles | ✅ | ✅ |
-| DRM (Widevine) | ✅ | ❌ |
-| DRM (FairPlay) | ❌ | ✅ |
-| Notifications | ✅ | ✅ |
-| Picture-in-Picture | ✅ | ✅ |
-| Chromecast | ✅ | ❌ |
-| AirPlay | ❌ | ✅ |
+| Basic Playback | Yes | Yes |
+| HLS/DASH | Yes | Yes |
+| Subtitles | Yes | Yes |
+| DRM (Widevine) | Yes | No |
+| DRM (FairPlay) | No | Yes |
+| Notifications | Yes | Yes |
+| Picture-in-Picture | Yes | Yes |
+| Chromecast | Yes | No |
+| AirPlay | No | Yes |
 
 ---
 
 ## Need Help?
 
-- 📖 Browse the guides in this folder
-- 🐛 [Report issues](https://github.com/zionmedianetwork/zmedia_player/issues)
-- 💬 [Discussions](https://github.com/zionmedianetwork/zmedia_player/discussions)
+- Browse the guides in this folder
+- [Report issues](https://github.com/zionmedianetwork/zmedia_player/issues)
+- [Discussions](https://github.com/zionmedianetwork/zmedia_player/discussions)
 
 ---
 
 **Version:** 0.1.0
-**Last Updated:** October 19, 2025
+**Last Updated:** June 22, 2026

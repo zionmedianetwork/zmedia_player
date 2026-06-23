@@ -556,14 +556,14 @@ Rx.combineLatest2(
 
 | Stream | Frequency | When Emitted | Broadcast |
 |--------|-----------|--------------|-----------|
-| `stateStream` | On state change | State transitions, errors | ✅ Yes |
-| `positionStream` | ~500ms | During playback | ✅ Yes |
-| `durationStream` | On load | Media loaded, duration known | ✅ Yes |
-| `volumeStream` | On volume change | Volume adjustments | ✅ Yes |
-| `speedStream` | On speed change | Speed adjustments | ✅ Yes |
-| `subtitleTracksStream` | On track change | Tracks loaded/changed | ✅ Yes |
-| `qualityTracksStream` | On track change | Tracks loaded/changed | ✅ Yes |
-| `audioTracksStream` | On track change | Tracks loaded/changed | ✅ Yes |
+| `stateStream` | On state change | State transitions, errors | Yes Yes |
+| `positionStream` | ~500ms | During playback | Yes Yes |
+| `durationStream` | On load | Media loaded, duration known | Yes Yes |
+| `volumeStream` | On volume change | Volume adjustments | Yes Yes |
+| `speedStream` | On speed change | Speed adjustments | Yes Yes |
+| `subtitleTracksStream` | On track change | Tracks loaded/changed | Yes Yes |
+| `qualityTracksStream` | On track change | Tracks loaded/changed | Yes Yes |
+| `audioTracksStream` | On track change | Tracks loaded/changed | Yes Yes |
 
 **Note**: All streams are **broadcast streams**, meaning multiple listeners can subscribe simultaneously.
 
@@ -580,14 +580,14 @@ The position stream is automatically throttled to emit at most every 500ms to pr
 Only subscribe to the streams you need:
 
 ```dart
-// ❌ Don't listen to everything if you don't need it
+// Don't listen to everything if you don't need it
 player.stateStream.listen(...);
 player.positionStream.listen(...);
 player.durationStream.listen(...);
 player.volumeStream.listen(...);
 player.speedStream.listen(...);
 
-// ✅ Only listen to what you need
+// Only listen to what you need
 player.stateStream.listen(...);
 player.positionStream.listen(...);
 ```
@@ -610,7 +610,7 @@ void dispose() {
 
 ### Callback-Based (Legacy Pattern)
 ```dart
-// ❌ Old pattern (not used in ZMedia Player)
+// Old pattern (not used in ZMedia Player)
 player.onStateChanged = (state) {
   // Handle state
 };
@@ -621,7 +621,7 @@ player.onPositionChanged = (position) {
 
 ### Stream-Based (ZMedia Player)
 ```dart
-// ✅ Modern, reactive pattern
+// Modern, reactive pattern
 player.stateStream.listen((state) {
   // Handle state
 });
@@ -644,14 +644,14 @@ player.positionStream.listen((position) {
 
 The ZMedia Player provides **8 comprehensive event streams** covering:
 
-1. ✅ **Playback state** - Complete player state with rich metadata
-2. ✅ **Position tracking** - Real-time position updates
-3. ✅ **Duration info** - Media length information
-4. ✅ **Volume control** - Volume level changes
-5. ✅ **Speed control** - Playback speed changes
-6. ✅ **Subtitle management** - Available and selected subtitles
-7. ✅ **Quality selection** - Video quality/resolution options
-8. ✅ **Audio tracks** - Multi-language audio support
+1. **Playback state** - Complete player state with rich metadata
+2. **Position tracking** - Real-time position updates
+3. **Duration info** - Media length information
+4. **Volume control** - Volume level changes
+5. **Speed control** - Playback speed changes
+6. **Subtitle management** - Available and selected subtitles
+7. **Quality selection** - Video quality/resolution options
+8. **Audio tracks** - Multi-language audio support
 
 All streams follow Flutter's reactive programming model and are broadcast streams supporting multiple simultaneous listeners.
 
