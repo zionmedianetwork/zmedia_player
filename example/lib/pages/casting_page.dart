@@ -51,7 +51,11 @@ class _CastingPageState extends State<CastingPage> {
     super.initState();
     _controller = MediaController.create(
       playerId: 'casting_demo',
+      // respectSafeArea keeps the video below the status bar / notch in
+      // landscape so content is never obscured. Set immersiveLandscape: true
+      // instead if you want the status bar hidden in landscape.
       config: const MediaConfig(
+        respectSafeArea: true,
         castConfig: CastConfig(
           enabled: true,
           enableChromecast: true,

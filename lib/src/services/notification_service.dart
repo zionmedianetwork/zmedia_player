@@ -86,6 +86,7 @@ class NotificationService {
           'artist': mediaItem.artist,
           'album': mediaItem.album,
           'artworkUrl': mediaItem.artworkUrl,
+          'url': mediaItem.url,
           'duration': mediaItem.duration?.inMilliseconds,
         },
         'state': {

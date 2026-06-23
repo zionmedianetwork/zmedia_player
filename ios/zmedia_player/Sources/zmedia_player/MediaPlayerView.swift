@@ -3,120 +3,106 @@ import AVFoundation
 import AVKit
 import Flutter
 
+// MARK: - PlayerContainerView
+
+/// A UIView subclass whose sole job is to keep the AVPlayerLayer's frame
+/// exactly equal to its own bounds on every layout pass, including during
+/// device rotation and any animated size change.
+///
+/// Using layoutSubviews() is the canonical iOS pattern for this; KVO on
+/// "bounds" is unreliable during rotation because the bounds change arrives
+/// inside a Core Animation transaction that has already begun, so the
+/// synchronous KVO callback races the animation and the layer ends up with
+/// the old (portrait) frame.
+private final class PlayerContainerView: UIView {
+    let playerLayer = AVPlayerLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .black
+        // The playerLayer must NOT clip to the view's bounds — PiP requires
+        // the layer to be part of the full presentation tree.
+        playerLayer.masksToBounds = false
+        playerLayer.backgroundColor = UIColor.black.cgColor
+        playerLayer.needsDisplayOnBoundsChange = true
+        playerLayer.contentsGravity = .resizeAspect
+        playerLayer.videoGravity = .resizeAspect
+        playerLayer.isHidden = false
+        playerLayer.opacity = 1.0
+        layer.addSublayer(playerLayer)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("PlayerContainerView does not support Storyboard/NIB instantiation")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Disable implicit Core Animation resize animation so the layer
+        // snaps to the new size instantly — no shrink/stretch artefact.
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playerLayer.frame = bounds
+        CATransaction.commit()
+    }
+}
+
+// MARK: - MediaPlayerView
+
 class MediaPlayerView: NSObject, FlutterPlatformView {
-    let playerLayer: AVPlayerLayer
-    private let containerView: UIView
-    private var isObserving = false
+    // Public read-only accessor kept for PiP and AirPlay callers that do:
+    //     playerManager.getPlayerLayer(playerId:) → instance.currentPlayerLayer()
+    //                                             → activePlayerView?.playerLayer
+    var playerLayer: AVPlayerLayer { container.playerLayer }
+
+    private let container: PlayerContainerView
+
     private var player: AVPlayer? {
         didSet {
-            playerLayer.player = player
+            container.playerLayer.player = player
         }
     }
 
     init(player: AVPlayer?) {
-        containerView = UIView()
-        playerLayer = AVPlayerLayer(player: player)
+        container = PlayerContainerView()
         self.player = player
 
         super.init()
 
-        setupPlayerLayer()
+        // Wire the player into the layer now that super.init() has run.
+        container.playerLayer.player = player
+
+        print("MediaPlayerView.init(): Configured — player: \(player != nil)")
     }
 
-    private func setupPlayerLayer() {
-        // Ensure we're on the main thread for UI operations
-        assert(Thread.isMainThread, "setupPlayerLayer must be called on main thread")
-
-        containerView.backgroundColor = UIColor.black
-        containerView.layer.addSublayer(playerLayer)
-        playerLayer.videoGravity = .resizeAspect
-
-        // Ensure player layer is part of the presentation tree (required for PiP)
-        playerLayer.masksToBounds = false
-
-        // Configure layer for proper video rendering
-        playerLayer.isHidden = false
-        playerLayer.opacity = 1.0
-        playerLayer.backgroundColor = UIColor.black.cgColor
-        playerLayer.needsDisplayOnBoundsChange = true
-        playerLayer.contentsGravity = .resizeAspect
-
-        // Set initial frame
-        playerLayer.frame = containerView.bounds
-
-        // Force a redraw
-        playerLayer.setNeedsDisplay()
-        playerLayer.setNeedsLayout()
-
-        // Add KVO observer safely
-        addBoundsObserver()
-
-        print("MediaPlayerView.setupPlayerLayer(): Layer configured - frame: \(playerLayer.frame), player: \(player != nil)")
-    }
-
-    private func addBoundsObserver() {
-        guard !isObserving else { return }
-
-        do {
-            containerView.addObserver(
-                self,
-                forKeyPath: "bounds",
-                options: [.new],
-                context: nil
-            )
-            isObserving = true
-        } catch {
-            print("MediaPlayerView: Failed to add bounds observer: \(error)")
-        }
-    }
-
-    private func removeBoundsObserver() {
-        guard isObserving else { return }
-
-        do {
-            containerView.removeObserver(self, forKeyPath: "bounds")
-            isObserving = false
-        } catch {
-            print("MediaPlayerView: Failed to remove bounds observer: \(error)")
-        }
-    }
+    // MARK: - FlutterPlatformView
 
     func view() -> UIView {
-        // Ensure the player layer is properly sized and visible when view is returned
+        // layoutSubviews handles all sizing; no asyncAfter nudge needed.
+        // A single setNeedsLayout ensures we get a pass when the platform view
+        // host has finished measuring and placed the view.
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-
-            // Force update of player layer frame
-            self.updatePlayerLayerFrame()
-
-            // Ensure the layer is visible and force redraw
-            self.playerLayer.isHidden = false
-            self.playerLayer.opacity = 1.0
-            self.playerLayer.setNeedsDisplay()
-
-            // Force container view layout
-            self.containerView.setNeedsLayout()
-            self.containerView.layoutIfNeeded()
-
-            print("MediaPlayerView.view(): Frame set to \(self.playerLayer.frame), player: \(self.player != nil)")
+            self.container.setNeedsLayout()
+            self.container.layoutIfNeeded()
+            print("MediaPlayerView.view(): frame=\(self.container.frame), layerFrame=\(self.container.playerLayer.frame)")
         }
-        return containerView
+        return container
     }
 
-    func setVideoGravity(boxFit: String) {
-        // Ensure we're on the main thread for UI operations
-        let gravity = videoGravity(from: boxFit)
+    // MARK: - Video Gravity
 
-        print("MediaPlayerView: Setting video gravity to '\(boxFit)' -> \(gravity.rawValue)")
+    func setVideoGravity(boxFit: String) {
+        let gravity = videoGravity(from: boxFit)
+        print("MediaPlayerView: setVideoGravity '\(boxFit)' → \(gravity.rawValue)")
 
         if Thread.isMainThread {
-            playerLayer.videoGravity = gravity
-            // Force a redraw to ensure the change takes effect
-            playerLayer.setNeedsDisplay()
+            container.playerLayer.videoGravity = gravity
+            container.playerLayer.setNeedsDisplay()
         } else {
             DispatchQueue.main.async { [weak self] in
-                self?.playerLayer.videoGravity = gravity
-                self?.playerLayer.setNeedsDisplay()
+                self?.container.playerLayer.videoGravity = gravity
+                self?.container.playerLayer.setNeedsDisplay()
             }
         }
     }
@@ -127,117 +113,44 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
             return .resizeAspectFill
         case "fill":
             return .resize
-        case "fitwidth":
-            return .resizeAspect
-        case "fitheight":
-            return .resizeAspect
-        case "none":
-            return .resizeAspect
-        case "scaledown":
-            return .resizeAspect
-        case "contain", "":
+        case "contain", "fitwidth", "fitheight", "none", "scaledown", "":
             return .resizeAspect
         default:
-            print("MediaPlayerView: Unknown boxFit value '\(boxFit)', using default .resizeAspect")
+            print("MediaPlayerView: Unknown boxFit '\(boxFit)', defaulting to .resizeAspect")
             return .resizeAspect
         }
     }
 
-    override func observeValue(
-        forKeyPath keyPath: String?,
-        of object: Any?,
-        change: [NSKeyValueChangeKey : Any]?,
-        context: UnsafeMutableRawPointer?
-    ) {
-        guard keyPath == "bounds" else {
-            super.observeValue(forKeyPath: keyPath, of: object, change: change, context: context)
-            return
-        }
-
-        DispatchQueue.main.async { [weak self] in
-            self?.updatePlayerLayerFrame()
-        }
-    }
-
-    private func updatePlayerLayerFrame() {
-        guard Thread.isMainThread else {
-            DispatchQueue.main.async { [weak self] in
-                self?.updatePlayerLayerFrame()
-            }
-            return
-        }
-
-        // Use CATransaction to prevent implicit animations
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        playerLayer.frame = containerView.bounds
-        CATransaction.commit()
-    }
+    // MARK: - Player Update
 
     func updatePlayer(_ newPlayer: AVPlayer?) {
-        print("MediaPlayerView: updatePlayer called with player: \(newPlayer != nil), has current item: \(newPlayer?.currentItem != nil)")
+        print("MediaPlayerView: updatePlayer — player: \(newPlayer != nil), hasItem: \(newPlayer?.currentItem != nil)")
 
-        // Update on main thread to ensure UI consistency
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
 
-            // Store reference and update layer
             self.player = newPlayer
 
-            if let player = newPlayer {
-                print("MediaPlayerView: Setting player and configuring layer, frame: \(self.containerView.bounds)")
-
-                // Ensure the player layer is visible and properly configured
-                self.playerLayer.isHidden = false
-                self.playerLayer.opacity = 1.0
-                self.playerLayer.backgroundColor = UIColor.black.cgColor
-
-                // Update frame immediately
-                self.updatePlayerLayerFrame()
-
-                // Force a redraw of the layer
-                self.playerLayer.setNeedsDisplay()
-                self.playerLayer.setNeedsLayout()
-
-                // Force container view to layout
-                self.containerView.setNeedsLayout()
-                self.containerView.layoutIfNeeded()
-
-                // Multiple redraws with delays to ensure the video surface is ready
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-                    guard let self = self else { return }
-                    self.playerLayer.setNeedsDisplay()
-                    self.updatePlayerLayerFrame()
-                    print("MediaPlayerView: First redraw, frame: \(self.playerLayer.frame)")
-                }
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-                    guard let self = self else { return }
-                    self.playerLayer.setNeedsDisplay()
-                    self.updatePlayerLayerFrame()
-                    self.containerView.layoutIfNeeded()
-                    print("MediaPlayerView: Second redraw, frame: \(self.playerLayer.frame), player item: \(player.currentItem != nil)")
-                }
-
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-                    guard let self = self else { return }
-                    self.playerLayer.setNeedsDisplay()
-                    self.updatePlayerLayerFrame()
-                    print("MediaPlayerView: Final redraw, frame: \(self.playerLayer.frame)")
-                }
+            if newPlayer != nil {
+                self.container.playerLayer.isHidden = false
+                self.container.playerLayer.opacity = 1.0
+                // Trigger a layout pass so the layer frame is up to date.
+                self.container.setNeedsLayout()
+                self.container.layoutIfNeeded()
+                self.container.playerLayer.setNeedsDisplay()
+                print("MediaPlayerView: updatePlayer done — layerFrame=\(self.container.playerLayer.frame)")
             } else {
+                self.container.playerLayer.isHidden = true
                 print("MediaPlayerView: Player set to nil")
-                self.playerLayer.isHidden = true
             }
         }
     }
 
+    // MARK: - Cleanup
+
     deinit {
         print("MediaPlayerView: Deallocating")
-        removeBoundsObserver()
-
-        // Clean up player reference
-        playerLayer.player = nil
+        container.playerLayer.player = nil
         player = nil
     }
 }
@@ -258,7 +171,6 @@ class MediaPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
         arguments args: Any?
     ) -> FlutterPlatformView {
 
-        // Validate arguments
         guard let creationParams = args as? [String: Any] else {
             fatalError("MediaPlayerViewFactory: Invalid arguments - expected dictionary")
         }

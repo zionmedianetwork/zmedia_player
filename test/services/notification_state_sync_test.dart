@@ -68,6 +68,21 @@ const _dummyItem = MediaItem(
   url: 'https://example.com/track.mp4',
 );
 
+/// A media item with no artworkUrl — used to verify thumbnail-generation path.
+const _dummyItemNoArtwork = MediaItem(
+  id: 'notif-item-no-artwork',
+  title: 'Test Track No Artwork',
+  url: 'https://example.com/video.mp4',
+);
+
+/// A media item that carries both a url and an artworkUrl.
+const _dummyItemWithArtwork = MediaItem(
+  id: 'notif-item-with-artwork',
+  title: 'Test Track With Artwork',
+  url: 'https://example.com/video2.mp4',
+  artworkUrl: 'https://example.com/thumb.jpg',
+);
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -396,6 +411,142 @@ void main() {
         stateArg['state'],
         'playing',
         reason: 'state field must reflect the current player state name',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
+
+  // =========================================================================
+  group(
+      'NotificationService — showNotification includes url (Fix: thumbnail generation)',
+      () {
+    // -----------------------------------------------------------------------
+    test('show() sends url in the mediaItem map when artworkUrl is absent',
+        () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-url-no-artwork');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-url-no-artwork', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItemNoArtwork,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-url-no-artwork',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      expect(
+        mediaItemArg.containsKey('url'),
+        isTrue,
+        reason:
+            'showNotification mediaItem must include url so native can generate '
+            'a thumbnail when artworkUrl is absent',
+      );
+      expect(
+        mediaItemArg['url'],
+        _dummyItemNoArtwork.url,
+        reason: 'url in mediaItem must equal MediaItem.url',
+      );
+      expect(
+        mediaItemArg['artworkUrl'],
+        isNull,
+        reason: 'artworkUrl must be null for this test item',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test('show() sends both url and artworkUrl when artworkUrl is present',
+        () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-url-with-artwork');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-url-with-artwork', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItemWithArtwork,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-url-with-artwork',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      expect(
+        mediaItemArg['url'],
+        _dummyItemWithArtwork.url,
+        reason: 'url must be present even when artworkUrl is set',
+      );
+      expect(
+        mediaItemArg['artworkUrl'],
+        _dummyItemWithArtwork.artworkUrl,
+        reason: 'artworkUrl must also be passed so native can prefer it',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test(
+        'show() always includes the title, artworkUrl, and url keys in mediaItem',
+        () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-url-keys');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-url-keys', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-url-keys',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      for (final key in ['title', 'artworkUrl', 'url']) {
+        expect(
+          mediaItemArg.containsKey(key),
+          isTrue,
+          reason: 'mediaItem map must always contain the "$key" key',
+        );
+      }
+
+      expect(
+        mediaItemArg['url'],
+        _dummyItem.url,
+        reason: 'url value must match the MediaItem.url field',
       );
 
       service.dispose();

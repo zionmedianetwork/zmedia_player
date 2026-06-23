@@ -33,7 +33,13 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
   @override
   void initState() {
     super.initState();
-    _controller = MediaController.create(playerId: 'error_handling');
+    _controller = MediaController.create(
+      playerId: 'error_handling',
+      // respectSafeArea keeps the video below the status bar / notch in
+      // landscape so content is never obscured. Set immersiveLandscape: true
+      // instead if you want the status bar hidden in landscape.
+      config: const MediaConfig(respectSafeArea: true),
+    );
     _init();
   }
 

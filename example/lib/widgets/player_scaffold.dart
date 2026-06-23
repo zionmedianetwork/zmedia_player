@@ -23,6 +23,21 @@ class PlayerScaffold extends StatelessWidget {
     this.showAdaptiveControls = true,
   });
 
+  Widget _buildPlayer({required BoxFit boxFit}) {
+    return MediaPlayerWidget(
+      controller: controller,
+      showControls: showAdaptiveControls,
+      boxFit: boxFit,
+      customControls: showAdaptiveControls
+          ? AdaptiveMediaControls(
+              controller: controller,
+              title: title,
+            )
+          : null,
+      backgroundColor: Colors.black,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -33,31 +48,40 @@ class PlayerScaffold extends StatelessWidget {
         elevation: 0,
         actions: actions,
       ),
-      body: Column(
-        children: [
-          // Video player at 16:9 aspect ratio
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: MediaPlayerWidget(
-              controller: controller,
-              showControls: showAdaptiveControls,
-              customControls: showAdaptiveControls
-                  ? AdaptiveMediaControls(
-                      controller: controller,
-                      title: title,
-                    )
-                  : null,
-              backgroundColor: Colors.black,
-            ),
-          ),
-          // Scrollable area for additional controls / info
-          Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16),
-              child: body,
-            ),
-          ),
-        ],
+      body: OrientationBuilder(
+        builder: (context, orientation) {
+          // Landscape: the video fills the entire screen using BoxFit.cover so
+          // there are no black bars (the player scales to cover, cropping the
+          // edges as needed). Dropping the scrollable body here also avoids the
+          // vertical overflow an AspectRatio(16:9) would force at large widths.
+          // The adaptive controls overlay keeps playback controllable; rotate
+          // back to portrait for the per-page demo controls.
+          if (orientation == Orientation.landscape) {
+            return ColoredBox(
+              color: Colors.black,
+              child: SizedBox.expand(
+                child: _buildPlayer(boxFit: BoxFit.cover),
+              ),
+            );
+          }
+
+          // Portrait: 16:9 video at the top (letterboxed to preserve aspect) +
+          // scrollable body for controls/info.
+          return Column(
+            children: [
+              AspectRatio(
+                aspectRatio: 16 / 9,
+                child: _buildPlayer(boxFit: BoxFit.contain),
+              ),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: body,
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

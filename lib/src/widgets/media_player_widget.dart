@@ -96,6 +96,17 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// Current media item ID to track changes
   String? _currentMediaId;
 
+  // ---------------------------------------------------------------------------
+  // Immersive-landscape state
+  // ---------------------------------------------------------------------------
+
+  /// Last known orientation — used to detect orientation changes in build.
+  Orientation? _lastOrientation;
+
+  /// Whether we have applied immersive mode at least once.  Used in dispose()
+  /// so we only restore if we actually changed the system UI.
+  bool _appliedImmersive = false;
+
   /// Subtitle service for managing subtitle tracks
   late final SubtitleService _subtitleService;
 
@@ -164,6 +175,15 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       _refreshVideoSurface();
     }
 
+    // Propagate boxFit changes to native when the platform view already exists.
+    // creationParams are one-shot (sent only at view creation), so a prop change
+    // must be forwarded explicitly via the method channel.
+    final oldBoxFit = oldWidget.boxFit ?? oldWidget.controller.config.boxFit;
+    final newBoxFit = widget.boxFit ?? widget.controller.config.boxFit;
+    if (oldBoxFit != newBoxFit && _hasNativeView && !_isDisposed && mounted) {
+      widget.controller.player.setBoxFit(newBoxFit).ignore();
+    }
+
     // Force resize if we detect potential sizing issues
     if (oldWidget.key != widget.key) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -177,6 +197,12 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   @override
   void dispose() {
     _isDisposed = true;
+
+    // Restore system UI if we ever applied immersive mode, so a popped player
+    // never leaves the rest of the app stuck in immersive sticky.
+    if (_appliedImmersive) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge).ignore();
+    }
 
     // Clean up observers and listeners
     WidgetsBinding.instance.removeObserver(this);
@@ -261,8 +287,26 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     super.build(context); // Required for AutomaticKeepAliveClientMixin
 
     // Listen to orientation changes for responsive behavior
-    final orientation = MediaQuery.of(context).orientation;
+    final orientation = MediaQuery.orientationOf(context);
     final isLandscape = orientation == Orientation.landscape;
+
+    // immersiveLandscape: detect orientation changes and schedule a
+    // SystemChrome call via addPostFrameCallback (never during build).
+    if (widget.controller.config.immersiveLandscape &&
+        orientation != _lastOrientation) {
+      _lastOrientation = orientation;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_isDisposed || !mounted) return;
+        if (isLandscape) {
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky)
+              .ignore();
+          _appliedImmersive = true;
+        } else {
+          SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge).ignore();
+          // Keep _appliedImmersive = true so dispose() still restores if needed
+        }
+      });
+    }
 
     // In landscape mode, prioritize video display
     if (isLandscape && widget.expandToFill) {
@@ -407,12 +451,20 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
     // We have a native view - show it regardless of buffering state
     // The native player will handle its own buffering overlay if needed
-    return Container(
+    final nativeContent = Container(
       color: Colors.black, // Ensure background is black for video
       child: SizedBox.expand(
         child: _nativeView!,
       ),
     );
+
+    // respectSafeArea: wrap the native view subtree in a SafeArea so the
+    // video insets below the status bar / notch in fullscreen/landscape.
+    // When false (default), the video is edge-to-edge.
+    if (widget.controller.config.respectSafeArea) {
+      return SafeArea(child: nativeContent);
+    }
+    return nativeContent;
   }
 
   Future<void> _createNativeView() async {
@@ -511,6 +563,14 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
   void _onPlatformViewCreated(int viewId) {
     if (_isDisposed) return;
+
+    // Apply the effective boxFit immediately after the native view is created.
+    // creationParams are one-shot and ignored by the native factory, so we must
+    // push the value via the method channel on every new view creation.
+    if (mounted && !_isDisposed) {
+      final effectiveBoxFit = widget.boxFit ?? widget.controller.config.boxFit;
+      widget.controller.player.setBoxFit(effectiveBoxFit).ignore();
+    }
 
     // Platform view is ready - trigger a rebuild to ensure it's displayed
     if (mounted && !_isDisposed) {

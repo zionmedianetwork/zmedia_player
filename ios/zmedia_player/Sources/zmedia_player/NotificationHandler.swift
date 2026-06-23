@@ -22,6 +22,7 @@ class NotificationHandler: NSObject {
     private var currentArtist: String?
     private var currentAlbum: String?
     private var currentArtworkUrl: String?
+    private var currentMediaUrl: String?
     private var currentArtwork: MPMediaItemArtwork?
     private var isPlaying: Bool = false
     private var position: Double = 0.0
@@ -162,7 +163,6 @@ class NotificationHandler: NSObject {
             if let event = event as? MPChangePlaybackPositionCommandEvent {
                 let position = event.positionTime
                 print("NotificationHandler: Change playback position to: \(position)")
-                // Could send seek event to Flutter if needed
             }
             return .success
         }
@@ -175,11 +175,22 @@ class NotificationHandler: NSObject {
     func showNotification(mediaItem: [String: Any], state: [String: Any]) {
         print("NotificationHandler: Showing notification")
 
+        let newArtworkUrl = mediaItem["artworkUrl"] as? String
+        let newMediaUrl = mediaItem["url"] as? String
+
+        // Detect when the media item changes so stale artwork is not reused.
+        // A change is identified by either the artworkUrl or the media URL changing.
+        let mediaChanged = (newArtworkUrl != currentArtworkUrl) || (newMediaUrl != currentMediaUrl)
+        if mediaChanged {
+            currentArtwork = nil
+        }
+
         // Update media info
         currentTitle = mediaItem["title"] as? String ?? "Unknown Title"
         currentArtist = mediaItem["artist"] as? String
         currentAlbum = mediaItem["album"] as? String
-        currentArtworkUrl = mediaItem["artworkUrl"] as? String
+        currentArtworkUrl = newArtworkUrl
+        currentMediaUrl = newMediaUrl
 
         // Update playback state
         isPlaying = state["isPlaying"] as? Bool ?? false
@@ -198,9 +209,15 @@ class NotificationHandler: NSObject {
 
         playbackRate = isPlaying ? 1.0 : 0.0
 
-        // Load artwork if needed
+        // Artwork resolution:
+        // 1. If an artworkUrl is provided, load from URL (takes priority).
+        // 2. Otherwise, if the media URL is present, generate a thumbnail frame.
         if let artworkUrl = currentArtworkUrl, currentArtwork == nil {
             loadArtwork(from: artworkUrl)
+        } else if (currentArtworkUrl == nil || currentArtworkUrl?.isEmpty == true),
+                  currentArtwork == nil,
+                  let mediaUrl = currentMediaUrl, !mediaUrl.isEmpty {
+            generateThumbnail(from: mediaUrl)
         }
 
         // Update now playing info
@@ -300,12 +317,10 @@ class NotificationHandler: NSObject {
                 let data = try Data(contentsOf: url)
 
                 if let image = UIImage(data: data) {
-                    // Create MPMediaItemArtwork
-                    self.currentArtwork = MPMediaItemArtwork(boundsSize: image.size) { size in
+                    self.currentArtwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
                         return image
                     }
 
-                    // Update now playing info on main thread
                     DispatchQueue.main.async {
                         if self.isShowing {
                             self.updateNowPlayingInfo()
@@ -319,12 +334,132 @@ class NotificationHandler: NSObject {
         }
     }
 
+    // MARK: - Video Thumbnail Generation
+
+    /// Generates a thumbnail from the video at `urlString` and sets it as
+    /// the Now Playing artwork.  Called only when artworkUrl is absent.
+    /// Works with both local files and remote URLs; AVAssetImageGenerator
+    /// reads just the range it needs so it does not download the whole file.
+    ///
+    /// Black-frame avoidance strategy
+    /// ───────────────────────────────
+    /// Many videos (e.g. Big Buck Bunny) open with a black fade-in.
+    /// The previous implementation requested t=1s but left generator
+    /// tolerances at their default of `.positiveInfinity`, which lets
+    /// AVAssetImageGenerator snap all the way back to the nearest sync
+    /// keyframe — often frame 0 (black).
+    ///
+    /// The fix has two parts:
+    ///   1. Load the asset duration *before* generating so we can pick a
+    ///      meaningful target time that is well inside real content.
+    ///   2. Set tight tolerances (±1 s) so the generator stays close to
+    ///      the requested time instead of snapping back to keyframe 0.
+    ///
+    /// Target time calculation
+    /// ───────────────────────
+    ///   • duration ≥ 3 s  → clamp(duration × 0.1, min: 3 s, max: 10 s)
+    ///   • 0 < duration < 3 s → duration × 0.5   (short clip, meet in the middle)
+    ///   • fallback (unknown duration) → 5 s fixed offset
+    private func generateThumbnail(from urlString: String) {
+        guard let url = URL(string: urlString) else {
+            print("NotificationHandler: Invalid media URL for thumbnail generation")
+            return
+        }
+
+        print("NotificationHandler: Generating thumbnail from media: \(urlString)")
+
+        let asset = AVURLAsset(url: url)
+
+        // Load "duration" and "tracks" asynchronously so the asset is ready
+        // before we attempt image generation.  For local files this is nearly
+        // instant; for remote (HLS/MP4) assets it fetches only the headers /
+        // moov atom, not the whole file.
+        asset.loadValuesAsynchronously(forKeys: ["duration", "tracks"]) { [weak self] in
+            guard let self = self else { return }
+
+            // If the media changed while we were loading, discard this work.
+            guard self.currentMediaUrl == urlString else {
+                print("NotificationHandler: Thumbnail load cancelled — media changed while loading asset")
+                return
+            }
+
+            // Determine asset readiness; fall back to a fixed 5-second target
+            // if the duration key failed to load (e.g. live streams).
+            let durationStatus = asset.statusOfValue(forKey: "duration", error: nil)
+            let assetDurationSeconds: Double
+            if durationStatus == .loaded {
+                let d = CMTimeGetSeconds(asset.duration)
+                assetDurationSeconds = (d.isFinite && d > 0) ? d : 0
+            } else {
+                assetDurationSeconds = 0
+                print("NotificationHandler: Asset duration not loaded (status \(durationStatus.rawValue)); using fallback target time")
+            }
+
+            // Compute a target time well into real content.
+            let targetSeconds: Double
+            if assetDurationSeconds >= 3.0 {
+                // 10 % of duration, clamped to [3 s, 10 s]
+                targetSeconds = min(max(assetDurationSeconds * 0.1, 3.0), 10.0)
+            } else if assetDurationSeconds > 0 {
+                // Very short clip — use the midpoint
+                targetSeconds = assetDurationSeconds * 0.5
+            } else {
+                // Unknown duration (live, or load failed) — fixed 5 s
+                targetSeconds = 5.0
+            }
+
+            print("NotificationHandler: Asset duration \(assetDurationSeconds)s → thumbnail target \(targetSeconds)s")
+
+            let targetTime = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            // Limit the decode size to avoid excessive memory use.
+            generator.maximumSize = CGSize(width: 600, height: 600)
+
+            // Tight tolerances prevent the generator from snapping all the way
+            // back to keyframe 0 (which is black on many videos).  Allowing ±1 s
+            // gives it enough room to find the nearest keyframe around our target
+            // without reaching the very beginning of the file.
+            generator.requestedTimeToleranceBefore = CMTime(seconds: 1, preferredTimescale: 600)
+            generator.requestedTimeToleranceAfter  = CMTime(seconds: 1, preferredTimescale: 600)
+
+            do {
+                var actualTime = CMTime.zero
+                let cgImage = try generator.copyCGImage(at: targetTime, actualTime: &actualTime)
+                let image = UIImage(cgImage: cgImage)
+
+                let artwork = MPMediaItemArtwork(boundsSize: image.size) { _ in
+                    return image
+                }
+
+                print("NotificationHandler: Frame captured at actual time \(CMTimeGetSeconds(actualTime))s (requested \(targetSeconds)s)")
+
+                DispatchQueue.main.async {
+                    // Only apply if the media item hasn't changed while we were
+                    // generating (guard by comparing the url that was captured
+                    // when the generation was triggered).
+                    if self.currentMediaUrl == urlString, self.currentArtwork == nil {
+                        self.currentArtwork = artwork
+                        if self.isShowing {
+                            self.updateNowPlayingInfo()
+                            print("NotificationHandler: Video thumbnail generated and applied")
+                        }
+                    } else {
+                        print("NotificationHandler: Thumbnail discarded — media changed during generation")
+                    }
+                }
+            } catch {
+                print("NotificationHandler: Failed to generate thumbnail: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - Dismiss Notification
 
     func dismiss() {
         print("NotificationHandler: Dismissing notification")
 
-        // Clear now playing info
         nowPlayingInfoCenter.nowPlayingInfo = nil
 
         isShowing = false

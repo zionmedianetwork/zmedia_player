@@ -71,6 +71,16 @@ class MediaConfig {
   /// Whether to enable subtitles by default
   final bool enableSubtitles;
 
+  /// When true, the player insets its video below system intrusions
+  /// (status bar / notch) via a [SafeArea] wrap; when false the video is
+  /// edge-to-edge (current default behaviour).
+  final bool respectSafeArea;
+
+  /// When true, the player hides the system status bar (immersive sticky
+  /// mode) while the device is in landscape orientation, and restores it
+  /// when the device returns to portrait.  Has no effect in portrait.
+  final bool immersiveLandscape;
+
   const MediaConfig({
     this.autoPlay = false,
     this.looping = false,
@@ -93,6 +103,8 @@ class MediaConfig {
     this.hlsConfig,
     this.dashConfig,
     this.enableSubtitles = true,
+    this.respectSafeArea = false,
+    this.immersiveLandscape = false,
   });
 
   /// Creates a copy of this config with updated values
@@ -118,6 +130,8 @@ class MediaConfig {
     HlsConfig? hlsConfig,
     DashConfig? dashConfig,
     bool? enableSubtitles,
+    bool? respectSafeArea,
+    bool? immersiveLandscape,
   }) {
     return MediaConfig(
       autoPlay: autoPlay ?? this.autoPlay,
@@ -143,12 +157,16 @@ class MediaConfig {
       hlsConfig: hlsConfig ?? this.hlsConfig,
       dashConfig: dashConfig ?? this.dashConfig,
       enableSubtitles: enableSubtitles ?? this.enableSubtitles,
+      respectSafeArea: respectSafeArea ?? this.respectSafeArea,
+      immersiveLandscape: immersiveLandscape ?? this.immersiveLandscape,
     );
   }
 
   @override
   String toString() {
-    return 'MediaConfig(autoPlay: $autoPlay, boxFit: $boxFit, volume: $volume, speed: $speed)';
+    return 'MediaConfig(autoPlay: $autoPlay, boxFit: $boxFit, volume: $volume, '
+        'speed: $speed, respectSafeArea: $respectSafeArea, '
+        'immersiveLandscape: $immersiveLandscape)';
   }
 }
 
