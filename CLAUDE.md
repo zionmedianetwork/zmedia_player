@@ -615,7 +615,8 @@ The control overlay consists of three main zones:
 - Chromecast requires Google Play Services
 
 ### iOS
-- Min iOS: 12.0
+- Min iOS: 13.0 (Swift concurrency; Flutter 3.44+ dropped iOS 12)
+- Plugin supports both Swift Package Manager (`ios/zmedia_player/Package.swift`) and CocoaPods
 - Uses AVPlayer/AVFoundation
 - Requires NSAppTransportSecurity configuration for HTTP
 - Background audio requires UIBackgroundModes in Info.plist

@@ -102,3 +102,6 @@ docs-archive/
 
 # Screenshots (design reference images)
 docs/images/screenshots/
+
+# Swift Package Manager (Xcode user state)
+.swiftpm/

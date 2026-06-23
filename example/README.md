@@ -19,13 +19,20 @@ correctly, and surface loading/error states.
 
 ## Requirements
 
-- **Flutter** ≥ 3.19, **Dart** ≥ 3.0
-- **iOS** 12.0+ (a physical device is required for DRM/FairPlay, PiP, casting, and
+- **Flutter** ≥ 3.19, **Dart** ≥ 3.0 (developed/verified on Flutter 3.44.3 / Dart 3.12)
+- **iOS** 13.0+ (a physical device is required for DRM/FairPlay, PiP, casting, and
   to hear background audio over the silent switch)
 - **Android** API 21+ (API 26+ for Picture-in-Picture)
 
 The example app depends on the package via a local `path:` reference (`../`), so no
 publishing step is needed.
+
+### iOS dependency manager
+
+The `zmedia_player` plugin supports **both Swift Package Manager and CocoaPods** for
+iOS. By default Flutter uses CocoaPods; to build via SPM, enable it once with
+`flutter config --enable-swift-package-manager` (Flutter then integrates the plugin's
+`ios/zmedia_player/Package.swift`). Either path builds the same Swift sources.
 
 ## Running the app
 
