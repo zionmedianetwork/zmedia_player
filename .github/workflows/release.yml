@@ -58,7 +58,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Fetch all history for changelog generation
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Prefer a PAT (RELEASE_PAT) so the release-branch push and the
+          # version-bump PR are attributed to a real user and can trigger the
+          # required status checks. Falls back to GITHUB_TOKEN when unset.
+          token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
           ref: main  # Always work from main branch
 
       - name: Setup Flutter
@@ -390,11 +393,13 @@ jobs:
           🤖 This PR was automatically created by the release workflow.
           After checks pass and this PR is merged, the release will be available.
           EOF
-          )"
+          )" || echo "::warning::Could not create the version-bump PR automatically. The default GITHUB_TOKEN is blocked when the org/repo policy 'Allow GitHub Actions to create and approve pull requests' is disabled. Set a RELEASE_PAT secret (Contents + Pull requests: write) or open the PR manually: $RELEASE_BRANCH -> main. The tag and release will still be created from $RELEASE_BRANCH."
 
-          echo "✅ Created PR for version bump"
+          echo "Version-bump PR step finished (see log/warnings above)"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # A PAT bypasses the 'Actions cannot create or approve PRs' policy.
+          # Falls back to GITHUB_TOKEN (which works only if that policy is on).
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
 
       - name: Create and push tag
         if: ${{ github.event.inputs.dry_run != 'true' }}
