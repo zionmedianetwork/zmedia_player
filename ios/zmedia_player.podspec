@@ -9,9 +9,12 @@ A comprehensive Flutter media player package with advanced features for video an
   s.license          = { :file => '../LICENSE' }
   s.author           = { 'Zion Media Network' => 'contact@zionmedianetwork.com' }
   s.source           = { :path => '.' }
-  s.source_files = 'Classes/**/*'
+  # Sources are shared with the Swift Package Manager layout under
+  # zmedia_player/Sources/zmedia_player so both CocoaPods and SPM build the
+  # same files.
+  s.source_files = 'zmedia_player/Sources/zmedia_player/**/*.swift'
   s.dependency 'Flutter'
-  s.platform = :ios, '12.0'
+  s.platform = :ios, '13.0'
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'EXCLUDED_ARCHS[sdk=iphonesimulator*]' => 'i386' }
