@@ -352,15 +352,19 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Create release branch from main
-          git checkout -b "$RELEASE_BRANCH"
+          # Create release branch from main. Use -B so a leftover local branch
+          # (e.g. from a re-run in the same job) is reset rather than erroring.
+          git checkout -B "$RELEASE_BRANCH"
 
           # Commit version bump
           git add pubspec.yaml CHANGELOG.md README.md
           git commit -m "chore(release): bump version to $NEW_VERSION"
 
-          # Push release branch
-          git push origin "$RELEASE_BRANCH"
+          # Force-push the release branch. It is ephemeral (created per release,
+          # deleted after merge), so overwriting a stale branch left behind by a
+          # previous failed run is intended — this avoids the non-fast-forward
+          # error when release/vX.Y.Z already exists on the remote.
+          git push --force origin "$RELEASE_BRANCH"
 
           echo "✅ Created and pushed release branch: $RELEASE_BRANCH"
           echo "release_branch=$RELEASE_BRANCH" >> $GITHUB_OUTPUT
