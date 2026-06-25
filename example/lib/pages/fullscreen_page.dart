@@ -29,6 +29,14 @@ class _FullscreenPageState extends State<FullscreenPage> {
   bool _isLoading = false;
   String? _error;
 
+  /// True while the fullscreen route is active.
+  ///
+  /// When true the inline [MediaPlayerWidget] is replaced by a black
+  /// [ColoredBox] placeholder so that only ONE platform-view host competes for
+  /// the single native player surface at a time.  See the "single-native-view
+  /// contract" doc-comment on [FullscreenMediaPlayer] for the full rationale.
+  bool _isFullscreen = false;
+
   @override
   void initState() {
     super.initState();
@@ -60,56 +68,73 @@ class _FullscreenPageState extends State<FullscreenPage> {
   /// Navigate to fullscreen route using the built-in FullscreenMediaPlayer.
   ///
   /// Passes the same [_controller] so playback is uninterrupted.
+  ///
+  /// SINGLE-NATIVE-VIEW GATE: set [_isFullscreen] = true before pushing so
+  /// the inline [MediaPlayerWidget] is swapped for a [ColoredBox] placeholder
+  /// while the fullscreen route owns the native surface.  Restored in the
+  /// `finally` block so the inline player always reappears on pop, even if an
+  /// exception is thrown during navigation.
   Future<void> _enterFullscreen() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => FullscreenMediaPlayer(
-          controller: _controller,
+    if (mounted) setState(() => _isFullscreen = true);
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => FullscreenMediaPlayer(
+            controller: _controller,
+          ),
+          fullscreenDialog: true,
         ),
-        fullscreenDialog: true,
-      ),
-    );
-
-    // Restore portrait orientation when returning
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      );
+    } finally {
+      // Restore portrait orientation and system UI regardless of how the
+      // fullscreen route ended (back-swipe, close button, or error).
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      if (mounted) setState(() => _isFullscreen = false);
+    }
   }
 
   /// Navigate to fullscreen using MaterialFullscreenPlayer as customControls.
   ///
   /// This variant lets you customise the controls in fullscreen while still
   /// using [MediaPlayerWidget] as the video surface.
+  ///
+  /// Applies the same single-native-view gate as [_enterFullscreen].
   Future<void> _enterMaterialFullscreen() async {
-    // Reuse the built-in FullscreenMediaPlayer wrapper (handles orientation, the
-    // video surface, and an always-visible exit button) but supply
-    // MaterialFullscreenPlayer as the controls overlay.
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => FullscreenMediaPlayer(
-          controller: _controller,
-          customControls: MaterialFullscreenPlayer(
+    if (mounted) setState(() => _isFullscreen = true);
+    try {
+      // Reuse the built-in FullscreenMediaPlayer wrapper (handles orientation,
+      // the video surface, and an always-visible exit button) but supply
+      // MaterialFullscreenPlayer as the controls overlay.
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => FullscreenMediaPlayer(
             controller: _controller,
-            title: SampleMedia.bigBuckBunny.title,
-            showSettings: true,
-            showPip: true,
+            customControls: MaterialFullscreenPlayer(
+              controller: _controller,
+              title: SampleMedia.bigBuckBunny.title,
+              showSettings: true,
+              showPip: true,
+            ),
           ),
+          fullscreenDialog: true,
         ),
-        fullscreenDialog: true,
-      ),
-    );
-
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      );
+    } finally {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      if (mounted) setState(() => _isFullscreen = false);
+    }
   }
 
   @override
@@ -120,9 +145,20 @@ class _FullscreenPageState extends State<FullscreenPage> {
 
   @override
   Widget build(BuildContext context) {
+    // While the fullscreen route is active we replace the inline
+    // MediaPlayerWidget with a black placeholder so that only ONE platform-view
+    // host is alive for this controller at a time (single-native-view contract).
+    final Widget? inlinePlayerOverride = _isFullscreen
+        ? const AspectRatio(
+            aspectRatio: 16 / 9,
+            child: ColoredBox(color: Colors.black),
+          )
+        : null;
+
     return PlayerScaffold(
       title: 'Fullscreen',
       controller: _controller,
+      playerWidget: inlinePlayerOverride,
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : _error != null

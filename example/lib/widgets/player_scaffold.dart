@@ -7,12 +7,34 @@ import 'package:zmedia_player/zmedia_player.dart';
 /// - An AppBar with the page title
 /// - The [MediaPlayerWidget] at 16:9 aspect ratio at the top
 /// - A scrollable body for additional controls / info
+///
+/// ### Single-native-view pattern
+///
+/// When pushing a fullscreen route (e.g. [FullscreenMediaPlayer]) for the
+/// same [controller], pass a [playerWidget] override — typically a black
+/// [ColoredBox] placeholder — so the inline player surface is hidden while
+/// the fullscreen host owns the native view.  Restore [playerWidget] to
+/// `null` after the route pops to show the inline player again.
+///
+/// ```dart
+/// // Before push:
+/// setState(() => _fullscreenActive = true); // show placeholder
+/// await Navigator.push(...);
+/// // After pop:
+/// setState(() => _fullscreenActive = false); // restore player
+/// ```
 class PlayerScaffold extends StatelessWidget {
   final String title;
   final MediaController controller;
   final Widget body;
   final List<Widget>? actions;
   final bool showAdaptiveControls;
+
+  /// Optional widget that replaces the default [MediaPlayerWidget].
+  ///
+  /// Pass a [ColoredBox] with [Colors.black] here while a fullscreen route is
+  /// active for this player so only one native-view host is alive at a time.
+  final Widget? playerWidget;
 
   const PlayerScaffold({
     super.key,
@@ -21,9 +43,15 @@ class PlayerScaffold extends StatelessWidget {
     required this.body,
     this.actions,
     this.showAdaptiveControls = true,
+    this.playerWidget,
   });
 
   Widget _buildPlayer({required BoxFit boxFit}) {
+    // Use the caller-supplied playerWidget (e.g. a black placeholder) when one
+    // is provided, so the inline surface relinquishes the native view while a
+    // fullscreen route is active.
+    if (playerWidget != null) return playerWidget!;
+
     return MediaPlayerWidget(
       controller: controller,
       showControls: showAdaptiveControls,

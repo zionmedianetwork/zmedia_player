@@ -132,6 +132,14 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         case "castSetVolume":
             handleCastSetVolume(call, result: result)
 
+        // Surface reclaim — no-op on iOS because AVPlayer supports multiple
+        // AVPlayerLayers simultaneously.  Each new UiKitView host creates its
+        // own MediaPlayerView with a fresh AVPlayerLayer wired to the shared
+        // AVPlayer, so no explicit re-attachment is required.  Returning nil
+        // (success) prevents the Dart caller from receiving a PlatformException.
+        case "reclaimVideoSurface":
+            result(nil)
+
         default:
             result(FlutterMethodNotImplemented)
         }

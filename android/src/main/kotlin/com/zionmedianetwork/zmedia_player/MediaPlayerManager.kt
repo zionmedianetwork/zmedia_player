@@ -209,6 +209,11 @@ class MediaPlayerManager(
         return playerInstance.getPlayerView()
     }
 
+    fun reclaimVideoSurface(playerId: String) {
+        android.util.Log.d("MediaPlayerManager", "reclaimVideoSurface: re-attaching player for $playerId")
+        players[playerId]?.reclaimVideoSurface()
+    }
+
     fun getBufferHealth(playerId: String): Map<String, Any> {
         markActivity(playerId)
         return players[playerId]?.getBufferHealth() ?: mapOf(
@@ -448,6 +453,12 @@ class MediaPlayerInstance(
             playWhenReady = config?.get("autoPlay") as? Boolean ?: false
         }
 
+        // Ensure the active PlayerView has the (possibly freshly created) ExoPlayer
+        // attached.  If getPlayerView() was called by a new host (e.g. fullscreen)
+        // after the player was created, playerView.setPlayer(exoPlayer) may not yet
+        // have been called on the new view — re-attach here to be safe.
+        playerView?.setPlayer(exoPlayer)
+
         currentMediaSource = mediaSource
     }
 
@@ -680,19 +691,49 @@ class MediaPlayerInstance(
         applyConfig(newConfig)
     }
 
-    fun getPlayerView(): MediaPlayerView? {
-        if (playerView == null) {
-            android.util.Log.d("MediaPlayerInstance", "Creating new player view with player: ${exoPlayer != null}")
-            playerView = MediaPlayerView(context, exoPlayer)
-        } else {
-            // Ensure the existing player view has the current player
-            android.util.Log.d("MediaPlayerInstance", "Returning existing player view")
-        }
-        return playerView
+    fun getPlayerView(): MediaPlayerView {
+        // Always create a NEW MediaPlayerView for the requesting host so that
+        // each UiKitView / AndroidView host gets its own PlayerView wired to the
+        // same ExoPlayer instance.  ExoPlayer supports rendering to multiple
+        // PlayerViews as long as only one is active at a time: we detach the
+        // previous view's player reference before returning the new view so the
+        // old host shows a black frame instead of contending for the surface.
+        //
+        // This mirrors the iOS approach where MediaPlayerInstance.getPlayerView()
+        // creates a new AVPlayerLayer per host and AVPlayer supports multiple
+        // layers simultaneously.  ExoPlayer does NOT support multiple PlayerViews
+        // simultaneously, so we must detach the old one.
+        android.util.Log.d(
+            "MediaPlayerInstance",
+            "getPlayerView(): creating new PlayerView for host; detaching previous view (had player: ${playerView?.let { true } ?: false})"
+        )
+
+        // Detach the ExoPlayer from whichever PlayerView is the current live
+        // host.  This prevents the "single View parent" crash and ensures the
+        // old inline host goes black cleanly while the new host (e.g. fullscreen)
+        // renders immediately.
+        playerView?.setPlayer(null)
+
+        val newView = MediaPlayerView(context, exoPlayer)
+        playerView = newView
+        return newView
     }
 
     fun isPlaying(): Boolean {
         return exoPlayer?.isPlaying ?: false
+    }
+
+    /// Re-attach the ExoPlayer to the most recently created PlayerView.
+    /// Called when the Dart side sends `reclaimVideoSurface` (i.e. when a new
+    /// AndroidView host mounts and [_onPlatformViewCreated] fires).  The latest
+    /// [getPlayerView()] call already created a fresh [MediaPlayerView] and stored
+    /// it in [playerView]; here we just ensure ExoPlayer is re-wired to it.
+    fun reclaimVideoSurface() {
+        android.util.Log.d(
+            "MediaPlayerInstance",
+            "reclaimVideoSurface: (re)attaching exoPlayer to current playerView (view=${playerView != null}, player=${exoPlayer != null})"
+        )
+        playerView?.setPlayer(exoPlayer)
     }
 
     fun getBufferHealth(): Map<String, Any> {
@@ -705,6 +746,11 @@ class MediaPlayerInstance(
 
         // Stop bandwidth monitoring
         stopBandwidthMonitoring()
+
+        // Detach the player from the active view before releasing ExoPlayer so
+        // the PlayerView surface is cleanly released and does not hold a dangling
+        // player reference.
+        playerView?.setPlayer(null)
 
         exoPlayer?.apply {
             removeListener(playerListener)
