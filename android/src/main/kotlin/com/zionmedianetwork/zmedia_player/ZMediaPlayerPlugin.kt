@@ -89,6 +89,9 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             "exitPictureInPicture" -> handleExitPictureInPicture(call, result)
             "onPipModeChanged" -> handlePipModeChanged(call, result)
 
+            // Surface reclaim: re-attach ExoPlayer to the newest platform-view host
+            "reclaimVideoSurface" -> handleReclaimVideoSurface(call, result)
+
             // Phase 3: Cast methods
             "initializeCast" -> handleInitializeCast(call, result)
             "startCastDiscovery" -> handleStartCastDiscovery(call, result)
@@ -386,6 +389,28 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             }
         } catch (e: Exception) {
             result.error("DISPOSE_ERROR", e.message, null)
+        }
+    }
+
+    // Surface reclaim handler
+
+    private fun handleReclaimVideoSurface(call: MethodCall, result: Result) {
+        // Called by the Dart layer when a new AndroidView host mounts for a
+        // player that already has an ExoPlayer instance.  We ask the instance to
+        // re-attach the ExoPlayer to its current (newest) PlayerView so the new
+        // host renders video immediately.
+        try {
+            val playerId = call.argument<String>("playerId")
+            if (playerId != null) {
+                playerManager.reclaimVideoSurface(playerId)
+                android.util.Log.d("ZMediaPlayerPlugin", "reclaimVideoSurface: re-attached player for $playerId")
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID is required", null)
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ZMediaPlayerPlugin", "reclaimVideoSurface error: ${e.message}", e)
+            result.error("RECLAIM_ERROR", e.message, null)
         }
     }
 

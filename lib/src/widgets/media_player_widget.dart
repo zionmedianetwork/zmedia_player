@@ -564,6 +564,14 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   void _onPlatformViewCreated(int viewId) {
     if (_isDisposed) return;
 
+    // Tell the native side that this new host is now the active surface so
+    // it re-attaches the ExoPlayer / AVPlayer to the freshly created view.
+    // On Android this is essential: getPlayerView() already detached the old
+    // PlayerView's player, and reclaimVideoSurface() wires the exoPlayer back
+    // onto the new PlayerView.  On iOS this is a no-op (AVPlayer supports
+    // multiple AVPlayerLayers) but is harmless.
+    widget.controller.player.reclaimVideoSurface().ignore();
+
     // Apply the effective boxFit immediately after the native view is created.
     // creationParams are one-shot and ignored by the native factory, so we must
     // push the value via the method channel on every new view creation.
@@ -744,11 +752,19 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   void didChangeDependencies() {
     super.didChangeDependencies();
 
-    // Check if we're returning from fullscreen and refresh video surface
+    // Called when the widget's dependencies change — most relevantly when the
+    // navigator route changes (e.g. fullscreen route is pushed/popped).
+    // Re-assert native surface ownership so this (inline) host renders video
+    // once it is back on screen, and trigger a layout rebuild.
     if (!_isDisposed && mounted) {
-      // Small delay to ensure we're back from fullscreen
+      // Small delay to let the route transition complete so the platform view
+      // is fully attached to the window before we nudge the native layer.
       Future.delayed(const Duration(milliseconds: 50), () {
         if (mounted && !_isDisposed) {
+          // reclaimVideoSurface is a no-op if no platform view exists yet; it
+          // only matters when returning from fullscreen where the inline host
+          // was de-prioritised.
+          widget.controller.player.reclaimVideoSurface().ignore();
           refreshVideoSurface();
         }
       });
@@ -857,7 +873,55 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 }
 
-/// Fullscreen media player widget
+/// A fullscreen scaffold that wraps [MediaPlayerWidget], locks the device to
+/// landscape orientation, hides the system UI, and shows an always-visible
+/// close button.
+///
+/// ### Single-native-view contract
+///
+/// Every [MediaPlayerWidget] (and therefore every [FullscreenMediaPlayer])
+/// creates exactly ONE native platform-view host (`UiKitView` on iOS,
+/// `AndroidView` on Android) per mount.  Because the underlying native player
+/// (AVPlayer + AVPlayerLayer on iOS, ExoPlayer + PlayerView on Android) is a
+/// singleton per `playerId`, two concurrently-mounted hosts contend for the
+/// same surface and the inactive one shows a black frame.
+///
+/// **Symptoms**: pushing [FullscreenMediaPlayer] while an inline
+/// [MediaPlayerWidget] for the same controller is still mounted results in a
+/// black fullscreen (audio continues).
+///
+/// **Root-cause fix**: On iOS, [MediaPlayerInstance.getPlayerView()] now
+/// creates a separate `AVPlayerLayer` per host so both can render
+/// simultaneously via `AVPlayer`'s native multi-layer support.  On Android,
+/// [MediaPlayerInstance.getPlayerView()] detaches the ExoPlayer from the
+/// previous [PlayerView] before returning a fresh one for the new host, and
+/// the Dart `_onPlatformViewCreated` callback calls
+/// [MediaPlayer.reclaimVideoSurface] to re-attach the player.
+///
+/// **Recommended usage pattern** (belt-and-suspenders, required on Android):
+/// Before pushing [FullscreenMediaPlayer], hide the inline [MediaPlayerWidget]
+/// (replace it with a [ColoredBox(color: Colors.black)] placeholder so the
+/// Flutter platform-view host is unmounted).  Restore the inline player after
+/// the route pops.  This guarantees only one host is alive at a time and
+/// avoids any residual surface-contention on devices where the native fix
+/// cannot fully compensate.
+///
+/// ```dart
+/// Future<void> _enterFullscreen() async {
+///   if (mounted) setState(() => _isFullscreen = true); // swap to placeholder
+///   try {
+///     await Navigator.of(context).push(MaterialPageRoute(
+///       builder: (_) => FullscreenMediaPlayer(controller: _controller),
+///       fullscreenDialog: true,
+///     ));
+///   } finally {
+///     if (mounted) setState(() => _isFullscreen = false); // restore player
+///   }
+/// }
+/// ```
+///
+/// See also: `docs/fullscreen_pip_guide.md` for the full explanation and
+/// example code.
 class FullscreenMediaPlayer extends StatefulWidget {
   /// Media controller for the fullscreen player
   final MediaController controller;

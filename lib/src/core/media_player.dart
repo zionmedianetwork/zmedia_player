@@ -929,6 +929,40 @@ class MediaPlayer {
     }
   }
 
+  /// Notify the native layer that a new platform-view host has been attached
+  /// and that it should re-assert the player onto the newly-active surface.
+  ///
+  /// Call this from [MediaPlayerWidget]'s [_onPlatformViewCreated] callback
+  /// (and from [didChangeDependencies] when returning from a fullscreen route)
+  /// so the newest host always wins the surface.
+  ///
+  /// On iOS this is a no-op: AVPlayer supports multiple AVPlayerLayers
+  /// simultaneously, and each new [UiKitView] host already creates its own
+  /// [MediaPlayerView] with a fresh [AVPlayerLayer] wired to the shared
+  /// [AVPlayer].  The call succeeds silently even on iOS because the native
+  /// handler returns `nil` for unknown methods gracefully.
+  ///
+  /// On Android the native handler calls `playerView?.setPlayer(exoPlayer)`
+  /// so that the newest [PlayerView] (created by [getPlayerView()]) has the
+  /// ExoPlayer reference re-attached after it was detached from the old host.
+  Future<void> reclaimVideoSurface() async {
+    if (!isInitialized) return;
+    _markActivity();
+
+    try {
+      await _channel.invokeMethod('reclaimVideoSurface', {
+        'playerId': playerId,
+      });
+    } on PlatformException catch (e) {
+      // Non-fatal: log and continue.  A failure here means the native side
+      // did not handle the call (e.g. older plugin version).
+      debugPrint(
+          'MediaPlayer.reclaimVideoSurface: ignored PlatformException: ${e.message}');
+    } catch (e) {
+      debugPrint('MediaPlayer.reclaimVideoSurface: ignored error: $e');
+    }
+  }
+
   /// Set video BoxFit mode
   Future<void> setBoxFit(BoxFit boxFit) async {
     await _ensureInitialized();
