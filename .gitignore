@@ -34,6 +34,10 @@ migrate_working_dir/
 /build/
 **/build/*
 
+# Swift Package Manager build output
+**/.build/
+.swiftpm/
+
 # Symbolication related
 app.*.symbols
 

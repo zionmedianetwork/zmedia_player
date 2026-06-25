@@ -1076,6 +1076,7 @@ class MediaPlayer {
           'MediaPlayer: Checking PiP availability for player: $playerId');
       final result = await _channel.invokeMethod<bool>('checkPipAvailability', {
         'playerId': playerId,
+        if (_config.pipConfig != null) 'config': _config.pipConfig!.toMap(),
       });
 
       debugPrint('MediaPlayer: PiP availability check result: $result');
@@ -1104,6 +1105,7 @@ class MediaPlayer {
       final result =
           await _channel.invokeMethod<bool>('enterPictureInPicture', {
         'playerId': playerId,
+        if (_config.pipConfig != null) 'config': _config.pipConfig!.toMap(),
       });
 
       return result ?? false;

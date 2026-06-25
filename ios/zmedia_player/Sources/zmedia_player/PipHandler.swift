@@ -24,10 +24,16 @@ class PipHandler: NSObject {
 
     // MARK: - Initialization
 
-    func initialize(player: AVPlayer?, playerLayer: AVPlayerLayer?) {
+    func initialize(player: AVPlayer?, playerLayer: AVPlayerLayer?, config: [String: Any]? = nil) {
         print("PipHandler: Initializing for player: \(playerId)")
         print("PipHandler: Received player: \(player != nil)")
         print("PipHandler: Received playerLayer: \(playerLayer != nil)")
+
+        // Persist config when provided so autoEnterOnBackground is available on
+        // every code path, including the unchanged-layer branch below.
+        if let config = config {
+            self.config = config
+        }
 
         // Log device info on first init
         if self.player == nil {
@@ -81,6 +87,15 @@ class PipHandler: NSObject {
                 setupPipController(with: playerLayer)
             } else {
                 print("PipHandler: PiP controller already exists and layer unchanged")
+
+                // Re-apply autoEnterOnBackground in case config was updated without
+                // a layer change (setupPipController is skipped on this branch).
+                if #available(iOS 14.2, *), let controller = pipController {
+                    let autoEnter = (self.config?["autoEnterOnBackground"] as? Bool) ?? false
+                    controller.canStartPictureInPictureAutomaticallyFromInline = autoEnter
+                    print("PipHandler: Re-applied autoEnterOnBackground=\(autoEnter) on unchanged-layer path")
+                }
+
                 // Still notify available status
                 notifyPipStatusChanged(
                     state: "available",

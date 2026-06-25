@@ -2,7 +2,7 @@
 
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](https://github.com/zionmedianetwork/zmedia_player)
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/zionmedianetwork/zmedia_player)
 [![Tests](https://img.shields.io/badge/tests-578%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
@@ -382,6 +382,23 @@ Add to `android/app/src/main/AndroidManifest.xml`:
 
 Picture-in-Picture requires API 26+. Chromecast requires Google Play Services. For
 notifications on Android 13+, request the `POST_NOTIFICATIONS` runtime permission.
+
+**Background audio.** Setting `allowBackgroundPlayback: true` makes the plugin hold an
+ExoPlayer wake lock (`WAKE_MODE_NETWORK`) so the decoder keeps running while the screen
+is off. Android will still reclaim the process unless your app keeps a **foreground
+service with a persistent media notification** alive for the duration of playback — the
+plugin cannot do this on the host app's behalf. To enable it:
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+```
+
+Then run a `MediaSessionService` (or an equivalent `Service` started with
+`startForeground()` and a media-style notification) from your app while audio is playing.
+Without that service, `allowBackgroundPlayback` only prevents the decoder from idling; it
+does not by itself guarantee the OS lets playback continue in the background.
 
 ### iOS
 

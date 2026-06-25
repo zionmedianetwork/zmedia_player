@@ -553,6 +553,8 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             print("ZMediaPlayerPlugin: Using existing PiP handler for \(playerId)")
         }
 
+        let pipConfig = args["config"] as? [String: Any]
+
         // Always re-initialize with current player and player layer (in case media changed)
         do {
             if let player = try playerManager.getPlayer(playerId: playerId) {
@@ -560,7 +562,7 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
 
                 if let playerLayer = try playerManager.getPlayerLayer(playerId: playerId) {
                     print("ZMediaPlayerPlugin: Got player layer: \(playerLayer)")
-                    handler?.initialize(player: player, playerLayer: playerLayer)
+                    handler?.initialize(player: player, playerLayer: playerLayer, config: pipConfig)
                 } else {
                     print("ZMediaPlayerPlugin: WARNING - Could not get player layer")
                 }
@@ -592,10 +594,11 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             pipHandlers[playerId] = handler
         }
 
-        // Always re-initialize with current player and player layer before entering PiP
+        // Always re-initialize with current player and player layer before entering PiP,
+        // forwarding the PiP config so autoEnterOnBackground is applied on every path.
         if let player = try? playerManager.getPlayer(playerId: playerId),
            let playerLayer = try? playerManager.getPlayerLayer(playerId: playerId) {
-            handler?.initialize(player: player, playerLayer: playerLayer)
+            handler?.initialize(player: player, playerLayer: playerLayer, config: config)
         }
 
         let success = handler?.enterPip(config: config) ?? false

@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-06-25
+
+### Fixed
+- `PipConfig.autoEnterOnBackground` is now forwarded to native on both iOS and Android.
+  Previously, `checkPipAvailability()` sent only `playerId` over the method channel;
+  the PiP config was never transmitted, so `canStartPictureInPictureAutomaticallyFromInline`
+  (iOS 14.2+) and `setAutoEnterEnabled` (Android 12+) were silently never set.
+- iOS `PipHandler.initialize(player:playerLayer:)` now accepts an optional `config`
+  parameter; when provided it is persisted and applied via
+  `canStartPictureInPictureAutomaticallyFromInline` on every code path, including the
+  unchanged-layer branch that previously skipped `setupPipController`.
+- Android `PipHandler.applyConfig()` introduced so that the config primed during
+  `checkPipAvailability` is available when `enterPip` is subsequently called.
+- `MediaConfig.allowBackgroundPlayback` is now consumed natively:
+  - iOS: configures `AVAudioSession` category `.playback` at `applyConfig` time so
+    audio continues when the app is backgrounded (host app must declare
+    `UIBackgroundModes: audio` in Info.plist).
+  - Android: sets ExoPlayer `WAKE_MODE_NETWORK` so the CPU/wifi lock is held during
+    background playback (host app must run a foreground service with a media
+    notification for full background audio; that service infrastructure is deferred).
+
 ## [Unreleased]
 
 ### BREAKING

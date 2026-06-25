@@ -24,6 +24,17 @@ class PipHandler(
     private var isInPipMode = false
 
     /**
+     * Persist the PiP config map so that subsequent [enterPip] calls (and
+     * [buildPipParams]) can read autoEnterOnBackground even if the caller
+     * does not pass the config again at that point.
+     */
+    fun applyConfig(config: Map<String, Any>?) {
+        if (config != null) {
+            this.config = config
+        }
+    }
+
+    /**
      * Check if PiP is available on this device
      */
     fun checkAvailability(): Boolean {
@@ -93,10 +104,13 @@ class PipHandler(
             return false
         }
 
-        this.config = config
+        // Merge: caller-supplied config takes precedence; fall back to previously
+        // stored config (primed by applyConfig during checkPipAvailability).
+        val effectiveConfig = config ?: this.config
+        this.config = effectiveConfig
 
         return try {
-            val params = buildPipParams(config)
+            val params = buildPipParams(effectiveConfig)
             android.util.Log.d(TAG, "Built PiP params, entering PiP mode...")
 
             val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
