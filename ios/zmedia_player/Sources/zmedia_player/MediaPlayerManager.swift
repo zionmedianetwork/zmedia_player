@@ -796,6 +796,21 @@ class MediaPlayerInstance: NSObject {
         if let boxFit = config["boxFit"] as? String {
             forEachLiveView { $0.setVideoGravity(boxFit: boxFit) }
         }
+
+        // Configure the AVAudioSession for background playback when requested.
+        // PipHandler.configureAudioSessionForPiP() also sets .playback, so both
+        // paths converge on the same category — no conflict.  The host app must
+        // still declare UIBackgroundModes: audio in Info.plist for this to work.
+        if config["allowBackgroundPlayback"] as? Bool == true {
+            do {
+                let audioSession = AVAudioSession.sharedInstance()
+                try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
+                try audioSession.setActive(true)
+                print("MediaPlayerInstance: Audio session configured for background playback")
+            } catch {
+                print("MediaPlayerInstance: Failed to configure background-playback audio session: \(error)")
+            }
+        }
     }
 
     private func handleStatusChange(status: AVPlayer.Status) {

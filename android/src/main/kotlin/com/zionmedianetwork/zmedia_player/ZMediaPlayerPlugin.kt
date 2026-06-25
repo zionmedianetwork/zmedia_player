@@ -502,11 +502,15 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleCheckPipAvailability(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
+            // Forward the PiP config map so checkAvailability can prime autoEnterEnabled
+            // on Android 12+ via PipHandler.applyConfig() before the user taps Enter.
+            val pipConfig = call.argument<Map<String, Any>>("config")
 
             if (playerId != null) {
                 // Use the actual activity from ActivityAware
                 val handler = PipHandler(activity, playerId, channel)
                 pipHandlers[playerId] = handler
+                handler.applyConfig(pipConfig)
                 val isAvailable = handler.checkAvailability()
                 android.util.Log.d("ZMediaPlayerPlugin", "PiP availability check: $isAvailable (activity: ${activity != null})")
                 result.success(isAvailable)
@@ -522,17 +526,18 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private fun handleEnterPictureInPicture(call: MethodCall, result: Result) {
         try {
             val playerId = call.argument<String>("playerId")
+            val pipConfig = call.argument<Map<String, Any>>("config")
 
             if (playerId != null) {
                 val handler = pipHandlers[playerId]
                 if (handler != null) {
-                    val success = handler.enterPip(null)
+                    val success = handler.enterPip(pipConfig)
                     result.success(success)
                 } else {
                     // Create handler if not exists - use actual activity from ActivityAware
                     val newHandler = PipHandler(activity, playerId, channel)
                     pipHandlers[playerId] = newHandler
-                    val success = newHandler.enterPip(null)
+                    val success = newHandler.enterPip(pipConfig)
                     android.util.Log.d("ZMediaPlayerPlugin", "PiP enter result: $success (activity: ${activity != null})")
                     result.success(success)
                 }

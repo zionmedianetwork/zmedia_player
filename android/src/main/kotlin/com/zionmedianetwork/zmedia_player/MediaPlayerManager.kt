@@ -760,6 +760,17 @@ class MediaPlayerInstance(
 
         // Apply BoxFit
         (config["boxFit"] as? String)?.let { setBoxFit(it) }
+
+        // Enable ExoPlayer wake-lock and wi-fi lock so playback continues when the
+        // screen is off.  Full background-audio support on Android additionally
+        // requires the host app to run a foreground service with a media notification
+        // (ExoPlayer's MediaSessionService or a custom Service); this flag is the
+        // minimum necessary player-side configuration.
+        val allowBackground = config["allowBackgroundPlayback"] as? Boolean ?: false
+        exoPlayer?.setWakeMode(
+            if (allowBackground) C.WAKE_MODE_NETWORK else C.WAKE_MODE_NONE
+        )
+        android.util.Log.d("MediaPlayerInstance", "allowBackgroundPlayback=$allowBackground, wakeMode=${if (allowBackground) "NETWORK" else "NONE"}")
     }
 
     private fun startPositionUpdates() {
