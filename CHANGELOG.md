@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Chromecast discovery never finding devices resolved: `MediaPlayer` never invoked
+  the `initializeCast` method channel, so the native `CastHandler` was never created
+  on the `MediaController`/`MediaPlayer` path (only the separate `CastService` called
+  it). `startCastDiscovery` then ran `castHandlers[playerId]?.startDiscovery()` as a
+  null-safe no-op that still reported success, leaving the UI spinning forever with
+  zero devices. `MediaPlayer` now lazily calls `initializeCast` (once, guarded) before
+  `startCastDiscovery`, `connectToCastDevice`, and `loadMediaOnCastDevice`.
 - Chromecast crash on device selection resolved: `CastHandler.loadMedia` polled
   `RemoteMediaClient` readiness on `Dispatchers.IO`, but the poll reads the Cast SDK's
   `SessionManager.getCurrentCastSession()`, which asserts the main thread and threw
