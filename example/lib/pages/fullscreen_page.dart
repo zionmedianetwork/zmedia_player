@@ -5,16 +5,20 @@ import '../data/sample_media.dart';
 import '../widgets/player_scaffold.dart';
 
 /// Demonstrates fullscreen playback using:
-/// - [FullscreenMediaPlayer] — built-in fullscreen scaffold that locks
-///   orientation and hides system UI
+/// - [FullscreenMediaPlayer] — built-in fullscreen scaffold that hides system
+///   UI and applies orientation preferences.
 /// - [MaterialFullscreenPlayer] — Material Design 3 controls wrapper for
-///   fullscreen, used as [MediaPlayerWidget.customControls]
+///   fullscreen, used as [MediaPlayerWidget.customControls].
+/// - Portrait + Rotation Lock demo — shows the new [FullscreenMediaPlayer]
+///   orientation API: [FullscreenMediaPlayer.preferredOrientations],
+///   [FullscreenMediaPlayer.rotationLocked], and
+///   [FullscreenMediaPlayer.exitOrientations].
 ///
 /// The normal→fullscreen transition is achieved by pushing [FullscreenMediaPlayer]
 /// as a new route.  The same [MediaController] is shared, so playback continues
 /// seamlessly without re-loading.
 ///
-/// NOTE: Orientation locking uses SystemChrome.setPreferredOrientations —
+/// NOTE: Orientation control uses SystemChrome.setPreferredOrientations —
 /// effective on physical devices.  On some simulators the orientation may not
 /// actually rotate.
 class FullscreenPage extends StatefulWidget {
@@ -36,6 +40,14 @@ class _FullscreenPageState extends State<FullscreenPage> {
   /// the single native player surface at a time.  See the "single-native-view
   /// contract" doc-comment on [FullscreenMediaPlayer] for the full rationale.
   bool _isFullscreen = false;
+
+  /// Drives the "Portrait + Rotation Lock" demo.
+  ///
+  /// When [ValueNotifier.value] is `true`, [FullscreenMediaPlayer] pins the
+  /// device to [DeviceOrientation.portraitUp] in real-time via its
+  /// `rotationLocked` parameter.  When `false` it falls back to
+  /// `preferredOrientations` (portrait + landscape).
+  final ValueNotifier<bool> _rotationLocked = ValueNotifier(false);
 
   @override
   void initState() {
@@ -137,8 +149,50 @@ class _FullscreenPageState extends State<FullscreenPage> {
     }
   }
 
+  /// Navigate to fullscreen with configurable orientation and a live rotation
+  /// lock driven by [_rotationLocked].
+  ///
+  /// Demonstrates the new [FullscreenMediaPlayer] orientation API:
+  /// - [FullscreenMediaPlayer.preferredOrientations] — portrait + both
+  ///   landscapes allowed by default.
+  /// - [FullscreenMediaPlayer.rotationLocked] — listens to [_rotationLocked];
+  ///   when true the widget pins immediately to portraitUp in real-time.
+  /// - [FullscreenMediaPlayer.exitOrientations] — restores only portraitUp
+  ///   on exit.
+  ///
+  /// Applies the same single-native-view gate as the other two entry methods.
+  Future<void> _enterPortraitFullscreen() async {
+    if (mounted) setState(() => _isFullscreen = true);
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => FullscreenMediaPlayer(
+            controller: _controller,
+            preferredOrientations: const [
+              DeviceOrientation.portraitUp,
+              DeviceOrientation.landscapeLeft,
+              DeviceOrientation.landscapeRight,
+            ],
+            rotationLocked: _rotationLocked,
+            exitOrientations: const [DeviceOrientation.portraitUp],
+          ),
+          fullscreenDialog: true,
+        ),
+      );
+    } finally {
+      // exitOrientations is [portraitUp] so the widget already restored
+      // portrait on pop; we honour the same choice here for consistency.
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+      if (mounted) setState(() => _isFullscreen = false);
+    }
+  }
+
   @override
   void dispose() {
+    _rotationLocked.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -213,9 +267,35 @@ class _FullscreenPageState extends State<FullscreenPage> {
               label: const Text('MaterialFullscreenPlayer'),
               onPressed: _enterMaterialFullscreen,
             ),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.screen_rotation),
+              label: const Text('Portrait + Rotation Lock'),
+              onPressed: _enterPortraitFullscreen,
+            ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 8),
+        // Rotation-lock toggle — wired to the ValueNotifier so it is
+        // reflected live inside FullscreenMediaPlayer while it is open.
+        ValueListenableBuilder<bool>(
+          valueListenable: _rotationLocked,
+          builder: (context, locked, _) {
+            return SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: Icon(
+                locked ? Icons.screen_lock_rotation : Icons.screen_rotation,
+              ),
+              title: const Text('Rotation lock'),
+              subtitle: const Text(
+                'When ON, the "Portrait + Rotation Lock" fullscreen is '
+                'pinned to portrait in real-time via rotationLocked.',
+              ),
+              value: locked,
+              onChanged: (value) => _rotationLocked.value = value,
+            );
+          },
+        ),
+        const SizedBox(height: 8),
         const _FullscreenNote(),
       ],
     );
@@ -237,9 +317,12 @@ class _FullscreenNote extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        'FullscreenMediaPlayer: built-in Scaffold + orientation lock.\n'
+        'FullscreenMediaPlayer: built-in Scaffold with configurable '
+        'orientation (preferredOrientations / rotationLocked / exitOrientations).\n'
         'MaterialFullscreenPlayer: custom fullscreen controls widget.\n'
-        'Both share the same MediaController — no reload needed.\n'
+        'Portrait + Rotation Lock: demonstrates the new orientation API — '
+        'toggle the switch above while in fullscreen to pin/unpin portrait.\n'
+        'All three share the same MediaController — no reload needed.\n'
         'The fullscreen button in AdaptiveMediaControls (top bar) also '
         'enters fullscreen via the same mechanism.',
         style: Theme.of(context).textTheme.bodySmall,

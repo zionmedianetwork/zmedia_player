@@ -47,7 +47,9 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
 - Picture-in-Picture (iOS AVPictureInPictureController, Android `enterPictureInPictureMode`)
 - Visibility-aware `ListView` playback (`MediaListPlayer`)
 - Casting: Chromecast and AirPlay
-- Configurable fullscreen display: `respectSafeArea` and `immersiveLandscape`
+- Configurable fullscreen display: `respectSafeArea`, `immersiveLandscape`, and
+  per-route orientation control (`preferredOrientations`, live `rotationLocked`,
+  `exitOrientations`) on `FullscreenMediaPlayer`
 
 **DRM & security**
 - Widevine (Android), FairPlay (iOS), EZDRM, and token-based DRM

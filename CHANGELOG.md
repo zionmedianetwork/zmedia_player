@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- Chromecast crash on device selection resolved: `CastHandler.loadMedia` polled
+  `RemoteMediaClient` readiness on `Dispatchers.IO`, but the poll reads the Cast SDK's
+  `SessionManager.getCurrentCastSession()`, which asserts the main thread and threw
+  `IllegalStateException` off the IO worker, hard-crashing the app on the first cast.
+  The poll now runs on `Dispatchers.Main`; `delay()` suspends rather than blocks the
+  thread, so the UI stays responsive (no ANR).
+- Android fullscreen-exit crash/black-screen resolved: `MediaPlayerWidget` now composites
+  the Android video surface with true Hybrid Composition
+  (`PlatformViewsService.initExpensiveAndroidView`) instead of a Virtual Display
+  `AndroidView`. This removes `VirtualDisplayController` entirely, eliminating the
+  `getRenderTargetWidth → getWidth()`-on-null NPE that fired when a resize was posted to
+  the platform `Handler` after the `SurfaceProducer` was released on exit. iOS `UiKitView`
+  is unchanged.
+
+### Added
+- `FullscreenMediaPlayer` orientation control (non-breaking; defaults preserve the prior
+  landscape-locked behavior):
+  - `preferredOrientations` — orientations applied while fullscreen is active
+    (e.g. portrait fullscreen or portrait + free rotation).
+  - `rotationLocked` — a `ValueListenable<bool>` that live-pins the device to portrait
+    when true and re-applies `preferredOrientations` when false.
+  - `exitOrientations` — orientations restored when the route pops (default: all four).
+
 ## [0.2.2] - 2026-06-25
 
 ### Fixed

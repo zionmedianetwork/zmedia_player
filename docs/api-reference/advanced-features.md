@@ -111,6 +111,45 @@ await cache.clearCache();
   - `respectSafeArea: true` insets the video below the status bar/notch.
   - `immersiveLandscape: true` hides the system status bar in landscape (restored on portrait/dispose).
 
+### Orientation control
+
+`FullscreenMediaPlayer` no longer forces landscape. Three optional, non-breaking
+parameters let you choose the orientation behavior (omit them all to keep the legacy
+landscape-locked default):
+
+```dart
+FullscreenMediaPlayer(
+  controller: controller,
+  // Orientations applied while fullscreen is active.
+  // Omit (or pass null) to keep the default [landscapeLeft, landscapeRight].
+  preferredOrientations: const [
+    DeviceOrientation.portraitUp,
+    DeviceOrientation.landscapeLeft,
+    DeviceOrientation.landscapeRight,
+  ],
+  // Live rotation lock: when the listenable's value is true the device is pinned
+  // to portraitUp; flipping it back to false re-applies preferredOrientations.
+  rotationLocked: rotationLockNotifier, // ValueListenable<bool>?
+  // Orientations restored on exit (default: all four). A portrait-locked app can
+  // restore just portraitUp so it never briefly unlocks landscape on pop.
+  exitOrientations: const [DeviceOrientation.portraitUp],
+)
+```
+
+- `preferredOrientations` — portrait fullscreen, free rotation, or any custom set.
+- `rotationLocked` — bind to a settings toggle; the widget re-applies orientations
+  live when the value changes (it subscribes/unsubscribes automatically).
+- `exitOrientations` — what to restore when the route pops.
+
+### Android native view (Hybrid Composition)
+
+On Android the inline/fullscreen video surface is composited with **true Hybrid
+Composition** (`PlatformViewsService.initExpensiveAndroidView`) rather than a Virtual
+Display `AndroidView`. This eliminates the `VirtualDisplayController` resize race that
+could throw an NPE (`getRenderTargetWidth → getWidth()` on a released surface) or render
+black on fullscreen exit. No consumer action is required — this is internal to
+`MediaPlayerWidget`.
+
 ## Bandwidth & buffering
 
 ```dart
