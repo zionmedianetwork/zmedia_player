@@ -1,4 +1,7 @@
+import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import '../core/media_controller.dart';
 import '../models/player_state.dart';
@@ -506,11 +509,39 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
       final platform = Theme.of(context).platform;
 
       if (platform == TargetPlatform.android) {
-        nativeView = AndroidView(
+        // True Hybrid Composition via PlatformViewLink + initExpensiveAndroidView.
+        // This avoids VirtualDisplayController entirely, eliminating the
+        // getRenderTargetWidth → getWidth()-on-null NPE that occurs when a resize
+        // is posted to the platform Handler after the SurfaceProducer is released
+        // on fullscreen exit.  TLHC (initSurfaceAndroidView) is intentionally NOT
+        // used here — it renders via texture and cannot capture the ExoPlayer
+        // SurfaceView, producing black video.
+        nativeView = PlatformViewLink(
           viewType: viewType,
-          creationParams: creationParams,
-          creationParamsCodec: const StandardMessageCodec(),
-          onPlatformViewCreated: _onPlatformViewCreated,
+          surfaceFactory: (context, controller) {
+            return AndroidViewSurface(
+              controller: controller as AndroidViewController,
+              gestureRecognizers: const <Factory<
+                  OneSequenceGestureRecognizer>>{},
+              hitTestBehavior: PlatformViewHitTestBehavior.opaque,
+            );
+          },
+          onCreatePlatformView: (params) {
+            final controller = PlatformViewsService.initExpensiveAndroidView(
+              id: params.id,
+              viewType: viewType,
+              layoutDirection: TextDirection.ltr,
+              creationParams: creationParams,
+              creationParamsCodec: const StandardMessageCodec(),
+              onFocus: () => params.onFocusChanged(true),
+            );
+            controller
+                .addOnPlatformViewCreatedListener(params.onPlatformViewCreated);
+            // Preserve the re-attach hook: reclaimVideoSurface + setBoxFit.
+            controller.addOnPlatformViewCreatedListener(_onPlatformViewCreated);
+            controller.create();
+            return controller;
+          },
         );
       } else if (platform == TargetPlatform.iOS) {
         nativeView = UiKitView(
@@ -932,11 +963,44 @@ class FullscreenMediaPlayer extends StatefulWidget {
   /// Background color
   final Color backgroundColor;
 
+  /// Preferred device orientations while fullscreen is active.
+  ///
+  /// When null the widget preserves the original behavior: it locks to
+  /// `[landscapeLeft, landscapeRight]`.  Pass a custom list to allow portrait
+  /// fullscreen, free rotation, or any other set.
+  ///
+  /// Ignored while [rotationLocked] is non-null and its value is `true`.
+  final List<DeviceOrientation>? preferredOrientations;
+
+  /// Live rotation-lock signal.
+  ///
+  /// When non-null and its current value is `true`, the device is pinned to
+  /// `[DeviceOrientation.portraitUp]` regardless of [preferredOrientations].
+  /// When the value flips to `false`, [preferredOrientations] (or the default
+  /// landscape pair) is re-applied immediately.  The widget subscribes in
+  /// `initState` and unsubscribes in `dispose`.
+  final ValueListenable<bool>? rotationLocked;
+
+  /// Orientations to restore when the fullscreen player exits.
+  ///
+  /// Defaults to all four — matching the original hard-coded behavior.  A
+  /// portrait-locked app can pass `[DeviceOrientation.portraitUp]` to avoid
+  /// briefly unlocking landscape on exit.
+  final List<DeviceOrientation> exitOrientations;
+
   const FullscreenMediaPlayer({
     super.key,
     required this.controller,
     this.customControls,
     this.backgroundColor = Colors.black,
+    this.preferredOrientations,
+    this.rotationLocked,
+    this.exitOrientations = const [
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ],
   });
 
   @override
@@ -947,10 +1011,46 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
     with WidgetsBindingObserver {
   bool _isDisposed = false;
 
+  // ---------------------------------------------------------------------------
+  // Orientation helpers
+  // ---------------------------------------------------------------------------
+
+  /// Returns the orientation list that should be active right now.
+  ///
+  /// Priority order:
+  ///   1. If [FullscreenMediaPlayer.rotationLocked] is non-null and `true`
+  ///      → pin to portrait.
+  ///   2. [FullscreenMediaPlayer.preferredOrientations] when non-null.
+  ///   3. Original default: landscape pair.
+  List<DeviceOrientation> _computeOrientations() {
+    if (widget.rotationLocked?.value ?? false) {
+      return const [DeviceOrientation.portraitUp];
+    }
+    return widget.preferredOrientations ??
+        const [
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ];
+  }
+
+  /// Called whenever [FullscreenMediaPlayer.rotationLocked] changes value.
+  void _onRotationLockChanged() {
+    if (!_isDisposed) {
+      _enterFullscreen();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lifecycle
+  // ---------------------------------------------------------------------------
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    // Subscribe to the live rotation-lock signal if one was provided.
+    widget.rotationLocked?.addListener(_onRotationLockChanged);
 
     // Set fullscreen orientation and hide system UI
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -963,9 +1063,16 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
   @override
   void dispose() {
     _isDisposed = true;
+
+    // Unsubscribe from the rotation-lock listenable before tearing down.
+    widget.rotationLocked?.removeListener(_onRotationLockChanged);
+
     WidgetsBinding.instance.removeObserver(this);
 
-    // Restore system UI and orientation
+    // Restore system UI and orientation.
+    // NOTE: _exitFullscreen guards on _isDisposed, so it returns early here.
+    // The actual restore on normal navigation happens via the PopScope callback
+    // below (where _isDisposed is still false at call time).
     _exitFullscreen();
     super.dispose();
   }
@@ -977,11 +1084,9 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
       // Set fullscreen mode
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-      // Set landscape orientation
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      // Apply the computed orientation set (respects preferredOrientations and
+      // the live rotationLocked signal).
+      await SystemChrome.setPreferredOrientations(_computeOrientations());
     } catch (_) {
       // Ignore system UI / orientation errors on platforms that do not support them
     }
@@ -994,13 +1099,9 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
       // Restore system UI
       await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
-      // Restore all orientations
-      await SystemChrome.setPreferredOrientations([
-        DeviceOrientation.portraitUp,
-        DeviceOrientation.portraitDown,
-        DeviceOrientation.landscapeLeft,
-        DeviceOrientation.landscapeRight,
-      ]);
+      // Restore the caller-supplied orientations (defaults to all four, matching
+      // the original hard-coded behavior).
+      await SystemChrome.setPreferredOrientations(widget.exitOrientations);
     } catch (_) {
       // Ignore system UI / orientation errors on platforms that do not support them
     }
@@ -1011,7 +1112,8 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
     super.didChangeAppLifecycleState(state);
 
     if (state == AppLifecycleState.resumed && !_isDisposed) {
-      // Re-enter fullscreen mode when app resumes
+      // Re-enter fullscreen mode when app resumes, re-applying computed
+      // orientations (including any rotationLocked state).
       _enterFullscreen();
     }
   }
