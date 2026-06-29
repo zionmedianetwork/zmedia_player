@@ -12,7 +12,7 @@ High-level overview of development progress, completed features, and project sta
 
 ## Project Status (v0.1.0): **feature-complete, hardening in progress**
 
-**Version:** 0.1.0
+**Version:** 0.2.2
 **Status:** Active development — native layers need on-device verification
 **Last Updated:** October 19, 2025
 
@@ -32,8 +32,9 @@ Comprehensive testing results and performance benchmarks.
 ### [Production Readiness](production-readiness.md)
 Deployment checklist, performance metrics, and go-live criteria.
 
-### [Implementation Timeline](timeline.md)
-Development milestones and completion dates.
+### [Development Phases](phases.md)
+Historical record of the v0.1.0 phase milestones. For the current roadmap, see
+[`PLAN.md`](../../PLAN.md).
 
 ---
 
@@ -236,5 +237,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 **Project:** ZMedia Player
 **Organization:** Zion Media Network
 **Status:** Production Ready
-**Version:** 0.1.0
+**Version:** 0.2.2
 **Completion Date:** October 19, 2025

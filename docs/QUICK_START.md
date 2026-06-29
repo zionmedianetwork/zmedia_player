@@ -103,7 +103,7 @@ docs/
 import 'package:zmedia_player/zmedia_player.dart';
 
 // Create controller
-final controller = MediaController();
+final controller = MediaController.create();
 
 // Load and play
 await controller.load(MediaItem(
@@ -173,7 +173,7 @@ await controller.load(drmItem);
 
 **Status:** Complete and up-to-date
 **Last Updated:** June 22, 2026
-**Version:** 0.1.0
+**Version:** 0.2.2
 
 ### Coverage
 - All features documented

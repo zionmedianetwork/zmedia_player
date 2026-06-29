@@ -427,10 +427,9 @@ flutter analyze
 
 ### Resources
 
-- [DRM Implementation Guide](./DRM_GUIDE.md)
-- [Testing Guide](./TESTING_GUIDE.md)
-- [Security Audit](./SECURITY_AUDIT.md)
-- [Phase 4 Summary](./PHASE4_SUMMARY.md)
+- [DRM Implementation Guide](../api-reference/drm.md)
+- [Testing Guide](../implementation/testing.md)
+- [Security Audit](../implementation/security.md)
 
 ---
 
