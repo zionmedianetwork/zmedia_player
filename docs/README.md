@@ -71,7 +71,7 @@ This documentation is organized into three main sections:
 ### For Developers
 - [Architecture Overview](implementation/README.md)
 - [Running Tests](implementation/testing.md)
-- [Contributing Guidelines](../CONTRIBUTING.md)
+- [Contributor Guidelines](../CLAUDE.md) (branching, commits, release workflow)
 
 ### Project Status
 - [Complete Feature List](summary/features.md)
@@ -112,7 +112,7 @@ ZMedia Player is a comprehensive Flutter media player package that provides:
 
 ## Project Status
 
-**Version:** 0.1.0
+**Version:** 0.2.2
 **Status:** **Active development — feature-complete, hardening in progress**
 
 All features are implemented across the Dart and native layers. The project is
@@ -128,7 +128,7 @@ are implemented but require on-device verification.
 - **Phase 4** - DRM & Polish (Complete)
 
 ### Key Metrics
-- **Tests:** 578 automated tests passing (run `flutter test` for the current count);
+- **Tests:** 588 automated tests passing (run `flutter test` for the current count);
   strong Dart-layer coverage, **no automated native tests yet**
 - **Native verification:** DRM, casting, certificate pinning, and bandwidth metering
   are implemented but need on-device testing
@@ -150,7 +150,6 @@ are implemented but require on-device verification.
 - [Testing Guide](implementation/testing.md)
 - [Security Audit](implementation/security.md)
 - [Better Player Comparison](implementation/better-player-comparison.md)
-- [Better Player Parity](implementation/better-player-parity.md)
 - [Codebase Audit & Remediation Roadmap](implementation/codebase-audit.md)
 
 ### Summary
@@ -194,7 +193,7 @@ are implemented but require on-device verification.
 import 'package:zmedia_player/zmedia_player.dart';
 
 // Create a controller
-final controller = MediaController();
+final controller = MediaController.create();
 
 // Load and play a video
 await controller.load(MediaItem(
@@ -213,8 +212,14 @@ MediaPlayerWidget(controller: controller);
 // Enable Picture-in-Picture
 await controller.enterPictureInPicture();
 
-// Show notifications
-await controller.showNotification();
+// Show lock-screen / Control Center notifications (via NotificationService)
+final notifications = NotificationService(const NotificationConfig(enabled: true));
+await notifications.initialize(controller.playerId, mediaPlayer: controller.player);
+await notifications.show(
+  mediaItem: item,
+  state: controller.state,
+  playerId: controller.playerId,
+);
 
 // Add DRM protection
 final drmItem = MediaItem(
@@ -244,9 +249,8 @@ See [API Reference](api-reference/) for complete examples.
 
 We welcome contributions! Please see:
 
-- [Contributing Guidelines](../CONTRIBUTING.md)
-- [Code of Conduct](../CODE_OF_CONDUCT.md)
-- [Development Setup](implementation/README.md#contributing)
+- [Contributor Guidelines](../CLAUDE.md) — branching strategy, commit conventions, and the release workflow
+- [Architecture & Implementation](implementation/README.md)
 
 ---
 
@@ -266,5 +270,5 @@ This project is licensed under the MIT License - see the [LICENSE](../LICENSE) f
 
 **Project:** ZMedia Player
 **Organization:** Zion Media Network
-**Version:** 0.1.0
+**Version:** 0.2.2
 **Status:** Active development — feature-complete, hardening in progress

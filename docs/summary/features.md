@@ -350,5 +350,5 @@ All planned features have been successfully implemented and tested.
 
 ---
 
-**Version:** 0.1.0
+**Version:** 0.2.2
 **Status:** Active development — feature-complete, native layers need on-device verification

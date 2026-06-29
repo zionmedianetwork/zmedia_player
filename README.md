@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/badge/version-0.2.2-blue.svg)](https://github.com/zionmedianetwork/zmedia_player)
-[![Tests](https://img.shields.io/badge/tests-578%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-588%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -470,7 +470,7 @@ Dart communicates with native over a single `MethodChannel` (`zmedia_player`), r
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 578), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 588), and open a PR.
 
 ## License
 
@@ -487,14 +487,17 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 578 automated tests — run `flutter test` for the current count.
+- **Tests:** 588 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth
   metering) warrant **on-device verification**.
-- **Verified on-device (physical iPhone):** playback, fullscreen, custom controls,
+- **Verified on-device — iPhone (iOS):** playback, fullscreen, custom controls,
   quality/subtitles, background audio, lock-screen notifications.
-- **Version:** 0.1.0
+- **Verified on-device — Note 9P (Android 11):** Chromecast discovery + load (main-thread
+  safe), fullscreen enter/exit via true Hybrid Composition (no surface-release crash), and
+  inline controls layout (no overflow).
+- **Version:** 0.2.2
 
 > Not yet validated as production-ready end-to-end. Verify DRM, casting, and security features
 > on real Android and iOS devices before relying on them in production.

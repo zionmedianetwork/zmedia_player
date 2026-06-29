@@ -362,9 +362,9 @@ Timer.periodic(Duration(minutes: 5), (_) {
 
 ## Related Documentation
 
-- [Fix #1 Implementation Summary](../../FIX_1_IMPLEMENTATION_SUMMARY.md)
-- [Critical Fixes Guide](../../CRITICAL_FIXES_GUIDE.md)
-- [Production Readiness Analysis](../../PRODUCTION_READINESS_ANALYSIS.md)
+- [Testing & Quality](../../docs/implementation/testing.md)
+- [Production Readiness](../../docs/summary/production-readiness.md)
+- [Codebase Audit & Remediation Roadmap](../../docs/implementation/codebase-audit.md)
 
 ## Support
 
@@ -377,6 +377,6 @@ If tests fail:
 
 ---
 
-**Last Updated:** October 21, 2025
+**Last Updated:** June 29, 2026
 **Test Coverage:** 50+ test cases
 **Status:** ✅ All tests passing

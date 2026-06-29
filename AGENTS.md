@@ -14,7 +14,7 @@ For the architecture narrative and contributor workflow, see [`CLAUDE.md`](CLAUD
 - Dart talks to native over a single `MethodChannel` named `zmedia_player`, routed per `playerId`.
 - Advanced features: HLS/DASH adaptive streaming, DRM (Widevine/FairPlay/EZDRM), subtitles, PiP, casting (Chromecast/AirPlay), lock-screen notifications, certificate pinning.
 
-**Versions:** package `0.1.0` · Flutter SDK `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**) · iOS **13.0+** · Android **minSdk 21**. iOS builds with **Swift Package Manager or CocoaPods**.
+**Versions:** package `0.2.2` · Flutter SDK `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**) · iOS **13.0+** · Android **minSdk 21**. iOS builds with **Swift Package Manager or CocoaPods**.
 
 ---
 
@@ -220,7 +220,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 578 Dart tests (core, models, services, widgets, memory, performance)
+test/                             # 588 Dart tests (core, models, services, widgets, memory, performance)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -236,7 +236,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **578**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **588**, keep green) before proposing changes.
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
 
@@ -247,7 +247,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (578 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (588 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone.

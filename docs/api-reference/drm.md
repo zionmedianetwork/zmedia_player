@@ -135,10 +135,12 @@ controller.player.drmSessionStream.listen((session) {
 ### Check License Status
 
 ```dart
-final session = await controller.getDrmSession();
-if (session.license?.isExpired ?? false) {
-  print('License expired, renewing...');
-}
+// DRM session state is exposed as a broadcast stream.
+controller.player.drmSessionStream.listen((session) {
+  if (session.license?.isExpired ?? false) {
+    print('License expired, renewing...');
+  }
+});
 ```
 
 ---
@@ -398,9 +400,10 @@ MediaPlayer.enableCrashReporting(
   ConsoleOnlyCrashReporter(), // Logs all errors to console
 );
 
-// Check DRM session details
-final session = await controller.getDrmSession();
-print('DRM Session: ${session.toMap()}');
+// Inspect DRM session details as they change
+controller.player.drmSessionStream.listen((session) {
+  print('DRM Session: ${session.toMap()}');
+});
 ```
 
 ---

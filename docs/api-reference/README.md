@@ -84,5 +84,5 @@ MediaPlayerWidget  // UI widget with controls
 
 ---
 
-**Version:** 0.1.0
+**Version:** 0.2.2
 **Last Updated:** June 22, 2026

@@ -6,14 +6,11 @@ Technical documentation covering architecture, native implementations, and devel
 
 ## Documentation Index
 
-### [Architecture Overview](architecture.md)
-System design, component interactions, and architectural decisions.
-
-### [Native Android Implementation](android.md)
-ExoPlayer integration, DRM, notifications, PiP, and Chromecast.
-
-### [Native iOS Implementation](ios.md)
-AVPlayer integration, FairPlay DRM, notifications, PiP, and AirPlay.
+### Architecture & native implementation
+System design, component interactions, and the per-feature native handler layout
+(ExoPlayer/Widevine/Chromecast on Android, AVPlayer/FairPlay/AirPlay on iOS) are
+covered in the **Architecture Highlights** section below and in the root
+[`CLAUDE.md`](../../CLAUDE.md) architecture overview.
 
 ### [Testing & Quality](testing.md)
 Unit tests, performance tests, test coverage, and quality metrics.
@@ -21,7 +18,7 @@ Unit tests, performance tests, test coverage, and quality metrics.
 ### [Security](security.md)
 Security audit checklist, DRM best practices, and compliance guidelines.
 
-### [Better Player Comparison](better-player-parity.md)
+### [Better Player Comparison](better-player-comparison.md)
 Feature parity analysis with the popular `better_player` package.
 
 ---
@@ -155,7 +152,7 @@ ZMediaPlayerPlugin
 
 ## Testing Strategy
 
-### Unit Tests (Dart — 578 passing; run `flutter test` for the live count)
+### Unit Tests (Dart — 588 passing; run `flutter test` for the live count)
 - Model validation
 - Serialization/deserialization
 - Configuration handling
@@ -208,5 +205,5 @@ flutter run
 
 ---
 
-**Version:** 0.1.0
+**Version:** 0.2.2
 **Last Updated:** June 22, 2026
