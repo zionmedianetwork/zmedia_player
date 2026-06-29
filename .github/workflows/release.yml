@@ -117,15 +117,11 @@ jobs:
             COMMIT_COUNT=$(git rev-list --count ${{ steps.latest_tag.outputs.tag }}..HEAD)
 
             if [ "$COMMIT_COUNT" = "0" ]; then
-              echo "⚠️ Warning: No new commits since last tag ${{ steps.latest_tag.outputs.tag }}"
-
-              # Allow release without new commits if manual version is specified
-              if [ -z "${{ github.event.inputs.manual_version }}" ]; then
-                echo "❌ Cannot create release without new commits (unless manual_version is specified)"
-                exit 1
-              else
-                echo "✅ Manual version specified, proceeding with release"
-              fi
+              # Always-bump policy: never abort on an empty commit range. With no
+              # qualifying commits the bump type falls through to the default
+              # "patch" below, so every release run still advances the version.
+              echo "⚠️ No new commits since last tag ${{ steps.latest_tag.outputs.tag }} —"
+              echo "   proceeding anyway and bumping at least a patch (always-bump policy)."
             fi
 
             COMMITS=$(git log ${{ steps.latest_tag.outputs.tag }}..HEAD --pretty=format:"%s")
@@ -331,15 +327,47 @@ jobs:
           mv CHANGELOG.new.md CHANGELOG.md
           echo "✅ Updated CHANGELOG.md"
 
-      - name: Update README.md version badge
+      - name: Run test suite (gates release; computes tests badge)
+        id: tests
+        run: |
+          echo "Running the full test suite for the release gate + tests badge..."
+          set +e
+          flutter test --reporter expanded 2>&1 | tee test_output.log
+          TEST_EXIT=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$TEST_EXIT" -ne 0 ]; then
+            echo "❌ Tests failed — aborting the release so the README badge never lies."
+            exit 1
+          fi
+
+          # The expanded/compact reporter prints incrementing "+N" pass counters;
+          # the highest value is the total number of passing tests.
+          PASSING=$(grep -oE '\+[0-9]+' test_output.log | tr -d '+' | sort -n | tail -1)
+          if [ -z "$PASSING" ]; then
+            echo "⚠️ Could not parse the passing test count; the tests badge will be left unchanged."
+          else
+            echo "✅ $PASSING tests passing"
+          fi
+          echo "passing=$PASSING" >> $GITHUB_OUTPUT
+
+      - name: Update README.md badges (version + tests)
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          PASSING="${{ steps.tests.outputs.passing }}"
 
-          # Update version badge in README.md
+          # Version badge — always refreshed to the new version.
           sed -i "s/version-[0-9]\+\.[0-9]\+\.[0-9]\+/version-$NEW_VERSION/" README.md
-
           echo "✅ Updated README.md version badge to $NEW_VERSION"
+
+          # Tests badge — refreshed to the live passing count from the gate above.
+          if [ -n "$PASSING" ]; then
+            sed -i "s/tests-[0-9]\+%20passing/tests-${PASSING}%20passing/" README.md
+            echo "✅ Updated README.md tests badge to ${PASSING} passing"
+          else
+            echo "⚠️ Skipped tests badge update (no passing count parsed)."
+          fi
 
       - name: Create release branch and commit version bump
         if: ${{ github.event.inputs.dry_run != 'true' }}
@@ -388,7 +416,7 @@ jobs:
           ### Changes
           - Updated \`pubspec.yaml\` to v$NEW_VERSION
           - Updated \`CHANGELOG.md\` with release notes
-          - Updated \`README.md\` version badge
+          - Updated \`README.md\` version + tests badges
 
           ### Changelog
           ${{ steps.changelog.outputs.changelog }}
