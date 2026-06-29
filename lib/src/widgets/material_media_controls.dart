@@ -296,20 +296,33 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
                   stops: const [0.0, 0.2, 0.8, 1.0],
                 ),
               ),
-              child: Column(
+              // Stack overlay: three zones are painted on top of each other
+              // rather than stacked additively in a Column.  Spacers only
+              // absorb *positive* free space; in a short inline box (e.g. a
+              // 16:9 AspectRatio ≈ 202dp tall on a 360dp-wide phone) the
+              // fixed children exceed the available height and a Column
+              // overflows.  A Stack + Positioned layout pins each zone to its
+              // edge independently, so no cumulative height is computed and
+              // overflow is impossible at any container height.
+              child: Stack(
+                fit: StackFit.expand,
                 children: [
-                  // Top bar with title and actions
-                  _buildTopBar(colorScheme, textTheme),
-
-                  const Spacer(),
-
-                  // Center play/pause button
-                  _buildCenterControls(colorScheme),
-
-                  const Spacer(),
-
-                  // Bottom bar with seek and controls
-                  _buildBottomBar(colorScheme, textTheme),
+                  // Center play/pause controls — centered over the video
+                  Center(child: _buildCenterControls(colorScheme)),
+                  // Top bar pinned to the top edge
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _buildTopBar(colorScheme, textTheme),
+                  ),
+                  // Bottom bar pinned to the bottom edge
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: _buildBottomBar(colorScheme, textTheme),
+                  ),
                 ],
               ),
             ),

@@ -134,6 +134,11 @@ class MediaPlayer {
   /// Whether the player has been initialized
   bool _isInitialized = false;
 
+  /// Whether the native cast handler has been initialized for this player
+  /// instance. Guards lazy initialization so [_ensureCastInitialized] only
+  /// invokes 'initializeCast' once per player lifetime.
+  bool _castInitialized = false;
+
   /// Whether the player has been disposed
   bool _isDisposed = false;
 
@@ -1172,6 +1177,7 @@ class MediaPlayer {
   /// Start cast device discovery
   Future<void> startCastDiscovery() async {
     await _ensureInitialized();
+    await _ensureCastInitialized();
 
     try {
       await _channel.invokeMethod('startCastDiscovery', {
@@ -1206,6 +1212,7 @@ class MediaPlayer {
   /// Connect to a cast device
   Future<bool> connectToCastDevice(CastDevice device) async {
     await _ensureInitialized();
+    await _ensureCastInitialized();
 
     try {
       final result = await _channel.invokeMethod<bool>('connectToCastDevice', {
@@ -1244,6 +1251,7 @@ class MediaPlayer {
   /// Load media on cast device
   Future<void> loadMediaOnCastDevice(MediaItem mediaItem) async {
     await _ensureInitialized();
+    await _ensureCastInitialized();
 
     try {
       await _channel.invokeMethod('loadMediaOnCastDevice', {
@@ -1940,6 +1948,35 @@ class MediaPlayer {
 
     if (!_isInitialized) {
       await initialize();
+    }
+  }
+
+  /// Lazily initializes the native CastHandler for this player.
+  ///
+  /// The native plugin only creates a [CastHandler] when `initializeCast` is
+  /// called via the method channel. Without this call, [startCastDiscovery]
+  /// and related cast operations are silent no-ops at the native layer
+  /// (`castHandlers[playerId]` is null, so `?.startDiscovery()` returns
+  /// immediately without doing anything).
+  ///
+  /// This guard ensures the initialization channel call is made at most once
+  /// per player instance. It is called lazily from [startCastDiscovery],
+  /// [connectToCastDevice], and [loadMediaOnCastDevice] — the three entry
+  /// points that actually require an active native handler.
+  Future<void> _ensureCastInitialized() async {
+    if (_castInitialized) return;
+    try {
+      await _channel.invokeMethod('initializeCast', {
+        'playerId': playerId,
+        'config': const CastConfig().toMap(),
+      });
+      _castInitialized = true;
+    } on PlatformException catch (e) {
+      throw PlatformOperationException(
+        'Failed to initialize cast handler: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
     }
   }
 

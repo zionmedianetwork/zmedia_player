@@ -6,9 +6,10 @@ import io.flutter.plugin.platform.PlatformView
 import io.flutter.plugin.platform.PlatformViewFactory
 
 /**
- * Factory for creating MediaPlayerView instances
- * Uses StandardMessageCodec to properly decode creation parameters
- * Hybrid Composition is enabled on the Dart side via AndroidView
+ * Factory for creating MediaPlayerView instances.
+ * Uses StandardMessageCodec to properly decode creation parameters.
+ * The Dart side uses PlatformViewLink + PlatformViewsService.initExpensiveAndroidView
+ * (true Hybrid Composition) so VirtualDisplayController is never involved.
  */
 class MediaPlayerViewFactory(
     private val playerManager: MediaPlayerManager

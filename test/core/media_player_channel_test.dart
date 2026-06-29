@@ -539,6 +539,111 @@ void main() {
   });
 
   // -------------------------------------------------------------------------
+  group('cast — lazy initializeCast before cast operations', () {
+    test(
+        'startCastDiscovery sends "initializeCast" before "startCastDiscovery"',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'cast-lazy-init-1');
+      await player.initialize();
+      calls.clear(); // ignore initialize calls
+
+      await player.startCastDiscovery();
+
+      final methods = calls.map((c) => c.method).toList();
+      expect(methods, contains('initializeCast'),
+          reason: 'initializeCast must be called before startCastDiscovery');
+      expect(methods, contains('startCastDiscovery'),
+          reason: 'startCastDiscovery must be forwarded to the channel');
+
+      final initIdx = methods.indexOf('initializeCast');
+      final discIdx = methods.indexOf('startCastDiscovery');
+      expect(initIdx < discIdx, isTrue,
+          reason: '"initializeCast" must precede "startCastDiscovery"');
+
+      // Verify initializeCast sends the required payload.
+      final initCall = calls[initIdx];
+      expect(initCall.arguments['playerId'], 'cast-lazy-init-1');
+      expect(initCall.arguments['config'], isNotNull,
+          reason: '"config" map must be present (native requires it non-null)');
+
+      player.dispose();
+    });
+
+    test('second startCastDiscovery does NOT send a second "initializeCast"',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'cast-lazy-init-2');
+      await player.initialize();
+      calls.clear();
+
+      await player.startCastDiscovery();
+      await player.startCastDiscovery(); // second call — handler already live
+
+      final initCalls =
+          calls.where((c) => c.method == 'initializeCast').toList();
+      expect(initCalls.length, 1,
+          reason: '"initializeCast" must only be sent once regardless of how '
+              'many times startCastDiscovery is called');
+
+      player.dispose();
+    });
+
+    test(
+        'connectToCastDevice also triggers initializeCast when not yet '
+        'initialized', () async {
+      final calls = _installCapture((call) async {
+        if (call.method == 'connectToCastDevice') return true;
+        return null;
+      });
+      final player = MediaPlayer(playerId: 'cast-lazy-connect-1');
+      await player.initialize();
+      calls.clear();
+
+      const device = CastDevice(
+        id: 'd-1',
+        name: 'Living Room TV',
+        type: CastDeviceType.chromecast,
+      );
+      await player.connectToCastDevice(device);
+
+      expect(calls.map((c) => c.method), contains('initializeCast'),
+          reason: 'connectToCastDevice must also trigger lazy cast init');
+
+      player.dispose();
+    });
+
+    test(
+        'initializeCast is NOT sent twice when connectToCastDevice follows '
+        'startCastDiscovery', () async {
+      final calls = _installCapture((call) async {
+        if (call.method == 'connectToCastDevice') return true;
+        return null;
+      });
+      final player = MediaPlayer(playerId: 'cast-lazy-no-double');
+      await player.initialize();
+      calls.clear();
+
+      await player.startCastDiscovery();
+      const device = CastDevice(
+        id: 'd-2',
+        name: 'Bedroom TV',
+        type: CastDeviceType.chromecast,
+      );
+      await player.connectToCastDevice(device);
+
+      final initCalls =
+          calls.where((c) => c.method == 'initializeCast').toList();
+      expect(initCalls.length, 1,
+          reason:
+              '"initializeCast" must be sent only once even across different '
+              'cast operations on the same player');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   group('dispose — outgoing contract', () {
     test('sends method "dispose" with playerId when initialized', () async {
       final calls = _installCapture();

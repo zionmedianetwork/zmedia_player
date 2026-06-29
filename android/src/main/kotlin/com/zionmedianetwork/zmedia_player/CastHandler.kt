@@ -267,8 +267,9 @@ class CastHandler(
     /**
      * Load media on cast device.
      *
-     * Polling for RemoteMediaClient readiness is done off the main thread using
-     * coroutine delay() so the UI thread is never blocked (avoids ANR risk).
+     * Polling for RemoteMediaClient readiness runs on the main thread: it reads
+     * the Cast SDK's currentCastSession, which asserts the main thread. coroutine
+     * delay() suspends rather than blocks, so the UI thread is never held (no ANR).
      * The owned [scope] is used so this coroutine is automatically cancelled
      * when [dispose] is called.
      */
@@ -278,8 +279,10 @@ class CastHandler(
         android.util.Log.d(TAG, "Media title: ${mediaItem["title"]}")
         android.util.Log.d(TAG, "Media URL: ${mediaItem["url"]}")
 
-        scope.launch(Dispatchers.IO) {
-            // Poll for remote media client on a background thread, max 2 s.
+        // MUST run on Main: the poll reads sessionManager.currentCastSession
+        // (Cast SDK getCurrentCastSession()), which asserts the main thread.
+        scope.launch(Dispatchers.Main) {
+            // Poll for remote media client on the main thread, max 2 s.
             var client: RemoteMediaClient? = remoteMediaClient
             var attempts = 0
             val maxAttempts = 20 // 20 × 100 ms = 2 000 ms
