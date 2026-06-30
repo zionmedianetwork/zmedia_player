@@ -2,7 +2,7 @@
 
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
-[![Version](https://img.shields.io/badge/version-0.2.2-blue.svg)](https://github.com/zionmedianetwork/zmedia_player)
+[![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
 [![Tests](https://img.shields.io/badge/tests-588%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 

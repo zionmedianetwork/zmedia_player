@@ -357,9 +357,11 @@ jobs:
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           PASSING="${{ steps.tests.outputs.passing }}"
 
-          # Version badge — always refreshed to the new version.
-          sed -i "s/version-[0-9]\+\.[0-9]\+\.[0-9]\+/version-$NEW_VERSION/" README.md
-          echo "✅ Updated README.md version badge to $NEW_VERSION"
+          # Version badge — now a dynamic shields.io github/v/release badge that
+          # always reflects the latest published release. It needs no edit here and
+          # never goes stale on main, even when the version-bump PR back to main is
+          # not merged (which previously left the static badge a release behind).
+          echo "ℹ️ Version badge is dynamic (github/v/release for $NEW_VERSION) — no edit needed."
 
           # Tests badge — refreshed to the live passing count from the gate above.
           if [ -n "$PASSING" ]; then
