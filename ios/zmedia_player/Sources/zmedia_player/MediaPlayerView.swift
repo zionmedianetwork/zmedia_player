@@ -72,7 +72,34 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         // Wire the player into the layer now that super.init() has run.
         container.playerLayer.player = player
 
+        // Re-attach the AVPlayerLayer's player whenever the app returns to the
+        // foreground. iOS releases the layer's render surface while the app is
+        // backgrounded / the device is locked, leaving a blank (grey) surface on
+        // resume. Re-setting the layer's player forces a fresh render pass.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAppDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+
         print("MediaPlayerView.init(): Configured — player: \(player != nil)")
+    }
+
+    /// Forces the AVPlayerLayer to re-render after returning from background /
+    /// device standby (otherwise the layer can come back grey/blank).
+    @objc private func handleAppDidBecomeActive() {
+        guard let activePlayer = container.playerLayer.player else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.container.playerLayer.player = nil
+            self.container.playerLayer.player = activePlayer
+            self.container.playerLayer.isHidden = false
+            self.container.playerLayer.opacity = 1.0
+            self.container.setNeedsLayout()
+            self.container.layoutIfNeeded()
+            self.container.playerLayer.setNeedsDisplay()
+        }
     }
 
     // MARK: - FlutterPlatformView
@@ -150,6 +177,7 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
 
     deinit {
         print("MediaPlayerView: Deallocating")
+        NotificationCenter.default.removeObserver(self)
         container.playerLayer.player = nil
         player = nil
     }

@@ -357,9 +357,11 @@ jobs:
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           PASSING="${{ steps.tests.outputs.passing }}"
 
-          # Version badge — always refreshed to the new version.
-          sed -i "s/version-[0-9]\+\.[0-9]\+\.[0-9]\+/version-$NEW_VERSION/" README.md
-          echo "✅ Updated README.md version badge to $NEW_VERSION"
+          # Version badge — now a dynamic shields.io github/v/release badge that
+          # always reflects the latest published release. It needs no edit here and
+          # never goes stale on main, even when the version-bump PR back to main is
+          # not merged (which previously left the static badge a release behind).
+          echo "ℹ️ Version badge is dynamic (github/v/release for $NEW_VERSION) — no edit needed."
 
           # Tests badge — refreshed to the live passing count from the gate above.
           if [ -n "$PASSING" ]; then
@@ -404,7 +406,7 @@ jobs:
           NEW_VERSION="${{ steps.version.outputs.new_version }}"
           RELEASE_BRANCH="${{ steps.release_branch.outputs.release_branch }}"
 
-          gh pr create \
+          PR_URL=$(gh pr create \
             --base main \
             --head "$RELEASE_BRANCH" \
             --title "chore(release): v$NEW_VERSION" \
@@ -416,16 +418,30 @@ jobs:
           ### Changes
           - Updated \`pubspec.yaml\` to v$NEW_VERSION
           - Updated \`CHANGELOG.md\` with release notes
-          - Updated \`README.md\` version + tests badges
+          - Updated \`README.md\` tests badge (version badge is dynamic)
 
           ### Changelog
           ${{ steps.changelog.outputs.changelog }}
 
           ---
           🤖 This PR was automatically created by the release workflow.
-          After checks pass and this PR is merged, the release will be available.
+          Auto-merge is enabled — it merges to main once required checks pass.
           EOF
-          )" || echo "::warning::Could not create the version-bump PR automatically. The default GITHUB_TOKEN is blocked when the org/repo policy 'Allow GitHub Actions to create and approve pull requests' is disabled. Set a RELEASE_PAT secret (Contents + Pull requests: write) or open the PR manually: $RELEASE_BRANCH -> main. The tag and release will still be created from $RELEASE_BRANCH."
+          )") || PR_URL=""
+
+          if [ -z "$PR_URL" ]; then
+            echo "::warning::Could not create the version-bump PR automatically. The default GITHUB_TOKEN is blocked when the org/repo policy 'Allow GitHub Actions to create and approve pull requests' is disabled. Set a RELEASE_PAT secret (Contents + Pull requests: write) or open the PR manually: $RELEASE_BRANCH -> main. The tag and release will still be created from $RELEASE_BRANCH."
+          else
+            echo "✅ Created version-bump PR: $PR_URL"
+            # Enable auto-merge so the version bump (pubspec + CHANGELOG + badges)
+            # lands on main automatically once required checks pass. Without this,
+            # main lagged a release behind whenever the PR was left unmerged.
+            if gh pr merge --auto --squash --delete-branch "$PR_URL"; then
+              echo "✅ Auto-merge enabled — PR will merge to main when checks pass."
+            else
+              echo "::warning::Could not enable auto-merge on $PR_URL. Enable 'Allow auto-merge' in repo Settings → General, and ensure RELEASE_PAT has 'Pull requests: write'. Merge the PR manually to update main."
+            fi
+          fi
 
           echo "Version-bump PR step finished (see log/warnings above)"
         env:

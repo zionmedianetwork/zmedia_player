@@ -61,6 +61,8 @@ class _CastingPageState extends State<CastingPage> {
           enableChromecast: true,
           enableAirPlay: true,
           showCastButton: true,
+          // Google's Default Media Receiver app ID.
+          chromecastAppId: 'CC1AD845',
         ),
       ),
     );
@@ -186,7 +188,9 @@ class _CastingPageState extends State<CastingPage> {
         ],
 
         const SizedBox(height: 16),
-        const SectionHeader('Device Discovery'),
+        // On iOS, AirPlay discovery is handled exclusively by the native
+        // AirPlay button above. This section targets Chromecast only on iOS.
+        SectionHeader(isIos ? 'Chromecast Discovery' : 'Device Discovery'),
         Row(
           children: [
             FilledButton.icon(
@@ -211,12 +215,13 @@ class _CastingPageState extends State<CastingPage> {
           devices: _devices,
           castStatus: _castStatus,
           isDiscovering: _isDiscovering,
+          isIos: isIos,
           onConnect: _connectDevice,
           onDisconnect: _disconnect,
         ),
 
         const SizedBox(height: 16),
-        const _CastNote(),
+        _CastNote(isIos: isIos),
       ],
     );
   }
@@ -259,11 +264,15 @@ class _AirPlaySection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'Tap the AirPlay button to open the native iOS route picker.',
+          'AirPlay devices are discovered by the system — tap the AirPlay '
+          'button below to pick a device. This is the only supported way '
+          'to discover and select AirPlay targets on iOS.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 8),
-        // AirPlayButton uses AVRoutePickerView — iOS native widget
+        // AirPlayButton wraps AVRoutePickerView — iOS native widget.
+        // Apple does not allow programmatic AirPlay device enumeration;
+        // this native picker is the sole discovery and selection mechanism.
         AirPlayButton(
           size: 40,
           tintColor: Theme.of(context).colorScheme.primary,
@@ -279,6 +288,7 @@ class _DeviceList extends StatelessWidget {
   final List<CastDevice> devices;
   final CastStatus castStatus;
   final bool isDiscovering;
+  final bool isIos;
   final ValueChanged<CastDevice> onConnect;
   final VoidCallback onDisconnect;
 
@@ -286,6 +296,7 @@ class _DeviceList extends StatelessWidget {
     required this.devices,
     required this.castStatus,
     required this.isDiscovering,
+    required this.isIos,
     required this.onConnect,
     required this.onDisconnect,
   });
@@ -293,16 +304,20 @@ class _DeviceList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (isDiscovering && devices.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
         child: Row(
           children: [
-            SizedBox.square(
+            const SizedBox.square(
               dimension: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            SizedBox(width: 12),
-            Text('Scanning for cast devices...'),
+            const SizedBox(width: 12),
+            Text(
+              isIos
+                  ? 'Scanning for Chromecast devices...'
+                  : 'Scanning for cast devices...',
+            ),
           ],
         ),
       );
@@ -312,7 +327,11 @@ class _DeviceList extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
         child: Text(
-          'No devices found. Start discovery to search for Chromecast / AirPlay devices.',
+          isIos
+              ? 'No Chromecast devices found. '
+                  'For AirPlay, use the native AirPlay button above.'
+              : 'No devices found. Start discovery to search for '
+                  'Chromecast / AirPlay devices.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       );
@@ -348,7 +367,8 @@ class _DeviceList extends StatelessWidget {
 }
 
 class _CastNote extends StatelessWidget {
-  const _CastNote();
+  final bool isIos;
+  const _CastNote({this.isIos = false});
 
   @override
   Widget build(BuildContext context) {
@@ -362,11 +382,19 @@ class _CastNote extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        'Chromecast: requires Google Play Services + Chromecast on same Wi-Fi.\n'
-        'AirPlay: requires physical Apple TV or AirPlay display on same Wi-Fi.\n'
-        'API: startCastDiscovery() / connectToCastDevice(device) / '
-        'connectAndLoadMedia(device) / disconnectFromCastDevice().\n'
-        'Monitor via castStatusStream / castDevicesStream.',
+        isIos
+            ? 'AirPlay (iOS): tap the AirPlay button above — Apple only exposes '
+                'device discovery through the native AVRoutePickerView. '
+                'startCastDiscovery() does not enumerate AirPlay devices by design.\n'
+                'Chromecast: requires Google Play Services + Chromecast on same Wi-Fi.\n'
+                'API: startCastDiscovery() / connectToCastDevice(device) / '
+                'connectAndLoadMedia(device) / disconnectFromCastDevice().\n'
+                'Monitor via castStatusStream / castDevicesStream.'
+            : 'Chromecast: requires Google Play Services + Chromecast on same Wi-Fi.\n'
+                'AirPlay: requires physical Apple TV or AirPlay display on same Wi-Fi.\n'
+                'API: startCastDiscovery() / connectToCastDevice(device) / '
+                'connectAndLoadMedia(device) / disconnectFromCastDevice().\n'
+                'Monitor via castStatusStream / castDevicesStream.',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     );
