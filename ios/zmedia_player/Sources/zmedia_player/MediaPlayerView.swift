@@ -55,6 +55,24 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
     //                                             → activePlayerView?.playerLayer
     var playerLayer: AVPlayerLayer { container.playerLayer }
 
+    /// Invoked from `deinit` (main thread) so the owning `MediaPlayerInstance`
+    /// can promote the next-topmost view to be the sole active render target.
+    ///
+    /// Without this, disposing the active host (e.g. leaving fullscreen, or the
+    /// inline→MiniPlayer swap) would leave every remaining `AVPlayerLayer`
+    /// detached — a grey surface — because nothing re-binds the shared
+    /// `AVPlayer` to a surviving layer.
+    var onDeinit: (() -> Void)?
+
+    /// True while this view's layer is the one bound to the shared `AVPlayer`.
+    ///
+    /// Only the active view may re-attach on foreground (see
+    /// `handleAppDidBecomeActive`); inactive views must stay unbound so a
+    /// single `AVPlayer` never drives more than one `AVPlayerLayer` at a time
+    /// (multiple simultaneous layers on one player is undefined behaviour and
+    /// renders grey).
+    private(set) var isActiveRenderTarget = false
+
     private let container: PlayerContainerView
 
     private var player: AVPlayer? {
@@ -86,9 +104,29 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         print("MediaPlayerView.init(): Configured — player: \(player != nil)")
     }
 
+    // MARK: - Active-render-target binding
+
+    /// Binds the shared `AVPlayer` to THIS view's layer and marks it active.
+    /// Call on the most-recently-created (topmost) host only.
+    func activate(with player: AVPlayer?) {
+        isActiveRenderTarget = true
+        updatePlayer(player)
+    }
+
+    /// Unbinds the shared `AVPlayer` from this view's layer so it stops being a
+    /// render target. Leaves the container in the tree (Flutter still owns it)
+    /// but with no player — preventing the multi-layer grey.
+    func deactivate() {
+        isActiveRenderTarget = false
+        updatePlayer(nil)
+    }
+
     /// Forces the AVPlayerLayer to re-render after returning from background /
     /// device standby (otherwise the layer can come back grey/blank).
     @objc private func handleAppDidBecomeActive() {
+        // Only the active render target may re-grab the player on foreground;
+        // inactive views must stay unbound (single-layer-per-player rule).
+        guard isActiveRenderTarget else { return }
         guard let activePlayer = container.playerLayer.player else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -180,6 +218,9 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         NotificationCenter.default.removeObserver(self)
         container.playerLayer.player = nil
         player = nil
+        // Let the instance promote the next-topmost view to active so the
+        // shared AVPlayer keeps a live layer after this host is torn down.
+        onDeinit?()
     }
 }
 
