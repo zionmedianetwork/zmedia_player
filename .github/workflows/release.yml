@@ -77,11 +77,28 @@ jobs:
         id: current_version
         run: |
           set -e  # Exit on error
-          CURRENT_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+
+          # Source of truth for "what was last released" is the latest git TAG,
+          # NOT pubspec.yaml on main. The version-bump PR back to main is gated by
+          # branch protection + auto-merge prereqs and frequently does not land, so
+          # main's pubspec.yaml lags several releases behind (and the auto path then
+          # recomputes a version that collides with an existing tag). Tags are
+          # always pushed successfully, so they are the reliable baseline. Use a
+          # semver sort across ALL tags — the newest release tag is often on an
+          # unmerged release/* branch, so it is NOT reachable via `git describe`.
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -n1)
+          if [ -n "$LATEST_TAG" ]; then
+            CURRENT_VERSION="${LATEST_TAG#v}"
+            echo "Current version from latest tag $LATEST_TAG: $CURRENT_VERSION"
+          else
+            # First release ever — fall back to pubspec.yaml.
+            CURRENT_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
+            echo "No tags yet — current version from pubspec.yaml: $CURRENT_VERSION"
+          fi
 
           # Validate version format (MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-prerelease)
           if ! echo "$CURRENT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "❌ Error: Invalid version format in pubspec.yaml: $CURRENT_VERSION"
+            echo "❌ Error: Invalid version format: $CURRENT_VERSION"
             echo "Expected format: MAJOR.MINOR.PATCH (e.g., 1.2.3 or 1.2.3-beta.1)"
             exit 1
           fi
@@ -92,12 +109,15 @@ jobs:
       - name: Get latest tag
         id: latest_tag
         run: |
-          # Check if any tags exist
-          if git describe --tags --abbrev=0 2>/dev/null; then
-            LATEST_TAG=$(git describe --tags --abbrev=0)
+          # Highest release tag by semver across ALL refs. NOT `git describe`,
+          # which only finds tags reachable from HEAD (main) — the newest release
+          # tag usually lives on an unmerged release/* branch, so `git describe`
+          # would return a much older tag (e.g. v0.1.0) and make the changelog
+          # range + compare link span far too much history.
+          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -n1)
+          if [ -n "$LATEST_TAG" ]; then
             HAS_TAGS="true"
           else
-            LATEST_TAG=""
             HAS_TAGS="false"
             echo "No previous tags found - this will be the first release"
           fi
