@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  PlayerView backed by a TextureView instead of the default SurfaceView.
+
+  Hybrid Composition mounts/disposes this platform view repeatedly for a single
+  shared ExoPlayer (inline <-> MiniPlayer <-> fullscreen swaps, tab changes and
+  live recovery reloads). A SurfaceView owns a dedicated SurfaceFlinger layer +
+  BufferQueue that is NOT reliably freed on dispose, so the churn leaks graphics
+  buffers until SurfaceFlinger / system_server is exhausted ("System UI has
+  stopped"). A TextureView renders into the normal view hierarchy, is released
+  with the view, and is the recommended surface type under Hybrid Composition.
+-->
+<com.google.android.exoplayer2.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/zmedia_player_view"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black"
+    app:surface_type="texture_view"
+    app:use_controller="false"
+    app:use_artwork="false"
+    app:resize_mode="fit"
+    app:keep_content_on_player_reset="true" />

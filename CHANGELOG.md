@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Grey video surface and Android "System UI has stopped" after prolonged use
+  resolved — both were the same root cause: one shared player driving multiple
+  native render surfaces as the host app mounts the player at up to three sites
+  (inline / MiniPlayer / fullscreen) for a single controller and swaps between
+  them on tab changes, fullscreen enter/exit and live recovery reloads.
+  - iOS: each `UiKitView` host created its own `AVPlayerLayer` bound to the same
+    `AVPlayer`, and every layer was re-bound on load/ready. A single `AVPlayer`
+    driving more than one `AVPlayerLayer` is undefined behaviour on iOS and
+    leaves the losing layer(s) grey — an orphan the host app cannot clear by
+    navigating. `MediaPlayerInstance` now enforces a single active layer:
+    `activateTopmostView()` binds only the most-recently-created (topmost) view
+    and unbinds all others; `MediaPlayerView.onDeinit` promotes the next view
+    when a host is torn down; and `handleAppDidBecomeActive` only re-attaches on
+    the active view. (The prior standby re-attach only covered background→
+    foreground, not reparent churn.)
+  - Android: the platform view was a programmatic `PlayerView` (defaulting to a
+    `SurfaceView`), whose dedicated SurfaceFlinger layer + BufferQueue was not
+    reliably released on `dispose()`. Repeated create/dispose leaked graphics
+    buffers until SurfaceFlinger / `system_server` was exhausted. The view is
+    now inflated from `res/layout/zmedia_player_view.xml` with
+    `app:surface_type="texture_view"`, and `dispose()` detaches the player and
+    removes the view from its parent so the `TextureView` surface is freed
+    immediately.
 - Chromecast discovery never finding devices resolved: `MediaPlayer` never invoked
   the `initializeCast` method channel, so the native `CastHandler` was never created
   on the `MediaController`/`MediaPlayer` path (only the separate `CastService` called

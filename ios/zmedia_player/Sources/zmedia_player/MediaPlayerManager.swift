@@ -291,6 +291,32 @@ class MediaPlayerInstance: NSObject {
         }
     }
 
+    /// Enforces the single-active-layer rule: exactly ONE live view (the
+    /// most-recently-created / topmost host) is bound to the shared `AVPlayer`;
+    /// every other live view is unbound.
+    ///
+    /// A single `AVPlayer` driving more than one `AVPlayerLayer` at a time is
+    /// undefined behaviour on iOS and renders the losing layer(s) grey. The app
+    /// mounts the player at up to three hosts (inline / MiniPlayer / fullscreen)
+    /// for one controller and swaps between them on tab-change, fullscreen
+    /// enter/exit and recovery reloads, so this must run whenever the set of
+    /// live views or the current item changes.
+    private func activateTopmostView() {
+        // Prune dead weak refs first.
+        playerViews = playerViews.filter { $0.view != nil }
+        guard let active = playerViews.last?.view else { return }
+        for ref in playerViews {
+            guard let v = ref.view else { continue }
+            if v === active {
+                if !v.isActiveRenderTarget || v.playerLayer.player == nil {
+                    v.activate(with: avPlayer)
+                }
+            } else if v.isActiveRenderTarget || v.playerLayer.player != nil {
+                v.deactivate()
+            }
+        }
+    }
+
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
     private var rateObserver: NSKeyValueObservation?
@@ -506,11 +532,12 @@ class MediaPlayerInstance: NSObject {
 
             print("MediaPlayerInstance.loadMediaItem(): Item replaced, player: \(self.avPlayer != nil)")
 
-            // Force update ALL live player views with the current player
+            // Re-bind ONLY the topmost live view to the (new) current item;
+            // every other view stays unbound (single-layer-per-player rule).
             let liveCount = self.playerViews.filter { $0.view != nil }.count
             if liveCount > 0 {
-                print("MediaPlayerInstance.loadMediaItem(): Updating \(liveCount) live player view(s)")
-                self.forEachLiveView { $0.updatePlayer(self.avPlayer) }
+                print("MediaPlayerInstance.loadMediaItem(): Re-activating topmost of \(liveCount) live view(s)")
+                self.activateTopmostView()
             } else {
                 print("MediaPlayerInstance.loadMediaItem(): No player views exist yet")
             }
@@ -710,15 +737,25 @@ class MediaPlayerInstance: NSObject {
         print("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil), has item: \(avPlayer?.currentItem != nil)")
         let newView = MediaPlayerView(player: avPlayer)
 
+        // Promote the next-topmost view when this host is torn down so the
+        // shared AVPlayer never ends up without a bound layer (grey surface).
+        newView.onDeinit = { [weak self] in
+            guard let self = self else { return }
+            if Thread.isMainThread {
+                self.activateTopmostView()
+            } else {
+                DispatchQueue.main.async { self.activateTopmostView() }
+            }
+        }
+
         // Track weakly — Flutter (UiKitView host) owns the strong reference.
         playerViews.append(WeakPlayerView(view: newView))
 
-        // If the player already has a current item, ensure the fresh view shows it.
-        if avPlayer?.currentItem != nil {
-            print("MediaPlayerInstance.getPlayerView(): Player already has item, scheduling update on new view")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak newView, weak self] in
-                newView?.updatePlayer(self?.avPlayer)
-            }
+        // The freshly-created host is now the topmost: bind the shared AVPlayer
+        // to it and unbind every other live view (single-layer-per-player).
+        // Deferred a frame so the UiKitView is laid out before the first bind.
+        DispatchQueue.main.async { [weak self] in
+            self?.activateTopmostView()
         }
 
         return newView
@@ -867,12 +904,12 @@ class MediaPlayerInstance: NSObject {
             notifyStateChanged(state: "ready", isBuffering: false)
             notifyDurationChanged()
 
-            // Force ALL live player views to update when ready
-            let player = self.avPlayer
+            // Re-bind only the topmost live view when ready (others stay
+            // unbound to avoid multiple layers on one AVPlayer → grey).
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                print("MediaPlayerInstance: Forcing all live player views update on ready state")
-                self.forEachLiveView { $0.updatePlayer(player) }
+                print("MediaPlayerInstance: Re-activating topmost live view on ready state")
+                self.activateTopmostView()
             }
         case .failed:
             print("MediaPlayerInstance: Player failed with error: \(avPlayer?.error?.localizedDescription ?? "Unknown")")
