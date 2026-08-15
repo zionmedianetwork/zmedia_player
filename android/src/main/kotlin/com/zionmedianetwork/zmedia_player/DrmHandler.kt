@@ -105,7 +105,10 @@ class DrmHandler(
             return drmSessionManager
 
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to create DRM session manager: ${e.message}", e)
+            // e.message may embed the license/media URL (including auth token query
+            // params) surfaced by the underlying DRM/network stack. Log.e survives
+            // release ProGuard stripping, so redact before logging (see H-03).
+            Log.e(TAG, "Failed to create DRM session manager: ${LogSanitizer.redactUrls(e.message)}", e)
             notifyDrmError("Failed to initialize DRM: ${e.message}")
             return null
         }

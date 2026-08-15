@@ -645,16 +645,16 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        print("ZMediaPlayerPlugin: checkPipAvailability called for player: \(playerId)")
+        zlog("ZMediaPlayerPlugin: checkPipAvailability called for player: \(playerId)")
 
         // Get or create PiP handler
         var handler = pipHandlers[playerId]
         if handler == nil {
-            print("ZMediaPlayerPlugin: Creating new PiP handler for \(playerId)")
+            zlog("ZMediaPlayerPlugin: Creating new PiP handler for \(playerId)")
             handler = PipHandler(playerId: playerId, channel: methodChannel)
             pipHandlers[playerId] = handler
         } else {
-            print("ZMediaPlayerPlugin: Using existing PiP handler for \(playerId)")
+            zlog("ZMediaPlayerPlugin: Using existing PiP handler for \(playerId)")
         }
 
         let pipConfig = args["config"] as? [String: Any]
@@ -662,23 +662,23 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         // Always re-initialize with current player and player layer (in case media changed)
         do {
             if let player = try playerManager.getPlayer(playerId: playerId) {
-                print("ZMediaPlayerPlugin: Got player: \(player)")
+                zlog("ZMediaPlayerPlugin: Got player: \(player)")
 
                 if let playerLayer = try playerManager.getPlayerLayer(playerId: playerId) {
-                    print("ZMediaPlayerPlugin: Got player layer: \(playerLayer)")
+                    zlog("ZMediaPlayerPlugin: Got player layer: \(playerLayer)")
                     handler?.initialize(player: player, playerLayer: playerLayer, config: pipConfig)
                 } else {
-                    print("ZMediaPlayerPlugin: WARNING - Could not get player layer")
+                    zlog("ZMediaPlayerPlugin: WARNING - Could not get player layer")
                 }
             } else {
-                print("ZMediaPlayerPlugin: WARNING - Could not get player")
+                zlog("ZMediaPlayerPlugin: WARNING - Could not get player")
             }
         } catch {
-            print("ZMediaPlayerPlugin: ERROR getting player/layer: \(error)")
+            zlog("ZMediaPlayerPlugin: ERROR getting player/layer: \(error)")
         }
 
         let isAvailable = handler?.checkAvailability() ?? false
-        print("ZMediaPlayerPlugin: PiP availability result: \(isAvailable)")
+        zlog("ZMediaPlayerPlugin: PiP availability result: \(isAvailable)")
         result(isAvailable)
     }
 

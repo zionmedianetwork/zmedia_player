@@ -110,13 +110,17 @@ class CacheService {
 
     if (!_config.enabled) return;
 
+    // M-08: sanitize before it becomes part of a filename — see
+    // _sanitizeMediaIdForFilename.
+    final safeMediaId = _sanitizeMediaIdForFilename(mediaId);
+
     try {
       // Check if we need to make space
       await _ensureCacheSpace(data.length);
 
       // Generate unique filename
       final fileName =
-          '${mediaId}_${DateTime.now().millisecondsSinceEpoch}.cache';
+          '${safeMediaId}_${DateTime.now().millisecondsSinceEpoch}.cache';
       final file = File(path.join(_cacheDir.path, fileName));
 
       // Write data to file
@@ -324,6 +328,34 @@ class CacheService {
     }
   }
 
+  /// M-08: sanitizes a caller-supplied media id before it is used to build
+  /// an on-disk cache filename, closing a path-traversal hole where an
+  /// unsanitized id (e.g. `'../../../etc/passwd'`, an absolute path, or one
+  /// containing a null byte) was interpolated directly into a filename that
+  /// [File] would happily resolve outside [_cacheDir].
+  ///
+  /// Only [A-Za-z0-9_-] survive; everything else (path separators, `.`
+  /// — which also kills any `..` traversal segment — drive letters, UNC
+  /// prefixes, null bytes, etc.) is replaced with `_`. This does not change
+  /// the *lookup* key used in [_metadata] (still the original, unsanitized
+  /// [mediaId]) — only what actually becomes part of a filename on disk.
+  static String _sanitizeMediaIdForFilename(String mediaId) {
+    if (mediaId.trim().isEmpty) {
+      throw const CacheException('mediaId cannot be empty');
+    }
+
+    // Reject outright rather than silently stripping: a null byte is a
+    // strong signal of a hostile/corrupted caller (e.g. a classic
+    // path-truncation attack against native filesystem APIs), not merely an
+    // unconventional identifier.
+    if (mediaId.contains('\x00')) {
+      throw const CacheException('mediaId must not contain a null byte');
+    }
+
+    final sanitized = mediaId.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    return sanitized.isEmpty ? '_' : sanitized;
+  }
+
   /// Get app cache directory.
   ///
   /// Honors an explicit [CacheConfig.cacheDirectory] override (already handled
@@ -359,8 +391,11 @@ class CacheService {
     final client = _httpClientFactory();
     _activeDownloads[mediaItem.id] = client;
 
+    // M-08: sanitize before it becomes part of a filename — see
+    // _sanitizeMediaIdForFilename.
+    final safeMediaId = _sanitizeMediaIdForFilename(mediaItem.id);
     final fileName =
-        '${mediaItem.id}_${DateTime.now().millisecondsSinceEpoch}.cache';
+        '${safeMediaId}_${DateTime.now().millisecondsSinceEpoch}.cache';
     final finalFile = File(path.join(_cacheDir.path, fileName));
     final tempFile = File('${finalFile.path}.part');
 

@@ -115,7 +115,7 @@ class DrmHandler: NSObject {
                     delegate: self,
                     delegateQueue: nil
                 )
-                print("DrmHandler: Certificate pinning configured for \(pinnedDomains.count) domain(s)")
+                zlog("DrmHandler: Certificate pinning configured for \(pinnedDomains.count) domain(s)")
             }
         }
 
@@ -146,7 +146,7 @@ class DrmHandler: NSObject {
         // Load FairPlay certificate
         loadCertificate(from: certificateUrl) { [weak self] success in
             if success {
-                print("DrmHandler: FairPlay certificate loaded successfully")
+                zlog("DrmHandler: FairPlay certificate loaded successfully")
                 self?.notifyDrmSessionState(state: "idle")
             } else {
                 self?.notifyDrmError("Failed to load FairPlay certificate")
@@ -185,7 +185,7 @@ class DrmHandler: NSObject {
 
         self.contentKeySession = keySession
 
-        print("DrmHandler: Content key session created")
+        zlog("DrmHandler: Content key session created")
         return keySession
     }
 
@@ -196,13 +196,13 @@ class DrmHandler: NSObject {
     /// the certificate endpoint is not the licence server).
     private func loadCertificate(from urlString: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: urlString) else {
-            print("DrmHandler: Invalid certificate URL")
+            zlog("DrmHandler: Invalid certificate URL")
             resolveCertificateState(.failed(DrmError.invalidCertificateUrl))
             completion(false)
             return
         }
 
-        print("DrmHandler: Loading FairPlay certificate from: \(urlString)")
+        zlog("DrmHandler: Loading FairPlay certificate from: \(redactedURL(urlString))")
 
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -218,20 +218,20 @@ class DrmHandler: NSObject {
             guard let self = self else { return }
 
             if let error = error {
-                print("DrmHandler: Certificate loading error: \(error.localizedDescription)")
+                zlog("DrmHandler: Certificate loading error: \(error.localizedDescription)")
                 self.resolveCertificateState(.failed(error))
                 completion(false)
                 return
             }
 
             guard let data = data, !data.isEmpty else {
-                print("DrmHandler: No certificate data received")
+                zlog("DrmHandler: No certificate data received")
                 self.resolveCertificateState(.failed(DrmError.certificateNotLoaded))
                 completion(false)
                 return
             }
 
-            print("DrmHandler: Certificate loaded successfully (\(data.count) bytes)")
+            zlog("DrmHandler: Certificate loaded successfully (\(data.count) bytes)")
             self.resolveCertificateState(.loaded(data))
             completion(true)
         }
@@ -339,7 +339,7 @@ class DrmHandler: NSObject {
             return
         }
 
-        print("DrmHandler: Requesting license for asset: \(assetId)")
+        zlog("DrmHandler: Requesting license for asset: \(assetId)")
         notifyDrmSessionState(state: "acquiringLicense")
 
         var request = URLRequest(url: url)
@@ -368,20 +368,20 @@ class DrmHandler: NSObject {
             guard let self = self else { return }
 
             if let error = error {
-                print("DrmHandler: License request error: \(error.localizedDescription)")
+                zlog("DrmHandler: License request error: \(error.localizedDescription)")
                 self.notifyDrmError("License request failed: \(error.localizedDescription)")
                 completion(nil, error)
                 return
             }
 
             guard let data = data, !data.isEmpty else {
-                print("DrmHandler: No license data received")
+                zlog("DrmHandler: No license data received")
                 self.notifyDrmError("No license data received")
                 completion(nil, DrmError.noLicenseData)
                 return
             }
 
-            print("DrmHandler: License received successfully (\(data.count) bytes)")
+            zlog("DrmHandler: License received successfully (\(data.count) bytes)")
             self.notifyDrmSessionState(state: "licensed")
             completion(data, nil)
         }
@@ -473,7 +473,7 @@ class DrmHandler: NSObject {
         }
 
         guard let header = spkiHeader else {
-            print("DrmHandler: Unsupported key type '\(String(describing: keyType))' size \(keySize) — pin cannot be computed")
+            zlog("DrmHandler: Unsupported key type '\(String(describing: keyType))' size \(keySize) — pin cannot be computed")
             return nil
         }
 
@@ -534,7 +534,7 @@ class DrmHandler: NSObject {
     /// ``drmSessionStream`` surfaces the failure.  Also emits the legacy
     /// ``onDrmError`` event for any other consumers.
     func notifyDrmError(_ message: String) {
-        print("DrmHandler Error: \(message)")
+        zlog("DrmHandler Error: \(message)")
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
         let sessionPayload = buildDrmSessionPayload(
             state: "error",
@@ -624,7 +624,7 @@ class DrmHandler: NSObject {
         // down mid-flight. No-ops if the certificate already resolved
         // (loaded/failed) — see `resolveCertificateState(_:)`.
         resolveCertificateState(.disposed)
-        print("DrmHandler: Disposed")
+        zlog("DrmHandler: Disposed")
     }
 }
 
@@ -662,7 +662,7 @@ extension DrmHandler: URLSessionDelegate {
 
         // We have pins; validate the server trust ourselves
         guard let serverTrust = challenge.protectionSpace.serverTrust else {
-            print("DrmHandler: No server trust in challenge for '\(host)' — cancelling")
+            zlog("DrmHandler: No server trust in challenge for '\(host)' — cancelling")
             completionHandler(.cancelAuthenticationChallenge, nil)
             return
         }
@@ -673,7 +673,7 @@ extension DrmHandler: URLSessionDelegate {
             var error: CFError?
             let evaluated = SecTrustEvaluateWithError(serverTrust, &error)
             if !evaluated {
-                print("DrmHandler: Trust evaluation failed for '\(host)': \(String(describing: error))")
+                zlog("DrmHandler: Trust evaluation failed for '\(host)': \(String(describing: error))")
                 completionHandler(.cancelAuthenticationChallenge, nil)
                 return
             }
@@ -682,7 +682,7 @@ extension DrmHandler: URLSessionDelegate {
             let status = SecTrustEvaluate(serverTrust, &secResult)
             guard status == errSecSuccess,
                   secResult == .unspecified || secResult == .proceed else {
-                print("DrmHandler: Trust evaluation failed for '\(host)' result=\(secResult.rawValue)")
+                zlog("DrmHandler: Trust evaluation failed for '\(host)' result=\(secResult.rawValue)")
                 completionHandler(.cancelAuthenticationChallenge, nil)
                 return
             }
@@ -694,12 +694,12 @@ extension DrmHandler: URLSessionDelegate {
             guard let cert = SecTrustGetCertificateAtIndex(serverTrust, i) else { continue }
             guard let certHex = spkiSha256Hex(for: cert) else {
                 // Unsupported key type — log and skip (see SPKI note in file header)
-                print("DrmHandler: Could not compute SPKI hash for cert at index \(i) for '\(host)'")
+                zlog("DrmHandler: Could not compute SPKI hash for cert at index \(i) for '\(host)'")
                 continue
             }
 
             if hostPins.contains(certHex) {
-                print("DrmHandler: Pin matched for '\(host)' at chain index \(i)")
+                zlog("DrmHandler: Pin matched for '\(host)' at chain index \(i)")
                 let credential = URLCredential(trust: serverTrust)
                 completionHandler(.useCredential, credential)
                 return
@@ -707,7 +707,7 @@ extension DrmHandler: URLSessionDelegate {
         }
 
         // No pin matched — reject the connection
-        print("DrmHandler: Certificate pin mismatch for '\(host)' — cancelling licence request")
+        zlog("DrmHandler: Certificate pin mismatch for '\(host)' — cancelling licence request")
         notifyDrmError("Certificate pin mismatch for '\(host)' — DRM licence request rejected")
         completionHandler(.cancelAuthenticationChallenge, nil)
     }
@@ -729,7 +729,7 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
         _ session: AVContentKeySession,
         didProvide keyRequest: AVContentKeyRequest
     ) {
-        print("ContentKeyDelegate: Content key requested")
+        zlog("ContentKeyDelegate: Content key requested")
         handleStreamingContentKeyRequest(keyRequest)
     }
 
@@ -737,7 +737,7 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
         _ session: AVContentKeySession,
         didProvideRenewingContentKeyRequest keyRequest: AVContentKeyRequest
     ) {
-        print("ContentKeyDelegate: Renewing content key requested")
+        zlog("ContentKeyDelegate: Renewing content key requested")
         handleStreamingContentKeyRequest(keyRequest)
     }
 
@@ -746,7 +746,7 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
         contentKeyRequest keyRequest: AVContentKeyRequest,
         didFailWithError err: Error
     ) {
-        print("ContentKeyDelegate: Content key request failed: \(err.localizedDescription)")
+        zlog("ContentKeyDelegate: Content key request failed: \(err.localizedDescription)")
         drmHandler?.notifyDrmError("Content key request failed: \(err.localizedDescription)")
     }
 
@@ -793,7 +793,7 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
         contentIdentifier: String,
         certificateData: Data
     ) {
-        print("ContentKeyDelegate: Processing key request for: \(contentIdentifier)")
+        zlog("ContentKeyDelegate: Processing key request for: \(contentIdentifier)")
 
         let contentIdentifierData = contentIdentifier.data(using: .utf8)!
 
@@ -805,7 +805,7 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
             guard let self = self else { return }
 
             if let error = error {
-                print("ContentKeyDelegate: SPC request error: \(error.localizedDescription)")
+                zlog("ContentKeyDelegate: SPC request error: \(error.localizedDescription)")
                 self.drmHandler?.notifyDrmError("SPC request failed: \(error.localizedDescription)")
                 keyRequest.processContentKeyResponseError(error)
                 return
@@ -817,7 +817,7 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
                 return
             }
 
-            print("ContentKeyDelegate: SPC data generated (\(spcData.count) bytes)")
+            zlog("ContentKeyDelegate: SPC data generated (\(spcData.count) bytes)")
 
             self.drmHandler?.requestLicense(
                 spcData: spcData,
@@ -836,7 +836,7 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
                 let keyResponse = AVContentKeyResponse(fairPlayStreamingKeyResponseData: ckcData)
                 keyRequest.processContentKeyResponse(keyResponse)
 
-                print("ContentKeyDelegate: Content key processed successfully")
+                zlog("ContentKeyDelegate: Content key processed successfully")
             }
         }
     }

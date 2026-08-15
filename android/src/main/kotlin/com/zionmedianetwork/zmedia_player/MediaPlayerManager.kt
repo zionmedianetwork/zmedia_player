@@ -342,9 +342,13 @@ class MediaPlayerInstance(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            // error.message frequently embeds the failing request URI (HttpDataSource /
+            // manifest fetch failures), which may carry signed-cookie or DRM token query
+            // params. Log.e is not stripped from release builds (see H-03), so redact it.
             android.util.Log.e(
                 "MediaPlayerInstance",
-                "Player error: ${error.message} (errorCode=${error.errorCode}/${error.errorCodeName})"
+                "Player error: ${LogSanitizer.redactUrls(error.message)} " +
+                    "(errorCode=${error.errorCode}/${error.errorCodeName})"
             )
             val category = categorizeExoPlayerError(error.errorCode)
             val httpStatusCode = extractHttpStatusCode(error)

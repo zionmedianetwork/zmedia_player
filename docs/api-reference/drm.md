@@ -195,14 +195,16 @@ final drmConfig = DrmConfig.fairplay(
 
 **Requirements:**
 - Valid FairPlay Streaming (FPS) certificate from Apple
-- Add to `Info.plist` (automatically handled by plugin):
-  ```xml
-  <key>NSAppTransportSecurity</key>
-  <dict>
-    <key>NSAllowsArbitraryLoads</key>
-    <true/>
-  </dict>
-  ```
+- License, certificate, and media URLs must all use HTTPS — `InputValidator`
+  (`lib/src/security/input_validation.dart`) enforces this in Dart before a
+  DRM-protected `MediaItem` ever reaches native code, rejecting anything
+  else. Because of that, FairPlay content needs **no** App Transport
+  Security changes in `Info.plist`: you do not need
+  `NSAllowsArbitraryLoads`, and this plugin does not read, add, or modify
+  `Info.plist` on your behalf — that claim in earlier versions of this doc
+  was incorrect. If your app *also* serves non-DRM content over plain HTTP
+  elsewhere, see the ATS guidance in `docs/implementation/security.md`
+  instead of disabling ATS globally.
 
 ---
 

@@ -284,12 +284,19 @@
     *;
 }
 
-# Remove logging in release builds (optional - comment out to keep logs)
-# -assumenosideeffects class android.util.Log {
-#     public static *** d(...);
-#     public static *** v(...);
-#     public static *** i(...);
-# }
+# Remove verbose/debug/info logging in release builds (H-03). Debug-level log
+# lines throughout the plugin interpolate media/manifest/artwork URLs, which
+# may carry signed-cookie or DRM auth tokens in their query strings — those
+# must never reach a release build's logcat output. Log.e/Log.w are
+# deliberately NOT stripped here (crash diagnostics still need them); call
+# sites that log exception messages which may embed a URL route them through
+# LogSanitizer.redactUrls() instead (see CrashHandler, DrmHandler,
+# MediaPlayerManager, NotificationHandler, CastHandler).
+-assumenosideeffects class android.util.Log {
+    public static *** d(...);
+    public static *** v(...);
+    public static *** i(...);
+}
 
 # ============================================================================
 # Warnings to Suppress

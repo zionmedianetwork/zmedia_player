@@ -34,9 +34,9 @@ class PipHandler: NSObject {
     // MARK: - Initialization
 
     func initialize(player: AVPlayer?, playerLayer: AVPlayerLayer?, config: [String: Any]? = nil) {
-        print("PipHandler: Initializing for player: \(playerId)")
-        print("PipHandler: Received player: \(player != nil)")
-        print("PipHandler: Received playerLayer: \(playerLayer != nil)")
+        zlog("PipHandler: Initializing for player: \(playerId)")
+        zlog("PipHandler: Received player: \(player != nil)")
+        zlog("PipHandler: Received playerLayer: \(playerLayer != nil)")
 
         // Persist config when provided so autoEnterOnBackground is available on
         // every code path, including the unchanged-layer branch below.
@@ -48,7 +48,7 @@ class PipHandler: NSObject {
         if self.player == nil {
             let deviceModel = UIDevice.current.model
             let systemVersion = UIDevice.current.systemVersion
-            print("PipHandler: Device: \(deviceModel), iOS: \(systemVersion)")
+            zlog("PipHandler: Device: \(deviceModel), iOS: \(systemVersion)")
         }
 
         // Update references
@@ -67,18 +67,18 @@ class PipHandler: NSObject {
             // This is necessary for AVPictureInPictureController to recognize it
             if let layer = playerLayer {
                 layer.player = player
-                print("PipHandler: Explicitly set player on layer")
+                zlog("PipHandler: Explicitly set player on layer")
             }
 
-            print("PipHandler: Configured player for PiP playback")
+            zlog("PipHandler: Configured player for PiP playback")
         }
 
         // Check if PiP is supported
         let isSupported = AVPictureInPictureController.isPictureInPictureSupported()
-        print("PipHandler: AVPictureInPictureController.isPictureInPictureSupported() = \(isSupported)")
+        zlog("PipHandler: AVPictureInPictureController.isPictureInPictureSupported() = \(isSupported)")
 
         guard isSupported else {
-            print("PipHandler: Picture-in-Picture not supported on this device")
+            zlog("PipHandler: Picture-in-Picture not supported on this device")
             notifyPipStatusChanged(
                 state: "unavailable",
                 isSupported: false,
@@ -92,17 +92,17 @@ class PipHandler: NSObject {
         if let playerLayer = playerLayer {
             // Only recreate controller if layer changed or controller doesn't exist
             if pipController == nil || layerChanged {
-                print("PipHandler: Setting up PiP controller with player layer (changed: \(layerChanged))")
+                zlog("PipHandler: Setting up PiP controller with player layer (changed: \(layerChanged))")
                 setupPipController(with: playerLayer)
             } else {
-                print("PipHandler: PiP controller already exists and layer unchanged")
+                zlog("PipHandler: PiP controller already exists and layer unchanged")
 
                 // Re-apply autoEnterOnBackground in case config was updated without
                 // a layer change (setupPipController is skipped on this branch).
                 if #available(iOS 14.2, *), let controller = pipController {
                     let autoEnter = (self.config?["autoEnterOnBackground"] as? Bool) ?? false
                     controller.canStartPictureInPictureAutomaticallyFromInline = autoEnter
-                    print("PipHandler: Re-applied autoEnterOnBackground=\(autoEnter) on unchanged-layer path")
+                    zlog("PipHandler: Re-applied autoEnterOnBackground=\(autoEnter) on unchanged-layer path")
                 }
 
                 // Still notify available status
@@ -113,7 +113,7 @@ class PipHandler: NSObject {
                 )
             }
         } else {
-            print("PipHandler: WARNING - No player layer provided, cannot setup PiP controller")
+            zlog("PipHandler: WARNING - No player layer provided, cannot setup PiP controller")
             notifyPipStatusChanged(
                 state: "unavailable",
                 isSupported: true,
@@ -122,14 +122,14 @@ class PipHandler: NSObject {
             )
         }
 
-        print("PipHandler: Initialization complete")
+        zlog("PipHandler: Initialization complete")
     }
 
     // MARK: - PiP Controller Setup
 
     private func setupPipController(with playerLayer: AVPlayerLayer) {
         guard AVPictureInPictureController.isPictureInPictureSupported() else {
-            print("PipHandler: Cannot setup PiP controller - not supported")
+            zlog("PipHandler: Cannot setup PiP controller - not supported")
             return
         }
 
@@ -153,9 +153,9 @@ class PipHandler: NSObject {
                 isActive: false
             )
 
-            print("PipHandler: PiP controller created successfully")
+            zlog("PipHandler: PiP controller created successfully")
         } catch {
-            print("PipHandler: Failed to create PiP controller: \(error.localizedDescription)")
+            zlog("PipHandler: Failed to create PiP controller: \(error.localizedDescription)")
             notifyPipStatusChanged(
                 state: "unavailable",
                 isSupported: false,
@@ -183,9 +183,9 @@ class PipHandler: NSObject {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
-            print("PipHandler: Audio session category configured for PiP (activation is owned by AudioSessionCoordinator)")
+            zlog("PipHandler: Audio session category configured for PiP (activation is owned by AudioSessionCoordinator)")
         } catch {
-            print("PipHandler: Failed to configure audio session category: \(error.localizedDescription)")
+            zlog("PipHandler: Failed to configure audio session category: \(error.localizedDescription)")
         }
     }
 
@@ -193,13 +193,13 @@ class PipHandler: NSObject {
 
     func checkAvailability() -> Bool {
         let isSupported = AVPictureInPictureController.isPictureInPictureSupported()
-        print("PipHandler: PiP system support check: \(isSupported)")
-        print("PipHandler: Has player: \(player != nil)")
-        print("PipHandler: Has playerLayer: \(playerLayer != nil)")
-        print("PipHandler: Has pipController: \(pipController != nil)")
+        zlog("PipHandler: PiP system support check: \(isSupported)")
+        zlog("PipHandler: Has player: \(player != nil)")
+        zlog("PipHandler: Has playerLayer: \(playerLayer != nil)")
+        zlog("PipHandler: Has pipController: \(pipController != nil)")
 
         if let controller = pipController {
-            print("PipHandler: PiP controller isPictureInPicturePossible: \(controller.isPictureInPicturePossible)")
+            zlog("PipHandler: PiP controller isPictureInPicturePossible: \(controller.isPictureInPicturePossible)")
         }
 
         notifyPipStatusChanged(
@@ -219,26 +219,26 @@ class PipHandler: NSObject {
     ///   BOTH retry points below (controller creation and layer-readiness),
     ///   so the total wait is bounded regardless of which stage is slow.
     func enterPip(config: [String: Any]?, attempt: Int = 0) -> Bool {
-        print("PipHandler: Attempting to enter PiP mode (attempt \(attempt))")
+        zlog("PipHandler: Attempting to enter PiP mode (attempt \(attempt))")
 
         guard AVPictureInPictureController.isPictureInPictureSupported() else {
-            print("PipHandler: Cannot enter PiP - not supported")
+            zlog("PipHandler: Cannot enter PiP - not supported")
             return false
         }
 
         self.config = config
 
         // Verify player state
-        print("PipHandler: Player status check:")
-        print("  - Has player: \(player != nil)")
-        print("  - Has player layer: \(playerLayer != nil)")
-        print("  - Player has current item: \(player?.currentItem != nil)")
-        print("  - Player item status: \(player?.currentItem?.status.rawValue ?? -1)")
-        print("  - Player rate: \(player?.rate ?? 0)")
+        zlog("PipHandler: Player status check:")
+        zlog("  - Has player: \(player != nil)")
+        zlog("  - Has player layer: \(playerLayer != nil)")
+        zlog("  - Player has current item: \(player?.currentItem != nil)")
+        zlog("  - Player item status: \(player?.currentItem?.status.rawValue ?? -1)")
+        zlog("  - Player rate: \(player?.rate ?? 0)")
 
         // Ensure player has a valid item and is ready
         guard let playerItem = player?.currentItem else {
-            print("PipHandler: Cannot enter PiP - no current player item")
+            zlog("PipHandler: Cannot enter PiP - no current player item")
             notifyPipStatusChanged(
                 state: "failed",
                 isSupported: true,
@@ -250,7 +250,7 @@ class PipHandler: NSObject {
 
         // Check if player item is ready
         guard playerItem.status == .readyToPlay else {
-            print("PipHandler: Cannot enter PiP - player item not ready (status: \(playerItem.status.rawValue))")
+            zlog("PipHandler: Cannot enter PiP - player item not ready (status: \(playerItem.status.rawValue))")
             notifyPipStatusChanged(
                 state: "failed",
                 isSupported: true,
@@ -263,17 +263,17 @@ class PipHandler: NSObject {
         // Ensure player layer's player is set (critical for PiP)
         if let layer = playerLayer, let p = player {
             layer.player = p
-            print("PipHandler: Ensured player is set on layer before PiP attempt")
+            zlog("PipHandler: Ensured player is set on layer before PiP attempt")
         }
 
         // Create PiP controller if not exists
         if pipController == nil {
             if let playerLayer = playerLayer {
-                print("PipHandler: Creating PiP controller...")
+                zlog("PipHandler: Creating PiP controller...")
                 setupPipController(with: playerLayer)
 
                 guard attempt < PipHandler.maxPipEnterAttempts else {
-                    print("PipHandler: Gave up waiting for PiP controller to become ready after \(PipHandler.maxPipEnterAttempts) attempts")
+                    zlog("PipHandler: Gave up waiting for PiP controller to become ready after \(PipHandler.maxPipEnterAttempts) attempts")
                     notifyPipStatusChanged(
                         state: "failed",
                         isSupported: true,
@@ -298,7 +298,7 @@ class PipHandler: NSObject {
 
                 return false
             } else {
-                print("PipHandler: Cannot enter PiP - no player layer available")
+                zlog("PipHandler: Cannot enter PiP - no player layer available")
                 notifyPipStatusChanged(
                     state: "unavailable",
                     isSupported: true,
@@ -310,20 +310,20 @@ class PipHandler: NSObject {
         }
 
         guard let pipController = pipController else {
-            print("PipHandler: Cannot enter PiP - controller not available")
+            zlog("PipHandler: Cannot enter PiP - controller not available")
             return false
         }
 
-        print("PipHandler: PiP controller exists")
-        print("PipHandler: Player layer frame: \(playerLayer?.frame ?? .zero)")
-        print("PipHandler: Player layer superlayer: \(playerLayer?.superlayer != nil)")
-        print("PipHandler: Player layer isReadyForDisplay: \(playerLayer?.isReadyForDisplay ?? false)")
-        print("PipHandler: isPictureInPicturePossible = \(pipController.isPictureInPicturePossible)")
+        zlog("PipHandler: PiP controller exists")
+        zlog("PipHandler: Player layer frame: \(playerLayer?.frame ?? .zero)")
+        zlog("PipHandler: Player layer superlayer: \(playerLayer?.superlayer != nil)")
+        zlog("PipHandler: Player layer isReadyForDisplay: \(playerLayer?.isReadyForDisplay ?? false)")
+        zlog("PipHandler: isPictureInPicturePossible = \(pipController.isPictureInPicturePossible)")
 
         // Check if player layer is ready for display
         if let layer = playerLayer, !layer.isReadyForDisplay {
             guard attempt < PipHandler.maxPipEnterAttempts else {
-                print("PipHandler: Gave up waiting for player layer to become ready for display after \(PipHandler.maxPipEnterAttempts) attempts")
+                zlog("PipHandler: Gave up waiting for player layer to become ready for display after \(PipHandler.maxPipEnterAttempts) attempts")
                 notifyPipStatusChanged(
                     state: "failed",
                     isSupported: true,
@@ -333,7 +333,7 @@ class PipHandler: NSObject {
                 return false
             }
 
-            print("PipHandler: Player layer not ready for display yet, will retry asynchronously")
+            zlog("PipHandler: Player layer not ready for display yet, will retry asynchronously")
 
             // Schedule async retry instead of blocking
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -353,13 +353,13 @@ class PipHandler: NSObject {
 
         // Re-check if PiP is possible after waiting
         let isPossible = pipController.isPictureInPicturePossible
-        print("PipHandler: Final isPictureInPicturePossible check: \(isPossible)")
+        zlog("PipHandler: Final isPictureInPicturePossible check: \(isPossible)")
 
         guard isPossible else {
-            print("PipHandler: Cannot enter PiP - not possible at this time")
-            print("PipHandler: Diagnostics:")
-            print("  - Player layer isReadyForDisplay: \(playerLayer?.isReadyForDisplay ?? false)")
-            print("  - Player layer has presentation: \(playerLayer?.presentation() != nil)")
+            zlog("PipHandler: Cannot enter PiP - not possible at this time")
+            zlog("PipHandler: Diagnostics:")
+            zlog("  - Player layer isReadyForDisplay: \(playerLayer?.isReadyForDisplay ?? false)")
+            zlog("  - Player layer has presentation: \(playerLayer?.presentation() != nil)")
 
             notifyPipStatusChanged(
                 state: "failed",
@@ -372,24 +372,24 @@ class PipHandler: NSObject {
 
         // Start PiP
         pipController.startPictureInPicture()
-        print("PipHandler: PiP start requested")
+        zlog("PipHandler: PiP start requested")
 
         return true
     }
 
     func exitPip() {
-        print("PipHandler: Exiting PiP mode")
+        zlog("PipHandler: Exiting PiP mode")
 
         guard let pipController = pipController else {
-            print("PipHandler: Cannot exit PiP - controller not available")
+            zlog("PipHandler: Cannot exit PiP - controller not available")
             return
         }
 
         if pipController.isPictureInPictureActive {
             pipController.stopPictureInPicture()
-            print("PipHandler: PiP stop requested")
+            zlog("PipHandler: PiP stop requested")
         } else {
-            print("PipHandler: PiP is not active")
+            zlog("PipHandler: PiP is not active")
         }
     }
 
@@ -437,7 +437,7 @@ class PipHandler: NSObject {
     // MARK: - Cleanup
 
     func dispose() {
-        print("PipHandler: Disposing")
+        zlog("PipHandler: Disposing")
 
         // Stop PiP if active
         if isInPipMode {
@@ -462,7 +462,7 @@ class PipHandler: NSObject {
 extension PipHandler: AVPictureInPictureControllerDelegate {
 
     func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        print("PipHandler: Will start Picture-in-Picture")
+        zlog("PipHandler: Will start Picture-in-Picture")
 
         notifyPipStatusChanged(
             state: "active",
@@ -472,7 +472,7 @@ extension PipHandler: AVPictureInPictureControllerDelegate {
     }
 
     func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        print("PipHandler: Did start Picture-in-Picture")
+        zlog("PipHandler: Did start Picture-in-Picture")
 
         isInPipMode = true
 
@@ -487,7 +487,7 @@ extension PipHandler: AVPictureInPictureControllerDelegate {
         _ pictureInPictureController: AVPictureInPictureController,
         failedToStartPictureInPictureWithError error: Error
     ) {
-        print("PipHandler: Failed to start Picture-in-Picture: \(error.localizedDescription)")
+        zlog("PipHandler: Failed to start Picture-in-Picture: \(error.localizedDescription)")
 
         isInPipMode = false
 
@@ -500,7 +500,7 @@ extension PipHandler: AVPictureInPictureControllerDelegate {
     }
 
     func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        print("PipHandler: Will stop Picture-in-Picture")
+        zlog("PipHandler: Will stop Picture-in-Picture")
 
         notifyPipStatusChanged(
             state: "exiting",
@@ -510,7 +510,7 @@ extension PipHandler: AVPictureInPictureControllerDelegate {
     }
 
     func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-        print("PipHandler: Did stop Picture-in-Picture")
+        zlog("PipHandler: Did stop Picture-in-Picture")
 
         isInPipMode = false
 
@@ -523,7 +523,7 @@ extension PipHandler: AVPictureInPictureControllerDelegate {
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
                 restoreUserInterfaceForPictureInPictureStopWithCompletionHandler completionHandler: @escaping (Bool) -> Void) {
-        print("PipHandler: Restore user interface for Picture-in-Picture stop")
+        zlog("PipHandler: Restore user interface for Picture-in-Picture stop")
 
         // Restore the player UI when returning from PiP
         // The app should restore its UI to show the video player
@@ -538,7 +538,7 @@ extension PipHandler: AVPictureInPictureControllerDelegate {
         _ pictureInPictureController: AVPictureInPictureController,
         restoreUserInterfaceForPictureInPictureStop completionHandler: @escaping (Bool) -> Void
     ) {
-        print("PipHandler: Restore user interface for Picture-in-Picture stop (iOS 14+)")
+        zlog("PipHandler: Restore user interface for Picture-in-Picture stop (iOS 14+)")
 
         // Restore the player UI when returning from PiP
         completionHandler(true)
@@ -556,7 +556,7 @@ extension PipHandler {
         if #available(iOS 14.2, *) {
             let autoStart = config["autoEnterOnBackground"] as? Bool ?? false
             pipController?.canStartPictureInPictureAutomaticallyFromInline = autoStart
-            print("PipHandler: Updated auto-start configuration: \(autoStart)")
+            zlog("PipHandler: Updated auto-start configuration: \(autoStart)")
         }
     }
 
@@ -564,7 +564,7 @@ extension PipHandler {
     @available(iOS 14.2, *)
     func setAutoStartEnabled(_ enabled: Bool) {
         pipController?.canStartPictureInPictureAutomaticallyFromInline = enabled
-        print("PipHandler: Auto-start enabled: \(enabled)")
+        zlog("PipHandler: Auto-start enabled: \(enabled)")
     }
 
     /// Check if PiP controller requires linear playback

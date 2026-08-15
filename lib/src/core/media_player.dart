@@ -42,6 +42,29 @@ enum PlayerPauseReason {
   audioFocusLoss,
 }
 
+/// M-09: strips the query string and fragment from [url] before it is
+/// handed to the crash reporter (custom keys / error context). Signed
+/// cookies and auth tokens for authenticated media/license URLs commonly
+/// live in the query string, and crash reports are frequently stored and
+/// transmitted by a third-party service outside this app's control — so
+/// the full URL must never reach it.
+///
+/// Deliberately does plain substring truncation at the first `?`/`#`
+/// rather than round-tripping through [Uri] — `Uri.replace(query: '',
+/// fragment: '')` sets an *empty* query/fragment component rather than
+/// removing it, which leaves a dangling `?`/`#` in the output (and would
+/// still leak the fact that query params existed, though not their
+/// content). Never throws: an unparseable/malformed [url] is truncated the
+/// same way, rather than being passed through unredacted.
+String _redactUrlForCrashReporting(String url) {
+  final queryIndex = url.indexOf('?');
+  final fragmentIndex = url.indexOf('#');
+  var cut = url.length;
+  if (queryIndex != -1 && queryIndex < cut) cut = queryIndex;
+  if (fragmentIndex != -1 && fragmentIndex < cut) cut = fragmentIndex;
+  return url.substring(0, cut);
+}
+
 /// Main media player controller class
 ///
 /// This class provides the primary interface for controlling media playbook,
@@ -954,7 +977,13 @@ class MediaPlayer {
 
     try {
       crashReporter?.setCustomKey('media_id', item.id);
-      crashReporter?.setCustomKey('media_url', item.url);
+      // M-09: strip the query string (and fragment) before this ever
+      // reaches a crash reporter — signed cookies/tokens for authenticated
+      // media URLs commonly live there, and crash reports are frequently
+      // stored/transmitted by a third-party service outside this app's
+      // control.
+      crashReporter?.setCustomKey(
+          'media_url', _redactUrlForCrashReporting(item.url));
       crashReporter?.setCustomKey('drm_enabled', item.drmConfig != null);
 
       _currentItem = item;
@@ -1005,7 +1034,8 @@ class MediaPlayer {
       crashReporter?.reportError(e, stack, context: {
         'operation': 'load',
         'mediaId': item.id,
-        'url': item.url,
+        // M-09: redacted — see _redactUrlForCrashReporting.
+        'url': _redactUrlForCrashReporting(item.url),
         'playerId': playerId,
         'errorCode': e.code,
       });
@@ -1069,7 +1099,8 @@ class MediaPlayer {
       crashReporter?.reportError(e, stack, context: {
         'operation': 'load',
         'mediaId': item.id,
-        'url': item.url,
+        // M-09: redacted — see _redactUrlForCrashReporting.
+        'url': _redactUrlForCrashReporting(item.url),
         'playerId': playerId,
       });
 
@@ -1100,6 +1131,19 @@ class MediaPlayer {
 
     final index = (startIndex ?? playlist.currentIndex)
         .clamp(0, playlist.items.length - 1);
+
+    // B-11: setPlaylist() was the one bulk-load entry point that skipped
+    // InputValidator entirely — every item's url/drmConfig/httpHeaders was
+    // serialized and sent to native unvalidated, so the "DRM requires
+    // HTTPS" invariant did not actually hold for playlist-driven playback.
+    // Validate every item up front, before any state changes, exactly like
+    // load() does for a single item. Left outside the try/catch below (like
+    // load()) so a validation failure surfaces as its own typed
+    // [ConfigurationException] rather than being re-wrapped as a generic
+    // [MediaLoadException].
+    for (final item in playlist.items) {
+      InputValidator.validateMediaItemWithDrm(item);
+    }
 
     try {
       _currentPlaylist = playlist.copyWith(currentIndex: index);
@@ -1683,6 +1727,30 @@ class MediaPlayer {
   Future<void> loadMediaOnCastDevice(MediaItem mediaItem) async {
     await _ensureInitialized();
     await _ensureCastInitialized();
+
+    // M-07: the cast path forwards only id/title/url/artwork/duration to
+    // the receiver device — there is no DRM session on this path at all.
+    // Casting a DRM-protected item would either fail opaquely on the
+    // receiver or, worse, could expose a stream that was assumed to be
+    // protected to an unauthenticated receiver. Refuse outright rather than
+    // silently stripping the drmConfig and casting anyway.
+    if (mediaItem.drmConfig != null) {
+      throw ConfigurationException(
+        'Cannot cast DRM-protected media: casting has no DRM session and '
+        'would expose protected content to an unauthenticated receiver.',
+        parameter: 'drmConfig',
+        value: mediaItem.id,
+      );
+    }
+
+    // B-11: validate the url/headers before handing them to native, same as
+    // load()/setPlaylist(). validateMediaItemWithDrm() would no-op here
+    // (drmConfig is already known-null above), so validate the URL/headers
+    // directly instead.
+    InputValidator.validateUrl(mediaItem.url);
+    if (mediaItem.httpHeaders != null) {
+      InputValidator.validateHeaders(mediaItem.httpHeaders!);
+    }
 
     try {
       await _invokeMethod('loadMediaOnCastDevice', {

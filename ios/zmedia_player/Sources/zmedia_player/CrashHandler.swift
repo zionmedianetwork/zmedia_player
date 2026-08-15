@@ -59,7 +59,7 @@ class CrashHandler {
         error: Error,
         context: [String: Any]
     ) {
-        print("CrashHandler: Native error in \(operation) for player \(playerId): \(error.localizedDescription)")
+        zlog("CrashHandler: Native error in \(operation) for player \(playerId): \(error.localizedDescription)")
 
         var errorData: [String: Any] = [
             "operation": operation,
@@ -75,7 +75,7 @@ class CrashHandler {
         // Invoke method on Flutter side
         methodChannel.invokeMethod("onNativeError", arguments: errorData) { result in
             if let error = result as? FlutterError {
-                print("CrashHandler: Failed to report error to Flutter: \(error.message ?? "Unknown")")
+                zlog("CrashHandler: Failed to report error to Flutter: \(error.message ?? "Unknown")")
             }
         }
     }
@@ -87,7 +87,7 @@ class CrashHandler {
         message: String,
         context: [String: Any] = [:]
     ) {
-        print("CrashHandler: Warning in \(operation) for player \(playerId): \(message)")
+        zlog("CrashHandler: Warning in \(operation) for player \(playerId): \(message)")
 
         var warningData: [String: Any] = [
             "operation": operation,
@@ -101,13 +101,13 @@ class CrashHandler {
 
         methodChannel.invokeMethod("onNativeWarning", arguments: warningData) { result in
             if let error = result as? FlutterError {
-                print("CrashHandler: Failed to report warning: \(error.message ?? "Unknown")")
+                zlog("CrashHandler: Failed to report warning: \(error.message ?? "Unknown")")
             }
         }
     }
 
     /// Log a debug message
     func logDebug(operation: String, playerId: String, message: String) {
-        print("CrashHandler: [\(playerId)] \(operation): \(message)")
+        zlog("CrashHandler: [\(playerId)] \(operation): \(message)")
     }
 }

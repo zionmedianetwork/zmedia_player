@@ -35,14 +35,34 @@ Minimum iOS 13.0. The plugin supports **Swift Package Manager and CocoaPods**. T
 flutter config --enable-swift-package-manager
 ```
 
-For HTTP media and background audio, add to `ios/Runner/Info.plist`:
+For background audio, add to `ios/Runner/Info.plist`:
 
 ```xml
-<key>NSAppTransportSecurity</key>
-<dict><key>NSAllowsArbitraryLoads</key><true/></dict>
 <key>UIBackgroundModes</key>
 <array><string>audio</string></array>
 ```
+
+HTTPS media needs no App Transport Security changes at all. If you must serve
+plain **HTTP** media, scope the exception to the specific domain(s) you
+control rather than disabling ATS globally with `NSAllowsArbitraryLoads`
+(see `docs/implementation/security.md`):
+
+```xml
+<key>NSAppTransportSecurity</key>
+<dict>
+  <key>NSExceptionDomains</key>
+  <dict>
+    <key>your-http-media-domain.example.com</key>
+    <dict>
+      <key>NSExceptionAllowsInsecureHTTPLoads</key>
+      <true/>
+    </dict>
+  </dict>
+</dict>
+```
+
+You must add this to your own `Info.plist` — the plugin does not read, add,
+or modify `Info.plist` on your behalf.
 
 ## Your first player
 

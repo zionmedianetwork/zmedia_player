@@ -34,7 +34,7 @@ class AirPlayHandler: NSObject {
     // MARK: - Initialization
 
     func initialize(config: [String: Any], player: AVPlayer?) {
-        print("AirPlayHandler: Initializing for player: \(playerId)")
+        zlog("AirPlayHandler: Initializing for player: \(playerId)")
 
         self.config = config
 
@@ -60,7 +60,7 @@ class AirPlayHandler: NSObject {
                 guard let self = self else { return }
 
                 let isActive = change.newValue ?? false
-                print("AirPlayHandler: External playback active changed: \(isActive)")
+                zlog("AirPlayHandler: External playback active changed: \(isActive)")
 
                 self.isAirPlayActive = isActive
 
@@ -83,7 +83,7 @@ class AirPlayHandler: NSObject {
         // Check initial AirPlay availability
         checkAirPlayAvailability()
 
-        print("AirPlayHandler: Initialized successfully")
+        zlog("AirPlayHandler: Initialized successfully")
     }
 
     // MARK: - Audio Session Setup
@@ -102,9 +102,9 @@ class AirPlayHandler: NSObject {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
-            print("AirPlayHandler: Audio session category configured for AirPlay (activation is owned by AudioSessionCoordinator)")
+            zlog("AirPlayHandler: Audio session category configured for AirPlay (activation is owned by AudioSessionCoordinator)")
         } catch {
-            print("AirPlayHandler: Failed to configure audio session category: \(error.localizedDescription)")
+            zlog("AirPlayHandler: Failed to configure audio session category: \(error.localizedDescription)")
         }
     }
 
@@ -118,7 +118,7 @@ class AirPlayHandler: NSObject {
             object: nil
         )
 
-        print("AirPlayHandler: Route change notifications setup")
+        zlog("AirPlayHandler: Route change notifications setup")
     }
 
     @objc private func handleRouteChange(notification: Notification) {
@@ -128,20 +128,20 @@ class AirPlayHandler: NSObject {
             return
         }
 
-        print("AirPlayHandler: Route change detected - reason: \(reason.rawValue)")
+        zlog("AirPlayHandler: Route change detected - reason: \(reason.rawValue)")
 
         switch reason {
         case .newDeviceAvailable:
-            print("AirPlayHandler: New device available")
+            zlog("AirPlayHandler: New device available")
             handleNewDeviceAvailable()
 
         case .oldDeviceUnavailable:
-            print("AirPlayHandler: Old device unavailable")
+            zlog("AirPlayHandler: Old device unavailable")
             handleDeviceUnavailable()
             pausePlaybackIfWiredOrBluetoothOutputRemoved(notification: notification)
 
         case .routeConfigurationChange:
-            print("AirPlayHandler: Route configuration changed")
+            zlog("AirPlayHandler: Route configuration changed")
             updateAirPlayStatus()
 
         default:
@@ -235,11 +235,11 @@ class AirPlayHandler: NSObject {
         // `MediaPlayerInstance` ever grows a fade/ducking concept beyond raw
         // `isMuted`/`volume`, this copy would need updating too.
         guard let player = player, !player.isMuted, player.volume > 0 else {
-            print("AirPlayHandler: Wired/Bluetooth output route removed — player is muted/silent, skipping pause")
+            zlog("AirPlayHandler: Wired/Bluetooth output route removed — player is muted/silent, skipping pause")
             return
         }
 
-        print("AirPlayHandler: Wired/Bluetooth output route removed — pausing playback")
+        zlog("AirPlayHandler: Wired/Bluetooth output route removed — pausing playback")
 
         // Mutate the shared AVPlayer on the main thread; route-change
         // notifications are not guaranteed to be delivered on main. Pausing
@@ -267,7 +267,7 @@ class AirPlayHandler: NSObject {
             isAirPlayActive = isAirPlayActive || player.isExternalPlaybackActive
         }
 
-        print("AirPlayHandler: AirPlay status updated - Active: \(isAirPlayActive)")
+        zlog("AirPlayHandler: AirPlay status updated - Active: \(isAirPlayActive)")
 
         // Notify if status changed
         if wasActive != isAirPlayActive {
@@ -292,7 +292,7 @@ class AirPlayHandler: NSObject {
 
         for output in route.outputs {
             let portType = output.portType
-            print("AirPlayHandler: Checking port type: \(portType.rawValue)")
+            zlog("AirPlayHandler: Checking port type: \(portType.rawValue)")
 
             // Check if it's an AirPlay output
             if portType == .airPlay {
@@ -317,7 +317,7 @@ class AirPlayHandler: NSObject {
     // MARK: - Device Discovery
 
     func startDiscovery() {
-        print("AirPlayHandler: Starting device discovery")
+        zlog("AirPlayHandler: Starting device discovery")
 
         notifyCastStatusChanged(
             state: "discovering",
@@ -335,14 +335,14 @@ class AirPlayHandler: NSObject {
     }
 
     func stopDiscovery() {
-        print("AirPlayHandler: Stopping device discovery")
+        zlog("AirPlayHandler: Stopping device discovery")
         // Discovery management is automatic in iOS
     }
 
     // MARK: - Connection Management
 
     func connect(deviceId: String) -> Bool {
-        print("AirPlayHandler: Connecting to device: \(deviceId)")
+        zlog("AirPlayHandler: Connecting to device: \(deviceId)")
 
         // On iOS, AirPlay connection is managed through AVRoutePickerView
         // We can't programmatically connect to a specific device
@@ -363,7 +363,7 @@ class AirPlayHandler: NSObject {
     }
 
     func disconnect() {
-        print("AirPlayHandler: Disconnecting from AirPlay")
+        zlog("AirPlayHandler: Disconnecting from AirPlay")
 
         // Reset to local playback
         if let player = player {
@@ -385,21 +385,21 @@ class AirPlayHandler: NSObject {
     // MARK: - Media Loading
 
     func loadMedia(mediaItem: [String: Any]) {
-        print("AirPlayHandler: Loading media on AirPlay device")
+        zlog("AirPlayHandler: Loading media on AirPlay device")
 
         // Media loading is handled by AVPlayer automatically
         // when AirPlay is active
 
         guard let urlString = mediaItem["url"] as? String,
               let url = URL(string: urlString) else {
-            print("AirPlayHandler: Invalid media URL")
+            zlog("AirPlayHandler: Invalid media URL")
             return
         }
 
         if let player = player {
             let playerItem = AVPlayerItem(url: url)
             player.replaceCurrentItem(with: playerItem)
-            print("AirPlayHandler: Media loaded successfully")
+            zlog("AirPlayHandler: Media loaded successfully")
         }
     }
 
@@ -407,23 +407,23 @@ class AirPlayHandler: NSObject {
 
     func play() {
         player?.play()
-        print("AirPlayHandler: Play command sent")
+        zlog("AirPlayHandler: Play command sent")
     }
 
     func pause() {
         player?.pause()
-        print("AirPlayHandler: Pause command sent")
+        zlog("AirPlayHandler: Pause command sent")
     }
 
     func seekTo(position: Int64) {
         let time = CMTime(value: position, timescale: 1000)
         player?.seek(to: time)
-        print("AirPlayHandler: Seek command sent to position: \(position)ms")
+        zlog("AirPlayHandler: Seek command sent to position: \(position)ms")
     }
 
     func setVolume(volume: Double) {
         player?.volume = Float(volume)
-        print("AirPlayHandler: Volume set to: \(volume)")
+        zlog("AirPlayHandler: Volume set to: \(volume)")
     }
 
     // MARK: - Route Picker View
@@ -436,13 +436,13 @@ class AirPlayHandler: NSObject {
 
         self.routePickerView = picker
 
-        print("AirPlayHandler: Route picker view created")
+        zlog("AirPlayHandler: Route picker view created")
         return picker
     }
 
     func showRoutePicker() {
         guard let picker = routePickerView else {
-            print("AirPlayHandler: Route picker not available")
+            zlog("AirPlayHandler: Route picker not available")
             return
         }
 
@@ -450,7 +450,7 @@ class AirPlayHandler: NSObject {
         for view in picker.subviews {
             if let button = view as? UIButton {
                 button.sendActions(for: .touchUpInside)
-                print("AirPlayHandler: Route picker shown")
+                zlog("AirPlayHandler: Route picker shown")
                 break
             }
         }
@@ -560,7 +560,7 @@ class AirPlayHandler: NSObject {
     // MARK: - Cleanup
 
     func dispose() {
-        print("AirPlayHandler: Disposing")
+        zlog("AirPlayHandler: Disposing")
 
         // Remove NotificationCenter observers (route change notifications).
         NotificationCenter.default.removeObserver(self)

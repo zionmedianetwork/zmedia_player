@@ -72,7 +72,11 @@ class SecureStorageHandler: NSObject, FlutterPlugin {
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: key,
             kSecValueData as String: valueData,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            // H-11: ...ThisDeviceOnly ties the item to this device's Secure Enclave-backed
+            // keybag, so it is excluded from encrypted iCloud/iTunes backups and cannot be
+            // restored onto different hardware. DRM tokens and credentials stored here must
+            // never migrate to another device via a backup restore.
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
 
         let status = SecItemAdd(addQuery as CFDictionary, nil)

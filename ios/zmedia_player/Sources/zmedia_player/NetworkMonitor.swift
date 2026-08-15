@@ -61,7 +61,7 @@ class NetworkMonitor {
      */
     func startMonitoring() {
         guard !isMonitoring else {
-            print("NetworkMonitor: Already monitoring network")
+            zlog("NetworkMonitor: Already monitoring network")
             return
         }
 
@@ -72,7 +72,7 @@ class NetworkMonitor {
         monitor.start(queue: queue)
         isMonitoring = true
 
-        print("NetworkMonitor: Network monitoring started")
+        zlog("NetworkMonitor: Network monitoring started")
     }
 
     /**
@@ -87,7 +87,7 @@ class NetworkMonitor {
         isMonitoring = false
         currentPath = nil
 
-        print("NetworkMonitor: Network monitoring stopped")
+        zlog("NetworkMonitor: Network monitoring stopped")
     }
 
     /**
@@ -112,7 +112,7 @@ class NetworkMonitor {
         currentPath = path
 
         if path.status == .satisfied {
-            print("NetworkMonitor: Network available")
+            zlog("NetworkMonitor: Network available")
             let status = getNetworkStatus(from: path)
             callback?.onNetworkAvailable(status: status)
 
@@ -123,7 +123,7 @@ class NetworkMonitor {
             // checkNetworkQuality split).
             checkNetworkQuality(path, precomputedStatus: status)
         } else {
-            print("NetworkMonitor: Network lost")
+            zlog("NetworkMonitor: Network lost")
             lastQuality = "offline"
             callback?.onNetworkLost(status: offlineStatus())
         }
@@ -133,7 +133,7 @@ class NetworkMonitor {
         let status = precomputedStatus ?? getNetworkStatus(from: path)
 
         guard let quality = status["quality"] as? String else {
-            print("NetworkMonitor: Unexpected shape in getNetworkStatus result — skipping quality update")
+            zlog("NetworkMonitor: Unexpected shape in getNetworkStatus result — skipping quality update")
             return
         }
 
@@ -254,12 +254,12 @@ class LegacyNetworkMonitor {
     func startMonitoring() {
         guard !isMonitoring else { return }
         isMonitoring = true
-        print("LegacyNetworkMonitor: Network monitoring started (limited functionality)")
+        zlog("LegacyNetworkMonitor: Network monitoring started (limited functionality)")
     }
 
     func stopMonitoring() {
         isMonitoring = false
-        print("LegacyNetworkMonitor: Network monitoring stopped")
+        zlog("LegacyNetworkMonitor: Network monitoring stopped")
     }
 
     func getCurrentNetworkStatus() -> [String: Any] {

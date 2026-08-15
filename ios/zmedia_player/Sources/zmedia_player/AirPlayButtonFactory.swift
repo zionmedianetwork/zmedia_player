@@ -66,7 +66,7 @@ class AirPlayButtonView: NSObject, FlutterPlatformView {
             routePickerView.heightAnchor.constraint(equalToConstant: 32)
         ])
 
-        print("AirPlayButtonView: Created with frame: \(frame)")
+        zlog("AirPlayButtonView: Created with frame: \(frame)")
     }
 
     func view() -> UIView {
@@ -95,7 +95,7 @@ class AirPlayButtonView: NSObject, FlutterPlatformView {
             routePickerView.prioritizesVideoDevices = true
         }
 
-        print("AirPlayButtonView: Configured with arguments: \(arguments)")
+        zlog("AirPlayButtonView: Configured with arguments: \(arguments)")
     }
 
     /// Convert hex string to UIColor

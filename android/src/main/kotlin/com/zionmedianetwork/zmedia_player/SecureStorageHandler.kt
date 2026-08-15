@@ -2,6 +2,7 @@ package com.zionmedianetwork.zmedia_player
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import android.util.Log
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
@@ -34,20 +35,43 @@ class SecureStorageHandler(private val context: Context) : MethodChannel.MethodC
     /**
      * Nullable encrypted prefs.  null means initialisation failed and every
      * operation must return an error – never fall back to plaintext.
+     *
+     * H-09: the plugin declares `minSdkVersion 21` and
+     * `androidx.security:security-crypto:1.1.0-alpha06`'s AAR manifest claims
+     * `minSdkVersion="21"` too, so the manifest merger stays silent — but
+     * `androidx.security.crypto.MasterKeys` is actually annotated
+     * `@RequiresApi(23)` and throws at runtime below API 23 (observed via
+     * decompilation, not just documentation). minSdk stays 21 by policy, so we
+     * guard the API level explicitly here rather than relying on the (silent)
+     * manifest merge, and degrade to "unavailable" below API 23 per the
+     * SECURITY POLICY above — never fall back to plaintext storage.
      */
     private val securePrefs: SharedPreferences? by lazy {
-        try {
-            val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-            EncryptedSharedPreferences.create(
-                PREFS_NAME,
-                masterKeyAlias,
-                context,
-                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            Log.w(
+                TAG,
+                "Secure storage requires API 23+ (MasterKeys); unavailable on API ${Build.VERSION.SDK_INT}"
             )
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to create EncryptedSharedPreferences; secure storage unavailable", e)
             null
+        } else {
+            try {
+                val masterKeyAlias = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+                EncryptedSharedPreferences.create(
+                    PREFS_NAME,
+                    masterKeyAlias,
+                    context,
+                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+                )
+            } catch (t: Throwable) {
+                // Widened from `Exception` to `Throwable` (H-09): a misbehaving or
+                // missing Keystore/Conscrypt provider can surface as
+                // NoClassDefFoundError / ExceptionInInitializerError, both of which
+                // are `Error`, not `Exception`, and would otherwise crash the app
+                // instead of degrading to "unavailable".
+                Log.e(TAG, "Failed to create EncryptedSharedPreferences; secure storage unavailable", t)
+                null
+            }
         }
     }
 
