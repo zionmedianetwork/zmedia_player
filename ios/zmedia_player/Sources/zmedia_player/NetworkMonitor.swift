@@ -7,6 +7,13 @@ import Network
  * Uses NWPathMonitor to monitor network changes and estimate quality based on
  * available interfaces and path status. Provides callbacks for network
  * availability, loss, and quality changes.
+ *
+ * H-06: every `NetworkCallback` method is handed a full status dictionary
+ * matching the shape `lib/src/models/network_status.dart`'s
+ * `NetworkStatus.fromPlatform` expects (`quality`, `downloadSpeed`,
+ * `isMetered`, `connectionType`) so `ZMediaPlayerPlugin` can forward it to
+ * Dart unmodified — mirrors `NetworkMonitor.kt`'s `Callback` shape on
+ * Android (see that file's doc comment).
  */
 @available(iOS 12.0, *)
 class NetworkMonitor {
@@ -22,7 +29,9 @@ class NetworkMonitor {
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.zionmedianetwork.zmedia_player.network_monitor")
 
-    private var callback: NetworkCallback?
+    // H-06: weak to avoid a retain cycle with ZMediaPlayerPlugin, which owns
+    // this monitor and is itself the callback.
+    private weak var callback: NetworkCallback?
     private var isMonitoring = false
     private var currentPath: NWPath?
     private var lastQuality: String = "unknown"
@@ -30,9 +39,9 @@ class NetworkMonitor {
     // MARK: - Callback Protocol
 
     protocol NetworkCallback: AnyObject {
-        func onNetworkAvailable()
-        func onNetworkLost()
-        func onNetworkQualityChanged(quality: String, downloadSpeed: Int, isMetered: Bool)
+        func onNetworkAvailable(status: [String: Any])
+        func onNetworkLost(status: [String: Any])
+        func onNetworkQualityChanged(status: [String: Any])
     }
 
     // MARK: - Initialization
@@ -104,35 +113,45 @@ class NetworkMonitor {
 
         if path.status == .satisfied {
             print("NetworkMonitor: Network available")
-            callback?.onNetworkAvailable()
+            let status = getNetworkStatus(from: path)
+            callback?.onNetworkAvailable(status: status)
 
-            // Check network quality
-            checkNetworkQuality(path)
+            // Check network quality (reuses the status just computed above
+            // rather than recomputing it, but still only fires
+            // onNetworkQualityChanged when the quality bucket actually
+            // changed — mirrors NetworkMonitor.kt's onAvailable/
+            // checkNetworkQuality split).
+            checkNetworkQuality(path, precomputedStatus: status)
         } else {
             print("NetworkMonitor: Network lost")
             lastQuality = "offline"
-            callback?.onNetworkLost()
+            callback?.onNetworkLost(status: offlineStatus())
         }
     }
 
-    private func checkNetworkQuality(_ path: NWPath) {
-        let status = getNetworkStatus(from: path)
+    private func checkNetworkQuality(_ path: NWPath, precomputedStatus: [String: Any]? = nil) {
+        let status = precomputedStatus ?? getNetworkStatus(from: path)
 
-        guard let quality = status["quality"] as? String,
-              let downloadSpeed = status["downloadSpeed"] as? Int,
-              let isMetered = status["isMetered"] as? Bool else {
+        guard let quality = status["quality"] as? String else {
             print("NetworkMonitor: Unexpected shape in getNetworkStatus result — skipping quality update")
             return
         }
 
         if quality != lastQuality {
             lastQuality = quality
-            callback?.onNetworkQualityChanged(
-                quality: quality,
-                downloadSpeed: downloadSpeed,
-                isMetered: isMetered
-            )
+            callback?.onNetworkQualityChanged(status: status)
         }
+    }
+
+    /// Canonical "no connection" status dictionary, shared by every offline
+    /// path — mirrors `NetworkMonitor.kt`'s `offlineStatus()`.
+    private func offlineStatus() -> [String: Any] {
+        return [
+            "quality": "offline",
+            "downloadSpeed": 0,
+            "isMetered": false,
+            "connectionType": "none"
+        ]
     }
 
     private func getNetworkStatus(from path: NWPath) -> [String: Any] {

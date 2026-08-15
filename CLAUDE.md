@@ -249,7 +249,13 @@ MediaItem(drmConfig) → MediaPlayer.load()
 
 **NetworkResilienceService** (`lib/src/services/network_resilience_service.dart`)
 - Network status monitoring (`NetworkStatus`) and reconnection/retry logic
-- Backed natively by `NetworkMonitor` on each platform
+- Backed natively by `NetworkMonitor` on each platform (`ConnectivityManager.NetworkCallback` on
+  Android, `NWPathMonitor` on iOS), owned by `ZMediaPlayerPlugin` as a single plugin-lifetime
+  instance and pushed to Dart via the `onNetworkStatusChanged` MethodChannel event. `MediaPlayer`
+  owns a live `NetworkResilienceService` per player instance, feeds it from that event, and
+  exposes it via `MediaPlayer.networkStatus` / `.networkStatusStream` / `.networkChangeStream` /
+  `.networkResilienceService` — so it is reachable from the normal `MediaPlayer`/`MediaController`
+  path, not just constructible standalone.
 
 **AnalyticsService** (`lib/src/services/analytics_service.dart`)
 - Playback analytics/QoE metrics (`AnalyticsMetrics`): startup time, rebuffering, bitrate

@@ -15,11 +15,25 @@ import io.flutter.plugin.platform.PlatformViewRegistry
 /**
  * ZMediaPlayerPlugin
  */
-class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
+class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, NetworkMonitor.Callback {
     private lateinit var channel: MethodChannel
     private lateinit var context: Context
     private lateinit var playerManager: MediaPlayerManager
     private var activity: Activity? = null
+
+    // H-06: single, plugin-lifetime `NetworkMonitor` (not one per playerId —
+    // connectivity is a device-global signal, not a per-player one, so a
+    // per-player ConnectivityManager.NetworkCallback would just be N
+    // redundant registrations of the same system callback). Started in
+    // onAttachedToEngine, stopped in onDetachedFromEngine, mirroring
+    // `playerManager`'s own lifecycle in this class.
+    private lateinit var networkMonitor: NetworkMonitor
+
+    // Player ids currently between a successful `initialize` and `dispose`
+    // call, used to fan the single NetworkMonitor's events out to every live
+    // MediaPlayer instance on the Dart side (each event is dispatched by
+    // playerId — see MediaPlayer._staticMethodCallHandler).
+    private val activePlayerIds = mutableSetOf<String>()
 
     companion object {
         /**
@@ -61,6 +75,12 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
 
         // Initialize player manager
         playerManager = MediaPlayerManager(context, channel)
+
+        // H-06: start device-wide connectivity monitoring for the lifetime of
+        // the plugin (see the `networkMonitor` field doc for why this is one
+        // instance rather than one per player).
+        networkMonitor = NetworkMonitor(context, this)
+        networkMonitor.startMonitoring()
 
         // Phase 1: Initialize secure storage channel
         secureStorageChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "zmedia_player/secure_storage")
@@ -164,6 +184,10 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
             }
 
             playerManager.initializePlayer(playerId, config)
+            // H-06: track this playerId so NetworkMonitor events (which are
+            // device-global, not per-player) can be fanned out to it — see
+            // onNetworkAvailable/onNetworkLost/onNetworkQualityChanged below.
+            activePlayerIds.add(playerId)
             // Report our own version back so Dart can, symmetrically, detect
             // a native build too old for what it's about to call (see
             // MediaPlayer.initialize()'s minSupportedNativeProtocolVersion
@@ -457,6 +481,8 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
                 notificationHandlers.remove(playerId)?.dispose()
                 pipHandlers.remove(playerId)?.dispose()
                 castHandlers.remove(playerId)?.dispose()
+                // H-06: stop fanning NetworkMonitor events to this playerId.
+                activePlayerIds.remove(playerId)
                 result.success(null)
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID is required", null)
@@ -859,6 +885,12 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         channel.setMethodCallHandler(null)
         playerManager.shutdown()  // Properly stops Handler runnable + disposes all players
 
+        // H-06: unregister the ConnectivityManager.NetworkCallback. This is
+        // exactly the kind of native callback that leaks if never
+        // unregistered — see the class-level doc on NetworkMonitor.kt.
+        networkMonitor.stopMonitoring()
+        activePlayerIds.clear()
+
         // Phase 1: Cleanup secure storage channel
         secureStorageChannel.setMethodCallHandler(null)
 
@@ -871,6 +903,48 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
 
         castHandlers.values.forEach { it.dispose() }
         castHandlers.clear()
+    }
+
+    // H-06: NetworkMonitor.Callback implementation. All three events funnel
+    // through the same "onNetworkStatusChanged" wire event — the Dart side
+    // (NetworkStatus/NetworkChangeEvent) derives available/lost/
+    // quality-improved/quality-degraded by diffing consecutive statuses
+    // rather than needing three distinct method names, so no information is
+    // lost by unifying them here. See MediaPlayer._handleNetworkStatusChanged
+    // in lib/src/core/media_player.dart.
+
+    override fun onNetworkAvailable(status: Map<String, Any>) {
+        broadcastNetworkStatus(status)
+    }
+
+    override fun onNetworkLost(status: Map<String, Any>) {
+        broadcastNetworkStatus(status)
+    }
+
+    override fun onNetworkQualityChanged(status: Map<String, Any>) {
+        broadcastNetworkStatus(status)
+    }
+
+    /**
+     * Forwards a NetworkMonitor status map to every currently-initialized
+     * player. `ConnectivityManager.NetworkCallback` methods are delivered on
+     * the thread that called `registerNetworkCallback` when that thread has
+     * a prepared `Looper` (true here: `startMonitoring()` is always called
+     * from `onAttachedToEngine`, which runs on the platform/main thread), so
+     * this can call `invokeMethod` directly without an extra `Handler` hop —
+     * consistent with how other native->Dart events are sent elsewhere in
+     * this plugin (e.g. `MediaPlayerManager.notifyStateChanged`).
+     */
+    private fun broadcastNetworkStatus(status: Map<String, Any>) {
+        if (activePlayerIds.isEmpty()) return
+        for (id in activePlayerIds) {
+            try {
+                val payload: Map<String, Any> = status + mapOf("playerId" to id)
+                channel.invokeMethod("onNetworkStatusChanged", payload)
+            } catch (e: Exception) {
+                android.util.Log.e("ZMediaPlayerPlugin", "Failed to broadcast network status to $id: ${e.message}", e)
+            }
+        }
     }
 
     // ActivityAware implementation

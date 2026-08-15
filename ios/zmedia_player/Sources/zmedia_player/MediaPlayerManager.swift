@@ -741,7 +741,21 @@ class MediaPlayerInstance: NSObject {
 
         let playerItem = AVPlayerItem(asset: asset)
 
-        // Apply buffer configuration if available
+        // Apply buffer configuration if available.
+        //
+        // Only `targetBufferMs` maps onto a real AVFoundation knob
+        // (`preferredForwardBufferDuration` — a hint for how far ahead of
+        // the playhead to buffer). `minBufferMs`, `maxBufferMs` and
+        // `rebufferMs` — which Android's ExoPlayer-backed
+        // `BufferingHandler.createFromDartConfig` honours in full via
+        // `DefaultLoadControl.setBufferDurationsMs` — have no AVFoundation
+        // equivalent: there is no API to require a minimum buffer before
+        // starting playback, cap a maximum buffer, or set a distinct
+        // resume-after-stall threshold. `AVPlayer` manages that internally
+        // and does not expose it for tuning. See the file-level comment in
+        // `BufferingHandler.swift` (M-17) for the full platform-parity
+        // rationale. 15000ms mirrors `BufferingConfig.defaultConfig()`'s
+        // `targetBufferMs` on the Dart side.
         if let bufferConfig = config?["bufferConfig"] as? [String: Any] {
             playerItem.preferredForwardBufferDuration = TimeInterval((bufferConfig["targetBufferMs"] as? Int ?? 15000)) / 1000.0
         }

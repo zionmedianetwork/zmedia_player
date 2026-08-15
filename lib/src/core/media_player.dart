@@ -14,6 +14,7 @@ import '../models/buffering_config.dart';
 import '../models/buffer_health.dart';
 import '../models/network_status.dart';
 import '../services/buffering_service.dart';
+import '../services/network_resilience_service.dart';
 import '../security/input_validation.dart';
 import 'media_config.dart';
 import 'crash_reporter.dart';
@@ -144,6 +145,17 @@ class MediaPlayer {
   /// Buffering service for adaptive buffer management
   late final BufferingService _bufferingService;
 
+  /// H-06: network resilience/retry service, fed live by native connectivity
+  /// push events (`onNetworkStatusChanged` — see `_handleNetworkStatusChanged`
+  /// and `NetworkMonitor` on each platform). Unlike [BufferingService], this
+  /// is *not* started via a `startMonitoring()` poll: native already drives
+  /// it purely by calling [NetworkResilienceService.updateNetworkStatus]
+  /// whenever a connectivity event arrives, so [NetworkResilienceService]'s
+  /// own `Timer.periodic`-based `startMonitoring`/`stopMonitoring` (which
+  /// require a `platformNetworkStatusCallback` this constructor deliberately
+  /// omits) are simply unused here.
+  late final NetworkResilienceService _networkResilienceService;
+
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
 
@@ -212,6 +224,7 @@ class MediaPlayer {
     _ensureCleanupTimer();
     _setupMethodCallHandler();
     _initializeBufferingService();
+    _networkResilienceService = NetworkResilienceService();
   }
 
   /// Initialize buffering service with configuration
@@ -508,6 +521,52 @@ class MediaPlayer {
   BufferHealth? get lastBufferHealth {
     _throwIfDisposed();
     return _bufferingService.lastBufferHealth;
+  }
+
+  /// H-06: current device connectivity status, driven by native push events
+  /// (`ConnectivityManager.NetworkCallback` on Android, `NWPathMonitor` on
+  /// iOS — see `NetworkMonitor` on each platform). This is
+  /// [NetworkStatus.unknown] until the first native event arrives.
+  ///
+  /// Distinct from [networkQuality] above: that getter is derived from
+  /// ExoPlayer/AVPlayer's own bandwidth *meter* (how fast media is actually
+  /// downloading), whereas this reflects the OS-level connectivity signal
+  /// (is there a network at all, and what kind).
+  NetworkStatus get networkStatus {
+    _throwIfDisposed();
+    return _networkResilienceService.networkStatus;
+  }
+
+  /// Stream of [NetworkStatus] updates — emits every time native reports the
+  /// device's connectivity changed (available/lost) or its quality bucket
+  /// changed. See [networkStatus].
+  Stream<NetworkStatus> get networkStatusStream {
+    _throwIfDisposed();
+    return _networkResilienceService.networkStatusStream;
+  }
+
+  /// Stream of [NetworkChangeEvent]s — a filtered, semantically-labeled view
+  /// of [networkStatusStream] that only emits "significant" transitions
+  /// (connection lost/restored, quality improved/degraded). See
+  /// [NetworkChangeEvent.isSignificant].
+  Stream<NetworkChangeEvent> get networkChangeStream {
+    _throwIfDisposed();
+    return _networkResilienceService.networkChangeStream;
+  }
+
+  /// H-06: the [NetworkResilienceService] instance backing [networkStatus] /
+  /// [networkStatusStream] / [networkChangeStream], exposed directly so
+  /// callers can also use its retry/backoff helpers
+  /// ([NetworkResilienceService.withRetry],
+  /// [NetworkResilienceService.shouldRetry]) against the same live
+  /// connectivity signal this player observes, instead of constructing a
+  /// disconnected instance of their own. This is what makes
+  /// [NetworkResilienceService] reachable from the normal `MediaPlayer` /
+  /// `MediaController` path — previously it had zero call sites outside its
+  /// own file and tests.
+  NetworkResilienceService get networkResilienceService {
+    _throwIfDisposed();
+    return _networkResilienceService;
   }
 
   /// Stream of PiP status updates
@@ -1666,6 +1725,10 @@ class MediaPlayer {
     // Dispose buffering service
     _bufferingService.dispose();
 
+    // H-06: dispose network resilience service (closes its own stream
+    // controllers, cancels active retries and any monitoring timer).
+    _networkResilienceService.dispose();
+
     // Close stream controllers safely
     await _safeCloseStreams();
 
@@ -1878,6 +1941,9 @@ class MediaPlayer {
         case 'onBandwidthChanged':
           _handleBandwidthChanged(arguments!);
           break;
+        case 'onNetworkStatusChanged':
+          _handleNetworkStatusChanged(arguments!);
+          break;
         case 'onDrmSessionUpdate':
           _handleDrmSessionUpdate(arguments!);
           break;
@@ -2001,6 +2067,23 @@ class MediaPlayer {
     if (!_bandwidthController.isClosed) {
       _bandwidthController.add(bandwidth);
     }
+  }
+
+  /// H-06: handle native connectivity push events (`NetworkMonitor` on
+  /// Android/iOS). A single wire event covers "available", "lost", and
+  /// "quality changed" — [NetworkStatus.fromPlatform] builds the new status
+  /// and [NetworkResilienceService.updateNetworkStatus] derives the
+  /// available/lost/quality-improved/quality-degraded distinction by diffing
+  /// it against the previous one (see [NetworkChangeEvent]), so no
+  /// information is lost by not having three separate method names on the
+  /// wire.
+  void _handleNetworkStatusChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    final status = NetworkStatus.fromPlatform(
+      arguments.map((key, value) => MapEntry(key.toString(), value)),
+    );
+    _networkResilienceService.updateNetworkStatus(status);
   }
 
   /// Handle subtitle tracks change events from platform

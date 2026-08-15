@@ -2,134 +2,45 @@ import Foundation
 import AVFoundation
 
 /**
- * Handler for adaptive buffer management in AVPlayer.
+ * Handler for buffer health reporting for AVPlayer.
  *
- * Configures AVPlayer's preferredForwardBufferDuration to implement adaptive
- * buffering based on network conditions. Provides buffer health metrics for
- * predictive rebuffering.
+ * ## Why there is no "apply buffer config" side here (M-17)
+ *
+ * The public Dart `BufferConfig`/`BufferingConfig` model has four knobs —
+ * `minBufferMs`, `maxBufferMs`, `targetBufferMs`, `rebufferMs` — modelled
+ * after ExoPlayer's `DefaultLoadControl.setBufferDurationsMs(min, max,
+ * bufferForPlayback, bufferForPlaybackAfterRebuffer)`, which Android's
+ * `BufferingHandler.createFromDartConfig` honours in full.
+ *
+ * AVFoundation has no equivalent surface. The only buffering knob `AVPlayer`
+ * exposes is `AVPlayerItem.preferredForwardBufferDuration` — a single hint
+ * for how far ahead of the playhead to buffer, applied once per item. There
+ * is no API to set a minimum buffer required before playback starts, a
+ * maximum buffer ceiling, or a distinct "buffer to resume after a stall"
+ * threshold; `AVPlayer` manages all of that internally and does not expose
+ * it for tuning. So on iOS only `targetBufferMs` maps onto anything real —
+ * `minBufferMs`, `maxBufferMs` and `rebufferMs` are accepted from Dart
+ * (silently ignored) same as before, but this is a genuine platform
+ * limitation, not a missing wiring.
+ *
+ * A previous version of this file had a `BufferConfig` struct, buffer
+ * presets (`fastStartup`/`smoothPlayback`/`poorNetwork`/`liveStreaming`),
+ * `applyBufferConfig`/`applyDartConfig`, and `shouldRebuffer` — all dead
+ * code (zero call sites) that, even if wired up, would have done nothing
+ * more than the single `preferredForwardBufferDuration` assignment that
+ * `MediaPlayerInstance.loadMediaItem()` already performs inline: the struct
+ * carried `minBuffer`/`maxBuffer`/`rebuffer` fields that `applyBufferConfig`
+ * itself never read (see its old comment: "iOS doesn't expose min/max
+ * buffer configuration like ExoPlayer"). Reintroducing that scaffolding
+ * would not make the full `BufferConfig` real on iOS — it would just add an
+ * indirection around the same one-line `targetBuffer`-only hint. It was
+ * removed rather than wired up; the inline application in
+ * `MediaPlayerManager.swift` remains the single implementation.
+ *
+ * This type now only reports buffer health metrics (used for `getBufferHealth`
+ * / predictive-rebuffering signal to Dart).
  */
 class BufferingHandler {
-
-    // MARK: - Buffer Configuration Constants (in seconds)
-
-    // Default buffer configuration
-    private static let defaultMinBuffer: TimeInterval = 2.5
-    private static let defaultMaxBuffer: TimeInterval = 50.0
-    private static let defaultTargetBuffer: TimeInterval = 15.0
-    private static let defaultRebuffer: TimeInterval = 5.0
-
-    // Fast startup configuration
-    private static let fastMinBuffer: TimeInterval = 1.0
-    private static let fastMaxBuffer: TimeInterval = 30.0
-    private static let fastTargetBuffer: TimeInterval = 10.0
-    private static let fastRebuffer: TimeInterval = 2.5
-
-    // Smooth playback configuration
-    private static let smoothMinBuffer: TimeInterval = 5.0
-    private static let smoothMaxBuffer: TimeInterval = 60.0
-    private static let smoothTargetBuffer: TimeInterval = 20.0
-    private static let smoothRebuffer: TimeInterval = 7.5
-
-    // Poor network configuration
-    private static let poorMinBuffer: TimeInterval = 10.0
-    private static let poorMaxBuffer: TimeInterval = 90.0
-    private static let poorTargetBuffer: TimeInterval = 30.0
-    private static let poorRebuffer: TimeInterval = 15.0
-
-    // MARK: - Buffer Configuration
-
-    struct BufferConfig {
-        let minBuffer: TimeInterval
-        let maxBuffer: TimeInterval
-        let targetBuffer: TimeInterval
-        let rebuffer: TimeInterval
-
-        static let `default` = BufferConfig(
-            minBuffer: defaultMinBuffer,
-            maxBuffer: defaultMaxBuffer,
-            targetBuffer: defaultTargetBuffer,
-            rebuffer: defaultRebuffer
-        )
-
-        static let fastStartup = BufferConfig(
-            minBuffer: fastMinBuffer,
-            maxBuffer: fastMaxBuffer,
-            targetBuffer: fastTargetBuffer,
-            rebuffer: fastRebuffer
-        )
-
-        static let smoothPlayback = BufferConfig(
-            minBuffer: smoothMinBuffer,
-            maxBuffer: smoothMaxBuffer,
-            targetBuffer: smoothTargetBuffer,
-            rebuffer: smoothRebuffer
-        )
-
-        static let poorNetwork = BufferConfig(
-            minBuffer: poorMinBuffer,
-            maxBuffer: poorMaxBuffer,
-            targetBuffer: poorTargetBuffer,
-            rebuffer: poorRebuffer
-        )
-
-        static func liveStreaming(targetLatency: TimeInterval = 3.0) -> BufferConfig {
-            return BufferConfig(
-                minBuffer: targetLatency / 2.0,
-                maxBuffer: targetLatency * 3.0,
-                targetBuffer: targetLatency,
-                rebuffer: targetLatency
-            )
-        }
-
-        static func fromDartConfig(_ config: [String: Any]?) -> BufferConfig {
-            guard let config = config else {
-                return .default
-            }
-
-            // Dart sends milliseconds, convert to seconds
-            let minBufferMs = config["minBufferMs"] as? Int ?? Int(defaultMinBuffer * 1000)
-            let maxBufferMs = config["maxBufferMs"] as? Int ?? Int(defaultMaxBuffer * 1000)
-            let targetBufferMs = config["targetBufferMs"] as? Int ?? Int(defaultTargetBuffer * 1000)
-            let rebufferMs = config["rebufferMs"] as? Int ?? Int(defaultRebuffer * 1000)
-
-            return BufferConfig(
-                minBuffer: TimeInterval(minBufferMs) / 1000.0,
-                maxBuffer: TimeInterval(maxBufferMs) / 1000.0,
-                targetBuffer: TimeInterval(targetBufferMs) / 1000.0,
-                rebuffer: TimeInterval(rebufferMs) / 1000.0
-            )
-        }
-    }
-
-    // MARK: - Apply Buffer Configuration
-
-    /**
-     * Applies buffer configuration to AVPlayer.
-     *
-     * Note: AVPlayer uses preferredForwardBufferDuration for iOS 10+.
-     * The value is a hint to the system; actual buffer size may vary.
-     */
-    static func applyBufferConfig(_ config: BufferConfig, to player: AVPlayer) {
-        guard let playerItem = player.currentItem else {
-            return
-        }
-
-        // Set preferred forward buffer duration
-        // iOS will attempt to buffer this much content ahead of current time
-        playerItem.preferredForwardBufferDuration = config.targetBuffer
-
-        // Note: iOS doesn't expose min/max buffer configuration like ExoPlayer.
-        // The system manages buffer sizes automatically based on network conditions.
-        // We primarily control the target buffer duration.
-    }
-
-    /**
-     * Applies buffer configuration from Dart config map.
-     */
-    static func applyDartConfig(_ dartConfig: [String: Any]?, to player: AVPlayer) {
-        let config = BufferConfig.fromDartConfig(dartConfig)
-        applyBufferConfig(config, to: player)
-    }
 
     // MARK: - Buffer Health Monitoring
 
@@ -228,20 +139,5 @@ class BufferingHandler {
         }
 
         return 0
-    }
-
-    /**
-     * Determines if rebuffering is recommended based on current buffer status.
-     */
-    static func shouldRebuffer(player: AVPlayer?, minBuffer: TimeInterval = defaultMinBuffer) -> Bool {
-        guard let player = player,
-              let playerItem = player.currentItem else {
-            return false
-        }
-
-        let currentTime = CMTimeGetSeconds(playerItem.currentTime())
-        let bufferedDuration = getBufferedDuration(from: playerItem, currentTime: currentTime)
-
-        return bufferedDuration < minBuffer
     }
 }
