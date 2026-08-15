@@ -196,6 +196,18 @@ class AirPlayHandler: NSObject {
     ///
     /// NEEDS ON-DEVICE VERIFICATION: route-change delivery/timing for wired
     /// and Bluetooth accessories cannot be exercised in a simulator.
+    ///
+    /// A **muted** (or silent, volume == 0) player is skipped: "becoming
+    /// noisy" exists to stop audio suddenly blasting out of the device
+    /// speaker when headphones are removed. A muted player emits no audio,
+    /// so there is nothing to leak, and pausing it is a surprise with no
+    /// benefit — most notably for the muted-preview-in-a-feed case this
+    /// package explicitly supports (e.g. `MediaListPlayer`). This mirrors
+    /// Android's `MediaPlayerManager.updateAudioFocusHandling()`, which
+    /// passes `handleAudioFocus = !isMuted` / `setHandleAudioBecomingNoisy(!isMuted)`
+    /// so a muted player is exempt there too — the two platforms must agree
+    /// per the MethodChannel symmetry rule in AGENTS.md. Do not "fix" this
+    /// back to unconditional pausing.
     private func pausePlaybackIfWiredOrBluetoothOutputRemoved(notification: Notification) {
         guard let userInfo = notification.userInfo,
               let previousRoute = userInfo[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription else {
@@ -211,6 +223,21 @@ class AirPlayHandler: NSObject {
         }
 
         guard removedWiredOrBluetoothOutput else { return }
+
+        // Same "audible" definition as `MediaPlayerInstance.isCurrentlyAudible()`
+        // (not muted and volume > 0), reapplied here because `AirPlayHandler`
+        // is a sibling object — constructed independently in
+        // `ZMediaPlayerPlugin` and only ever handed a raw `AVPlayer` reference
+        // via `initialize(config:player:)` — with no reference back to the
+        // owning `MediaPlayerInstance` to call its private method on. Both
+        // read the exact same underlying `AVPlayer.isMuted`/`.volume` on the
+        // same shared player instance, so this cannot drift in practice; if
+        // `MediaPlayerInstance` ever grows a fade/ducking concept beyond raw
+        // `isMuted`/`volume`, this copy would need updating too.
+        guard let player = player, !player.isMuted, player.volume > 0 else {
+            print("AirPlayHandler: Wired/Bluetooth output route removed — player is muted/silent, skipping pause")
+            return
+        }
 
         print("AirPlayHandler: Wired/Bluetooth output route removed — pausing playback")
 
