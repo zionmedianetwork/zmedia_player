@@ -146,11 +146,23 @@ class _MediaControlsState extends State<MediaControls>
   Widget build(BuildContext context) {
     final theme = widget.theme ?? MediaControlsTheme.defaultTheme;
 
-    // Static chrome (gradient background + top bar + overlays) is built once
-    // and does NOT rebuild on every position tick.  Only the sub-trees that
-    // actually depend on frequently-changing controller state are wrapped in
-    // their own ListenableBuilder: the center play/pause button (play state)
-    // and the bottom seek-bar + time display (position/buffered).
+    // Rebuild scope, accurately described:
+    // - `widget.controller` (a ChangeNotifier) no longer calls
+    //   notifyListeners() for position-only changes -- MediaController
+    //   routes throttled position updates through the dedicated
+    //   `positionListenable` instead (see
+    //   MediaController.positionListenable). So none of the
+    //   ListenableBuilder(listenable: widget.controller) subtrees below
+    //   (main controls row, top bar, buffering overlay) rebuild on the
+    //   ~2/sec position tick anymore; they still rebuild -- as whole
+    //   subtrees, not scoped to a single button -- on genuine state changes
+    //   (play/pause, buffering, casting, tracks, volume, speed,
+    //   controlsVisible).
+    // - The seek bar and time text in the bottom bar are the only parts
+    //   that actually need to update every tick; they are the only
+    //   subtrees wrapped in ValueListenableBuilder<Duration>(valueListenable:
+    //   widget.controller.positionListenable), which is what genuinely
+    //   limits per-tick rebuild scope to just those two.
     return FadeTransition(
       opacity: _fadeAnimation,
       child: RepaintBoundary(
@@ -214,10 +226,14 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildMainControls(MediaControlsTheme theme) {
-    // Playlist-nav buttons and seek-10 buttons do not depend on the position
-    // tick; only the play/pause icon changes when play state changes.
-    // Wrap only that button in a ListenableBuilder so the surrounding row
-    // is not rebuilt on every 500 ms position tick.
+    // NOTE: this ListenableBuilder wraps the entire Row below (previous/
+    // next, both seek-10 buttons, and the play/pause button) -- it is not
+    // scoped to just the play/pause button. What actually keeps this cheap
+    // is that `widget.controller` no longer notifies on position-only
+    // ticks (see MediaController.positionListenable), so this whole Row
+    // only rebuilds on genuine state changes -- play/pause, playlist
+    // next/previous availability, etc. -- a handful of times per session,
+    // not on the ~2/sec position tick.
     return Center(
       child: ListenableBuilder(
         listenable: widget.controller,
@@ -410,7 +426,13 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildTopControls(MediaControlsTheme theme) {
-    // Top bar does not depend on position ticks — built once, no scoped builder.
+    // This ListenableBuilder rebuilds the entire top bar on every
+    // `widget.controller` notification -- it is not scoped to a sub-widget.
+    // It no longer rebuilds on position ticks specifically because
+    // MediaController does not notify listeners for position-only changes
+    // (see MediaController.positionListenable); it still rebuilds on the
+    // real state changes this bar needs to reflect (cast status, PiP
+    // availability, etc.).
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
@@ -563,9 +585,14 @@ class _MediaControlsState extends State<MediaControls>
   }
 
   Widget _buildBottomControls(MediaControlsTheme theme) {
-    // The gradient container and fullscreen button are static chrome;
-    // only the seek bar and time text change per position tick.
-    // Wrap only those in a scoped ListenableBuilder + RepaintBoundary.
+    // The gradient container and fullscreen button are static chrome built
+    // directly here (not inside a builder), so they only rebuild when this
+    // whole method re-runs. Only the seek bar and time text need to update
+    // on every position tick, so those two -- and only those two -- are
+    // each wrapped in RepaintBoundary + ValueListenableBuilder<Duration>
+    // scoped to widget.controller.positionListenable, the dedicated,
+    // throttled position signal that fires independently of
+    // notifyListeners() (see MediaController.positionListenable).
     return Positioned(
       bottom: 0,
       left: 0,
@@ -587,11 +614,12 @@ class _MediaControlsState extends State<MediaControls>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Seek bar + live indicator — scoped rebuild + repaint boundary
+                // Seek bar + live indicator — scoped to positionListenable,
+                // not the whole controller, + repaint boundary.
                 RepaintBoundary(
-                  child: ListenableBuilder(
-                    listenable: widget.controller,
-                    builder: (context, _) {
+                  child: ValueListenableBuilder<Duration>(
+                    valueListenable: widget.controller.positionListenable,
+                    builder: (context, _, __) {
                       final isLive = widget.controller.player.isLive;
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -610,11 +638,12 @@ class _MediaControlsState extends State<MediaControls>
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                   child: Row(
                     children: [
-                      // Time text — only this Text rebuilds per tick
+                      // Time text — only this Text rebuilds per tick, via
+                      // positionListenable (not the whole controller).
                       RepaintBoundary(
-                        child: ListenableBuilder(
-                          listenable: widget.controller,
-                          builder: (context, _) {
+                        child: ValueListenableBuilder<Duration>(
+                          valueListenable: widget.controller.positionListenable,
+                          builder: (context, _, __) {
                             final isLive = widget.controller.player.isLive;
                             if (isLive) return const SizedBox.shrink();
                             final timeText = _isDraggingProgress

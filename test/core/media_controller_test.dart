@@ -405,7 +405,11 @@ void main() {
       c.dispose();
     });
 
-    test('position update causes notifyListeners to fire', () async {
+    test(
+        'position-only update does NOT call notifyListeners, but does '
+        'update positionListenable (M-11: position ticks must not rebuild '
+        'every ChangeNotifier listener on the controller -- see '
+        'MediaController.positionListenable)', () async {
       _installCapture();
       final c = MediaController.create(playerId: 'mc-react-pos');
       await c.initialize();
@@ -413,13 +417,46 @@ void main() {
       var notifyCount = 0;
       c.addListener(() => notifyCount++);
 
+      var positionNotifyCount = 0;
+      c.positionListenable.addListener(() => positionNotifyCount++);
+
       await _injectEvent('onPositionChanged', {
         'playerId': 'mc-react-pos',
         'position': 5000,
       });
       await Future<void>.delayed(Duration.zero);
 
-      expect(notifyCount, greaterThan(0));
+      expect(notifyCount, 0,
+          reason: 'a position-only update must not trigger notifyListeners');
+      expect(positionNotifyCount, greaterThan(0),
+          reason: 'a position-only update must still fire positionListenable');
+      expect(c.position, const Duration(milliseconds: 5000));
+      c.dispose();
+    });
+
+    test(
+        'a state change that also carries a new position (e.g. the native '
+        'position bridge riding through stateStream) still calls '
+        'notifyListeners when non-position fields differ', () async {
+      _installCapture();
+      final c = MediaController.create(playerId: 'mc-react-pos-state');
+      await c.initialize();
+
+      var notifyCount = 0;
+      c.addListener(() => notifyCount++);
+
+      await _injectEvent('onStateChanged', {
+        'playerId': 'mc-react-pos-state',
+        'state': 'playing',
+        'isBuffering': false,
+        'bufferPercentage': 0.0,
+      });
+      await Future<void>.delayed(Duration.zero);
+
+      expect(notifyCount, greaterThan(0),
+          reason: 'a genuine state transition must still notify listeners, '
+              'even though it is delivered on the same stateStream that '
+              'position-only pushes are filtered out of');
       c.dispose();
     });
 

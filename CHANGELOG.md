@@ -38,6 +38,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MediaControls` was also removed.
 
 ### Fixed
+- Dragging the lock-screen / Control Center notification progress bar ("seekTo") now
+  actually seeks the player, on both platforms (M-02). Previously:
+  - Android: `NotificationHandler`'s `MediaSessionCompat.Callback.onSeekTo` was a
+    literal no-op — the callback fired and did nothing.
+  - iOS: `changePlaybackPositionCommand` already forwarded the requested position
+    natively, but had nowhere to put it — `NotificationService.actionStream` was a
+    bare `Stream<String>` and `MediaPlayer._handleNotificationAction` only ever
+    extracted `arguments['action']`, so the forwarded position was silently dropped
+    in Dart regardless of platform.
+  - Fix: `android/.../NotificationHandler.kt`'s `onSeekTo` now forwards the
+    requested position (milliseconds) via `sendActionToFlutter("seekTo", pos)`,
+    matching iOS's existing `{"action": "seekTo", "position": <ms>}` payload shape
+    exactly. A new `NotificationActionEvent` model (`action` + optional
+    `Duration? position`) is parsed from that payload and delivered on two new
+    typed streams: `MediaPlayer.notificationActionEventStream` and
+    `NotificationService.actionEventStream`. The existing `Stream<String>`
+    `MediaPlayer.notificationActionStream` / `NotificationService.actionStream` are
+    kept working (and receive `"seekTo"` too, just without a position) but are now
+    `@Deprecated` in favor of the typed streams. As with every other notification
+    action, **the host app — not the package — is responsible for calling
+    `controller.seekTo(event.position)`** on receipt; see the updated
+    `docs/api-reference/advanced-features.md` snippet and the example app
+    (`example/lib/pages/notifications_page.dart`,
+    `example/lib/pages/multi_player_page.dart`).
+
 - iOS: setting the playback speed no longer starts playback, so `MediaConfig.autoPlay:
   false` is finally honoured. On `AVPlayer`, assigning a non-zero `rate` **is** a
   transport command (equivalent to `play()` at that rate), and both

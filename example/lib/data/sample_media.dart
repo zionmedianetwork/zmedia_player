@@ -16,10 +16,23 @@ class SampleMedia {
   // NOTE: the old Google GCS sample bucket
   // (commondatastorage.googleapis.com/gtv-videos-bucket) now returns HTTP 403.
   // The test-videos.co.uk clips are reachable but VIDEO-ONLY (no audio), so we
-  // use sources verified (via ffprobe) to carry an audio track: archive.org's
-  // full Big Buck Bunny, Flutter's bee/butterfly clips, and W3Schools' BBB clip.
+  // use sources verified (via ffprobe) to carry an audio track: the
+  // ExoPlayer test-media GCS bucket's full Big Buck Bunny, Flutter's
+  // bee/butterfly clips, and W3Schools' BBB clip.
+  //
+  // The `archive.org/download/BigBuckBunny_124/...` URL this constant used
+  // to point at is unreliable — verified via repeated
+  // `curl -s -o /dev/null -w '%{http_code}' -L <url>` runs returning a
+  // consistent HTTP 500 for that exact item/path, and a *different*
+  // archive.org BBB item (`BigBuckBunny_328/BigBuckBunny_512kb.mp4`, same
+  // 9:56 duration, video+audio confirmed via ffprobe) taking 60+ seconds to
+  // resolve through archive.org's CDN redirect — too slow to be a usable
+  // fixture regardless. This bucket is Google-hosted, specifically
+  // maintained for ExoPlayer's own test suite, and returned a consistent,
+  // fast HTTP 200 with the same 9:56 duration (video h264 + audio aac,
+  // confirmed via ffprobe) in repeated checks.
   static const _bbbFull =
-      'https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4';
+      'https://storage.googleapis.com/exoplayer-test-media-0/BigBuckBunny_320x180.mp4';
   static const _bbbShort = 'https://www.w3schools.com/html/mov_bbb.mp4';
   static const _bee =
       'https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4';
@@ -36,8 +49,13 @@ class SampleMedia {
     artist: 'Blender Foundation',
     // Direct HTTP 200 (no redirect) + audio — reliable first-load on iOS.
     url: _bbbShort,
+    // NOTE: the `/thumb/.../800px-...jpg` Wikimedia thumbnail path below
+    // returns HTTP 400 (malformed thumb request) — verified via
+    // `curl -s -o /dev/null -w '%{http_code}' -L <url>`. This is the
+    // full-size original file at the same Commons path (no /thumb/ prefix,
+    // no width suffix), verified HTTP 200 `image/jpeg`.
     artworkUrl:
-        'https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Big_buck_bunny_poster_big.jpg/800px-Big_buck_bunny_poster_big.jpg',
+        'https://upload.wikimedia.org/wikipedia/commons/c/c5/Big_buck_bunny_poster_big.jpg',
     duration: Duration(seconds: 10),
     mediaType: MediaType.video,
   );
@@ -69,9 +87,9 @@ class SampleMedia {
     mediaType: MediaType.video,
   );
 
-  // Full 10-minute Big Buck Bunny (archive.org). Served via a 302 redirect, so
-  // the first load can be slightly slower — kept as a longer sample for
-  // seek/playlist demos, not as the primary item.
+  // Full ~10-minute Big Buck Bunny (Google's ExoPlayer test-media bucket —
+  // see the _bbbFull doc above) — kept as a longer sample for seek/playlist
+  // demos, not as the primary item.
   static const forBiggerFun = MediaItem(
     id: 'bbb_full',
     title: 'Big Buck Bunny (full · 10 min)',

@@ -33,7 +33,15 @@ class CacheService {
   /// Active download operations
   final Map<String, http.Client> _activeDownloads = {};
 
-  CacheService(this._config);
+  /// Factory used to create a new [http.Client] per download (H-12: kept as
+  /// a factory, not a single shared client, so [cancelDownload] can close
+  /// just one in-flight download without invalidating every other active
+  /// download on this service). Overridable for tests (e.g. with
+  /// `MockClient.streaming`) via the [httpClientFactory] constructor param.
+  final http.Client Function() _httpClientFactory;
+
+  CacheService(this._config, {http.Client Function()? httpClientFactory})
+      : _httpClientFactory = httpClientFactory ?? http.Client.new;
 
   /// Stream of download progress updates
   Stream<DownloadProgress> get downloadProgressStream =>
@@ -329,12 +337,34 @@ class CacheService {
     return base;
   }
 
-  /// Download media data with progress tracking
-  Future<Uint8List> _downloadMedia(MediaItem mediaItem,
+  /// Downloads [mediaItem]'s media directly to a cache file on disk,
+  /// streaming each chunk to an [IOSink] rather than accumulating the whole
+  /// response into an in-memory `List<int>` first (H-12).
+  ///
+  /// The prior implementation buffered the entire response into a growable
+  /// `List<int>` — roughly 8-17x the file's size in RAM, since each byte
+  /// occupies a full machine word in an untyped list — before ever writing
+  /// it to disk. That's enough to exhaust a low-end device on any real
+  /// video file.
+  ///
+  /// The response is written to a `<finalName>.part` temp file first and
+  /// only "committed" (renamed into place and registered as a valid cache
+  /// entry in [_metadata]) once the download completes successfully in
+  /// full. Any failure or cancellation part-way through — including via
+  /// [cancelDownload], which closes this download's [http.Client] and
+  /// interrupts the stream — deletes the temp file so a partial download is
+  /// never presented as a valid cache entry.
+  Future<void> _downloadAndCacheToFile(MediaItem mediaItem,
       {Map<String, String>? headers}) async {
-    final client = http.Client();
+    final client = _httpClientFactory();
     _activeDownloads[mediaItem.id] = client;
 
+    final fileName =
+        '${mediaItem.id}_${DateTime.now().millisecondsSinceEpoch}.cache';
+    final finalFile = File(path.join(_cacheDir.path, fileName));
+    final tempFile = File('${finalFile.path}.part');
+
+    IOSink? sink;
     try {
       final uri = Uri.parse(mediaItem.url);
       final request = http.Request('GET', uri);
@@ -352,11 +382,12 @@ class CacheService {
       }
 
       final contentLength = streamedResponse.contentLength ?? 0;
-      final chunks = <int>[];
       int downloadedBytes = 0;
 
+      sink = tempFile.openWrite();
+
       await for (final chunk in streamedResponse.stream) {
-        chunks.addAll(chunk);
+        sink.add(chunk);
         downloadedBytes += chunk.length;
 
         // Report progress
@@ -374,8 +405,48 @@ class CacheService {
         }
       }
 
-      return Uint8List.fromList(chunks);
+      await sink.flush();
+      await sink.close();
+      sink = null;
+
+      // Make room for the finished file before committing it — mirrors the
+      // space check the in-memory `cacheMedia` API performs.
+      await _ensureCacheSpace(downloadedBytes);
+
+      // Commit: only now does the download become a real, discoverable
+      // cache entry.
+      await tempFile.rename(finalFile.path);
+
+      final entry = CacheEntry(
+        mediaId: mediaItem.id,
+        fileName: fileName,
+        size: downloadedBytes,
+        mediaItem: mediaItem,
+        createdAt: DateTime.now(),
+        lastAccessed: DateTime.now(),
+        expiresAt: DateTime.now().add(_config.cacheExpiration),
+      );
+
+      _metadata[mediaItem.id] = entry;
+      _currentCacheSize += downloadedBytes;
+
+      await _saveMetadata();
     } catch (e) {
+      // A failed or cancelled download must never leave a partial file
+      // registered — or even just discoverable on disk — as a valid cache
+      // entry.
+      try {
+        await sink?.close();
+      } catch (_) {
+        // Best-effort; the delete below is what actually matters.
+      }
+      if (await tempFile.exists()) {
+        try {
+          await tempFile.delete();
+        } catch (_) {
+          // Best-effort cleanup.
+        }
+      }
       throw CacheException('Failed to download media: $e');
     } finally {
       _activeDownloads.remove(mediaItem.id);
@@ -414,12 +485,13 @@ class CacheService {
       throw CacheException('Download already in progress for ${mediaItem.id}');
     }
 
-    try {
-      final data = await _downloadMedia(mediaItem, headers: headers);
-      await cacheMedia(mediaItem.id, data, mediaItem);
-    } catch (e) {
-      rethrow;
-    }
+    // H-12: streams directly to a cache file instead of downloading fully
+    // into memory (via `_downloadMedia`) and then handing the buffer to
+    // `cacheMedia`. `cacheMedia` itself is left unchanged — it remains the
+    // public API for callers that already have the bytes in memory (e.g.
+    // pre-fetched or generated in-process) and takes a `Uint8List` by
+    // design.
+    await _downloadAndCacheToFile(mediaItem, headers: headers);
   }
 
   /// Dispose the cache service

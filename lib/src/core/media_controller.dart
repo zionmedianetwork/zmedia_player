@@ -49,6 +49,30 @@ class MediaController extends ChangeNotifier {
   /// Minimum interval between position updates (in milliseconds)
   static const int _positionUpdateInterval = 500;
 
+  /// Scoped, throttled position signal that fires independently of
+  /// [notifyListeners].
+  ///
+  /// Position updates arrive from two native-event paths -- the dedicated
+  /// `positionStream` and, because the native "position changed" bridge
+  /// pushes an updated `PlaybackState` through `stateStream` on every tick
+  /// too (see [MediaPlayer]'s `_handlePositionChanged`), also `stateStream`
+  /// itself. Neither path calls [notifyListeners] for a position-only
+  /// change (see [_isPositionOnlyChange]); both instead update this
+  /// notifier, throttled the same way `_currentState.position` is (see
+  /// [_shouldUpdatePosition]).
+  ///
+  /// Widgets that only need to react to playback position (seek bar, time
+  /// display, subtitle cues) should listen to [positionListenable] instead
+  /// of the whole controller, so that per-tick position updates (~2/sec)
+  /// don't rebuild every listener attached to the controller (play/pause
+  /// button, top bar, settings affordances, etc.) that has nothing to do
+  /// with position.
+  final ValueNotifier<Duration> _positionNotifier =
+      ValueNotifier<Duration>(Duration.zero);
+
+  /// See [_positionNotifier].
+  ValueListenable<Duration> get positionListenable => _positionNotifier;
+
   /// Create a media controller with the given player instance
   MediaController(this._player) {
     _setupSubscriptions();
@@ -705,10 +729,29 @@ class MediaController extends ChangeNotifier {
       _subscriptions.add(
         _player.stateStream.listen(
           (state) {
-            if (!_isDisposed) {
-              _currentState = state;
-              _notifyListeners();
+            if (_isDisposed) return;
+
+            // The native "position changed" bridge pushes an updated
+            // PlaybackState through this same stateStream on every position
+            // tick, not just on genuine state transitions (see MediaPlayer's
+            // _handlePositionChanged). If every one of those pushes called
+            // notifyListeners(), every listener on this controller
+            // (play/pause button, top bar, settings affordances, etc.) would
+            // rebuild on every ~500ms tick even though none of those fields
+            // actually changed. Detect a position-only push and route it
+            // through the throttled positionListenable instead of the
+            // broad notifyListeners() sweep; only genuine state changes
+            // notify listeners.
+            if (_isPositionOnlyChange(state)) {
+              if (_shouldUpdatePosition(state.position)) {
+                _currentState = state;
+                _positionNotifier.value = state.position;
+              }
+              return;
             }
+
+            _currentState = state;
+            _notifyListeners();
           },
           onError: (error) {
             debugPrint('MediaController: State stream error: $error');
@@ -716,13 +759,15 @@ class MediaController extends ChangeNotifier {
         ),
       );
 
-      // Position stream subscription with throttling
+      // Position stream subscription with throttling. Deliberately does NOT
+      // call notifyListeners() -- see positionListenable's doc comment for
+      // why position-only updates are scoped to their own listenable.
       _subscriptions.add(
         _player.positionStream.listen(
           (position) {
             if (!_isDisposed && _shouldUpdatePosition(position)) {
               _currentState = _currentState.copyWith(position: position);
-              _notifyListeners();
+              _positionNotifier.value = position;
             }
           },
           onError: (error) {
@@ -819,6 +864,17 @@ class MediaController extends ChangeNotifier {
       debugPrint('MediaController: Error setting up subscriptions: $e');
       rethrow;
     }
+  }
+
+  /// Returns true if [newState] differs from the current cached state only
+  /// in its [PlaybackState.position] field.
+  ///
+  /// Used to detect the native "position changed" bridge riding through
+  /// `stateStream` (see [MediaPlayer]'s `_handlePositionChanged`) so those
+  /// pushes can be routed through [positionListenable] instead of a full
+  /// [notifyListeners] sweep. Relies on [PlaybackState]'s field-wise `==`.
+  bool _isPositionOnlyChange(PlaybackState newState) {
+    return _currentState.copyWith(position: newState.position) == newState;
   }
 
   /// Check if position should be updated based on throttling
@@ -1023,6 +1079,9 @@ class MediaController extends ChangeNotifier {
 
     // Cancel all subscriptions
     _cleanupSubscriptions();
+
+    // Dispose the scoped position listenable
+    _positionNotifier.dispose();
 
     // Dispose player
     try {

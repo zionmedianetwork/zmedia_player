@@ -25,6 +25,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 import 'package:zmedia_player/zmedia_player.dart';
 
 // ---------------------------------------------------------------------------
@@ -173,6 +174,15 @@ void main() {
     warmup.dispose();
     calls.clear();
     _resetHandler();
+
+    // MediaListPlayer's VisibilityDetector defaults to a real 500ms Timer
+    // between visibility checks. flutter_test fakes Timers via FakeAsync, so
+    // that Timer is still pending (never fired) when a test tears its widget
+    // tree down with only a couple of `tester.pump()` calls, which trips
+    // flutter_test's "Timer is still pending" invariant check. Duration.zero
+    // makes the package fire via addPostFrameCallback instead of a Timer —
+    // exactly the setting its own docs recommend for automated tests.
+    VisibilityDetectorController.instance.updateInterval = Duration.zero;
   });
 
   group('MediaListPlayerConfig.pauseOthersOnPlay', () {

@@ -13,6 +13,8 @@ import 'adaptive_controls_page.dart';
 import 'custom_controls_page.dart';
 import 'error_handling_page.dart';
 import 'multi_player_page.dart';
+import 'network_status_page.dart';
+import 'feed_page.dart';
 
 /// Home page displaying a scrollable gallery of ZMedia Player feature demos.
 ///
@@ -183,6 +185,29 @@ class HomePage extends StatelessWidget {
                       'cross-instance completion and Now Playing ownership.',
                   icon: Icons.view_column_outlined,
                   page: const MultiPlayerPage(),
+                  iconColor: Colors.red,
+                ),
+                const SizedBox(height: 8),
+                _feature(
+                  context,
+                  title: 'Network Status (H-06)',
+                  description: 'Live NetworkStatus / networkStatusStream / '
+                      'networkChangeStream readout; toggle airplane mode '
+                      'to verify.',
+                  icon: Icons.signal_cellular_alt,
+                  page: const NetworkStatusPage(),
+                  iconColor: Colors.red,
+                ),
+                const SizedBox(height: 8),
+                _feature(
+                  context,
+                  title: 'Feed (MediaListPlayer, Phase 4)',
+                  description:
+                      'Scrolling feed of 12 MediaListPlayers; verifies '
+                      'scroll-away pause, the maxConcurrentPlayers cap, and '
+                      'pauseOthersOnPlay.',
+                  icon: Icons.view_agenda_outlined,
+                  page: const FeedPage(),
                   iconColor: Colors.red,
                 ),
               ]),

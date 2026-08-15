@@ -98,8 +98,8 @@ class _MultiPlayerPageState extends State<MultiPlayerPage> {
   late NotificationService _notifA;
   late NotificationService _notifB;
 
-  StreamSubscription<String>? _actionSubA;
-  StreamSubscription<String>? _actionSubB;
+  StreamSubscription<NotificationActionEvent>? _actionSubA;
+  StreamSubscription<NotificationActionEvent>? _actionSubB;
 
   PlayerState? _lastLoggedA;
   PlayerState? _lastLoggedB;
@@ -335,22 +335,26 @@ class _MultiPlayerPageState extends State<MultiPlayerPage> {
   void _subscribeActions() {
     _actionSubA?.cancel();
     _actionSubB?.cancel();
-    _actionSubA = _notifA.actionStream.listen((action) {
-      _handleAction('A', action);
+    // actionEventStream (not the deprecated actionStream) is required so
+    // "seekTo" (lock-screen / Control Center scrub bar) events carry their
+    // target position.
+    _actionSubA = _notifA.actionEventStream.listen((event) {
+      _handleAction('A', event);
     });
-    _actionSubB = _notifB.actionStream.listen((action) {
-      _handleAction('B', action);
+    _actionSubB = _notifB.actionEventStream.listen((event) {
+      _handleAction('B', event);
     });
-    _log('STEP 6: subscribed to actionStream for both A and B');
+    _log('STEP 6: subscribed to actionEventStream for both A and B');
   }
 
   /// Routes a lock-screen/Control Center action received for player
   /// [label] ('A' or 'B') to that player's controller only, logging the
   /// exact outcome so the console can be grepped for
   /// `[MP-TEST] ACTION <label>: ...`.
-  Future<void> _handleAction(String label, String action) async {
+  Future<void> _handleAction(String label, NotificationActionEvent event) async {
     final disposed = label == 'A' ? _aDisposed : _bDisposed;
     final controller = label == 'A' ? _controllerA : _controllerB;
+    final action = event.action;
 
     if (disposed) {
       _log(
@@ -399,6 +403,20 @@ class _MultiPlayerPageState extends State<MultiPlayerPage> {
           '$label.seekBackward()',
         );
         await controller.seekBackward();
+        break;
+      case NotificationActions.seekTo:
+        final position = event.position;
+        if (position == null) {
+          _log(
+            'ACTION $label: received=seekTo with no position -> ignoring',
+          );
+          break;
+        }
+        _log(
+          'ACTION $label: received=seekTo($position) -> calling '
+          '$label.seekTo($position)',
+        );
+        await controller.seekTo(position);
         break;
       default:
         _log('ACTION $label: received=$action -> unhandled, ignoring');
