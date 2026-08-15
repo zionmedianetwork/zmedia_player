@@ -16,6 +16,15 @@ class PipHandler: NSObject {
     // Configuration
     private var config: [String: Any]?
 
+    // M-03: bounds the "wait for controller / wait for layer readiness"
+    // retry loops in enterPip() below. Without a cap, content that never
+    // becomes ready for PiP (audio-only, a detached view, or the app
+    // backgrounded before the first frame renders) retried forever at a
+    // fixed interval. 10 attempts at up to 0.5s apart is an overall deadline
+    // of ~5s, which is generous for "player item just needs a moment to
+    // render" but finite.
+    private static let maxPipEnterAttempts = 10
+
     init(playerId: String, channel: FlutterMethodChannel) {
         self.playerId = playerId
         self.channel = channel
@@ -156,14 +165,27 @@ class PipHandler: NSObject {
         }
     }
 
+    /// Sets ONLY the audio session category (not activation) required for
+    /// `AVPictureInPictureController` — Apple requires the app's session
+    /// category to support background audio (`.playback`) for PiP to work,
+    /// but does not require it to be ACTIVE ahead of time.
+    ///
+    /// B-05: this used to also call `setActive(true)` here, which meant
+    /// simply setting up the PiP controller (which happens during
+    /// `initialize()`, independent of whether the user has pressed play)
+    /// seized the process-wide audio session and interrupted any other
+    /// app's audio. Setting the category alone does not interrupt other
+    /// apps — only activation does — so it's safe to do unconditionally.
+    /// Activation itself is owned exclusively by `AudioSessionCoordinator`,
+    /// driven by `MediaPlayerInstance.play()`/`pause()`, which shares the
+    /// same `AVPlayer` this controller is wrapping.
     private func configureAudioSessionForPiP() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
-            try audioSession.setActive(true)
-            print("PipHandler: Audio session configured for PiP")
+            print("PipHandler: Audio session category configured for PiP (activation is owned by AudioSessionCoordinator)")
         } catch {
-            print("PipHandler: Failed to configure audio session: \(error.localizedDescription)")
+            print("PipHandler: Failed to configure audio session category: \(error.localizedDescription)")
         }
     }
 
@@ -191,8 +213,13 @@ class PipHandler: NSObject {
 
     // MARK: - Enter/Exit PiP
 
-    func enterPip(config: [String: Any]?) -> Bool {
-        print("PipHandler: Attempting to enter PiP mode")
+    /// - Parameter attempt: internal retry counter (M-03). Always starts at
+    ///   0 for a fresh, externally-triggered call (the default); recursive
+    ///   retries below increment it. Capped by `maxPipEnterAttempts` across
+    ///   BOTH retry points below (controller creation and layer-readiness),
+    ///   so the total wait is bounded regardless of which stage is slow.
+    func enterPip(config: [String: Any]?, attempt: Int = 0) -> Bool {
+        print("PipHandler: Attempting to enter PiP mode (attempt \(attempt))")
 
         guard AVPictureInPictureController.isPictureInPictureSupported() else {
             print("PipHandler: Cannot enter PiP - not supported")
@@ -245,10 +272,21 @@ class PipHandler: NSObject {
                 print("PipHandler: Creating PiP controller...")
                 setupPipController(with: playerLayer)
 
+                guard attempt < PipHandler.maxPipEnterAttempts else {
+                    print("PipHandler: Gave up waiting for PiP controller to become ready after \(PipHandler.maxPipEnterAttempts) attempts")
+                    notifyPipStatusChanged(
+                        state: "failed",
+                        isSupported: true,
+                        isActive: false,
+                        errorMessage: "Picture-in-Picture could not start: the controller never became ready after \(PipHandler.maxPipEnterAttempts) attempts."
+                    )
+                    return false
+                }
+
                 // Schedule retry instead of blocking sleep
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
                     guard let self = self else { return }
-                    _ = self.enterPip(config: config)
+                    _ = self.enterPip(config: config, attempt: attempt + 1)
                 }
 
                 notifyPipStatusChanged(
@@ -284,12 +322,23 @@ class PipHandler: NSObject {
 
         // Check if player layer is ready for display
         if let layer = playerLayer, !layer.isReadyForDisplay {
+            guard attempt < PipHandler.maxPipEnterAttempts else {
+                print("PipHandler: Gave up waiting for player layer to become ready for display after \(PipHandler.maxPipEnterAttempts) attempts")
+                notifyPipStatusChanged(
+                    state: "failed",
+                    isSupported: true,
+                    isActive: false,
+                    errorMessage: "Picture-in-Picture could not start: the video layer never became ready to display after \(PipHandler.maxPipEnterAttempts) attempts."
+                )
+                return false
+            }
+
             print("PipHandler: Player layer not ready for display yet, will retry asynchronously")
 
             // Schedule async retry instead of blocking
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
                 guard let self = self else { return }
-                _ = self.enterPip(config: config)
+                _ = self.enterPip(config: config, attempt: attempt + 1)
             }
 
             notifyPipStatusChanged(

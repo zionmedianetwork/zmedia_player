@@ -6,4 +6,33 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
+    <application>
+        <!--
+          Routes taps on media-notification action buttons (play/pause/next/
+          previous/stop) back to the tapped player's MediaSessionCompat so the
+          buttons actually work (see NotificationHandler.createAction /
+          NotificationActionReceiver and docs/implementation/
+          production-gate-assessment.md B-08).
+
+          Declared here, in the plugin's own manifest, so the Android Gradle
+          manifest merger adds it to every consuming app automatically — no
+          host-app manifest changes are required for this receiver itself.
+
+          exported="false": only ever triggered via PendingIntents this module
+          creates for itself (delivered under this app's own identity regardless
+          of the exported flag); it is never a public entry point.
+
+          No intent-filter is declared: every PendingIntent that targets this
+          receiver names it explicitly by component, so no implicit
+          android.intent.action.MEDIA_BUTTON filter is needed. This also avoids
+          colliding with any other MediaSessionCompat-based plugin (e.g.
+          audio_service, just_audio_background) the host app may combine with
+          this one and that also wants to be the app's unique implicit
+          MEDIA_BUTTON receiver.
+        -->
+        <receiver
+            android:name="com.zionmedianetwork.zmedia_player.NotificationActionReceiver"
+            android:exported="false" />
+    </application>
 </manifest>
