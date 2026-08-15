@@ -200,9 +200,6 @@ class MediaPlayer {
   /// Available cast devices
   List<CastDevice> _castDevices = [];
 
-  /// Timer for position updates
-  Timer? _positionTimer;
-
   /// Whether the player has been initialized
   bool _isInitialized = false;
 
@@ -216,6 +213,67 @@ class MediaPlayer {
 
   /// Completer for initialization
   Completer<void>? _initializationCompleter;
+
+  /// H-10: explicit reference count of external consumers holding this
+  /// instance across otherwise-idle periods. The periodic stale-instance
+  /// sweep ([_cleanupStaleInstances]) previously inferred "abandoned" purely
+  /// from `!isPlaying` + a 15-minute inactivity timeout, which disposes a
+  /// perfectly live, paused instance the app still holds (e.g. `pause()` a
+  /// player, leave the app idle 15 minutes, `play()` again -> throws
+  /// [PlayerDisposedException]).
+  ///
+  /// Callers that keep a [MediaPlayer] reference around without necessarily
+  /// listening to any of its streams should call [attach] once they take
+  /// ownership and [detach] once they release it, so the sweep never
+  /// disposes an instance a caller still intends to use, regardless of its
+  /// current playback state. See [_isReferencedByLiveConsumer].
+  int _referenceCount = 0;
+
+  /// Registers this caller as an active consumer of this player instance,
+  /// protecting it from the stale-instance sweep regardless of its current
+  /// playback state (H-10). Each [attach] must be paired with exactly one
+  /// [detach]; safe to call multiple times for multiple independent owners.
+  void attach() {
+    _throwIfDisposed();
+    _referenceCount++;
+    _markActivity();
+  }
+
+  /// Releases a reference previously registered via [attach]. Once the
+  /// reference count returns to zero — and there is no other live consumer,
+  /// e.g. an active stream subscription (see [_isReferencedByLiveConsumer])
+  /// — this instance becomes eligible again for the stale-instance sweep
+  /// after the normal 15-minute inactivity threshold.
+  void detach() {
+    if (_referenceCount > 0) {
+      _referenceCount--;
+    }
+    // Give a fresh 15-minute inactivity grace period from the moment of
+    // release, rather than letting the sweep judge staleness against
+    // whatever [_lastActivity] happened to be when this instance was last
+    // (possibly long ago) protected by a live reference.
+    _markActivity();
+  }
+
+  /// H-10: whether some live consumer still holds/uses this instance, and so
+  /// it must survive the stale-instance sweep regardless of playback state
+  /// or elapsed inactivity.
+  ///
+  /// Two independent signals are honored:
+  ///  1. [_referenceCount] > 0 — an explicit [attach]/[detach] registration.
+  ///     This is the honest signal: it doesn't depend on *how* the consumer
+  ///     uses the player, only on whether it declared ownership.
+  ///  2. A live subscription on one of the "primary" broadcast streams a
+  ///     typical consumer listens to for the lifetime of its own object —
+  ///     e.g. `MediaController` subscribes to [stateStream] (and others) in
+  ///     its constructor and only cancels them in its own `dispose()`. This
+  ///     fallback protects existing consumers that hold a [MediaPlayer]
+  ///     reference and observe it reactively without calling [attach]
+  ///     explicitly.
+  bool get _isReferencedByLiveConsumer {
+    if (_referenceCount > 0) return true;
+    return _stateController.hasListener || _positionController.hasListener;
+  }
 
   /// Private constructor for factory pattern
   MediaPlayer._(this.playerId, this._config) {
@@ -324,7 +382,10 @@ class MediaPlayer {
     for (final key in staleKeys) {
       // Check instance still exists before cleanup
       final instance = _instances[key];
-      if (instance != null && !instance.isPlaying && !instance._isDisposed) {
+      if (instance != null &&
+          !instance.isPlaying &&
+          !instance._isDisposed &&
+          !instance._isReferencedByLiveConsumer) {
         debugPrint('MediaPlayer: Auto-cleaning stale instance: $key');
 
         // Atomic removal pattern: remove from tracking first
@@ -349,6 +410,23 @@ class MediaPlayer {
       _cleanupTimer?.cancel();
       _cleanupTimer = null;
     }
+  }
+
+  /// Test-only hook: immediately runs the stale-instance sweep that
+  /// normally only fires via [_cleanupTimer] every 5 minutes, so tests can
+  /// assert its behaviour (H-10) without waiting on real wall-clock time.
+  @visibleForTesting
+  static void debugRunStaleSweepForTest() => _cleanupStaleInstances();
+
+  /// Test-only hook: back-dates [playerId]'s last-activity timestamp so the
+  /// stale-instance sweep considers it eligible on the next run, without
+  /// requiring the test to wait out the real 15-minute inactivity threshold
+  /// (H-10). No-op if [playerId] has no tracked activity (e.g. unknown id).
+  @visibleForTesting
+  static void debugMarkStaleForTest(String playerId) {
+    if (!_lastActivity.containsKey(playerId)) return;
+    _lastActivity[playerId] =
+        DateTime.now().subtract(const Duration(minutes: 20));
   }
 
   /// Factory constructor to create a new media player instance
@@ -768,7 +846,6 @@ class MediaPlayer {
       }
 
       _isInitialized = true;
-      _startPositionTimer();
       _initializationCompleter!.complete();
 
       crashReporter?.log('MediaPlayer initialized successfully', context: {
@@ -1130,10 +1207,17 @@ class MediaPlayer {
   /// Stop playback
   Future<void> stop() async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       await _invokeMethod('stop', {'playerId': playerId});
       _updateState(_currentState.copyWith(state: PlayerState.idle));
+
+      // H-08: stop() leaves the playing state just as surely as pause() does
+      // — without this, buffer-health polling (a 500ms native channel
+      // round-trip; see BufferingService.startMonitoring) kept running
+      // indefinitely for any stopped-but-not-disposed player.
+      _bufferingService.stopMonitoring();
     } on PlatformException catch (e) {
       throw PlaybackException(
         'Failed to stop: ${e.message ?? e.code}',
@@ -1146,6 +1230,10 @@ class MediaPlayer {
   /// Seek to a specific position
   Future<void> seekTo(Duration position) async {
     await _ensureInitialized();
+    // H-10: scrubbing/seeking is ordinary interaction and must count as
+    // activity — otherwise a user actively seeking around a paused player
+    // could still have it swept as "stale" mid-interaction.
+    _markActivity();
 
     if (position.isNegative) {
       throw ConfigurationException(
@@ -1172,6 +1260,8 @@ class MediaPlayer {
   /// Set playbook volume (0.0 to 1.0)
   Future<void> setVolume(double volume) async {
     await _ensureInitialized();
+    // H-10: adjusting volume is ordinary interaction; count it as activity.
+    _markActivity();
 
     final clampedVolume = volume.clamp(0.0, 1.0);
 
@@ -1197,6 +1287,8 @@ class MediaPlayer {
   /// Set playback speed
   Future<void> setSpeed(double speed) async {
     await _ensureInitialized();
+    // H-10: changing speed is ordinary interaction; count it as activity.
+    _markActivity();
 
     final clampedSpeed = speed.clamp(0.25, 4.0);
 
@@ -1222,6 +1314,7 @@ class MediaPlayer {
   /// Mute or unmute the player
   Future<void> setMuted(bool muted) async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       await _invokeMethod('setMuted', {
@@ -1277,6 +1370,7 @@ class MediaPlayer {
   /// Set video BoxFit mode
   Future<void> setBoxFit(BoxFit boxFit) async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       await _invokeMethod('setBoxFit', {
@@ -1298,6 +1392,7 @@ class MediaPlayer {
   /// Set subtitle track
   Future<void> setSubtitleTrack(SubtitleTrack? track) async {
     await _ensureInitialized();
+    _markActivity();
 
     // Validate track exists in available tracks
     if (track != null && !_subtitleTracks.any((t) => t.id == track.id)) {
@@ -1330,6 +1425,7 @@ class MediaPlayer {
   /// Set quality track
   Future<void> setQualityTrack(QualityTrack track) async {
     await _ensureInitialized();
+    _markActivity();
 
     // Validate track exists in available tracks
     if (!_qualityTracks.any((t) => t.id == track.id)) {
@@ -1362,6 +1458,7 @@ class MediaPlayer {
   /// Set audio track
   Future<void> setAudioTrack(AudioTrack track) async {
     await _ensureInitialized();
+    _markActivity();
 
     // Validate track exists in available tracks
     if (!_audioTracks.any((t) => t.id == track.id)) {
@@ -1394,6 +1491,7 @@ class MediaPlayer {
   /// Enable automatic quality selection (adaptive bitrate)
   Future<void> enableAutoQuality() async {
     await _ensureInitialized();
+    _markActivity();
 
     try {
       await _invokeMethod('enableAutoQuality', {
@@ -1708,10 +1806,6 @@ class MediaPlayer {
     _instances.remove(playerId);
     _lastActivity.remove(playerId);
 
-    // Cancel timers
-    _positionTimer?.cancel();
-    _positionTimer = null;
-
     // Close platform channel
     if (_isInitialized) {
       try {
@@ -1972,6 +2066,20 @@ class MediaPlayer {
       bufferPercentage:
           (arguments['bufferPercentage'] as num?)?.toDouble() ?? 0.0,
     ));
+
+    // H-08: buffer-health polling (BufferingService.startMonitoring) makes a
+    // native channel round-trip every 500ms and must not keep running once
+    // playback is no longer actively progressing. play()/pause() already
+    // start/stop it for the Dart-driven path, but native can also drive a
+    // transition away from `playing` entirely on its own — audio focus loss
+    // (-> paused), natural completion (-> completed), a player error
+    // (-> error), or a native-initiated stop (-> idle) — without either of
+    // those methods ever being called. `buffering` is deliberately excluded:
+    // that's exactly the state where buffer health visibility matters most
+    // (e.g. a mid-playback rebuffer stall).
+    if (state != PlayerState.playing && state != PlayerState.buffering) {
+      _bufferingService.stopMonitoring();
+    }
 
     // H-01: only present on Android, and only for a "paused" event caused
     // by the OS revoking audio focus — see
@@ -2306,26 +2414,6 @@ class MediaPlayer {
     if (!_stateController.isClosed) {
       _stateController.add(newState);
     }
-  }
-
-  /// Start position update timer
-  void _startPositionTimer() {
-    _positionTimer?.cancel();
-    _positionTimer = Timer.periodic(
-      const Duration(milliseconds: 500),
-      (timer) {
-        if (_isDisposed) {
-          timer.cancel();
-          return;
-        }
-
-        // Position updates are primarily handled by platform events
-        // This timer serves as a fallback and heartbeat mechanism
-        if (_currentState.state == PlayerState.playing) {
-          // Could implement fallback position calculation here if needed
-        }
-      },
-    );
   }
 
   /// Ensure player is initialized

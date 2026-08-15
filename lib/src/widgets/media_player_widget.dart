@@ -60,6 +60,24 @@ class MediaPlayerWidget extends StatefulWidget {
   /// Whether to expand to fill available space
   final bool expandToFill;
 
+  /// Whether this widget's State should be kept alive by
+  /// [AutomaticKeepAliveClientMixin] when it would otherwise be removed
+  /// from the tree (e.g. scrolled out of a scrollable's cache extent).
+  ///
+  /// Defaults to `true`, matching a standalone player embedded in a
+  /// scrollable page (e.g. a video at the top of an article), where keeping
+  /// the native decoder/platform view alive across small scroll
+  /// adjustments is desirable.
+  ///
+  /// [MediaListPlayer] explicitly passes `false` here: in a feed of many
+  /// players, unconditionally keeping every item's State (and therefore its
+  /// native decoder/platform view) alive forever once mounted — regardless
+  /// of how far it has scrolled out of view — is what causes the live
+  /// decoder count to track every item ever scrolled past instead of only
+  /// the currently-visible ones. A `false` value lets Flutter actually
+  /// dispose the State once the item leaves the scrollable's cache extent.
+  final bool wantKeepAlive;
+
   const MediaPlayerWidget({
     super.key,
     required this.controller,
@@ -76,6 +94,7 @@ class MediaPlayerWidget extends StatefulWidget {
     this.allowFullscreen = true,
     this.aspectRatio,
     this.expandToFill = false,
+    this.wantKeepAlive = true,
   });
 
   @override
@@ -116,9 +135,10 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   /// Cache service for media caching
   late final CacheService _cacheService;
 
-  /// Keep alive for performance
+  /// Keep alive, configurable via [MediaPlayerWidget.wantKeepAlive] — see
+  /// its doc comment for why list usage (MediaListPlayer) needs `false`.
   @override
-  bool get wantKeepAlive => true;
+  bool get wantKeepAlive => widget.wantKeepAlive;
 
   /// Whether we have a native view (for fullscreen reuse)
   bool get hasNativeView => _hasNativeView;
@@ -418,18 +438,35 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   /// Build subtitle overlay
+  ///
+  /// This is built inside `_buildInteractiveContent`'s outer
+  /// `ListenableBuilder(listenable: widget.controller)`, which intentionally
+  /// does NOT rebuild on position-only changes (MediaController routes
+  /// those through the dedicated `positionListenable` instead of
+  /// `notifyListeners()` -- see `MediaController.positionListenable`).
+  /// Subtitle cues still need to track playback position every tick, so
+  /// this widget listens to `positionListenable` directly rather than
+  /// relying on the outer rebuild, keeping subtitle timing accurate without
+  /// re-triggering a rebuild of the whole video surface/controls
+  /// overlay/tap-detector stack on every ~500ms tick.
   Widget _buildSubtitleOverlay() {
     if (widget.controller.currentItem == null) {
       return const SizedBox.shrink();
     }
 
-    return SubtitleView(
-      subtitleService: _subtitleService,
-      position: widget.controller.state.position,
-      config: widget.controller.config.subtitleConfig ?? const SubtitleConfig(),
-      enabled: widget.controller.config.enableSubtitles,
-      onTrackChanged: (_) {
-        // Subtitle track change is handled internally by SubtitleView
+    return ValueListenableBuilder<Duration>(
+      valueListenable: widget.controller.positionListenable,
+      builder: (context, position, _) {
+        return SubtitleView(
+          subtitleService: _subtitleService,
+          position: position,
+          config:
+              widget.controller.config.subtitleConfig ?? const SubtitleConfig(),
+          enabled: widget.controller.config.enableSubtitles,
+          onTrackChanged: (_) {
+            // Subtitle track change is handled internally by SubtitleView
+          },
+        );
       },
     );
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:visibility_detector/visibility_detector.dart';
 import '../core/media_controller.dart';
 import 'media_player_widget.dart';
 
@@ -34,6 +35,22 @@ class _MediaListPlaybackCoordinator {
   /// here past its widget's teardown.
   final Set<MediaController> _registered = <MediaController>{};
 
+  /// Controllers currently counted as "live" — i.e. visible per their
+  /// widget's [MediaListPlayerConfig.visibilityThreshold] — ordered
+  /// oldest-became-visible first. This is the LRU queue [_evictExcess] trims
+  /// against a caller-supplied `maxConcurrentPlayers` ceiling.
+  ///
+  /// This is a *policy* cap on how many list items may be simultaneously
+  /// active, independent of [MediaListPlayerConfig.pauseOthersOnPlay]: that
+  /// flag only reacts to a "just started playing" edge and does nothing for
+  /// players that are visible-and-loaded but not (yet) playing, or when the
+  /// app disables it (e.g. a muted-preview grid where several items are
+  /// expected to play concurrently, just not unboundedly many). Hardware
+  /// decoder sessions are a scarce, process-wide resource on both platforms,
+  /// so this ceiling is enforced here rather than left to however many the
+  /// device happens to tolerate before failing with a generic error.
+  final List<MediaController> _liveOrder = <MediaController>[];
+
   /// Registers [controller] as a participant so it can be paused by (and can
   /// pause) other participants. Safe to call multiple times for the same
   /// controller.
@@ -45,6 +62,7 @@ class _MediaListPlaybackCoordinator {
   /// so a torn-down widget's controller is never retained or paused later.
   void unregister(MediaController controller) {
     _registered.remove(controller);
+    _liveOrder.remove(controller);
   }
 
   /// Call when [controller] has just transitioned from not-playing to
@@ -67,10 +85,48 @@ class _MediaListPlaybackCoordinator {
         // without going through this widget's dispose() first (e.g. the
         // host app disposes it directly after unmounting the widget).
         _registered.remove(other);
+        _liveOrder.remove(other);
         continue;
       }
       if (other.isPlaying) {
         other.pause();
+      }
+    }
+  }
+
+  /// Marks [controller] as live (visible) and enforces [maxConcurrentPlayers]
+  /// by pausing the least-recently-became-visible controller(s) once the
+  /// live set exceeds it.
+  ///
+  /// Called on every visibility-threshold crossing into view (not just
+  /// once), so scrolling quickly past many items in a row cannot leave the
+  /// live set transiently over the cap before an individual item's own
+  /// pause-on-invisible has a chance to run.
+  void onDidBecomeVisible(
+    MediaController controller, {
+    required int maxConcurrentPlayers,
+  }) {
+    _liveOrder.remove(controller);
+    _liveOrder.add(controller);
+    _evictExcess(maxConcurrentPlayers);
+  }
+
+  /// Removes [controller] from the live set. Does not itself pause the
+  /// controller — [_MediaListPlayerState._onBecameInvisible] already does
+  /// that via `autoPause` before calling this.
+  void onDidBecomeInvisible(MediaController controller) {
+    _liveOrder.remove(controller);
+  }
+
+  /// Pauses the oldest entries in [_liveOrder] until its length is at most
+  /// [maxConcurrentPlayers]. Values <= 0 disable the cap.
+  void _evictExcess(int maxConcurrentPlayers) {
+    if (maxConcurrentPlayers <= 0) return;
+    while (_liveOrder.length > maxConcurrentPlayers) {
+      final evicted = _liveOrder.removeAt(0);
+      if (evicted.isDisposed) continue;
+      if (evicted.isPlaying) {
+        evicted.pause();
       }
     }
   }
@@ -99,12 +155,30 @@ class MediaListPlayerConfig {
   /// volume changes) while a player is already playing.
   final bool pauseOthersOnPlay;
 
+  /// Hard ceiling on how many [MediaListPlayer] instances (registered with
+  /// the shared playback coordinator) may be counted as "live" — currently
+  /// visible per [visibilityThreshold] — at once.
+  ///
+  /// When a player becomes visible and the live set already has
+  /// [maxConcurrentPlayers] members, the least-recently-became-visible one
+  /// is paused to make room. This bounds concurrent hardware-decoder usage
+  /// by policy rather than by however many the device happens to tolerate
+  /// before failing with a generic error, and applies even when
+  /// [pauseOthersOnPlay] is `false` or a player is visible-and-loaded but
+  /// not (yet) playing.
+  ///
+  /// Values <= 0 disable the cap. Defaults to 2 (the currently-focused item
+  /// plus one adjacent/preloading item), matching a typical single-column
+  /// vertical feed.
+  final int maxConcurrentPlayers;
+
   const MediaListPlayerConfig({
     this.visibilityThreshold = 0.6,
     this.autoPlay = true,
     this.autoPause = true,
     this.muteWhenNotVisible = false,
     this.pauseOthersOnPlay = true,
+    this.maxConcurrentPlayers = 2,
   });
 }
 
@@ -216,6 +290,12 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
     }
   }
 
+  /// Driven by the `visibility_detector` package's composition-callback
+  /// based detection (see [build]), which genuinely fires on scroll —
+  /// unlike the previous hand-rolled `NotificationListener<ScrollNotification>`
+  /// implementation this replaced, which was a descendant of the enclosing
+  /// `Scrollable` and therefore structurally could never receive its scroll
+  /// notifications (they only bubble upward).
   void _handleVisibilityChanged(VisibilityInfo info) {
     final previouslyVisible = _isVisible;
 
@@ -247,6 +327,14 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
     debugPrint('MediaListPlayer: Became visible');
     widget.onVisible?.call();
 
+    // Enforce the maxConcurrentPlayers policy cap before considering
+    // autoPlay, so a player that would push the live set over the cap is
+    // evicted immediately rather than only after autoPlay's own delay.
+    _MediaListPlaybackCoordinator.instance.onDidBecomeVisible(
+      widget.controller,
+      maxConcurrentPlayers: widget.config.maxConcurrentPlayers,
+    );
+
     if (widget.config.autoPlay && !_hasPlayedOnce) {
       _hasPlayedOnce = true;
       // Small delay to ensure smooth scrolling
@@ -265,6 +353,9 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
     debugPrint('MediaListPlayer: Became invisible');
     widget.onInvisible?.call();
 
+    _MediaListPlaybackCoordinator.instance
+        .onDidBecomeInvisible(widget.controller);
+
     if (widget.config.autoPause && widget.controller.isPlaying) {
       widget.controller.pause();
     }
@@ -272,8 +363,20 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
 
   @override
   Widget build(BuildContext context) {
+    // Uses the `visibility_detector` package rather than a hand-rolled
+    // NotificationListener<ScrollNotification> (see the removed
+    // in-tree VisibilityDetector this replaced, and _handleVisibilityChanged
+    // above for why that approach never actually fired on scroll). The
+    // package detects visibility via a compositor/layer callback that is
+    // independent of the widget's position relative to the enclosing
+    // Scrollable, so it fires correctly regardless of ancestor/descendant
+    // relationships.
+    //
+    // Keyed by playerId (stable, unique per controller) rather than
+    // `hashCode`/`Object.hashCode`, which is not guaranteed stable or
+    // collision-free across the process.
     return VisibilityDetector(
-      key: Key('media_list_player_${widget.controller.hashCode}'),
+      key: ValueKey('media_list_player_${widget.controller.playerId}'),
       onVisibilityChanged: _handleVisibilityChanged,
       child: AspectRatio(
         aspectRatio: widget.aspectRatio,
@@ -284,107 +387,12 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
           placeholder: widget.placeholder,
           errorWidget: widget.errorWidget,
           onTap: widget.onTap,
+          // A list of players must not keep every item's State (and its
+          // native decoder/platform view) alive forever once mounted — see
+          // MediaPlayerWidget.wantKeepAlive's doc comment.
+          wantKeepAlive: false,
         ),
       ),
     );
   }
-}
-
-/// A simple visibility detector widget
-/// Note: In production, consider using the visibility_detector package
-class VisibilityDetector extends StatefulWidget {
-  final Widget child;
-  final Function(VisibilityInfo) onVisibilityChanged;
-
-  const VisibilityDetector({
-    required super.key,
-    required this.child,
-    required this.onVisibilityChanged,
-  });
-
-  @override
-  State<VisibilityDetector> createState() => _VisibilityDetectorState();
-}
-
-class _VisibilityDetectorState extends State<VisibilityDetector> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkVisibility();
-    });
-  }
-
-  @override
-  void didUpdateWidget(VisibilityDetector oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _checkVisibility();
-    });
-  }
-
-  void _checkVisibility() {
-    if (!mounted) return;
-
-    final RenderObject? renderObject = context.findRenderObject();
-    if (renderObject == null || renderObject is! RenderBox) return;
-
-    final RenderBox renderBox = renderObject;
-    final Size size = renderBox.size;
-    final Offset position = renderBox.localToGlobal(Offset.zero);
-
-    final double screenHeight = MediaQuery.of(context).size.height;
-    final double top = position.dy;
-    final double bottom = top + size.height;
-
-    // Calculate visible fraction
-    double visibleHeight = 0;
-    if (bottom < 0 || top > screenHeight) {
-      visibleHeight = 0;
-    } else if (top >= 0 && bottom <= screenHeight) {
-      visibleHeight = size.height;
-    } else if (top < 0 && bottom > 0) {
-      visibleHeight = bottom;
-    } else if (top < screenHeight && bottom > screenHeight) {
-      visibleHeight = screenHeight - top;
-    }
-
-    final double visibleFraction = visibleHeight / size.height;
-
-    widget.onVisibilityChanged(VisibilityInfo(
-      key: widget.key!,
-      size: size,
-      visibleBounds: Rect.fromLTWH(
-          0, top.clamp(0, screenHeight), size.width, visibleHeight),
-      visibleFraction: visibleFraction,
-    ));
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return NotificationListener<ScrollNotification>(
-      onNotification: (notification) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _checkVisibility();
-        });
-        return false;
-      },
-      child: widget.child,
-    );
-  }
-}
-
-/// Information about the visibility of a widget
-class VisibilityInfo {
-  final Key key;
-  final Size size;
-  final Rect visibleBounds;
-  final double visibleFraction;
-
-  const VisibilityInfo({
-    required this.key,
-    required this.size,
-    required this.visibleBounds,
-    required this.visibleFraction,
-  });
 }

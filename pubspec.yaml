@@ -15,6 +15,11 @@ dependencies:
   http: ^1.1.0
   fluentui_system_icons: ^1.1.273
   path_provider: ^2.1.0
+  # Used by MediaListPlayer for genuine scroll-aware visibility detection
+  # (composition-callback based, not NotificationListener<ScrollNotification>
+  # -- see lib/src/widgets/media_list_player.dart for why the hand-rolled
+  # in-tree implementation this replaces did not actually fire on scroll).
+  visibility_detector: ^0.4.0+2
 
 dev_dependencies:
   flutter_test:
