@@ -14,6 +14,13 @@ import android.util.Log
  * Uses ConnectivityManager.NetworkCallback to monitor network changes and
  * estimate quality based on bandwidth capabilities. Provides callbacks for
  * network availability, loss, and quality changes.
+ *
+ * H-06: every [Callback] method is handed a full status map matching the
+ * shape [lib/src/models/network_status.dart]'s `NetworkStatus.fromPlatform`
+ * expects (`quality`, `downloadSpeed`, `isMetered`, `connectionType`) so the
+ * plugin layer (see `ZMediaPlayerPlugin.onNetworkAvailable` /
+ * `onNetworkLost` / `onNetworkQualityChanged`) can forward it to Dart
+ * unmodified instead of re-deriving it from individual scalar arguments.
  */
 class NetworkMonitor(
     private val context: Context,
@@ -37,16 +44,21 @@ class NetworkMonitor(
     private var lastNetworkQuality: String = "unknown"
 
     /**
-     * Callback interface for network events
+     * Callback interface for network events. Every method receives the full
+     * status map (see class doc) so callers never need to reconstruct it
+     * from partial arguments.
      */
     interface Callback {
-        fun onNetworkAvailable(network: Network)
-        fun onNetworkLost()
-        fun onNetworkQualityChanged(quality: String, downloadSpeed: Int, isMetered: Boolean)
+        fun onNetworkAvailable(status: Map<String, Any>)
+        fun onNetworkLost(status: Map<String, Any>)
+        fun onNetworkQualityChanged(status: Map<String, Any>)
     }
 
     /**
-     * Starts monitoring network status
+     * Starts monitoring network status. Safe to call once; a second call
+     * while already monitoring is a no-op (mirrors [stopMonitoring]'s own
+     * guard so start/stop can be called defensively from plugin lifecycle
+     * hooks without double-registering the callback).
      */
     fun startMonitoring() {
         if (isMonitoring) {
@@ -62,10 +74,11 @@ class NetworkMonitor(
             override fun onAvailable(network: Network) {
                 Log.d(TAG, "Network available: $network")
                 currentNetwork = network
-                callback.onNetworkAvailable(network)
+                val caps = connectivityManager.getNetworkCapabilities(network)
+                callback.onNetworkAvailable(getNetworkStatusFromCapabilities(caps))
 
                 // Check initial quality
-                checkNetworkQuality(network)
+                checkNetworkQuality(network, caps)
             }
 
             override fun onLost(network: Network) {
@@ -73,7 +86,7 @@ class NetworkMonitor(
                 if (currentNetwork == network) {
                     currentNetwork = null
                     lastNetworkQuality = "offline"
-                    callback.onNetworkLost()
+                    callback.onNetworkLost(offlineStatus())
                 }
             }
 
@@ -100,7 +113,10 @@ class NetworkMonitor(
     }
 
     /**
-     * Stops monitoring network status
+     * Stops monitoring network status and unregisters the callback.
+     * `ConnectivityManager.NetworkCallback` leaks if never unregistered, so
+     * every caller of [startMonitoring] must be paired with a call here
+     * (see `ZMediaPlayerPlugin.onDetachedFromEngine`).
      */
     fun stopMonitoring() {
         if (!isMonitoring) {
@@ -125,12 +141,7 @@ class NetworkMonitor(
         val network = currentNetwork ?: connectivityManager.activeNetwork
 
         if (network == null) {
-            return mapOf(
-                "quality" to "offline",
-                "downloadSpeed" to 0,
-                "isMetered" to false,
-                "connectionType" to "none"
-            )
+            return offlineStatus()
         }
 
         val capabilities = connectivityManager.getNetworkCapabilities(network)
@@ -152,10 +163,11 @@ class NetworkMonitor(
         val network = connectivityManager.activeNetwork
         if (network != null) {
             currentNetwork = network
-            callback.onNetworkAvailable(network)
-            checkNetworkQuality(network)
+            val caps = connectivityManager.getNetworkCapabilities(network)
+            callback.onNetworkAvailable(getNetworkStatusFromCapabilities(caps))
+            checkNetworkQuality(network, caps)
         } else {
-            callback.onNetworkLost()
+            callback.onNetworkLost(offlineStatus())
         }
     }
 
@@ -172,12 +184,10 @@ class NetworkMonitor(
 
         val status = getNetworkStatusFromCapabilities(caps)
         val quality = status["quality"] as String
-        val downloadSpeed = status["downloadSpeed"] as Int
-        val isMetered = status["isMetered"] as Boolean
 
         if (quality != lastNetworkQuality) {
             lastNetworkQuality = quality
-            callback.onNetworkQualityChanged(quality, downloadSpeed, isMetered)
+            callback.onNetworkQualityChanged(status)
         }
     }
 
@@ -185,12 +195,7 @@ class NetworkMonitor(
         capabilities: NetworkCapabilities?
     ): Map<String, Any> {
         if (capabilities == null) {
-            return mapOf(
-                "quality" to "offline",
-                "downloadSpeed" to 0,
-                "isMetered" to false,
-                "connectionType" to "none"
-            )
+            return offlineStatus()
         }
 
         // Get download bandwidth (in Kbps)
@@ -242,4 +247,12 @@ class NetworkMonitor(
             else -> 1000 // 1 Mbps default
         }
     }
+
+    /** Canonical "no connection" status map, shared by every offline path. */
+    private fun offlineStatus(): Map<String, Any> = mapOf(
+        "quality" to "offline",
+        "downloadSpeed" to 0,
+        "isMetered" to false,
+        "connectionType" to "none"
+    )
 }

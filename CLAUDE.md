@@ -184,7 +184,7 @@ The package follows **clean architecture** with clear separation between Flutter
 
 Both managers follow identical interface patterns defined by the MethodChannel protocol.
 
-**Native code is decomposed into per-feature handlers** (mirrored across `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and `ios/Classes/`): `MediaPlayerManager`, `DrmHandler`, `PipHandler`, `NotificationHandler`, `BufferingHandler`, `CrashHandler`, `NetworkMonitor`, `SecureStorageHandler`, plus the platform view (`MediaPlayerView`/`MediaPlayerViewFactory`). Casting/AirPlay handlers are platform-specific (`CastHandler`/`CastOptionsProvider` on Android; `AirPlayHandler`/`AirPlayButtonFactory` on iOS). The plugin entry points are `ZMediaPlayerPlugin.kt` / `ZMediaPlayerPlugin.swift`. When adding a native capability, add the same handler on both platforms to keep the MethodChannel contract symmetric.
+**Native code is decomposed into per-feature handlers** (mirrored across `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and `ios/zmedia_player/Sources/zmedia_player/`): `MediaPlayerManager`, `DrmHandler`, `PipHandler`, `NotificationHandler`, `BufferingHandler`, `CrashHandler`, `NetworkMonitor`, `SecureStorageHandler`, plus the platform view (`MediaPlayerView`/`MediaPlayerViewFactory`). Casting/AirPlay handlers are platform-specific (`CastHandler`/`CastOptionsProvider` on Android; `AirPlayHandler`/`AirPlayButtonFactory` on iOS). The plugin entry points are `ZMediaPlayerPlugin.kt` / `ZMediaPlayerPlugin.swift`. When adding a native capability, add the same handler on both platforms to keep the MethodChannel contract symmetric.
 
 ### Public API Surface
 
@@ -249,7 +249,13 @@ MediaItem(drmConfig) → MediaPlayer.load()
 
 **NetworkResilienceService** (`lib/src/services/network_resilience_service.dart`)
 - Network status monitoring (`NetworkStatus`) and reconnection/retry logic
-- Backed natively by `NetworkMonitor` on each platform
+- Backed natively by `NetworkMonitor` on each platform (`ConnectivityManager.NetworkCallback` on
+  Android, `NWPathMonitor` on iOS), owned by `ZMediaPlayerPlugin` as a single plugin-lifetime
+  instance and pushed to Dart via the `onNetworkStatusChanged` MethodChannel event. `MediaPlayer`
+  owns a live `NetworkResilienceService` per player instance, feeds it from that event, and
+  exposes it via `MediaPlayer.networkStatus` / `.networkStatusStream` / `.networkChangeStream` /
+  `.networkResilienceService` — so it is reachable from the normal `MediaPlayer`/`MediaController`
+  path, not just constructible standalone.
 
 **AnalyticsService** (`lib/src/services/analytics_service.dart`)
 - Playback analytics/QoE metrics (`AnalyticsMetrics`): startup time, rebuffering, bitrate
@@ -1164,6 +1170,7 @@ The release workflow respects branch protection rules on `main` by creating a pu
 - `pubspec.yaml` - Package version
 - `CHANGELOG.md` - Version history with categorized changes
 - `README.md` - Version badge (`[![Version](https://img.shields.io/badge/version-X.Y.Z-blue.svg)]`)
+- `ios/zmedia_player.podspec` - CocoaPods version metadata (the workflow fails loudly if it cannot update this, rather than shipping a stale version)
 
 **Release Branch:**
 

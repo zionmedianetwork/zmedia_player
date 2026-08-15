@@ -1225,8 +1225,6 @@ class _MediaControlsState extends State<MediaControls>
         return FluentIcons.cast_20_regular;
       case CastDeviceType.airplay:
         return FluentIcons.cast_20_regular;
-      case CastDeviceType.dlna:
-        return FluentIcons.tv_20_regular;
       default:
         return FluentIcons.cast_20_regular;
     }

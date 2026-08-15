@@ -285,8 +285,6 @@ void main() {
         final map = <String, dynamic>{
           'scheme': 'widevine',
           'licenseUrl': 'https://drm.example.com/license',
-          'allowOffline': false,
-          'autoRenewLicense': true,
         };
         final config = DrmConfig.fromMap(map);
         expect(config.certificatePinning, isNull);
@@ -298,7 +296,6 @@ void main() {
         final original = DrmConfig.widevine(
           licenseUrl: 'https://drm.example.com/license',
           headers: {'X-Custom': 'value'},
-          allowOffline: true,
           certificatePinning: CertificatePinningConfig(
             pins: {
               'drm.example.com': [fakePin1, fakePin2],
@@ -323,7 +320,6 @@ void main() {
 
         expect(restored.scheme, original.scheme);
         expect(restored.licenseUrl, original.licenseUrl);
-        expect(restored.allowOffline, original.allowOffline);
         expect(restored.headers, original.headers);
         expect(restored.certificatePinning, isNotNull);
         expect(
@@ -365,9 +361,9 @@ void main() {
           licenseUrl: 'https://drm.example.com/license',
           certificatePinning: pinningConfig,
         );
-        final updated = original.copyWith(allowOffline: true);
+        final updated = original.copyWith(token: 'new-token');
         expect(updated.certificatePinning, isNotNull);
-        expect(updated.allowOffline, isTrue);
+        expect(updated.token, 'new-token');
       });
     });
   });

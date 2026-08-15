@@ -102,11 +102,9 @@ void main() {
   group('DrmConfig equality', () {
     final widevine1 = DrmConfig.widevine(
       licenseUrl: 'https://example.com/license',
-      allowOffline: false,
     );
     final widevine2 = DrmConfig.widevine(
       licenseUrl: 'https://example.com/license',
-      allowOffline: false,
     );
     final fairplay = DrmConfig.fairplay(
       licenseUrl: 'https://example.com/license',
@@ -133,17 +131,22 @@ void main() {
     test('different licenseUrl → not equal', () {
       final other = DrmConfig.widevine(
         licenseUrl: 'https://other.com/license',
-        allowOffline: false,
       );
       expect(widevine1, isNot(equals(other)));
     });
 
-    test('different allowOffline → not equal', () {
-      final other = DrmConfig.widevine(
+    test('different token → not equal', () {
+      final withToken = DrmConfig(
+        scheme: DrmScheme.widevine,
         licenseUrl: 'https://example.com/license',
-        allowOffline: true,
+        token: 'token-a',
       );
-      expect(widevine1, isNot(equals(other)));
+      final withOtherToken = DrmConfig(
+        scheme: DrmScheme.widevine,
+        licenseUrl: 'https://example.com/license',
+        token: 'token-b',
+      );
+      expect(withToken, isNot(equals(withOtherToken)));
     });
   });
 

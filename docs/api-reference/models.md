@@ -116,12 +116,11 @@ const Playlist({
 enum DrmScheme { token, widevine, fairplay, ezdrm, playready, clearkey }
 
 // Factories:
-DrmConfig.widevine({required String licenseUrl, Map<String, String>? headers,
-    bool allowOffline = false, int? offlineLicenseDuration, ...});
+DrmConfig.widevine({required String licenseUrl, Map<String, String>? headers, ...});
 DrmConfig.fairplay({required String licenseUrl, required String certificateUrl,
     String? contentId, Map<String, String>? headers, ...});
 DrmConfig.token({required String licenseUrl, required String token, String? keyId, ...});
-DrmConfig.ezdrm({required EzdrmConfig ezdrmConfig, bool allowOffline = false, ...});
+DrmConfig.ezdrm({required EzdrmConfig ezdrmConfig, ...});
 ```
 
 DRM requires HTTPS for license and media URLs (enforced by `InputValidator`). Each factory
@@ -162,3 +161,20 @@ const SubtitleConfig({
 - **Cache/buffer sub-configs:** `CacheConfig`, `BufferConfig`.
 
 Most models provide `copyWith`, and the serializable ones provide `toMap()` / `fromMap()`.
+
+### `BufferConfig` is only partly honoured on iOS
+
+This is a platform capability difference, not a wiring gap, and it is worth knowing before you tune
+buffering:
+
+| Field | Android (ExoPlayer) | iOS (AVFoundation) |
+|---|---|---|
+| `targetBufferMs` | Applied | Applied, via `AVPlayerItem.preferredForwardBufferDuration` |
+| `minBufferMs` | Applied | **Ignored** |
+| `maxBufferMs` | Applied | **Ignored** |
+| `rebufferMs` | Applied | **Ignored** |
+
+Android maps all four onto `DefaultLoadControl.setBufferDurationsMs`. AVFoundation exposes no
+equivalent for a minimum buffer before playback starts, a maximum buffer cap, or a
+resume-after-stall threshold, so those three values are accepted and silently ignored on iOS. Set
+them if you target Android; do not rely on them for iOS behaviour.

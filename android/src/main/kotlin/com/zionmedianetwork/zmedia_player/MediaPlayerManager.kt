@@ -282,6 +282,17 @@ class MediaPlayerInstance(
     // DRM handler — non-null only when the current media item has a drmConfig.
     private var drmHandler: DrmHandler? = null
 
+    // H-01: reason for the most recent playWhenReady change, so that when
+    // onIsPlayingChanged subsequently reports isPlaying == false we can tell
+    // an explicit user/API pause apart from one the OS forced by revoking
+    // audio focus (e.g. another app started playing audio). onIsPlayingChanged
+    // alone cannot distinguish these — both drive playWhenReady to false —
+    // which previously made a focus-loss pause indistinguishable from a user
+    // pause on the Dart side. Mirrors, in spirit, how Phase 2 disambiguated
+    // stall-vs-pause on iOS via timeControlStatus/reasonForWaitingToPlay.
+    private var lastPlayWhenReadyChangeReason: Int =
+        Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST
+
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             val stateName = when (playbackState) {
@@ -309,15 +320,40 @@ class MediaPlayerInstance(
             }
         }
 
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            lastPlayWhenReadyChangeReason = reason
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             android.util.Log.d("MediaPlayerInstance", "IsPlaying changed: $isPlaying")
             val state = if (isPlaying) "playing" else "paused"
-            notifyStateChanged(state, false)
+            // Only a "paused" transition caused by the OS revoking audio focus
+            // gets a reason attached; a normal user/API pause or any other
+            // playWhenReady-change reason leaves pauseReason null so the Dart
+            // side's default ("user pause") interpretation stands.
+            val pauseReason = if (!isPlaying &&
+                lastPlayWhenReadyChangeReason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS
+            ) {
+                "audioFocusLoss"
+            } else {
+                null
+            }
+            notifyStateChanged(state, false, pauseReason)
         }
 
         override fun onPlayerError(error: PlaybackException) {
-            android.util.Log.e("MediaPlayerInstance", "Player error: ${error.message}")
-            notifyError(error.message ?: "Unknown playback error")
+            android.util.Log.e(
+                "MediaPlayerInstance",
+                "Player error: ${error.message} (errorCode=${error.errorCode}/${error.errorCodeName})"
+            )
+            val category = categorizeExoPlayerError(error.errorCode)
+            val httpStatusCode = extractHttpStatusCode(error)
+            notifyError(
+                message = error.message ?: "Unknown playback error",
+                category = category,
+                nativeErrorCode = error.errorCodeName,
+                httpStatusCode = httpStatusCode
+            )
         }
 
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
@@ -952,15 +988,20 @@ class MediaPlayerInstance(
         }
     }
 
-    private fun notifyStateChanged(state: String, isBuffering: Boolean) {
+    private fun notifyStateChanged(state: String, isBuffering: Boolean, pauseReason: String? = null) {
         try {
-            android.util.Log.d("MediaPlayerInstance", "State changed: $state, isBuffering: $isBuffering")
-            val arguments = mapOf(
+            android.util.Log.d("MediaPlayerInstance", "State changed: $state, isBuffering: $isBuffering, pauseReason: $pauseReason")
+            val arguments = mutableMapOf<String, Any>(
                 "playerId" to playerId,
                 "state" to state,
                 "isBuffering" to isBuffering,
                 "bufferPercentage" to (exoPlayer?.bufferedPercentage ?: 0)
             )
+            // H-01: only attached for a "paused" event caused by the OS
+            // revoking audio focus — see onIsPlayingChanged/onPlayWhenReadyChanged
+            // above and MediaPlayer._handleStateChanged / pauseReasonStream on
+            // the Dart side.
+            pauseReason?.let { arguments["pauseReason"] = it }
             methodChannel.invokeMethod("onStateChanged", arguments)
         } catch (e: Exception) {
             // Handle potential exceptions when invoking method channel
@@ -1203,12 +1244,81 @@ class MediaPlayerInstance(
         }
     }
 
-    private fun notifyError(error: String) {
+    /**
+     * H-01: maps ExoPlayer's [PlaybackException.errorCode] onto the small,
+     * cross-platform error-category vocabulary shared with the Dart mapper
+     * (see `MediaErrorCategory` in lib/src/core/exceptions.dart) and mirrored
+     * on iOS by `MediaPlayerInstance.categorize(_:)` in MediaPlayerManager.swift.
+     * All three call sites must stay in lockstep — the Dart test suite
+     * (test/exceptions/error_category_vocabulary_test.dart) parses this
+     * file's category string literals as text and fails if they drift from
+     * the Dart vocabulary, since ExoPlayer's Kotlin constants can't be
+     * introspected from a pure-Dart test.
+     *
+     * Range groupings below follow ExoPlayer 2.19's documented
+     * PlaybackException error-code space (general: 1000s, I/O: 2000s,
+     * parsing/content: 3000s, decoder: 4000s, audio track: 5000s,
+     * DRM: 6000s). NEEDS BUILD/ON-DEVICE VERIFICATION — this file is not
+     * compiled as part of this change.
+     */
+    private fun categorizeExoPlayerError(errorCode: Int): String {
+        return when {
+            // Bad HTTP status / missing resource — the server responded, just
+            // not with usable content.
+            errorCode == PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS ||
+                errorCode == PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "HTTP"
+            // Remaining 2000-2999 I/O errors: connection failures, timeouts,
+            // permission/cleartext issues — could not reach/read the source.
+            errorCode in 2000..2999 -> "NETWORK"
+            // 3000-3999 container/manifest parsing errors, plus
+            // BEHIND_LIVE_WINDOW (1002) and out-of-range reads: the source
+            // itself is malformed/unsupported, not a network condition.
+            errorCode in 3000..3999 ||
+                errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ||
+                errorCode == PlaybackException.ERROR_CODE_IO_READ_POSITION_OUT_OF_RANGE -> "SOURCE"
+            // 4000-5999: decoder + audio track errors — codec/hardware cannot
+            // play this content.
+            errorCode in 4000..5999 -> "DECODER"
+            // 6000-6999: DRM/license errors.
+            errorCode in 6000..6999 -> "DRM"
+            else -> "UNKNOWN"
+        }
+    }
+
+    /**
+     * Walks the error's cause chain looking for ExoPlayer's
+     * [com.google.android.exoplayer2.upstream.HttpDataSource.InvalidResponseCodeException]
+     * to surface the actual HTTP status code to Dart (mirrors
+     * `httpStatusCode` in the iOS notifyError payload). Bounded depth guards
+     * against a pathological/cyclical cause chain.
+     */
+    private fun extractHttpStatusCode(error: Throwable): Int? {
+        var cause: Throwable? = error
+        var depth = 0
+        while (cause != null && depth < 10) {
+            if (cause is com.google.android.exoplayer2.upstream.HttpDataSource.InvalidResponseCodeException) {
+                return cause.responseCode
+            }
+            cause = cause.cause
+            depth++
+        }
+        return null
+    }
+
+    private fun notifyError(
+        message: String,
+        category: String = "UNKNOWN",
+        nativeErrorCode: String? = null,
+        httpStatusCode: Int? = null
+    ) {
         try {
-            val arguments = mapOf(
+            val arguments = mutableMapOf<String, Any>(
                 "playerId" to playerId,
-                "error" to error
+                "error" to message,
+                "category" to category
             )
+            nativeErrorCode?.let { arguments["nativeErrorCode"] = it }
+            httpStatusCode?.let { arguments["httpStatusCode"] = it }
             methodChannel.invokeMethod("onError", arguments)
         } catch (e: Exception) {
             e.printStackTrace()

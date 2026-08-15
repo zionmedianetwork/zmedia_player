@@ -489,6 +489,218 @@ void main() {
   });
 
   // -------------------------------------------------------------------------
+  // H-01: onError now also builds and emits a typed MediaPlayerException on
+  // errorStream, using the MediaErrorCategory wire vocabulary. See
+  // lib/src/core/exceptions.dart (MediaErrorCategory, mapNativeMediaError)
+  // and the native categorization functions in MediaPlayerManager.kt/.swift.
+  group('onError → errorStream (typed exceptions)', () {
+    test('category NETWORK emits NetworkException', () async {
+      final player = MediaPlayer(playerId: 'ev-err-network');
+      await player.initialize();
+
+      final errorFuture = player.errorStream.first;
+
+      await _injectEvent('onError', {
+        'playerId': 'ev-err-network',
+        'error': 'Connection failed',
+        'category': 'NETWORK',
+      });
+
+      final error = await errorFuture.timeout(const Duration(seconds: 2));
+      expect(error, isA<NetworkException>());
+
+      player.dispose();
+    });
+
+    test('category HTTP with httpStatusCode emits MediaLoadException',
+        () async {
+      final player = MediaPlayer(playerId: 'ev-err-http');
+      await player.initialize();
+
+      final errorFuture = player.errorStream.first;
+
+      await _injectEvent('onError', {
+        'playerId': 'ev-err-http',
+        'error': 'Not found',
+        'category': 'HTTP',
+        'httpStatusCode': 404,
+      });
+
+      final error = await errorFuture.timeout(const Duration(seconds: 2));
+      expect(error, isA<MediaLoadException>());
+      expect((error as MediaLoadException).statusCode, 404);
+
+      player.dispose();
+    });
+
+    test('category DRM emits DrmException', () async {
+      final player = MediaPlayer(playerId: 'ev-err-drm');
+      await player.initialize();
+
+      final errorFuture = player.errorStream.first;
+
+      await _injectEvent('onError', {
+        'playerId': 'ev-err-drm',
+        'error': 'License denied',
+        'category': 'DRM',
+        'nativeErrorCode': 'ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED',
+      });
+
+      final error = await errorFuture.timeout(const Duration(seconds: 2));
+      expect(error, isA<DrmException>());
+      expect((error as DrmException).errorCode,
+          'ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED');
+
+      player.dispose();
+    });
+
+    test('category DECODER emits PlaybackException with category set',
+        () async {
+      final player = MediaPlayer(playerId: 'ev-err-decoder');
+      await player.initialize();
+
+      final errorFuture = player.errorStream.first;
+
+      await _injectEvent('onError', {
+        'playerId': 'ev-err-decoder',
+        'error': 'Unsupported codec',
+        'category': 'DECODER',
+      });
+
+      final error = await errorFuture.timeout(const Duration(seconds: 2));
+      expect(error, isA<PlaybackException>());
+      expect((error as PlaybackException).category, MediaErrorCategory.decoder);
+
+      player.dispose();
+    });
+
+    test(
+        'missing category (older cached native build) emits '
+        'PlaybackException.unknown, not nothing', () async {
+      final player = MediaPlayer(playerId: 'ev-err-legacy');
+      await player.initialize();
+
+      final errorFuture = player.errorStream.first;
+
+      await _injectEvent('onError', {
+        'playerId': 'ev-err-legacy',
+        'error': 'Something went wrong',
+      });
+
+      final error = await errorFuture.timeout(const Duration(seconds: 2));
+      expect(error, isA<PlaybackException>());
+      expect((error as PlaybackException).category, MediaErrorCategory.unknown);
+
+      player.dispose();
+    });
+
+    test(
+        'errorStream event does not replace the untyped errorMessage on '
+        'stateStream', () async {
+      final player = MediaPlayer(playerId: 'ev-err-both');
+      await player.initialize();
+
+      final stateFuture = player.stateStream.first;
+      final errorFuture = player.errorStream.first;
+
+      await _injectEvent('onError', {
+        'playerId': 'ev-err-both',
+        'error': 'Codec not found',
+        'category': 'DECODER',
+      });
+
+      final state = await stateFuture.timeout(const Duration(seconds: 2));
+      final error = await errorFuture.timeout(const Duration(seconds: 2));
+
+      expect(state.state, PlayerState.error);
+      expect(state.errorMessage, contains('Codec not found'));
+      expect(error.message, 'Codec not found');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // H-01: DRM session errors are also bridged onto errorStream as a typed
+  // DrmException, not just as an untyped DrmSessionState.error.
+  group('onDrmSessionUpdate error state → errorStream', () {
+    test('DRM session error also emits a DrmException on errorStream',
+        () async {
+      final player = MediaPlayer(playerId: 'ev-drm-error-bridge');
+      await player.initialize();
+
+      final errorFuture = player.errorStream.first;
+      final now = DateTime.now();
+
+      await _injectEvent('onDrmSessionUpdate', {
+        'playerId': 'ev-drm-error-bridge',
+        'id': 'session-bridge',
+        'state': 'error',
+        'license': null,
+        'errorMessage': 'License server rejected request',
+        'createdAt': now.millisecondsSinceEpoch,
+        'updatedAt': now.millisecondsSinceEpoch,
+      });
+
+      final error = await errorFuture.timeout(const Duration(seconds: 2));
+      expect(error, isA<DrmException>());
+      expect(error.message, 'License server rejected request');
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // H-01: audio-focus-loss pause reason (Android), surfaced out-of-band via
+  // pauseReasonStream since PlaybackState has no field for it.
+  group('onStateChanged pauseReason → pauseReasonStream', () {
+    test('pauseReason "audioFocusLoss" emits PlayerPauseReason.audioFocusLoss',
+        () async {
+      final player = MediaPlayer(playerId: 'ev-pause-focus');
+      await player.initialize();
+
+      final pauseReasonFuture = player.pauseReasonStream.first;
+
+      await _injectEvent('onStateChanged', {
+        'playerId': 'ev-pause-focus',
+        'state': 'paused',
+        'isBuffering': false,
+        'bufferPercentage': 0.0,
+        'pauseReason': 'audioFocusLoss',
+      });
+
+      final reason =
+          await pauseReasonFuture.timeout(const Duration(seconds: 2));
+      expect(reason, PlayerPauseReason.audioFocusLoss);
+
+      player.dispose();
+    });
+
+    test('a normal pause (no pauseReason) does not emit on pauseReasonStream',
+        () async {
+      final player = MediaPlayer(playerId: 'ev-pause-user');
+      await player.initialize();
+
+      var emitted = false;
+      player.pauseReasonStream.listen((_) => emitted = true);
+
+      final stateFuture = player.stateStream.first;
+      await _injectEvent('onStateChanged', {
+        'playerId': 'ev-pause-user',
+        'state': 'paused',
+        'isBuffering': false,
+        'bufferPercentage': 0.0,
+      });
+      await stateFuture;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(emitted, isFalse);
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   group('onBandwidthChanged → bandwidthStream', () {
     test('delivers bandwidth value to bandwidthStream', () async {
       final player = MediaPlayer(playerId: 'ev-bw-1');

@@ -6,6 +6,22 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
     private var playerManager: MediaPlayerManager!
     private var methodChannel: FlutterMethodChannel!
 
+    /// M-16: wire protocol version for the MethodChannel contract with the
+    /// Dart package (see `MediaPlayer.protocolVersion` in
+    /// lib/src/core/media_player.dart). Bump alongside a matching Dart-side
+    /// bump whenever a MethodChannel contract change requires native to be
+    /// rebuilt to stay compatible. Mirrored on Android by
+    /// `ZMediaPlayerPlugin.NATIVE_PROTOCOL_VERSION` in ZMediaPlayerPlugin.kt.
+    private static let nativeProtocolVersion = 1
+
+    /// Oldest Dart `protocolVersion` this native implementation still
+    /// accepts. The package is distributed by git ref (not pub.dev), so a
+    /// host app can end up running a newer Dart package against a stale
+    /// cached/compiled native build — `handleInitialize` rejects that
+    /// combination explicitly instead of letting later calls fail
+    /// ambiguously via a raw `MissingPluginException`.
+    private static let minSupportedDartProtocolVersion = 1
+
     // Phase 3: Handler maps
     private var notificationHandlers: [String: NotificationHandler] = [:]
     private var pipHandlers: [String: PipHandler] = [:]
@@ -14,6 +30,21 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
     // Phase 1: Secure storage
     private var secureStorageChannel: FlutterMethodChannel!
     private var secureStorageHandler: SecureStorageHandler!
+
+    // H-06: single, plugin-lifetime NetworkMonitor (not one per playerId —
+    // connectivity is a device-global signal, not a per-player one, so a
+    // per-player NWPathMonitor would just be N redundant registrations of
+    // the same system monitor). Started in `register(with:)`, stopped in
+    // `detachFromEngine(for:)`, mirroring how `playerManager` is created in
+    // `register(with:)` — the closest thing this file has to an
+    // "attach"/"detach" pair for plugin-lifetime resources.
+    private var networkMonitor: NetworkMonitor!
+
+    // Player ids currently between a successful `initialize` and `dispose`
+    // call, used to fan the single NetworkMonitor's events out to every live
+    // MediaPlayer instance on the Dart side (each event is dispatched by
+    // playerId — see MediaPlayer._staticMethodCallHandler).
+    private var activePlayerIds: Set<String> = []
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "zmedia_player", binaryMessenger: registrar.messenger())
@@ -45,6 +76,22 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             AirPlayButtonFactory(messenger: registrar.messenger()),
             withId: "zmedia_player/airplay_button"
         )
+
+        // H-06: start device-wide connectivity monitoring for the lifetime
+        // of the plugin (see the `networkMonitor` field doc for why this is
+        // one instance rather than one per player).
+        instance.networkMonitor = NetworkMonitor(callback: instance)
+        instance.networkMonitor.startMonitoring()
+    }
+
+    /// H-06: unregisters the `NWPathMonitor` when the plugin detaches from
+    /// the engine. `NetworkMonitor.deinit` also calls `stopMonitoring()`,
+    /// but that only runs once nothing still retains this instance — this
+    /// explicit call ensures the monitor stops promptly on detach rather
+    /// than depending on `ZMediaPlayerPlugin` itself being deallocated.
+    public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
+        networkMonitor?.stopMonitoring()
+        activePlayerIds.removeAll()
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -153,10 +200,40 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         }
 
         let config = args["config"] as? [String: Any]
+        let dartProtocolVersion = args["protocolVersion"] as? Int
+
+        // M-16: reject a Dart package too old for this native build before
+        // doing anything else. A nil dartProtocolVersion means the Dart side
+        // predates version negotiation entirely — allow it through unchanged
+        // (nothing to compare against).
+        if let dartProtocolVersion = dartProtocolVersion,
+           dartProtocolVersion < ZMediaPlayerPlugin.minSupportedDartProtocolVersion {
+            result(FlutterError(
+                code: "PROTOCOL_VERSION_MISMATCH",
+                message: "Dart package protocol v\(dartProtocolVersion) is older than the minimum "
+                    + "v\(ZMediaPlayerPlugin.minSupportedDartProtocolVersion) this native plugin "
+                    + "(v\(ZMediaPlayerPlugin.nativeProtocolVersion)) requires. Rebuild the app "
+                    + "against a matching zmedia_player native version.",
+                details: [
+                    "nativeProtocolVersion": ZMediaPlayerPlugin.nativeProtocolVersion,
+                    "minSupportedDartProtocolVersion": ZMediaPlayerPlugin.minSupportedDartProtocolVersion,
+                    "dartProtocolVersion": dartProtocolVersion
+                ]
+            ))
+            return
+        }
 
         do {
             try playerManager.initializePlayer(playerId: playerId, config: config)
-            result(nil)
+            // H-06: track this playerId so NetworkMonitor events (which are
+            // device-global, not per-player) can be fanned out to it — see
+            // the NetworkMonitor.NetworkCallback conformance below.
+            activePlayerIds.insert(playerId)
+            // Report our own version back so Dart can, symmetrically, detect
+            // a native build too old for what it's about to call (see
+            // MediaPlayer.initialize()'s minSupportedNativeProtocolVersion
+            // check).
+            result(["protocolVersion": ZMediaPlayerPlugin.nativeProtocolVersion])
         } catch {
             result(FlutterError(code: "INITIALIZATION_ERROR", message: error.localizedDescription, details: nil))
         }
@@ -433,6 +510,9 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
 
         airPlayHandlers[playerId]?.dispose()
         airPlayHandlers.removeValue(forKey: playerId)
+
+        // H-06: stop fanning NetworkMonitor events to this playerId.
+        activePlayerIds.remove(playerId)
 
         do {
             try playerManager.disposePlayer(playerId: playerId)
@@ -797,5 +877,48 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
 
         handler.setVolume(volume: volume)
         result(nil)
+    }
+}
+
+// MARK: - H-06: NetworkMonitor.NetworkCallback
+
+extension ZMediaPlayerPlugin: NetworkMonitor.NetworkCallback {
+    // All three events funnel through the same "onNetworkStatusChanged" wire
+    // event — the Dart side (NetworkStatus/NetworkChangeEvent) derives
+    // available/lost/quality-improved/quality-degraded by diffing
+    // consecutive statuses rather than needing three distinct method names,
+    // so no information is lost by unifying them here. See
+    // MediaPlayer._handleNetworkStatusChanged in lib/src/core/media_player.dart.
+
+    func onNetworkAvailable(status: [String: Any]) {
+        broadcastNetworkStatus(status)
+    }
+
+    func onNetworkLost(status: [String: Any]) {
+        broadcastNetworkStatus(status)
+    }
+
+    func onNetworkQualityChanged(status: [String: Any]) {
+        broadcastNetworkStatus(status)
+    }
+
+    /// Forwards a NetworkMonitor status dictionary to every
+    /// currently-initialized player. `NWPathMonitor`'s `pathUpdateHandler`
+    /// fires on `NetworkMonitor`'s private background `queue`, not the main
+    /// thread, and `FlutterMethodChannel.invokeMethod` must be called on the
+    /// main thread — hence the explicit `DispatchQueue.main.async` hop
+    /// (mirrors the pattern already used for `onDrmSessionUpdate` in
+    /// `DrmHandler.swift`'s `notifyOnMainThread`).
+    private func broadcastNetworkStatus(_ status: [String: Any]) {
+        guard !activePlayerIds.isEmpty else { return }
+        let ids = activePlayerIds
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, let channel = self.methodChannel else { return }
+            for id in ids {
+                var payload = status
+                payload["playerId"] = id
+                channel.invokeMethod("onNetworkStatusChanged", arguments: payload)
+            }
+        }
     }
 }

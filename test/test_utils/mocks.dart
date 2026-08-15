@@ -5,7 +5,6 @@ class MockDrmConfigs {
   static DrmConfig get widevine => DrmConfig.widevine(
         licenseUrl: 'https://test-license-server.com/widevine',
         headers: {'X-Test-Header': 'test-value'},
-        allowOffline: false,
       );
 
   static DrmConfig get fairplay => DrmConfig.fairplay(
@@ -249,7 +248,6 @@ class TestHelpers {
     String? certificateUrl,
     Map<String, String>? headers,
     String? token,
-    bool allowOffline = false,
   }) {
     return DrmConfig(
       scheme: scheme,
@@ -257,7 +255,6 @@ class TestHelpers {
       certificateUrl: certificateUrl,
       headers: headers,
       token: token,
-      allowOffline: allowOffline,
     );
   }
 

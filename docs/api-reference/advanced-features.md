@@ -7,6 +7,15 @@ For live streaming see [Live Streaming](live-streaming.md); for DRM see [DRM](dr
 
 Lock-screen / Control Center controls backed by `NotificationService`.
 
+> **Required: subscribe to `actionStream`.** `NotificationService` only renders the
+> lock-screen / Control Center UI and forwards taps as string events on
+> `actionStream` — it does **not** call `play()`/`pause()`/`skipToNext()` etc. on your
+> behalf. If your app shows a notification without listening to `actionStream` and
+> routing each action to the controller (as in the snippet below), the notification
+> will render correctly but every button on it will do nothing when tapped. This is
+> easy to miss because there is no error: the notification looks complete, and only
+> manual testing reveals the dead buttons.
+
 ```dart
 final notifications = NotificationService(const NotificationConfig(
   enabled: true,

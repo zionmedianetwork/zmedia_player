@@ -124,7 +124,8 @@ This is the real backlog. State these honestly; do not mark them done.
 - **Native symmetry:** when adding a native capability, add the matching handler on
   both platforms to keep the MethodChannel contract symmetric. Per-feature handlers
   are mirrored under
-  `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and `ios/Classes/`.
+  `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and
+  `ios/zmedia_player/Sources/zmedia_player/`.
 - **UI/UX:** control overlays and menus must follow the canonical specs and
   screenshots documented in `CLAUDE.md` (`docs/images/screenshots/controls_*`).
 - **Branching & commits:** one task = one branch (`feat/`, `fix/`, `docs/`,

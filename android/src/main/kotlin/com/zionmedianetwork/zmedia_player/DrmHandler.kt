@@ -314,35 +314,6 @@ class DrmHandler(
     }
 
     /**
-     * Acquire offline license (placeholder for future implementation).
-     */
-    fun acquireOfflineLicense(
-        drmConfig: Map<String, Any>,
-        callback: (String?, String?) -> Unit
-    ) {
-        // TODO: Implement offline license acquisition
-        // This requires ExoPlayer's OfflineLicenseHelper
-        Log.w(TAG, "Offline license acquisition not yet implemented")
-        callback(null, "Offline licenses not yet implemented")
-    }
-
-    /**
-     * Release offline license (placeholder).
-     */
-    fun releaseOfflineLicense(licenseId: String) {
-        // TODO: Implement offline license release
-        Log.w(TAG, "Offline license release not yet implemented")
-    }
-
-    /**
-     * Renew offline license (placeholder).
-     */
-    fun renewOfflineLicense(licenseId: String) {
-        // TODO: Implement offline license renewal
-        Log.w(TAG, "Offline license renewal not yet implemented")
-    }
-
-    /**
      * Notify Flutter of DRM errors by emitting an onDrmSessionUpdate with state=error.
      * Also emits the legacy onDrmError call so any other consumers still receive it.
      */

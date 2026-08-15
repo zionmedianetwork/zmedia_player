@@ -7,6 +7,18 @@ import '../models/player_state.dart';
 import '../core/media_player.dart';
 
 /// Service for managing media playback notifications
+///
+/// ## You MUST subscribe to [actionStream]
+///
+/// This service only renders the lock-screen / Control Center notification and
+/// forwards user taps as string events on [actionStream] — it does **not** call
+/// `play()`/`pause()`/`skipToNext()`/etc. on any controller itself. If you call
+/// [show] without also listening to [actionStream] and routing each action to your
+/// `MediaController`, the notification will render completely and correctly while
+/// every button on it does nothing when tapped. There is no error or warning from
+/// the notification itself in that case — the dead buttons are only apparent from
+/// manual, on-device testing. See `docs/api-reference/advanced-features.md` for the
+/// wiring example every integrator needs to copy.
 class NotificationService {
   static const MethodChannel _channel = MethodChannel('zmedia_player');
 
@@ -18,10 +30,24 @@ class NotificationService {
   MediaItem? _currentMedia;
   StreamSubscription<String>? _notificationActionSubscription;
   StreamSubscription<PlaybackState>? _stateSubscription;
+  bool _actionStreamListenedTo = false;
+  bool _debugNoListenerWarningLogged = false;
 
-  NotificationService(this._config);
+  NotificationService(this._config) {
+    assert(() {
+      // Debug-only: track whether anything ever subscribes to actionStream so
+      // `show()` can warn once if a notification is displayed with no listener
+      // attached (see class dartdoc). No-op in release builds.
+      _actionController.onListen = () => _actionStreamListenedTo = true;
+      return true;
+    }());
+  }
 
-  /// Stream of notification action events
+  /// Stream of notification action events.
+  ///
+  /// You must listen to this and route each action (`"play"`, `"pause"`,
+  /// `"next"`, `"previous"`, `"stop"`, `"seekForward"`, `"seekBackward"`) to your
+  /// `MediaController`/`MediaPlayer` — see the class-level dartdoc above.
   Stream<String> get actionStream => _actionController.stream;
 
   /// Whether notification is currently showing
@@ -70,6 +96,20 @@ class NotificationService {
     if (!_config.enabled) return;
 
     _currentMedia = mediaItem;
+
+    assert(() {
+      if (!_actionStreamListenedTo && !_debugNoListenerWarningLogged) {
+        _debugNoListenerWarningLogged = true;
+        debugPrint(
+          'NotificationService: WARNING - showing a notification but nothing '
+          'is listening to actionStream. Lock-screen/Control Center buttons '
+          '(play/pause/next/previous/etc.) will appear but do nothing when '
+          'tapped. Subscribe to actionStream and route actions to your '
+          'MediaController — see docs/api-reference/advanced-features.md.',
+        );
+      }
+      return true;
+    }());
 
     // Don't show notification when paused if configured
     if (!_config.showWhenPaused && state.state == PlayerState.paused) {

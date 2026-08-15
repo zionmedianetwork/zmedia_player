@@ -93,6 +93,19 @@ void main() {
       expect(exception, isA<MediaPlayerException>());
       expect(exception.message, 'Playback failed');
       expect(exception.errorCode, 'PLAYBACK_001');
+      expect(exception.category, MediaErrorCategory.unknown,
+          reason: 'category defaults to unknown when native sends none');
+    });
+
+    test('PlaybackException carries an explicit category', () {
+      const exception = PlaybackException(
+        'Unsupported codec',
+        errorCode: 'ERROR_CODE_DECODING_FORMAT_UNSUPPORTED',
+        category: MediaErrorCategory.decoder,
+      );
+
+      expect(exception.category, MediaErrorCategory.decoder);
+      expect(exception.toString(), contains('DECODER'));
     });
 
     test('InvalidStateException with state info', () {
@@ -159,9 +172,15 @@ void main() {
           .setMockMethodCallHandler(channel, (MethodCall call) async {
         methodCalls.add(call);
 
-        // Simulate different error scenarios
+        // Simulate different error scenarios using the REAL codes/details
+        // native actually sends (H-01) — not the fabricated
+        // 'NETWORK_ERROR'/'DRM_LICENSE_ERROR'/'HTTP_ERROR' codes the old
+        // version of this test asserted against, which no native code path
+        // has ever emitted (see ZMediaPlayerPlugin.kt/.swift: every
+        // `load` failure uses the `LOAD_ERROR` per-operation code, with a
+        // best-effort `category` detail carrying the *why*).
         if (call.method == 'initialize') {
-          return null; // Success
+          return {'protocolVersion': MediaPlayer.protocolVersion};
         }
         if (call.method == 'load') {
           final args = call.arguments as Map;
@@ -169,27 +188,38 @@ void main() {
 
           if (url.contains('network-error')) {
             throw PlatformException(
-              code: 'NETWORK_ERROR',
+              code: 'LOAD_ERROR',
               message: 'Network connection failed',
+              details: {'category': 'NETWORK'},
             );
           }
           if (url.contains('drm-error')) {
             throw PlatformException(
-              code: 'DRM_LICENSE_ERROR',
+              code: 'LOAD_ERROR',
               message: 'License acquisition failed',
+              details: {'category': 'DRM'},
             );
           }
           if (url.contains('http-error')) {
             throw PlatformException(
-              code: 'HTTP_ERROR',
-              message: '404',
+              code: 'LOAD_ERROR',
+              message: 'Not found',
+              details: {'category': 'HTTP', 'httpStatusCode': 404},
+            );
+          }
+          if (url.contains('legacy-error')) {
+            // Simulates an older cached native build that predates H-01's
+            // `category` detail entirely.
+            throw PlatformException(
+              code: 'LOAD_ERROR',
+              message: 'Something went wrong',
             );
           }
           return null;
         }
         if (call.method == 'play') {
           throw PlatformException(
-            code: 'PLAYBACK_ERROR',
+            code: 'PLAY_ERROR',
             message: 'Playback failed',
           );
         }
@@ -220,7 +250,7 @@ void main() {
       );
     });
 
-    test('Network error throws NetworkException', () async {
+    test('category: NETWORK throws NetworkException', () async {
       final player = MediaPlayer();
       await player.initialize();
 
@@ -238,7 +268,7 @@ void main() {
       await player.dispose();
     });
 
-    test('DRM error throws DrmException', () async {
+    test('category: DRM throws DrmException', () async {
       final player = MediaPlayer();
       await player.initialize();
 
@@ -259,7 +289,8 @@ void main() {
       await player.dispose();
     });
 
-    test('HTTP error throws MediaLoadException', () async {
+    test('category: HTTP throws MediaLoadException carrying statusCode',
+        () async {
       final player = MediaPlayer();
       await player.initialize();
 
@@ -267,6 +298,32 @@ void main() {
         id: 'test-3',
         url: 'https://example.com/http-error.mp4',
         title: 'Not Found Video',
+      );
+
+      await expectLater(
+        player.load(mediaItem),
+        throwsA(
+          isA<MediaLoadException>().having(
+            (e) => e.statusCode,
+            'statusCode',
+            404,
+          ),
+        ),
+      );
+
+      await player.dispose();
+    });
+
+    test(
+        'load failure with no category detail (older cached native build) '
+        'still throws MediaLoadException', () async {
+      final player = MediaPlayer();
+      await player.initialize();
+
+      final mediaItem = MediaItem(
+        id: 'test-legacy',
+        url: 'https://example.com/legacy-error.mp4',
+        title: 'Legacy Error Video',
       );
 
       expect(
@@ -289,7 +346,7 @@ void main() {
         }
         if (call.method == 'play') {
           throw PlatformException(
-            code: 'PLAYBACK_ERROR',
+            code: 'PLAY_ERROR',
             message: 'Playback failed',
           );
         }
@@ -398,6 +455,227 @@ void main() {
       expect(str, contains('Widevine'));
       expect(str, contains('License error'));
       expect(str, contains('E_LICENSE_001'));
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // H-01: MediaErrorCategory / mapNativeMediaError
+  // ---------------------------------------------------------------------
+  group('MediaErrorCategory', () {
+    test('fromWireValue round-trips every declared category', () {
+      for (final category in MediaErrorCategory.values) {
+        expect(
+          MediaErrorCategory.fromWireValue(category.wireValue),
+          category,
+        );
+      }
+    });
+
+    test('fromWireValue defaults to unknown for null/unrecognized input', () {
+      expect(
+          MediaErrorCategory.fromWireValue(null), MediaErrorCategory.unknown);
+      expect(MediaErrorCategory.fromWireValue('NOT_A_REAL_CATEGORY'),
+          MediaErrorCategory.unknown);
+    });
+  });
+
+  group('mapNativeMediaError', () {
+    test('NETWORK category maps to NetworkException', () {
+      final exception = mapNativeMediaError(
+        message: 'offline',
+        categoryWireValue: 'NETWORK',
+        details: {'isOffline': true},
+      );
+      expect(exception, isA<NetworkException>());
+      expect((exception as NetworkException).isOffline, isTrue);
+    });
+
+    test('HTTP category maps to MediaLoadException with statusCode', () {
+      final exception = mapNativeMediaError(
+        message: 'not found',
+        categoryWireValue: 'HTTP',
+        details: {'httpStatusCode': 404},
+      );
+      expect(exception, isA<MediaLoadException>());
+      expect((exception as MediaLoadException).statusCode, 404);
+    });
+
+    test('DRM category maps to DrmException', () {
+      final exception = mapNativeMediaError(
+        message: 'license denied',
+        categoryWireValue: 'DRM',
+        nativeErrorCode: 'ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED',
+      );
+      expect(exception, isA<DrmException>());
+      expect((exception as DrmException).errorCode,
+          'ERROR_CODE_DRM_LICENSE_ACQUISITION_FAILED');
+    });
+
+    test('DECODER category maps to PlaybackException with category set', () {
+      final exception = mapNativeMediaError(
+        message: 'codec unsupported',
+        categoryWireValue: 'DECODER',
+      );
+      expect(exception, isA<PlaybackException>());
+      expect((exception as PlaybackException).category,
+          MediaErrorCategory.decoder);
+    });
+
+    test('SOURCE category maps to PlaybackException with category set', () {
+      final exception = mapNativeMediaError(
+        message: 'malformed manifest',
+        categoryWireValue: 'SOURCE',
+      );
+      expect(exception, isA<PlaybackException>());
+      expect(
+          (exception as PlaybackException).category, MediaErrorCategory.source);
+    });
+
+    test('missing/unrecognized category maps to PlaybackException.unknown', () {
+      final exception = mapNativeMediaError(message: 'something broke');
+      expect(exception, isA<PlaybackException>());
+      expect((exception as PlaybackException).category,
+          MediaErrorCategory.unknown);
+    });
+  });
+
+  // ---------------------------------------------------------------------
+  // M-16: protocol version negotiation / MissingPluginException mapping
+  // ---------------------------------------------------------------------
+  group('M-16 protocol version negotiation', () {
+    late MethodChannel channel;
+
+    setUp(() {
+      channel = const MethodChannel('zmedia_player');
+    });
+
+    tearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    });
+
+    test('initialize() sends this package\'s protocolVersion', () async {
+      MethodCall? initializeCall;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'initialize') {
+          initializeCall = call;
+          return {'protocolVersion': MediaPlayer.protocolVersion};
+        }
+        return null;
+      });
+
+      final player = MediaPlayer(playerId: 'proto-sends-version');
+      await player.initialize();
+
+      expect(initializeCall, isNotNull);
+      final args = initializeCall!.arguments as Map;
+      expect(args['protocolVersion'], MediaPlayer.protocolVersion);
+
+      await player.dispose();
+    });
+
+    test(
+        'native PROTOCOL_VERSION_MISMATCH error is mapped to '
+        'ProtocolMismatchException', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'initialize') {
+          throw PlatformException(
+            code: 'PROTOCOL_VERSION_MISMATCH',
+            message: 'Dart package protocol v1 is older than required',
+            details: {
+              'nativeProtocolVersion': 2,
+              'minSupportedDartProtocolVersion': 2,
+              'dartProtocolVersion': 1,
+            },
+          );
+        }
+        return null;
+      });
+
+      final player = MediaPlayer(playerId: 'proto-native-rejects');
+
+      await expectLater(
+        player.initialize(),
+        throwsA(
+          isA<ProtocolMismatchException>()
+              .having(
+                  (e) => e.nativeProtocolVersion, 'nativeProtocolVersion', 2)
+              .having((e) => e.dartProtocolVersion, 'dartProtocolVersion', 1),
+        ),
+      );
+    });
+
+    test(
+        'native reporting a protocol version below minSupportedNativeProtocolVersion '
+        'throws ProtocolMismatchException client-side', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'initialize') {
+          // Simulates a native build too old for this Dart package, but
+          // one that (hypothetically) still reports its own version.
+          return {'protocolVersion': 0};
+        }
+        return null;
+      });
+
+      final player = MediaPlayer(playerId: 'proto-native-too-old');
+
+      await expectLater(
+        player.initialize(),
+        throwsA(isA<ProtocolMismatchException>().having(
+            (e) => e.nativeProtocolVersion, 'nativeProtocolVersion', 0)),
+      );
+    });
+
+    test(
+        'initialize() succeeds when native predates protocol negotiation '
+        '(returns null, not a map)', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => null);
+
+      final player = MediaPlayer(playerId: 'proto-legacy-native');
+      await player.initialize();
+      expect(player.isInitialized, isTrue);
+
+      await player.dispose();
+    });
+
+    test(
+        'MissingPluginException from a method native does not implement is '
+        'mapped to ProtocolMismatchException', () async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'initialize') {
+          return {'protocolVersion': MediaPlayer.protocolVersion};
+        }
+        return null;
+      });
+
+      final player = MediaPlayer(playerId: 'proto-missing-method');
+      await player.initialize();
+
+      // Simulate a stale cached native build that doesn't implement 'play'
+      // at all: no handler registered for the channel at this point makes
+      // the test binding throw a raw MissingPluginException, exactly like
+      // an unimplemented native method would.
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+
+      await expectLater(
+        player.play(),
+        throwsA(
+          isA<ProtocolMismatchException>()
+              .having((e) => e.missingMethod, 'missingMethod', 'play'),
+        ),
+      );
+
+      // dispose() swallows its own MissingPluginException (logged, not
+      // thrown) — restoring a handler here just keeps teardown quiet.
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async => null);
+      await player.dispose();
     });
   });
 }

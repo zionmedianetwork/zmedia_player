@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show MethodCall, MethodChannel, PlatformException;
+    show MethodCall, MethodChannel, MissingPluginException, PlatformException;
 import '../models/media_item.dart';
 import '../models/player_state.dart';
 import '../models/playlist.dart';
@@ -14,10 +14,32 @@ import '../models/buffering_config.dart';
 import '../models/buffer_health.dart';
 import '../models/network_status.dart';
 import '../services/buffering_service.dart';
+import '../services/network_resilience_service.dart';
 import '../security/input_validation.dart';
 import 'media_config.dart';
 import 'crash_reporter.dart';
 import 'exceptions.dart';
+
+/// Reason a `paused` [PlaybackState] transition happened, when known.
+///
+/// H-01: [PlaybackState] itself carries no field for this (it lives in
+/// `lib/src/models/`, outside this fix's scope), so the reason is surfaced
+/// out-of-band via [MediaPlayer.pauseReasonStream] instead of changing the
+/// state string itself. This mirrors, in spirit, how Phase 2 disambiguated
+/// stall-vs-pause on iOS by choosing between the `buffering` and `paused`
+/// state strings — here both "user paused" and "OS revoked audio focus" are
+/// legitimately `paused`, so the disambiguation has to travel alongside the
+/// state event rather than replace it.
+enum PlayerPauseReason {
+  /// A normal user- or API-driven pause (or any other/unknown cause).
+  user,
+
+  /// Android only, currently: the OS paused playback by revoking audio
+  /// focus (e.g. another app started playing audio). See
+  /// `MediaPlayerInstance.onPlayWhenReadyChanged`/`onIsPlayingChanged` in
+  /// `android/.../MediaPlayerManager.kt`.
+  audioFocusLoss,
+}
 
 /// Main media player controller class
 ///
@@ -48,6 +70,29 @@ class MediaPlayer {
 
   /// Global crash reporter (set once at app startup)
   static CrashReporter? crashReporter;
+
+  /// M-16: wire protocol version for the MethodChannel contract between
+  /// this Dart package and the native (Android/Kotlin, iOS/Swift)
+  /// implementations. [initialize] sends this to native; native compares it
+  /// against its own NATIVE_PROTOCOL_VERSION /
+  /// MIN_SUPPORTED_DART_PROTOCOL_VERSION (see `ZMediaPlayerPlugin.kt` /
+  /// `ZMediaPlayerPlugin.swift`) and rejects an incompatible pairing with a
+  /// `PROTOCOL_VERSION_MISMATCH` error instead of silently misbehaving or
+  /// failing later with an unrelated-looking error. Bump this whenever a
+  /// change to the MethodChannel contract requires native to be rebuilt to
+  /// stay compatible (new required arguments, renamed methods, changed
+  /// event payload shapes, etc.), and bump the native constants to match.
+  static const int protocolVersion = 1;
+
+  /// Oldest native protocol version this Dart package can still talk to.
+  /// Native reports its own version back from a successful `initialize`
+  /// call; if it's older than this floor, [initialize] throws
+  /// [ProtocolMismatchException] rather than proceeding against native code
+  /// that may not understand calls this package is about to make. A native
+  /// build that predates protocol negotiation entirely reports no version
+  /// at all — that case is intentionally allowed through unchanged, since
+  /// there is nothing to compare it against.
+  static const int minSupportedNativeProtocolVersion = 1;
 
   /// Unique identifier for this player instance
   final String playerId;
@@ -92,9 +137,24 @@ class MediaPlayer {
       StreamController<int>.broadcast();
   final StreamController<BufferHealth> _bufferHealthController =
       StreamController<BufferHealth>.broadcast();
+  final StreamController<MediaPlayerException> _errorController =
+      StreamController<MediaPlayerException>.broadcast();
+  final StreamController<PlayerPauseReason> _pauseReasonController =
+      StreamController<PlayerPauseReason>.broadcast();
 
   /// Buffering service for adaptive buffer management
   late final BufferingService _bufferingService;
+
+  /// H-06: network resilience/retry service, fed live by native connectivity
+  /// push events (`onNetworkStatusChanged` — see `_handleNetworkStatusChanged`
+  /// and `NetworkMonitor` on each platform). Unlike [BufferingService], this
+  /// is *not* started via a `startMonitoring()` poll: native already drives
+  /// it purely by calling [NetworkResilienceService.updateNetworkStatus]
+  /// whenever a connectivity event arrives, so [NetworkResilienceService]'s
+  /// own `Timer.periodic`-based `startMonitoring`/`stopMonitoring` (which
+  /// require a `platformNetworkStatusCallback` this constructor deliberately
+  /// omits) are simply unused here.
+  late final NetworkResilienceService _networkResilienceService;
 
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
@@ -164,6 +224,7 @@ class MediaPlayer {
     _ensureCleanupTimer();
     _setupMethodCallHandler();
     _initializeBufferingService();
+    _networkResilienceService = NetworkResilienceService();
   }
 
   /// Initialize buffering service with configuration
@@ -195,7 +256,7 @@ class MediaPlayer {
   /// Get buffer status from platform
   Future<Map<String, dynamic>> _getPlatformBufferStatus() async {
     try {
-      final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      final result = await _invokeMethod<Map<dynamic, dynamic>>(
         'getBufferHealth',
         {'playerId': playerId},
       );
@@ -410,6 +471,40 @@ class MediaPlayer {
     return _bufferHealthController.stream;
   }
 
+  /// Stream of typed playback errors (H-01).
+  ///
+  /// This is the reachable half of the typed exception hierarchy for
+  /// failures that occur *after* an operation's method call has already
+  /// returned successfully — which, for native media playback, is most
+  /// failures: ExoPlayer/AVPlayer report network, HTTP, DRM, decoder, and
+  /// source errors asynchronously via a player-error callback, not as the
+  /// result of the `load`/`play` method call itself. Listen here (in
+  /// addition to catching exceptions thrown directly by methods like
+  /// [load]) to reliably observe every category in [MediaErrorCategory]:
+  ///
+  /// ```dart
+  /// player.errorStream.listen((e) {
+  ///   if (e is NetworkException) showOfflineBanner();
+  ///   if (e is DrmException) showDrmError(e);
+  /// });
+  /// ```
+  ///
+  /// Also receives a [DrmException] whenever [drmSessionStream] reports
+  /// [DrmSessionState.error], so DRM failures are reachable through this
+  /// stream too rather than only as an untyped session state.
+  Stream<MediaPlayerException> get errorStream {
+    _throwIfDisposed();
+    return _errorController.stream;
+  }
+
+  /// Stream of [PlayerPauseReason]s, emitted alongside a `paused`
+  /// [PlaybackState] transition when the reason for the pause is known
+  /// (currently: Android audio-focus loss). See [PlayerPauseReason].
+  Stream<PlayerPauseReason> get pauseReasonStream {
+    _throwIfDisposed();
+    return _pauseReasonController.stream;
+  }
+
   /// Current network quality based on bandwidth measurements
   NetworkQuality get networkQuality {
     _throwIfDisposed();
@@ -426,6 +521,52 @@ class MediaPlayer {
   BufferHealth? get lastBufferHealth {
     _throwIfDisposed();
     return _bufferingService.lastBufferHealth;
+  }
+
+  /// H-06: current device connectivity status, driven by native push events
+  /// (`ConnectivityManager.NetworkCallback` on Android, `NWPathMonitor` on
+  /// iOS — see `NetworkMonitor` on each platform). This is
+  /// [NetworkStatus.unknown] until the first native event arrives.
+  ///
+  /// Distinct from [networkQuality] above: that getter is derived from
+  /// ExoPlayer/AVPlayer's own bandwidth *meter* (how fast media is actually
+  /// downloading), whereas this reflects the OS-level connectivity signal
+  /// (is there a network at all, and what kind).
+  NetworkStatus get networkStatus {
+    _throwIfDisposed();
+    return _networkResilienceService.networkStatus;
+  }
+
+  /// Stream of [NetworkStatus] updates — emits every time native reports the
+  /// device's connectivity changed (available/lost) or its quality bucket
+  /// changed. See [networkStatus].
+  Stream<NetworkStatus> get networkStatusStream {
+    _throwIfDisposed();
+    return _networkResilienceService.networkStatusStream;
+  }
+
+  /// Stream of [NetworkChangeEvent]s — a filtered, semantically-labeled view
+  /// of [networkStatusStream] that only emits "significant" transitions
+  /// (connection lost/restored, quality improved/degraded). See
+  /// [NetworkChangeEvent.isSignificant].
+  Stream<NetworkChangeEvent> get networkChangeStream {
+    _throwIfDisposed();
+    return _networkResilienceService.networkChangeStream;
+  }
+
+  /// H-06: the [NetworkResilienceService] instance backing [networkStatus] /
+  /// [networkStatusStream] / [networkChangeStream], exposed directly so
+  /// callers can also use its retry/backoff helpers
+  /// ([NetworkResilienceService.withRetry],
+  /// [NetworkResilienceService.shouldRetry]) against the same live
+  /// connectivity signal this player observes, instead of constructing a
+  /// disconnected instance of their own. This is what makes
+  /// [NetworkResilienceService] reachable from the normal `MediaPlayer` /
+  /// `MediaController` path — previously it had zero call sites outside its
+  /// own file and tests.
+  NetworkResilienceService get networkResilienceService {
+    _throwIfDisposed();
+    return _networkResilienceService;
   }
 
   /// Stream of PiP status updates
@@ -542,6 +683,32 @@ class MediaPlayer {
   /// Whether the player is disposed
   bool get isDisposed => _isDisposed;
 
+  /// Thin wrapper around `_channel.invokeMethod` that converts a raw
+  /// [MissingPluginException] into the typed [ProtocolMismatchException]
+  /// (M-16). A [MissingPluginException] means the *compiled* native plugin
+  /// does not implement [method] at all — typically because the installed
+  /// native platform code is older than this Dart package (the package is
+  /// distributed by git ref, so this skew is easy to hit in practice).
+  /// Without this wrapper that exception escapes the sealed
+  /// [MediaPlayerException] hierarchy entirely and surprises callers who
+  /// only catch [MediaPlayerException]. Every other exception — in
+  /// particular [PlatformException], which each call site's own catch
+  /// block maps to a specific typed exception — passes through unchanged.
+  Future<T?> _invokeMethod<T>(String method, [dynamic arguments]) async {
+    try {
+      return await _channel.invokeMethod<T>(method, arguments);
+    } on MissingPluginException {
+      throw ProtocolMismatchException(
+        'Native plugin does not implement "$method". The installed native '
+        'platform code appears to be older than this zmedia_player Dart '
+        'package (protocol v$protocolVersion); rebuild the app to pick up '
+        'a matching native implementation.',
+        dartProtocolVersion: protocolVersion,
+        missingMethod: method,
+      );
+    }
+  }
+
   /// Initialize the player
   Future<void> initialize() async {
     _throwIfDisposed();
@@ -554,6 +721,16 @@ class MediaPlayer {
     }
 
     _initializationCompleter = Completer<void>();
+    // Every catch branch below both completes this completer with an error
+    // AND (re)throws the same exception to the direct caller. If this is
+    // the *only* caller (i.e. no concurrent second call is awaiting
+    // `_initializationCompleter!.future` via the branch above), the
+    // completer's future would otherwise have no listener at all and Dart
+    // reports it as an unhandled zone error even though the direct caller
+    // *did* handle it via its own try/catch. Futures support multiple
+    // independent listeners, so attaching this no-op handler up front does
+    // not suppress the error for a genuine second, concurrent caller.
+    unawaited(_initializationCompleter!.future.catchError((_) {}));
 
     try {
       crashReporter?.log('Initializing MediaPlayer', context: {
@@ -561,17 +738,87 @@ class MediaPlayer {
         'autoPlay': _config.autoPlay,
       });
 
-      await _channel.invokeMethod('initialize', {
+      // M-16: send this package's protocol version so native can reject an
+      // incompatible pairing (e.g. a stale cached native build that
+      // predates a required contract change) up front, with a clear error,
+      // instead of failing ambiguously on a later call.
+      final rawResult = await _invokeMethod<dynamic>('initialize', {
         'playerId': playerId,
+        'protocolVersion': protocolVersion,
         'config': _configToMap(_config),
       });
+
+      final nativeProtocolVersion = (rawResult is Map)
+          ? (rawResult['protocolVersion'] as num?)?.toInt()
+          : null;
+
+      // A native build that predates protocol negotiation returns null
+      // (or a bare success with no map) — that's allowed through
+      // unchanged, since there is nothing to compare it against yet.
+      if (nativeProtocolVersion != null &&
+          nativeProtocolVersion < minSupportedNativeProtocolVersion) {
+        throw ProtocolMismatchException(
+          'Native plugin protocol v$nativeProtocolVersion is older than the '
+          'minimum v$minSupportedNativeProtocolVersion this Dart package '
+          '(protocol v$protocolVersion) requires. Rebuild the app against a '
+          'matching zmedia_player native version.',
+          dartProtocolVersion: protocolVersion,
+          nativeProtocolVersion: nativeProtocolVersion,
+        );
+      }
+
       _isInitialized = true;
       _startPositionTimer();
       _initializationCompleter!.complete();
 
       crashReporter?.log('MediaPlayer initialized successfully', context: {
         'playerId': playerId,
+        'nativeProtocolVersion': nativeProtocolVersion,
       });
+    } on ProtocolMismatchException catch (exception, stack) {
+      crashReporter?.reportError(exception, stack,
+          context: {
+            'operation': 'initialize',
+            'playerId': playerId,
+          },
+          fatal: true);
+
+      _initializationCompleter!.completeError(exception);
+      _initializationCompleter = null;
+      rethrow;
+    } on PlatformException catch (e, stack) {
+      crashReporter?.reportError(e, stack,
+          context: {
+            'operation': 'initialize',
+            'playerId': playerId,
+            'config': _config.toString(),
+            'errorCode': e.code,
+          },
+          fatal: true);
+
+      final MediaPlayerException exception;
+      if (e.code == 'PROTOCOL_VERSION_MISMATCH') {
+        final details = e.details as Map<dynamic, dynamic>?;
+        exception = ProtocolMismatchException(
+          e.message ?? 'Native/Dart protocol version mismatch',
+          dartProtocolVersion:
+              (details?['dartProtocolVersion'] as num?)?.toInt() ??
+                  protocolVersion,
+          nativeProtocolVersion:
+              (details?['nativeProtocolVersion'] as num?)?.toInt(),
+          details: details?.map((k, v) => MapEntry(k.toString(), v)),
+        );
+      } else {
+        exception = ConfigurationException(
+          'Failed to initialize player: ${e.message ?? e.code}',
+          parameter: 'initialization',
+          value: playerId,
+          details: e.details as Map<String, dynamic>?,
+        );
+      }
+      _initializationCompleter!.completeError(exception);
+      _initializationCompleter = null;
+      throw exception;
     } catch (e, stack) {
       crashReporter?.reportError(e, stack,
           context: {
@@ -637,7 +884,7 @@ class MediaPlayer {
         }
       }
 
-      await _channel.invokeMethod('load', {
+      await _invokeMethod('load', {
         'playerId': playerId,
         'mediaItem': item.toMap(),
       });
@@ -660,34 +907,58 @@ class MediaPlayer {
 
       _handleLoadError('Failed to load media: ${e.message ?? e.code}');
 
-      // Convert platform exceptions to typed exceptions
-      if (e.code == 'NETWORK_ERROR' || e.code == 'CONNECTIVITY_ERROR') {
-        final isOffline = e.message?.toLowerCase().contains('offline') ?? false;
-        final isTimeout = e.message?.toLowerCase().contains('timeout') ?? false;
-        throw NetworkException(
-          e.message ?? 'Network error occurred',
-          isOffline: isOffline,
-          isTimeout: isTimeout,
-          details: e.details as Map<String, dynamic>?,
-        );
-      } else if (e.code.startsWith('DRM_')) {
-        throw DrmException(
-          e.message ?? 'DRM error occurred',
-          drmType: item.drmConfig?.scheme.toString().split('.').last,
-          errorCode: e.code,
-          isLicenseError: e.code.contains('LICENSE'),
-          isCertificateError:
-              e.code.contains('CERTIFICATE') || e.code.contains('PROVISIONING'),
-          details: e.details as Map<String, dynamic>?,
-        );
-      } else {
-        throw MediaLoadException(
-          e.message ?? 'Failed to load media',
-          url: item.url,
-          statusCode:
-              e.code == 'HTTP_ERROR' ? int.tryParse(e.message ?? '') : null,
-          details: e.details as Map<String, dynamic>?,
-        );
+      // H-01: real native `load` failures are almost always reported
+      // *asynchronously* (see MediaPlayer.errorStream) — ExoPlayer/AVPlayer
+      // build the media source synchronously but only start actually
+      // reading it (and can only detect network/HTTP/decoder/DRM problems)
+      // after this call has already returned success. What lands here is a
+      // *synchronous* failure while building that source/config (invalid
+      // arguments, a rejected DRM config, etc.), reported with the
+      // per-operation code (`LOAD_ERROR`) plus, best-effort, a `category`
+      // detail (see MediaErrorCategory / native categorizeSynchronousLoadError).
+      // Older cached native builds won't send `category` at all — fall back
+      // to the historical MediaLoadException-for-everything behaviour, which
+      // is still correct: the operation was `load` and it failed.
+      final rawDetails = e.details as Map<dynamic, dynamic>?;
+      final details = rawDetails?.map((k, v) => MapEntry(k.toString(), v));
+      final category =
+          MediaErrorCategory.fromWireValue(details?['category'] as String?);
+      final message = e.message ?? 'Failed to load media';
+
+      // Network/DRM are distinctive and useful enough to surface as their
+      // dedicated type even from this synchronous path. Everything else
+      // (including a missing/unrecognized category from an older cached
+      // native build) keeps the historical, still-correct
+      // MediaLoadException-for-everything behaviour — the operation was
+      // `load` and it failed, which is exactly what that type communicates.
+      switch (category) {
+        case MediaErrorCategory.network:
+          throw NetworkException(
+            message,
+            isOffline: message.toLowerCase().contains('offline'),
+            isTimeout: message.toLowerCase().contains('timeout'),
+            details: details,
+          );
+        case MediaErrorCategory.drm:
+          throw DrmException(
+            message,
+            drmType: item.drmConfig?.scheme.toString().split('.').last,
+            errorCode: e.code,
+            isLicenseError: message.toLowerCase().contains('license'),
+            isCertificateError: message.toLowerCase().contains('certificate') ||
+                message.toLowerCase().contains('provisioning'),
+            details: details,
+          );
+        case MediaErrorCategory.http:
+        case MediaErrorCategory.decoder:
+        case MediaErrorCategory.source:
+        case MediaErrorCategory.unknown:
+          throw MediaLoadException(
+            message,
+            url: item.url,
+            statusCode: details?['httpStatusCode'] as int?,
+            details: details,
+          );
       }
     } catch (e, stack) {
       crashReporter?.reportError(e, stack, context: {
@@ -755,7 +1026,7 @@ class MediaPlayer {
         }
       }
 
-      await _channel.invokeMethod('setPlaylist', {
+      await _invokeMethod('setPlaylist', {
         'playerId': playerId,
         'playlist': _playlistToMap(_currentPlaylist!),
         'startIndex': index,
@@ -795,13 +1066,13 @@ class MediaPlayer {
       // play() (e.g. from a lock-screen control or the play button) resumes
       // instead of no-opping at the end of the media.
       if (_currentState.state == PlayerState.completed) {
-        await _channel.invokeMethod('seekTo', {
+        await _invokeMethod('seekTo', {
           'playerId': playerId,
           'position': 0,
         });
       }
 
-      await _channel.invokeMethod('play', {'playerId': playerId});
+      await _invokeMethod('play', {'playerId': playerId});
 
       // Start buffer health monitoring
       _bufferingService.startMonitoring();
@@ -832,7 +1103,7 @@ class MediaPlayer {
     _markActivity();
 
     try {
-      await _channel.invokeMethod('pause', {'playerId': playerId});
+      await _invokeMethod('pause', {'playerId': playerId});
 
       // Stop buffer health monitoring when paused
       _bufferingService.stopMonitoring();
@@ -861,7 +1132,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('stop', {'playerId': playerId});
+      await _invokeMethod('stop', {'playerId': playerId});
       _updateState(_currentState.copyWith(state: PlayerState.idle));
     } on PlatformException catch (e) {
       throw PlaybackException(
@@ -885,7 +1156,7 @@ class MediaPlayer {
     }
 
     try {
-      await _channel.invokeMethod('seekTo', {
+      await _invokeMethod('seekTo', {
         'playerId': playerId,
         'position': position.inMilliseconds,
       });
@@ -905,7 +1176,7 @@ class MediaPlayer {
     final clampedVolume = volume.clamp(0.0, 1.0);
 
     try {
-      await _channel.invokeMethod('setVolume', {
+      await _invokeMethod('setVolume', {
         'playerId': playerId,
         'volume': clampedVolume,
       });
@@ -930,7 +1201,7 @@ class MediaPlayer {
     final clampedSpeed = speed.clamp(0.25, 4.0);
 
     try {
-      await _channel.invokeMethod('setSpeed', {
+      await _invokeMethod('setSpeed', {
         'playerId': playerId,
         'speed': clampedSpeed,
       });
@@ -953,7 +1224,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('setMuted', {
+      await _invokeMethod('setMuted', {
         'playerId': playerId,
         'muted': muted,
       });
@@ -990,7 +1261,7 @@ class MediaPlayer {
     _markActivity();
 
     try {
-      await _channel.invokeMethod('reclaimVideoSurface', {
+      await _invokeMethod('reclaimVideoSurface', {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
@@ -1008,7 +1279,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('setBoxFit', {
+      await _invokeMethod('setBoxFit', {
         'playerId': playerId,
         'boxFit': _boxFitToString(boxFit),
       });
@@ -1039,7 +1310,7 @@ class MediaPlayer {
     }
 
     try {
-      await _channel.invokeMethod('setSubtitleTrack', {
+      await _invokeMethod('setSubtitleTrack', {
         'playerId': playerId,
         'subtitleTrack': track?.toMap(),
       });
@@ -1071,7 +1342,7 @@ class MediaPlayer {
     }
 
     try {
-      await _channel.invokeMethod('setQualityTrack', {
+      await _invokeMethod('setQualityTrack', {
         'playerId': playerId,
         'qualityTrack': _qualityTrackToMap(track),
       });
@@ -1103,7 +1374,7 @@ class MediaPlayer {
     }
 
     try {
-      await _channel.invokeMethod('setAudioTrack', {
+      await _invokeMethod('setAudioTrack', {
         'playerId': playerId,
         'audioTrack': _audioTrackToMap(track),
       });
@@ -1125,7 +1396,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('enableAutoQuality', {
+      await _invokeMethod('enableAutoQuality', {
         'playerId': playerId,
       });
 
@@ -1148,7 +1419,7 @@ class MediaPlayer {
     try {
       debugPrint(
           'MediaPlayer: Checking PiP availability for player: $playerId');
-      final result = await _channel.invokeMethod<bool>('checkPipAvailability', {
+      final result = await _invokeMethod<bool>('checkPipAvailability', {
         'playerId': playerId,
         if (_config.pipConfig != null) 'config': _config.pipConfig!.toMap(),
       });
@@ -1176,8 +1447,7 @@ class MediaPlayer {
     }
 
     try {
-      final result =
-          await _channel.invokeMethod<bool>('enterPictureInPicture', {
+      final result = await _invokeMethod<bool>('enterPictureInPicture', {
         'playerId': playerId,
         if (_config.pipConfig != null) 'config': _config.pipConfig!.toMap(),
       });
@@ -1197,7 +1467,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('exitPictureInPicture', {
+      await _invokeMethod('exitPictureInPicture', {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
@@ -1215,7 +1485,7 @@ class MediaPlayer {
     await _ensureCastInitialized();
 
     try {
-      await _channel.invokeMethod('startCastDiscovery', {
+      await _invokeMethod('startCastDiscovery', {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
@@ -1232,7 +1502,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('stopCastDiscovery', {
+      await _invokeMethod('stopCastDiscovery', {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
@@ -1250,7 +1520,7 @@ class MediaPlayer {
     await _ensureCastInitialized();
 
     try {
-      final result = await _channel.invokeMethod<bool>('connectToCastDevice', {
+      final result = await _invokeMethod<bool>('connectToCastDevice', {
         'playerId': playerId,
         'deviceId': device.id,
         'deviceType': device.type.name,
@@ -1271,7 +1541,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('disconnectFromCastDevice', {
+      await _invokeMethod('disconnectFromCastDevice', {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
@@ -1289,7 +1559,7 @@ class MediaPlayer {
     await _ensureCastInitialized();
 
     try {
-      await _channel.invokeMethod('loadMediaOnCastDevice', {
+      await _invokeMethod('loadMediaOnCastDevice', {
         'playerId': playerId,
         'mediaItem': {
           'id': mediaItem.id,
@@ -1313,7 +1583,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('castPlay', {
+      await _invokeMethod('castPlay', {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
@@ -1330,7 +1600,7 @@ class MediaPlayer {
     await _ensureInitialized();
 
     try {
-      await _channel.invokeMethod('castPause', {
+      await _invokeMethod('castPause', {
         'playerId': playerId,
       });
     } on PlatformException catch (e) {
@@ -1388,7 +1658,7 @@ class MediaPlayer {
     }
 
     try {
-      await _channel.invokeMethod('skipToIndex', {
+      await _invokeMethod('skipToIndex', {
         'playerId': playerId,
         'index': index,
       });
@@ -1413,7 +1683,7 @@ class MediaPlayer {
 
     if (_isInitialized) {
       try {
-        await _channel.invokeMethod('updateConfig', {
+        await _invokeMethod('updateConfig', {
           'playerId': playerId,
           'config': _configToMap(config),
         });
@@ -1445,7 +1715,7 @@ class MediaPlayer {
     // Close platform channel
     if (_isInitialized) {
       try {
-        await _channel.invokeMethod('dispose', {'playerId': playerId});
+        await _invokeMethod('dispose', {'playerId': playerId});
       } catch (e) {
         // Ignore disposal errors but log them
         debugPrint('Warning: Error disposing MediaPlayer: $e');
@@ -1454,6 +1724,10 @@ class MediaPlayer {
 
     // Dispose buffering service
     _bufferingService.dispose();
+
+    // H-06: dispose network resilience service (closes its own stream
+    // controllers, cancels active retries and any monitoring timer).
+    _networkResilienceService.dispose();
 
     // Close stream controllers safely
     await _safeCloseStreams();
@@ -1479,6 +1753,8 @@ class MediaPlayer {
       _castDevicesController,
       _drmSessionController,
       _notificationActionController,
+      _errorController,
+      _pauseReasonController,
     ];
 
     final errors = <String, dynamic>{};
@@ -1528,11 +1804,14 @@ class MediaPlayer {
       'qualityTracksController',
       'audioTracksController',
       'bandwidthController',
+      'bufferHealthController',
       'pipStatusController',
       'castStatusController',
       'castDevicesController',
       'drmSessionController',
       'notificationActionController',
+      'errorController',
+      'pauseReasonController',
     ];
     return index < names.length ? names[index] : 'unknownController';
   }
@@ -1662,6 +1941,9 @@ class MediaPlayer {
         case 'onBandwidthChanged':
           _handleBandwidthChanged(arguments!);
           break;
+        case 'onNetworkStatusChanged':
+          _handleNetworkStatusChanged(arguments!);
+          break;
         case 'onDrmSessionUpdate':
           _handleDrmSessionUpdate(arguments!);
           break;
@@ -1690,6 +1972,17 @@ class MediaPlayer {
       bufferPercentage:
           (arguments['bufferPercentage'] as num?)?.toDouble() ?? 0.0,
     ));
+
+    // H-01: only present on Android, and only for a "paused" event caused
+    // by the OS revoking audio focus — see
+    // MediaPlayerInstance.onPlayWhenReadyChanged/onIsPlayingChanged in
+    // android/.../MediaPlayerManager.kt. Absent otherwise, in which case a
+    // paused state is left to mean an ordinary user/API pause.
+    final pauseReasonString = arguments['pauseReason'] as String?;
+    if (pauseReasonString == 'audioFocusLoss' &&
+        !_pauseReasonController.isClosed) {
+      _pauseReasonController.add(PlayerPauseReason.audioFocusLoss);
+    }
 
     // Auto-advance the playlist (respecting repeat/shuffle) when an item
     // finishes, or loop the current item when looping is enabled. Guarded by
@@ -1776,6 +2069,23 @@ class MediaPlayer {
     }
   }
 
+  /// H-06: handle native connectivity push events (`NetworkMonitor` on
+  /// Android/iOS). A single wire event covers "available", "lost", and
+  /// "quality changed" — [NetworkStatus.fromPlatform] builds the new status
+  /// and [NetworkResilienceService.updateNetworkStatus] derives the
+  /// available/lost/quality-improved/quality-degraded distinction by diffing
+  /// it against the previous one (see [NetworkChangeEvent]), so no
+  /// information is lost by not having three separate method names on the
+  /// wire.
+  void _handleNetworkStatusChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    final status = NetworkStatus.fromPlatform(
+      arguments.map((key, value) => MapEntry(key.toString(), value)),
+    );
+    _networkResilienceService.updateNetworkStatus(status);
+  }
+
   /// Handle subtitle tracks change events from platform
   void _handleSubtitleTracksChanged(Map<dynamic, dynamic> arguments) {
     if (_isDisposed) return;
@@ -1852,12 +2162,41 @@ class MediaPlayer {
       if (!_drmSessionController.isClosed) {
         _drmSessionController.add(session);
       }
+
+      // H-01: bridge a DRM session error into the typed exception hierarchy
+      // too, so DRM/license failures are reachable via [errorStream] and
+      // not only as an untyped [DrmSessionState.error] on [drmSessionStream].
+      // [DrmSession] carries no structured error classification (only a
+      // free-text [DrmSession.errorMessage]), so isLicenseError/
+      // isCertificateError are best-effort text matches, same pattern as
+      // the platform-code substring checks below in [load]'s catch block.
+      if (session.state == DrmSessionState.error &&
+          !_errorController.isClosed) {
+        final message = session.errorMessage ?? 'DRM session error';
+        final lowerMessage = message.toLowerCase();
+        _errorController.add(DrmException(
+          message,
+          isLicenseError: lowerMessage.contains('license'),
+          isCertificateError: lowerMessage.contains('certificate') ||
+              lowerMessage.contains('provisioning'),
+        ));
+      }
     } catch (e) {
       debugPrint('Error processing DRM session update: $e');
     }
   }
 
   /// Handle error events from platform
+  ///
+  /// H-01: this is the *primary* path real playback errors take — native
+  /// media playback errors (network, HTTP, DRM, decoder, source) are
+  /// reported by ExoPlayer/AVPlayer asynchronously via a player-error
+  /// callback, not as the result of the `load`/`play` method call that
+  /// triggered them (which has usually already returned successfully by
+  /// the time the failure is detected). In addition to the untyped
+  /// [PlaybackState.errorMessage] this always set, build and emit the
+  /// concrete typed [MediaPlayerException] via [errorStream] using the
+  /// shared [MediaErrorCategory] wire-format vocabulary native now sends.
   void _handleError(Map<dynamic, dynamic> arguments) {
     if (_isDisposed) return;
 
@@ -1867,6 +2206,18 @@ class MediaPlayer {
       state: PlayerState.error,
       errorMessage: errorMessage,
     ));
+
+    if (!_errorController.isClosed) {
+      final details = arguments['httpStatusCode'] != null
+          ? {'httpStatusCode': arguments['httpStatusCode']}
+          : null;
+      _errorController.add(mapNativeMediaError(
+        message: errorMessage,
+        categoryWireValue: arguments['category'] as String?,
+        nativeErrorCode: arguments['nativeErrorCode']?.toString(),
+        details: details,
+      ));
+    }
   }
 
   /// Handle PiP status change events from platform
@@ -2001,7 +2352,7 @@ class MediaPlayer {
   Future<void> _ensureCastInitialized() async {
     if (_castInitialized) return;
     try {
-      await _channel.invokeMethod('initializeCast', {
+      await _invokeMethod('initializeCast', {
         'playerId': playerId,
         'config': const CastConfig().toMap(),
       });
