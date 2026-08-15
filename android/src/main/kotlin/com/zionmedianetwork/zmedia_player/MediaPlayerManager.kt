@@ -9,6 +9,7 @@ import com.google.android.exoplayer2.source.MediaSource
 import com.google.android.exoplayer2.source.ProgressiveMediaSource
 import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.source.dash.DashMediaSource
+import com.google.android.exoplayer2.audio.AudioAttributes
 import com.google.android.exoplayer2.trackselection.TrackSelectionOverride
 import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
 import com.google.android.exoplayer2.upstream.DefaultDataSource
@@ -273,6 +274,10 @@ class MediaPlayerInstance(
     private var bandwidthUpdateHandler: Handler? = null
     private var bandwidthUpdateRunnable: Runnable? = null
     private var originalVolume: Float = 1f
+    // Tracks whether this instance is currently muted (via setMuted() or the initial
+    // config's "startMuted"). Used to decide whether this instance should participate in
+    // Android audio focus / becoming-noisy handling — see updateAudioFocusHandling().
+    private var isMuted: Boolean = false
     private var currentMediaItem: Map<String, Any>? = null
     // DRM handler — non-null only when the current media item has a drmConfig.
     private var drmHandler: DrmHandler? = null
@@ -351,6 +356,12 @@ class MediaPlayerInstance(
                 // Apply initial configuration
                 config?.let { applyConfig(it) }
             }
+
+        // Apply audio attributes / focus / becoming-noisy handling. Must run after
+        // applyConfig() (above) so that isMuted already reflects "startMuted" from the
+        // initial config, and must also run when config is null (applyConfig only runs
+        // when config != null, but every instance still needs its attributes set).
+        updateAudioFocusHandling()
 
         // Start position updates
         startPositionUpdates()
@@ -502,7 +513,11 @@ class MediaPlayerInstance(
     }
 
     fun setMuted(muted: Boolean) {
+        isMuted = muted
         exoPlayer?.volume = if (muted) 0f else originalVolume
+        // Re-evaluate audio focus / becoming-noisy handling now that mute state changed:
+        // muting drops focus handling (see updateAudioFocusHandling()), unmuting restores it.
+        updateAudioFocusHandling()
     }
 
     fun setBoxFit(boxFit: String) {
@@ -795,6 +810,7 @@ class MediaPlayerInstance(
 
             // Apply muted state
             (config["startMuted"] as? Boolean)?.let {
+                isMuted = it
                 if (it) volume = 0f
             }
 
@@ -817,6 +833,51 @@ class MediaPlayerInstance(
             if (allowBackground) C.WAKE_MODE_NETWORK else C.WAKE_MODE_NONE
         )
         android.util.Log.d("MediaPlayerInstance", "allowBackgroundPlayback=$allowBackground, wakeMode=${if (allowBackground) "NETWORK" else "NONE"}")
+    }
+
+    /**
+     * (Re)applies ExoPlayer's audio attributes, audio-focus handling, and
+     * becoming-noisy handling based on the current [isMuted] state.
+     *
+     * - [AudioAttributes] with `USAGE_MEDIA` / `CONTENT_TYPE_MOVIE` tell Android (and other
+     *   apps) what kind of audio stream this is, which is required for the system to make
+     *   correct ducking/interruption decisions. This is the same classification ExoPlayer's
+     *   own demo app uses for a general-purpose media player handling both audio and video.
+     * - `handleAudioFocus = true` (ExoPlayer's `setAudioAttributes(attrs, handleAudioFocus)`)
+     *   is what makes ExoPlayer request audio focus on play(), duck/pause on transient loss,
+     *   and pause on permanent loss, per the standard `AudioManager` contract. ExoPlayer does
+     *   NOT do any of this by default — `ExoPlayer.Builder` defaults to no focus handling
+     *   unless this is explicitly opted into (documented ExoPlayer behavior, unchanged across
+     *   2.x releases including 2.19.1); ExoPlayer.Builder.setAudioAttributes() was never
+     *   called at all in this file previously (see initializeExoPlayer()), so prior to this
+     *   change focus was not handled at all.
+     * - `setHandleAudioBecomingNoisy` is gated the same way: a muted instance has no audible
+     *   output, so pausing it when headphones are unplugged serves no purpose and would be a
+     *   surprising side effect (e.g. for a muted autoplay preview that should keep advancing).
+     *
+     * When [isMuted] is true we pass `handleAudioFocus = false` and disable becoming-noisy
+     * handling: a silent player has nothing to lose by not holding focus, and — because
+     * Android audio focus is granted to one listener at a time system-wide, not scoped per
+     * app — this also prevents a muted preview instance from stealing focus away from (or
+     * being paused by focus loss from) another *audible* instance of this same plugin, e.g.
+     * a real player elsewhere in the same app. Multiple concurrent *audible* instances of
+     * this plugin will still contend for focus with each other exactly as they would with any
+     * other app, since each MediaPlayerInstance owns an independent ExoPlayer with its own
+     * focus request; this is a known, accepted limitation of per-instance focus handling and
+     * is not addressed by this change (see report).
+     */
+    private fun updateAudioFocusHandling() {
+        val handleAudioFocus = !isMuted
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(C.USAGE_MEDIA)
+            .setContentType(C.CONTENT_TYPE_MOVIE)
+            .build()
+        exoPlayer?.setAudioAttributes(audioAttributes, handleAudioFocus)
+        exoPlayer?.setHandleAudioBecomingNoisy(handleAudioFocus)
+        android.util.Log.d(
+            "MediaPlayerInstance",
+            "updateAudioFocusHandling: isMuted=$isMuted handleAudioFocus=$handleAudioFocus"
+        )
     }
 
     private fun startPositionUpdates() {

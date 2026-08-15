@@ -802,21 +802,40 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     // ActivityAware implementation
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        refreshPipHandlersActivity()
         android.util.Log.d("ZMediaPlayerPlugin", "Activity attached: ${activity != null}")
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
-        // Keep activity reference during config changes
+        // Keep activity reference during config changes. The Activity being torn down
+        // here is about to be destroyed and recreated; onReattachedToActivityForConfigChanges
+        // will supply the new instance for both `activity` and every cached PipHandler.
         android.util.Log.d("ZMediaPlayerPlugin", "Activity detached for config changes")
     }
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
+        // Refresh cached PipHandler instances so a handler created before rotation
+        // doesn't keep operating against the now-destroyed pre-rotation Activity
+        // (see PipHandler.updateActivity).
+        refreshPipHandlersActivity()
         android.util.Log.d("ZMediaPlayerPlugin", "Activity reattached after config changes")
     }
 
     override fun onDetachedFromActivity() {
         activity = null
+        refreshPipHandlersActivity()
         android.util.Log.d("ZMediaPlayerPlugin", "Activity detached")
+    }
+
+    /**
+     * Keep every cached PipHandler's Activity reference in sync with this plugin's
+     * own [activity] field. PipHandler instances live in [pipHandlers] keyed by
+     * playerId and can outlive a single Activity instance across configuration
+     * changes (rotation), so without this they would retain a stale/destroyed
+     * Activity - see M-04 in docs/implementation/production-gate-assessment.md.
+     */
+    private fun refreshPipHandlersActivity() {
+        pipHandlers.values.forEach { it.updateActivity(activity) }
     }
 }

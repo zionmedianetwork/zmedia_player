@@ -3,6 +3,165 @@ import AVFoundation
 import AVKit
 import Flutter
 
+/// Coordinates activation/deactivation of the process-wide `AVAudioSession`
+/// across every `MediaPlayerInstance` (and the other handlers — Pip,
+/// AirPlay, Notification — that used to poke the session independently).
+///
+/// ## Why this exists (B-05)
+///
+/// `AVAudioSession.sharedInstance()` is a single, process-wide resource —
+/// exactly like `MPRemoteCommandCenter`/`MPNowPlayingInfoCenter`, which
+/// `NotificationHandler.Ownership` already coordinates for the same reason.
+/// This type follows the same shape (a private lock-guarded singleton that
+/// every instance registers with/unregisters from) but a different policy,
+/// because audio-session activation is not "one owner at a time" the way
+/// Now Playing info is — it is a **reference count**: the session must stay
+/// active as long as ANY live instance still needs it, and must not be
+/// deactivated just because one particular instance paused or disposed while
+/// others are still playing.
+///
+/// ## Policy
+///
+/// - An instance that is actually **audible** (not muted, volume > 0) needs
+///   the session active and EXCLUSIVE (`.playback`, no `.mixWithOthers`) —
+///   this is what lets audio play with the ring/silent switch on and
+///   continue in the background, but it also interrupts other apps' audio
+///   (e.g. Spotify), which is the correct, expected behaviour for audible
+///   playback.
+/// - An instance that is playing but **muted or at zero volume** (e.g. a
+///   silently autoplaying preview in a feed) must NOT interrupt other apps'
+///   audio. It still registers a request (so the category/activation state
+///   is recomputed correctly when it later becomes audible, or when it
+///   disposes), but the aggregate policy only asks for `.mixWithOthers` on
+///   its behalf, never exclusive activation.
+/// - The **aggregate** state across all live requesters determines the
+///   actual category: if ANY requester is audible, the session is exclusive
+///   (audible always wins — muting one preview must not silently downgrade a
+///   different, genuinely-playing instance to `.mixWithOthers`). Otherwise,
+///   if only silent requesters exist, the session is active with
+///   `.mixWithOthers`. If no requester remains, the session is deactivated
+///   with `.notifyOthersOnDeactivation` so a backgrounded app like Spotify
+///   resumes.
+/// - Release happens explicitly (`play()`'s counterpart `pause()`/`stop()`,
+///   and `dispose()`) rather than being inferred from `rate`/
+///   `timeControlStatus` transitions, because a transient stall
+///   (`waitingToPlayAtSpecifiedRate`) or an OS-driven interruption must NOT
+///   cause this instance to release its slot — only an explicit
+///   pause/stop/dispose means "no longer needed."
+///
+/// All AVAudioSession mutation is funnelled through here; `MediaPlayerInstance`,
+/// `PipHandler`, `AirPlayHandler` and `NotificationHandler` no longer call
+/// `setActive(true)` directly (only category hints, which — unlike
+/// activation — do not interrupt other apps' audio).
+final class AudioSessionCoordinator {
+    static let shared = AudioSessionCoordinator()
+
+    private let lock = NSLock()
+    /// Requesters (identified by object identity) whose output is currently
+    /// audible and therefore require exclusive session activation.
+    private var audibleRequesters: Set<ObjectIdentifier> = []
+    /// Requesters that are playing but muted/silent — they need the session
+    /// alive (so they don't glitch if unmuted) but must not interrupt others.
+    private var silentRequesters: Set<ObjectIdentifier> = []
+    private var sessionIsActive = false
+
+    private init() {}
+
+    /// Registers (or updates) `owner`'s need for the shared audio session.
+    /// Call this from `play()` and whenever audibility changes
+    /// (`setVolume`/`setMuted`) while the instance is still playing.
+    func requestActive(for owner: AnyObject, audible: Bool) {
+        lock.lock()
+        let id = ObjectIdentifier(owner)
+        if audible {
+            audibleRequesters.insert(id)
+            silentRequesters.remove(id)
+        } else {
+            silentRequesters.insert(id)
+            audibleRequesters.remove(id)
+        }
+        let snapshot = currentPolicy()
+        lock.unlock()
+
+        apply(snapshot)
+    }
+
+    /// Removes `owner` from the requester set. Call from `pause()`, `stop()`
+    /// and `dispose()`. Safe to call even if `owner` never requested
+    /// activation (e.g. `dispose()` on an instance that was never played).
+    func release(for owner: AnyObject) {
+        lock.lock()
+        let id = ObjectIdentifier(owner)
+        audibleRequesters.remove(id)
+        silentRequesters.remove(id)
+        let snapshot = currentPolicy()
+        lock.unlock()
+
+        apply(snapshot)
+    }
+
+    private enum Policy: Equatable {
+        case inactive
+        case activeExclusive
+        case activeMixWithOthers
+    }
+
+    /// Must be called with `lock` held.
+    private func currentPolicy() -> Policy {
+        if !audibleRequesters.isEmpty {
+            return .activeExclusive
+        } else if !silentRequesters.isEmpty {
+            return .activeMixWithOthers
+        } else {
+            return .inactive
+        }
+    }
+
+    /// Performs the actual `AVAudioSession` mutation. Dispatched to the main
+    /// thread for consistency with the rest of this plugin's AVFoundation/UI
+    /// interactions; `AVAudioSession` itself is thread-safe but session
+    /// changes can trigger route/interruption side effects best observed
+    /// from a consistent thread.
+    private func apply(_ policy: Policy) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let audioSession = AVAudioSession.sharedInstance()
+
+            switch policy {
+            case .activeExclusive:
+                do {
+                    try audioSession.setCategory(.playback, mode: .moviePlayback)
+                    try audioSession.setActive(true)
+                    self.sessionIsActive = true
+                    print("AudioSessionCoordinator: Session active (exclusive)")
+                } catch {
+                    print("AudioSessionCoordinator: Failed to activate session (exclusive): \(error)")
+                }
+
+            case .activeMixWithOthers:
+                do {
+                    try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+                    try audioSession.setActive(true)
+                    self.sessionIsActive = true
+                    print("AudioSessionCoordinator: Session active (mixWithOthers, muted/silent playback)")
+                } catch {
+                    print("AudioSessionCoordinator: Failed to activate session (mixWithOthers): \(error)")
+                }
+
+            case .inactive:
+                guard self.sessionIsActive else { return }
+                do {
+                    try audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
+                    self.sessionIsActive = false
+                    print("AudioSessionCoordinator: Session deactivated (no live requester) — notifying other apps")
+                } catch {
+                    print("AudioSessionCoordinator: Failed to deactivate session: \(error)")
+                }
+            }
+        }
+    }
+}
+
 class MediaPlayerManager {
     private var players: [String: MediaPlayerInstance] = [:]
     private let methodChannel: FlutterMethodChannel
@@ -348,8 +507,23 @@ class MediaPlayerInstance: NSObject {
 
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
-    private var rateObserver: NSKeyValueObservation?
+    /// Observes `timeControlStatus` rather than bare `rate` so a mid-playback
+    /// stall (`.waitingToPlayAtSpecifiedRate`, rate == 0) is reported as
+    /// `buffering`, not `paused` — see `handleTimeControlStatusChange` (B-06).
+    private var timeControlStatusObserver: NSKeyValueObservation?
     private var bandwidthTimer: Timer?
+
+    /// Whether this instance currently holds a live request with
+    /// `AudioSessionCoordinator` (i.e. `play()` was called and neither
+    /// `pause()`/`stop()`/`dispose()` nor an OS interruption has released it
+    /// since). Used so `setVolume`/`setMuted` know whether an audibility
+    /// change should refresh the in-flight session request (B-05).
+    private var audioSessionRequested = false
+
+    /// Set on `AVAudioSession.interruptionNotification` `.began` to whatever
+    /// this instance's play state was at that moment, so `.ended` can decide
+    /// whether to resume (B-06). Not persisted beyond one interruption cycle.
+    private var wasPlayingBeforeInterruption = false
 
     // Modern KVO observers for player item (auto-cleanup, no exceptions)
     private var itemDurationObserver: NSKeyValueObservation?
@@ -400,10 +574,36 @@ class MediaPlayerInstance: NSObject {
             self?.handleStatusChange(status: player.status)
         }
 
-        // Rate observer for play/pause state
-        rateObserver = player.observe(\.rate, options: [.new]) { [weak self] player, _ in
-            self?.handleRateChange(rate: player.rate)
+        // timeControlStatus observer for play/pause/buffering state (B-06).
+        // `rate` alone cannot distinguish "user paused" from "stalled waiting
+        // to play" — both report rate == 0. `timeControlStatus` can.
+        timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            self?.handleTimeControlStatusChange(player: player)
         }
+
+        // Audio session interruptions (phone calls, Siri, alarms, other apps
+        // requesting the session) (B-06). Scoped to the shared instance,
+        // same as every other consumer of this process-wide notification.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioSessionInterruption(notification:)),
+            name: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance()
+        )
+
+        // Explicit stall signal (B-06). timeControlStatus normally already
+        // reflects a stall via `.waitingToPlayAtSpecifiedRate`, but this
+        // notification is delivered promptly and unambiguously the moment
+        // AVFoundation detects an underrun, so it's kept as a belt-and-braces
+        // "buffering" report alongside the KVO-driven one above. `object: nil`
+        // + item-identity filtering follows the same B-02 convention as the
+        // notifications immediately below.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(playerItemDidStall(notification:)),
+            name: .AVPlayerItemPlaybackStalled,
+            object: nil
+        )
 
         // Notification observers.
         //
@@ -608,17 +808,15 @@ class MediaPlayerInstance: NSObject {
     }
 
     func play() {
-        // Configure the audio session for media playback so audio is audible
-        // even when the ring/silent switch is on, and continues in the background
-        // (the host app declares UIBackgroundModes: audio). Without this the
-        // default .soloAmbient category mutes audio on silent and stops in background.
-        do {
-            let audioSession = AVAudioSession.sharedInstance()
-            try audioSession.setCategory(.playback, mode: .moviePlayback)
-            try audioSession.setActive(true)
-        } catch {
-            print("MediaPlayerInstance.play(): Failed to activate playback audio session: \(error)")
-        }
+        // Request the shared audio session via AudioSessionCoordinator rather
+        // than activating it directly (B-05). This still results in audio
+        // playing with the ring/silent switch on and continuing in the
+        // background (the host app declares UIBackgroundModes: audio) when
+        // this instance is audible — but a muted/silent instance (e.g. an
+        // autoplaying preview) will only request `.mixWithOthers`, so it does
+        // not steal audio focus from another app (e.g. Spotify).
+        audioSessionRequested = true
+        AudioSessionCoordinator.shared.requestActive(for: self, audible: isCurrentlyAudible())
 
         guard let player = avPlayer else { return }
         if #available(iOS 16.0, *) {
@@ -633,11 +831,20 @@ class MediaPlayerInstance: NSObject {
 
     func pause() {
         avPlayer?.pause()
+        // Explicit user/app pause — release the audio-session slot (B-05).
+        // Deliberately NOT tied to timeControlStatus/rate transitions: a
+        // transient stall or an OS interruption also drives rate to 0 and
+        // must NOT release this instance's slot (that would let the session
+        // be torn down mid-stall, or race the interruption's own recovery).
+        audioSessionRequested = false
+        AudioSessionCoordinator.shared.release(for: self)
     }
 
     func stop() {
         avPlayer?.pause()
         avPlayer?.seek(to: .zero)
+        audioSessionRequested = false
+        AudioSessionCoordinator.shared.release(for: self)
     }
 
     func seekTo(position: Int64) {
@@ -647,6 +854,21 @@ class MediaPlayerInstance: NSObject {
 
     func setVolume(volume: Float) {
         avPlayer?.volume = max(0.0, min(1.0, volume))
+        // Audibility may have just changed while playing (e.g. fading a
+        // preview up from 0) — refresh the session request so the aggregate
+        // policy (exclusive vs mixWithOthers) is recomputed (B-05).
+        if audioSessionRequested {
+            AudioSessionCoordinator.shared.requestActive(for: self, audible: isCurrentlyAudible())
+        }
+    }
+
+    /// Whether this instance's output is actually audible right now: not
+    /// muted and volume above zero. Drives whether `AudioSessionCoordinator`
+    /// must activate the shared session exclusively (interrupting other
+    /// apps) or merely keep it alive via `.mixWithOthers` (B-05).
+    private func isCurrentlyAudible() -> Bool {
+        guard let player = avPlayer else { return false }
+        return !player.isMuted && player.volume > 0
     }
 
     func setPlaybackSpeed(speed: Float) {
@@ -671,6 +893,11 @@ class MediaPlayerInstance: NSObject {
 
     func setMuted(muted: Bool) {
         avPlayer?.isMuted = muted
+        // See setVolume() — muting/unmuting mid-playback changes audibility
+        // and must be reflected in the aggregate session policy (B-05).
+        if audioSessionRequested {
+            AudioSessionCoordinator.shared.requestActive(for: self, audible: isCurrentlyAudible())
+        }
     }
 
     func setBoxFit(boxFit: String) {
@@ -892,6 +1119,13 @@ class MediaPlayerInstance: NSObject {
         // Stop bandwidth monitoring
         stopBandwidthMonitoring()
 
+        // Release this instance's audio-session slot (B-05). Must run
+        // regardless of whether audioSessionRequested was true — release()
+        // is a no-op if this instance never requested activation, and is
+        // idempotent, so it's always safe to call on teardown.
+        audioSessionRequested = false
+        AudioSessionCoordinator.shared.release(for: self)
+
         // Remove time observer
         if let observer = timeObserver, let player = avPlayer {
             player.removeTimeObserver(observer)
@@ -901,8 +1135,8 @@ class MediaPlayerInstance: NSObject {
         // Remove KVO observers
         statusObserver?.invalidate()
         statusObserver = nil
-        rateObserver?.invalidate()
-        rateObserver = nil
+        timeControlStatusObserver?.invalidate()
+        timeControlStatusObserver = nil
 
         // Remove player item observers (modern KVO auto-cleanup)
         itemDurationObserver?.invalidate()
@@ -950,20 +1184,17 @@ class MediaPlayerInstance: NSObject {
             forEachLiveView { $0.setVideoGravity(boxFit: boxFit) }
         }
 
-        // Configure the AVAudioSession for background playback when requested.
-        // PipHandler.configureAudioSessionForPiP() also sets .playback, so both
-        // paths converge on the same category — no conflict.  The host app must
-        // still declare UIBackgroundModes: audio in Info.plist for this to work.
-        if config["allowBackgroundPlayback"] as? Bool == true {
-            do {
-                let audioSession = AVAudioSession.sharedInstance()
-                try audioSession.setCategory(.playback, mode: .moviePlayback, options: [])
-                try audioSession.setActive(true)
-                print("MediaPlayerInstance: Audio session configured for background playback")
-            } catch {
-                print("MediaPlayerInstance: Failed to configure background-playback audio session: \(error)")
-            }
-        }
+        // NOTE (B-05): This used to unconditionally call
+        // AVAudioSession.setActive(true) here — i.e. merely INITIALIZING a
+        // player configured for background playback seized the process-wide
+        // audio session and interrupted whatever else was playing, even if
+        // this player never played anything. Session activation is now only
+        // ever requested through AudioSessionCoordinator from play() (and
+        // kept in sync by setVolume/setMuted), which happens when playback
+        // actually starts. Background continuation via UIBackgroundModes:
+        // audio still works: play() activates the same `.playback` category
+        // before the app can be backgrounded, and the category/activation
+        // persists until pause()/stop()/dispose() releases it.
     }
 
     private func handleStatusChange(status: AVPlayer.Status) {
@@ -990,12 +1221,112 @@ class MediaPlayerInstance: NSObject {
         }
     }
 
-    private func handleRateChange(rate: Float) {
-        if rate > 0 {
+    /// Replaces the old bare-`rate` observer (B-06). `rate == 0` is
+    /// ambiguous: it means both "user paused" AND "stalled, waiting to
+    /// resume at the requested rate". `timeControlStatus` disambiguates:
+    /// `.waitingToPlayAtSpecifiedRate` means playback was requested and is
+    /// merely stalled — that must surface to Dart as `buffering`, not
+    /// `paused`, or a mid-playback rebuffer looks indistinguishable from the
+    /// user tapping pause.
+    private func handleTimeControlStatusChange(player: AVPlayer) {
+        switch player.timeControlStatus {
+        case .playing:
             notifyStateChanged(state: "playing", isBuffering: false)
-        } else {
+
+        case .paused:
             notifyStateChanged(state: "paused", isBuffering: false)
+
+        case .waitingToPlayAtSpecifiedRate:
+            // `reasonForWaitingToPlay` further distinguishes a real
+            // buffering wait from other wait reasons AVFoundation may
+            // report; treat anything that isn't explicitly "no item" as a
+            // buffering condition worth surfacing, since the most common
+            // case by far is network-driven stalling.
+            if player.reasonForWaitingToPlay == .noItemToPlay {
+                notifyStateChanged(state: "idle", isBuffering: false)
+            } else {
+                notifyStateChanged(state: "buffering", isBuffering: true)
+            }
+
+        @unknown default:
+            break
         }
+    }
+
+    /// Handles `AVAudioSession.interruptionNotification` (B-06): phone
+    /// calls, Siri, alarms, or another app requesting the audio session all
+    /// deliver this. This notification is process-wide (there is one shared
+    /// `AVAudioSession`), so every live `MediaPlayerInstance` receives every
+    /// interruption — each instance independently tracks and reacts based on
+    /// its OWN play state, which is correct: an interruption should pause
+    /// (and potentially later resume) every currently-playing instance, not
+    /// just one.
+    ///
+    /// NEEDS ON-DEVICE VERIFICATION: interruption delivery/timing (phone
+    /// calls, Siri, alarms) cannot be exercised in a simulator/unit-test
+    /// environment.
+    @objc private func handleAudioSessionInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
+
+        switch type {
+        case .began:
+            print("MediaPlayerInstance: Audio session interruption began (playerId: \(playerId))")
+            // The system silences/pauses playback itself; timeControlStatus
+            // will transition to .paused and the observer above already
+            // reports that to Dart via the existing notifyStateChanged path
+            // — no separate "interrupted" state exists in the Dart model, and
+            // "paused" is the correct, honest description of what the user
+            // sees. What we additionally need is whether THIS instance was
+            // actually playing, to decide on resumption below.
+            wasPlayingBeforeInterruption = (avPlayer?.timeControlStatus == .playing
+                || avPlayer?.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+            // The OS revokes activation for the whole process on .began, not
+            // just this instance's slot — clear the local bookkeeping so a
+            // subsequent pause()/dispose() doesn't try to "release" a
+            // request the coordinator no longer considers active, and so a
+            // resume in .ended goes through the normal play() path (which
+            // re-requests activation) rather than assuming it's still held.
+            audioSessionRequested = false
+
+        case .ended:
+            var shouldResume = false
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
+            }
+
+            print("MediaPlayerInstance: Audio session interruption ended (playerId: \(playerId), wasPlaying: \(wasPlayingBeforeInterruption), shouldResume: \(shouldResume))")
+
+            if wasPlayingBeforeInterruption && shouldResume {
+                // Route through play() (not a bare avPlayer?.play()) so the
+                // resume re-requests the audio session via
+                // AudioSessionCoordinator and re-applies requestedSpeed,
+                // exactly like a fresh user-initiated play().
+                DispatchQueue.main.async { [weak self] in
+                    self?.play()
+                }
+            }
+            wasPlayingBeforeInterruption = false
+
+        @unknown default:
+            break
+        }
+    }
+
+    /// Handles `AVPlayerItemPlaybackStalled` (B-06) — see the comment where
+    /// this is registered in `setupObservers()`. Follows the same B-02
+    /// item-identity filtering as the notifications below, since this is
+    /// also registered with `object: nil`.
+    @objc private func playerItemDidStall(notification: Notification) {
+        guard let stalledItem = notification.object as? AVPlayerItem,
+              stalledItem === avPlayer?.currentItem else {
+            return
+        }
+        print("MediaPlayerInstance: Playback stalled (playerId: \(playerId)) — reporting buffering")
+        notifyStateChanged(state: "buffering", isBuffering: true)
     }
 
     @objc private func playerDidFinishPlaying(notification: Notification) {
@@ -1078,9 +1409,36 @@ class MediaPlayerInstance: NSObject {
             "playerId": playerId,
             "state": state,
             "isBuffering": isBuffering,
-            "bufferPercentage": 0 // iOS doesn't provide easy access to buffer percentage
+            "bufferPercentage": computeBufferPercentage()
         ]
         methodChannel.invokeMethod("onStateChanged", arguments: arguments)
+    }
+
+    /// Computes the percentage (0-100) of the current item's total duration
+    /// that has been buffered, based on the furthest end of any loaded time
+    /// range (B-06 — this was previously hardcoded to 0). Mirrors the
+    /// semantics of ExoPlayer's `bufferedPercentage` on Android (percentage
+    /// of the FULL duration reached by buffering, not remaining
+    /// buffer-ahead-of-playhead) so the two platforms report comparable
+    /// values. Returns 0 for live/unknown-duration content, where "percentage
+    /// of duration buffered" isn't a meaningful concept.
+    private func computeBufferPercentage() -> Int {
+        guard let item = avPlayer?.currentItem else { return 0 }
+
+        let durationSeconds = CMTimeGetSeconds(item.duration)
+        guard durationSeconds.isFinite, durationSeconds > 0 else { return 0 }
+
+        var bufferedEndSeconds: Double = 0
+        for value in item.loadedTimeRanges {
+            let range = value.timeRangeValue
+            let start = CMTimeGetSeconds(range.start)
+            let duration = CMTimeGetSeconds(range.duration)
+            guard start.isFinite, duration.isFinite else { continue }
+            bufferedEndSeconds = max(bufferedEndSeconds, start + duration)
+        }
+
+        let percentage = (bufferedEndSeconds / durationSeconds) * 100.0
+        return Int(min(100.0, max(0.0, percentage)))
     }
 
     private func notifyPositionChanged(position: Int64) {

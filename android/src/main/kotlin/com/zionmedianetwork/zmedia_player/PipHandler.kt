@@ -12,7 +12,7 @@ import io.flutter.plugin.common.MethodChannel
  * Handles Picture-in-Picture mode for Android O and above
  */
 class PipHandler(
-    private val activity: Activity?,
+    activity: Activity?,
     private val playerId: String,
     private val methodChannel: MethodChannel
 ) {
@@ -20,8 +20,28 @@ class PipHandler(
         private const val TAG = "PipHandler"
     }
 
+    // Mutable so the plugin can refresh it on activity lifecycle callbacks
+    // (rotation/config change). PipHandler instances are cached in a long-lived
+    // map keyed by playerId, so the Activity captured at construction time can
+    // otherwise become stale/destroyed after a configuration change while the
+    // handler itself lives on. See updateActivity().
+    private var activity: Activity? = activity
+
     private var config: Map<String, Any>? = null
     private var isInPipMode = false
+
+    /**
+     * Refresh the Activity reference held by this handler.
+     *
+     * Must be called by the owner (ZMediaPlayerPlugin) whenever its own
+     * activity reference changes - i.e. from [ActivityAware.onAttachedToActivity]
+     * and [ActivityAware.onReattachedToActivityForConfigChanges], and with `null`
+     * from [ActivityAware.onDetachedFromActivity] - so that a cached PipHandler
+     * never operates against a destroyed pre-rotation Activity.
+     */
+    fun updateActivity(activity: Activity?) {
+        this.activity = activity
+    }
 
     /**
      * Persist the PiP config map so that subsequent [enterPip] calls (and
@@ -49,7 +69,8 @@ class PipHandler(
             return false
         }
 
-        if (activity == null) {
+        val currentActivity = activity
+        if (currentActivity == null) {
             android.util.Log.d(TAG, "PiP not available: No activity context")
             notifyPipStatusChanged(
                 state = "unavailable",
@@ -60,11 +81,11 @@ class PipHandler(
             return false
         }
 
-        val hasPipFeature = activity.packageManager.hasSystemFeature(
+        val hasPipFeature = currentActivity.packageManager.hasSystemFeature(
             PackageManager.FEATURE_PICTURE_IN_PICTURE
         )
 
-        android.util.Log.d(TAG, "PiP availability check: SDK=${Build.VERSION.SDK_INT}, hasFeature=$hasPipFeature, activity=${activity != null}")
+        android.util.Log.d(TAG, "PiP availability check: SDK=${Build.VERSION.SDK_INT}, hasFeature=$hasPipFeature, activity=true")
 
         // Notify status
         notifyPipStatusChanged(
@@ -93,7 +114,8 @@ class PipHandler(
             return false
         }
 
-        if (activity == null) {
+        val currentActivity = activity
+        if (currentActivity == null) {
             android.util.Log.w(TAG, "Cannot enter PiP: No activity context")
             notifyPipStatusChanged(
                 state = "failed",
@@ -114,7 +136,7 @@ class PipHandler(
             android.util.Log.d(TAG, "Built PiP params, entering PiP mode...")
 
             val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                activity.enterPictureInPictureMode(params)
+                currentActivity.enterPictureInPictureMode(params)
             } else {
                 false
             }

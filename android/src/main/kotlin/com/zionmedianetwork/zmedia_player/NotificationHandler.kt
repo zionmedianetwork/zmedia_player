@@ -27,6 +27,20 @@ class NotificationHandler(
 ) {
     companion object {
         private const val TAG = "NotificationHandler"
+
+        // Registry of active MediaSessionCompat instances keyed by playerId.
+        //
+        // NotificationActionReceiver (below) is a manifest-registered
+        // BroadcastReceiver: the OS instantiates it fresh for every broadcast, so it
+        // cannot hold a reference to "its" NotificationHandler directly. Instead,
+        // each handler publishes its MediaSessionCompat here on initialize() and
+        // removes it on dispose(), and the receiver looks the session up by the
+        // "playerId" extra carried on the PendingIntent built in createAction().
+        // This preserves support for multiple concurrent player instances (see
+        // AGENTS.md/CLAUDE.md: "Multiple instances are supported").
+        private val activeSessions = mutableMapOf<String, MediaSessionCompat>()
+
+        internal fun sessionFor(playerId: String): MediaSessionCompat? = activeSessions[playerId]
     }
 
     // Per-instance notification ID derived from playerId so that multiple concurrent
@@ -55,6 +69,11 @@ class NotificationHandler(
     private var showSeekBackward: Boolean = false
     private var seekInterval: Int = 10
 
+    // Resolved small-icon drawable resource id (see resolveSmallIcon()). Defaults to
+    // 0 (unresolved) until initialize() runs; buildNotification() re-resolves
+    // defensively if it is still 0.
+    private var smallIconResId: Int = 0
+
     // Current media info
     private var currentTitle: String? = null
     private var currentArtist: String? = null
@@ -81,6 +100,7 @@ class NotificationHandler(
         showSeekForward = config["showSeekForward"] as? Boolean ?: showSeekForward
         showSeekBackward = config["showSeekBackward"] as? Boolean ?: showSeekBackward
         seekInterval = (config["seekInterval"] as? Number)?.toInt() ?: seekInterval
+        smallIconResId = resolveSmallIcon(config["smallIcon"] as? String)
 
         // Initialize notification manager
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -135,6 +155,10 @@ class NotificationHandler(
             })
             isActive = true
         }
+
+        // Publish this instance's session so NotificationActionReceiver can route
+        // notification-button taps back to it (see activeSessions above).
+        mediaSession?.let { activeSessions[playerId] = it }
 
         android.util.Log.d(TAG, "Notification handler initialized successfully")
     }
@@ -237,6 +261,7 @@ class NotificationHandler(
         scope.cancel()
 
         dismiss()
+        activeSessions.remove(playerId)
         mediaSession?.release()
         mediaSession = null
         notificationManager = null
@@ -251,17 +276,27 @@ class NotificationHandler(
     }
 
     private fun buildNotification(): Notification {
+        if (smallIconResId == 0) {
+            // Defensive: buildNotification() should only run after initialize(),
+            // but never ship a notification with an unresolved (0) icon resource.
+            smallIconResId = resolveSmallIcon(null)
+        }
+
+        // Track the index each added action will occupy so the compact-view
+        // indices below always match the actions actually present, regardless of
+        // which showXxx flags are enabled. A stale hardcoded (0, 1, 2) referencing
+        // indices past the end of the action list is what M-13 fixes.
+        val compactViewIndices = mutableListOf<Int>()
+        var nextActionIndex = 0
+
         val builder = NotificationCompat.Builder(context, channelId)
             .setContentTitle(currentTitle)
             .setContentText(currentArtist)
-            .setSmallIcon(android.R.drawable.ic_media_play) // Use app icon in production
+            .setSmallIcon(smallIconResId)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(isPlaying)
             .setShowWhen(false)
-            .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
-                .setMediaSession(mediaSession?.sessionToken)
-                .setShowActionsInCompactView(0, 1, 2))
 
         // Add artwork if available
         currentArtworkBitmap?.let {
@@ -275,6 +310,7 @@ class NotificationHandler(
                 "Previous",
                 "previous"
             ))
+            compactViewIndices.add(nextActionIndex++)
         }
 
         if (showPlayPause) {
@@ -291,6 +327,7 @@ class NotificationHandler(
                     "play"
                 ))
             }
+            compactViewIndices.add(nextActionIndex++)
         }
 
         if (showNext) {
@@ -299,6 +336,7 @@ class NotificationHandler(
                 "Next",
                 "next"
             ))
+            compactViewIndices.add(nextActionIndex++)
         }
 
         if (showStop) {
@@ -307,20 +345,113 @@ class NotificationHandler(
                 "Stop",
                 "stop"
             ))
+            nextActionIndex++
+            // Stop intentionally not prioritized into the (max 3) compact view
+            // slots; previous/play-pause/next take priority there, matching the
+            // original (0, 1, 2) intent for the default flag configuration.
         }
+
+        // MediaStyle.setShowActionsInCompactView supports at most 3 indices.
+        builder.setStyle(androidx.media.app.NotificationCompat.MediaStyle()
+            .setMediaSession(mediaSession?.sessionToken)
+            .setShowActionsInCompactView(*compactViewIndices.take(3).toIntArray()))
 
         return builder.build()
     }
 
+    /**
+     * Resolves the notification's small-icon drawable resource id.
+     *
+     * Priority:
+     *  1. The host app's [NotificationConfig.smallIcon] (a drawable resource *name*,
+     *     e.g. "ic_notification") looked up in the host app's own resources via
+     *     [android.content.res.Resources.getIdentifier]. This is the field already
+     *     defined and serialized by `NotificationConfig` in the Dart layer
+     *     (lib/src/models/notification_config.dart) — it was simply never read
+     *     natively before this fix.
+     *  2. The host app's own launcher/application icon ([android.content.pm.
+     *     ApplicationInfo.icon]), which every installed app has, so every
+     *     integrating app gets a distinct, branded icon by default instead of a
+     *     generic system glyph.
+     *  3. `android.R.drawable.ic_media_play` as a last-resort fallback that can
+     *     never fail to resolve.
+     */
+    private fun resolveSmallIcon(configuredName: String?): Int {
+        if (!configuredName.isNullOrBlank()) {
+            val resId = context.resources.getIdentifier(configuredName, "drawable", context.packageName)
+            if (resId != 0) {
+                return resId
+            }
+            android.util.Log.w(
+                TAG,
+                "NotificationConfig.smallIcon '$configuredName' was not found in the host app's " +
+                    "drawable resources; falling back to the app icon. Ensure a drawable with " +
+                    "that name exists in the host app's res/drawable."
+            )
+        }
+        val appIcon = context.applicationInfo.icon
+        return if (appIcon != 0) appIcon else android.R.drawable.ic_media_play
+    }
+
+    /**
+     * Builds a notification action whose PendingIntent routes through
+     * [NotificationActionReceiver] to this instance's [MediaSessionCompat]. This
+     * replaces a prior implementation that broadcast a bespoke
+     * "com.zionmedianetwork.zmedia_player.NOTIFICATION_ACTION" intent with no
+     * registered receiver anywhere in the module or the example app — those taps
+     * were silently dropped by the OS (B-08). Bluetooth/lock-screen/Android Auto
+     * controls were never affected because they call the MediaSessionCompat.Callback
+     * below directly; this fix makes notification taps use that same, already-working
+     * path instead of finishing the abandoned parallel mechanism.
+     */
     private fun createAction(icon: Int, title: String, action: String): NotificationCompat.Action {
-        val intent = Intent("com.zionmedianetwork.zmedia_player.NOTIFICATION_ACTION").apply {
-            putExtra("action", action)
-            putExtra("playerId", playerId)
+        val playbackAction = when (action) {
+            "previous" -> PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS
+            "play" -> PlaybackStateCompat.ACTION_PLAY
+            "pause" -> PlaybackStateCompat.ACTION_PAUSE
+            "next" -> PlaybackStateCompat.ACTION_SKIP_TO_NEXT
+            "stop" -> PlaybackStateCompat.ACTION_STOP
+            else -> PlaybackStateCompat.ACTION_PLAY_PAUSE
         }
 
-        val pendingIntent = PendingIntent.getBroadcast(
+        return NotificationCompat.Action.Builder(icon, title, buildMediaButtonPendingIntent(playbackAction)).build()
+    }
+
+    /**
+     * Builds an explicit `ACTION_MEDIA_BUTTON` broadcast [PendingIntent] targeting
+     * [NotificationActionReceiver], carrying a synthetic [android.view.KeyEvent] for
+     * [playbackAction] plus this instance's [playerId].
+     *
+     * This mirrors `androidx.media.session.MediaButtonReceiver
+     * .buildMediaButtonPendingIntent(Context, ComponentName, long)` (same action,
+     * same explicit-component broadcast contract, same key-code mapping via
+     * `PlaybackStateCompat.toKeyCode`) but is hand-built rather than calling that
+     * helper directly, because the helper does not let us attach the "playerId"
+     * extra our receiver needs to route to the right session when multiple player
+     * instances are active concurrently.
+     *
+     * We deliberately do *not* declare an `ACTION_MEDIA_BUTTON` intent-filter on
+     * [NotificationActionReceiver] in the manifest — every PendingIntent we hand to
+     * the system here already targets it explicitly by component, so no implicit
+     * intent-filter is needed. That also avoids colliding with any other
+     * MediaSessionCompat-based plugin (e.g. audio_service, just_audio_background)
+     * that a host app may combine with this one and that also wants to be the
+     * unique implicit `ACTION_MEDIA_BUTTON` receiver.
+     */
+    private fun buildMediaButtonPendingIntent(playbackAction: Long): PendingIntent {
+        val keyCode = PlaybackStateCompat.toKeyCode(playbackAction)
+        val intent = Intent(Intent.ACTION_MEDIA_BUTTON).apply {
+            setClass(context, NotificationActionReceiver::class.java)
+            putExtra(Intent.EXTRA_KEY_EVENT, android.view.KeyEvent(android.view.KeyEvent.ACTION_DOWN, keyCode))
+            putExtra(NotificationActionReceiver.EXTRA_PLAYER_ID, playerId)
+        }
+
+        return PendingIntent.getBroadcast(
             context,
-            action.hashCode(),
+            // Distinct request code per (playerId, key code) so concurrent
+            // instances' actions don't collide and overwrite each other's
+            // PendingIntents via FLAG_UPDATE_CURRENT.
+            31 * playerId.hashCode() + keyCode,
             intent,
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
@@ -328,8 +459,6 @@ class NotificationHandler(
                 PendingIntent.FLAG_UPDATE_CURRENT
             }
         )
-
-        return NotificationCompat.Action.Builder(icon, title, pendingIntent).build()
     }
 
     private fun updateMediaSessionMetadata() {
@@ -489,5 +618,42 @@ class NotificationHandler(
                 "action" to action
             ))
         }
+    }
+}
+
+/**
+ * Manifest-registered receiver (see `android/src/main/AndroidManifest.xml`) that
+ * routes taps on media-notification action buttons back to the correct player's
+ * [MediaSessionCompat].
+ *
+ * Every [android.app.PendingIntent] that reaches this receiver is built by
+ * [NotificationHandler.buildMediaButtonPendingIntent] with an explicit component
+ * target (this class) and always carries [Intent.EXTRA_KEY_EVENT] plus
+ * [EXTRA_PLAYER_ID]. The system instantiates a fresh receiver instance per
+ * broadcast, so it cannot hold player state itself — it looks the owning
+ * [MediaSessionCompat] up via [NotificationHandler.sessionFor] and hands the intent
+ * to `androidx.media.session.MediaButtonReceiver.handleIntent`, which decodes the
+ * [android.view.KeyEvent] and calls
+ * `MediaControllerCompat.dispatchMediaButtonEvent`. That, in turn, invokes the same
+ * [MediaSessionCompat.Callback] (onPlay/onPause/onSkipToNext/onSkipToPrevious/
+ * onStop) already wired in [NotificationHandler.initialize] and already used by
+ * Bluetooth/lock-screen/Android Auto controls — so notification taps now forward to
+ * Flutter via the exact same, already-verified path (fixes B-08).
+ *
+ * No host-app manifest changes are required: this receiver is declared in this
+ * module's own `AndroidManifest.xml` and is merged into every consuming app's
+ * manifest automatically by the Android Gradle build's manifest merger, the same
+ * mechanism most plugins use to register their own receivers/services. The host app
+ * does not need to add anything for the notification buttons themselves to work.
+ */
+class NotificationActionReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val playerId = intent.getStringExtra(EXTRA_PLAYER_ID) ?: return
+        val session = NotificationHandler.sessionFor(playerId) ?: return
+        MediaButtonReceiver.handleIntent(session, intent)
+    }
+
+    companion object {
+        const val EXTRA_PLAYER_ID = "playerId"
     }
 }

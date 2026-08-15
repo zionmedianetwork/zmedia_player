@@ -88,14 +88,23 @@ class AirPlayHandler: NSObject {
 
     // MARK: - Audio Session Setup
 
+    /// B-05: this previously also called `setActive(true)` — and ran from
+    /// `init()`, i.e. the moment an `AirPlayHandler` object is constructed,
+    /// well before any media has loaded or played. That seized the
+    /// process-wide audio session and interrupted any other app's audio
+    /// just from constructing this handler. `.allowAirPlay` is also already
+    /// the default for the `.playback` category, so setting it explicitly
+    /// here is a no-op in practice — kept for clarity/documentation intent.
+    /// Session ACTIVATION is owned exclusively by `AudioSessionCoordinator`,
+    /// driven by `MediaPlayerInstance.play()`/`pause()`/`dispose()`, which
+    /// shares the same `AVPlayer` this handler wraps for AirPlay bookkeeping.
     private func setupAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
-            try audioSession.setActive(true)
-            print("AirPlayHandler: Audio session configured for AirPlay")
+            print("AirPlayHandler: Audio session category configured for AirPlay (activation is owned by AudioSessionCoordinator)")
         } catch {
-            print("AirPlayHandler: Failed to setup audio session: \(error.localizedDescription)")
+            print("AirPlayHandler: Failed to configure audio session category: \(error.localizedDescription)")
         }
     }
 
@@ -129,6 +138,7 @@ class AirPlayHandler: NSObject {
         case .oldDeviceUnavailable:
             print("AirPlayHandler: Old device unavailable")
             handleDeviceUnavailable()
+            pausePlaybackIfWiredOrBluetoothOutputRemoved(notification: notification)
 
         case .routeConfigurationChange:
             print("AirPlayHandler: Route configuration changed")
@@ -163,6 +173,82 @@ class AirPlayHandler: NSObject {
                 device: nil,
                 isCasting: false
             )
+        }
+    }
+
+    /// B-06: iOS does NOT automatically pause playback when the current
+    /// audio output route disappears (e.g. the user physically unplugs
+    /// wired headphones, or a Bluetooth headset/speaker drops out of
+    /// range/powers off) — without explicit handling, audio would otherwise
+    /// suddenly blast out of the built-in speaker. Apple's documented
+    /// guidance (and an App Store review expectation) is to pause on this
+    /// transition. This intentionally reuses the route-change observer this
+    /// handler already has for AirPlay bookkeeping (`setupRouteChangeNotifications`)
+    /// rather than registering a second, competing
+    /// `AVAudioSession.routeChangeNotification` observer elsewhere in the
+    /// plugin — see the call site above in `handleRouteChange`.
+    ///
+    /// AirPlay route changes are deliberately excluded here (AirPlay's own
+    /// `isExternalPlaybackActive`/route bookkeeping above already handles
+    /// that transition) so this does not fight with AirPlay's disconnect
+    /// handling — an AirPlay disconnect should fall back to local playback,
+    /// not pause it.
+    ///
+    /// NEEDS ON-DEVICE VERIFICATION: route-change delivery/timing for wired
+    /// and Bluetooth accessories cannot be exercised in a simulator.
+    ///
+    /// A **muted** (or silent, volume == 0) player is skipped: "becoming
+    /// noisy" exists to stop audio suddenly blasting out of the device
+    /// speaker when headphones are removed. A muted player emits no audio,
+    /// so there is nothing to leak, and pausing it is a surprise with no
+    /// benefit — most notably for the muted-preview-in-a-feed case this
+    /// package explicitly supports (e.g. `MediaListPlayer`). This mirrors
+    /// Android's `MediaPlayerManager.updateAudioFocusHandling()`, which
+    /// passes `handleAudioFocus = !isMuted` / `setHandleAudioBecomingNoisy(!isMuted)`
+    /// so a muted player is exempt there too — the two platforms must agree
+    /// per the MethodChannel symmetry rule in AGENTS.md. Do not "fix" this
+    /// back to unconditional pausing.
+    private func pausePlaybackIfWiredOrBluetoothOutputRemoved(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let previousRoute = userInfo[AVAudioSessionRouteChangePreviousRouteKey] as? AVAudioSessionRouteDescription else {
+            return
+        }
+
+        let outputRemovalPortTypes: Set<AVAudioSession.Port> = [
+            .headphones, .bluetoothA2DP, .bluetoothHFP, .bluetoothLE, .usbAudio, .carAudio
+        ]
+
+        let removedWiredOrBluetoothOutput = previousRoute.outputs.contains { output in
+            output.portType != .airPlay && outputRemovalPortTypes.contains(output.portType)
+        }
+
+        guard removedWiredOrBluetoothOutput else { return }
+
+        // Same "audible" definition as `MediaPlayerInstance.isCurrentlyAudible()`
+        // (not muted and volume > 0), reapplied here because `AirPlayHandler`
+        // is a sibling object — constructed independently in
+        // `ZMediaPlayerPlugin` and only ever handed a raw `AVPlayer` reference
+        // via `initialize(config:player:)` — with no reference back to the
+        // owning `MediaPlayerInstance` to call its private method on. Both
+        // read the exact same underlying `AVPlayer.isMuted`/`.volume` on the
+        // same shared player instance, so this cannot drift in practice; if
+        // `MediaPlayerInstance` ever grows a fade/ducking concept beyond raw
+        // `isMuted`/`volume`, this copy would need updating too.
+        guard let player = player, !player.isMuted, player.volume > 0 else {
+            print("AirPlayHandler: Wired/Bluetooth output route removed — player is muted/silent, skipping pause")
+            return
+        }
+
+        print("AirPlayHandler: Wired/Bluetooth output route removed — pausing playback")
+
+        // Mutate the shared AVPlayer on the main thread; route-change
+        // notifications are not guaranteed to be delivered on main. Pausing
+        // the shared AVPlayer (rather than duplicating state-notification
+        // logic here) is sufficient: MediaPlayerManager's timeControlStatus
+        // observer on this same AVPlayer already reports the resulting
+        // "paused" state to Dart via the existing notifyStateChanged path.
+        DispatchQueue.main.async { [weak self] in
+            self?.player?.pause()
         }
     }
 

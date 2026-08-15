@@ -221,14 +221,24 @@ class NotificationHandler: NSObject {
 
     // MARK: - Audio Session Setup
 
+    /// B-05: this previously also called `setActive(true)` — meaning simply
+    /// initializing the notification/lock-screen integration (which happens
+    /// independent of whether the associated player has ever played
+    /// anything; see `ZMediaPlayerPlugin.notificationHandlers`) seized the
+    /// process-wide audio session and interrupted any other app's audio.
+    /// Session ACTIVATION is now owned exclusively by
+    /// `AudioSessionCoordinator`, driven by `MediaPlayerInstance.play()`/
+    /// `pause()`/`dispose()` in MediaPlayerManager.swift. Setting the
+    /// category alone (no activation) is harmless — it does not interrupt
+    /// other apps' audio — and keeps this instance's session-category intent
+    /// consistent in case it's queried before the player ever plays.
     private func setupAudioSession() {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .moviePlayback)
-            try audioSession.setActive(true)
-            print("NotificationHandler: Audio session configured")
+            print("NotificationHandler: Audio session category configured (activation is owned by AudioSessionCoordinator)")
         } catch {
-            print("NotificationHandler: Failed to setup audio session: \(error.localizedDescription)")
+            print("NotificationHandler: Failed to configure audio session category: \(error.localizedDescription)")
         }
     }
 
