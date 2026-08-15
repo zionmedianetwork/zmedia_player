@@ -424,8 +424,7 @@ void main() {
       mediaType: MediaType.video,
     );
 
-    test('load does not send "setSpeed" when speed is already 1.0',
-        () async {
+    test('load does not send "setSpeed" when speed is already 1.0', () async {
       final calls = _installCapture();
       final player = MediaPlayer(playerId: 'ch-load-speed-noop');
       await player.initialize();
@@ -453,8 +452,7 @@ void main() {
 
       await player.load(item);
 
-      final setSpeedCalls =
-          calls.where((c) => c.method == 'setSpeed').toList();
+      final setSpeedCalls = calls.where((c) => c.method == 'setSpeed').toList();
       expect(setSpeedCalls.length, 1,
           reason: 'load() must reset speed back to 1.0x exactly once when '
               'the tracked speed diverged from 1.0');
@@ -501,8 +499,7 @@ void main() {
       );
       await player.setPlaylist(playlist);
 
-      final setSpeedCalls =
-          calls.where((c) => c.method == 'setSpeed').toList();
+      final setSpeedCalls = calls.where((c) => c.method == 'setSpeed').toList();
       expect(setSpeedCalls.length, 1,
           reason: 'setPlaylist() must reset speed back to 1.0x exactly once '
               'when the tracked speed diverged from 1.0');
@@ -781,6 +778,71 @@ void main() {
 
       final disposeCalls = calls.where((c) => c.method == 'dispose').toList();
       expect(disposeCalls.length, 1);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  group('factory — auto-generated playerId uniqueness (B-10 regression)', () {
+    test(
+        'two MediaPlayer() calls with no explicit id, constructed back-to-back '
+        'in a tight loop, are distinct objects with distinct ids', () async {
+      // Constructing synchronously in a tight loop is the realistic repro
+      // for the collision: the previous implementation generated ids from
+      // DateTime.now().millisecondsSinceEpoch, and multiple players built
+      // within the same event-loop tick (e.g. a ListView of players in one
+      // frame) could receive an identical timestamp-derived id. When that
+      // happened, the factory's existing-instance branch silently returned
+      // the *first* player for the second caller, aliasing two logically
+      // independent players onto one native instance.
+      final players = List.generate(50, (_) => MediaPlayer());
+
+      final ids = players.map((p) => p.playerId).toSet();
+      expect(ids.length, players.length,
+          reason: 'every auto-generated playerId must be unique, even when '
+              'constructed synchronously in the same millisecond');
+
+      final identitySet = players.map(identityHashCode).toSet();
+      expect(identitySet.length, players.length,
+          reason: 'every MediaPlayer() call with no explicit id must return '
+              'a distinct object — a collision would alias two players onto '
+              'one instance');
+
+      for (final p in players) {
+        await p.dispose();
+      }
+    });
+
+    test(
+        'an explicitly-passed playerId still returns the same instance on a '
+        'second call', () async {
+      final first = MediaPlayer(playerId: 'explicit-reuse-id');
+      final second = MediaPlayer(playerId: 'explicit-reuse-id');
+
+      expect(identical(first, second), isTrue,
+          reason: 'explicit playerId must keep returning the existing, '
+              'non-disposed instance — this is documented singleton-per-'
+              'playerId behaviour and must not be broken by the auto-id fix');
+      expect(second.playerId, 'explicit-reuse-id');
+
+      await first.dispose();
+    });
+
+    test(
+        'auto-generated ids remain unique across a create -> dispose -> '
+        'create cycle', () async {
+      final first = MediaPlayer();
+      final firstId = first.playerId;
+      await first.dispose();
+
+      final second = MediaPlayer();
+      final secondId = second.playerId;
+
+      expect(secondId, isNot(equals(firstId)),
+          reason: 'a disposed instance\'s id must never be reissued to a '
+              'newly-created instance');
+      expect(identical(first, second), isFalse);
+
+      await second.dispose();
     });
   });
 }

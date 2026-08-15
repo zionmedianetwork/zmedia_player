@@ -201,6 +201,29 @@ class MediaPlayerManager {
         return players[playerId]?.getPlayerView()
     }
 
+    /// Diagnostic-only notification used by `MediaPlayerViewFactory.create()`
+    /// when it could not resolve a live player for a platform-view creation
+    /// request (see B-03 in the Phase 1 remediation plan). This is
+    /// deliberately a distinct method name from `onError` — it is not a
+    /// playback error and must not be able to flip a `MediaController`'s
+    /// state to `PlayerState.error`. Presently unhandled Dart-side (falls
+    /// through to the `default:` case in `_handleMethodCall`, which just
+    /// debug-prints), so this is safe to call even though nothing consumes
+    /// it yet.
+    func notifyPlatformViewCreationFailed(playerId: String?, reason: String) {
+        let arguments: [String: Any] = [
+            "playerId": playerId ?? "",
+            "reason": reason
+        ]
+        if Thread.isMainThread {
+            methodChannel.invokeMethod("onPlatformViewError", arguments: arguments)
+        } else {
+            DispatchQueue.main.async { [methodChannel] in
+                methodChannel.invokeMethod("onPlatformViewError", arguments: arguments)
+            }
+        }
+    }
+
     // Phase 3: Helper methods for PiP and AirPlay handlers
     func getPlayer(playerId: String) throws -> AVPlayer? {
         guard let playerInstance = players[playerId] else {
@@ -382,17 +405,32 @@ class MediaPlayerInstance: NSObject {
             self?.handleRateChange(rate: player.rate)
         }
 
-        // Notification observers
+        // Notification observers.
+        //
+        // Registered with `object: nil` (rather than a specific `AVPlayerItem`)
+        // because at this point in `initializeAVPlayer()` there is no
+        // `currentItem` yet, and `loadMediaItem()` calls
+        // `replaceCurrentItem(with:)` on every load — re-registering an
+        // item-scoped observer per load would need to run in lockstep with
+        // that replacement and is easy to get out of sync with (e.g. a
+        // notification racing a re-registration). `object: nil` means these
+        // fire for EVERY AVPlayerItem in the process, including ones owned by
+        // other MediaPlayerInstance/MediaPlayerManager players — so the
+        // handlers below filter by comparing the notification's item against
+        // `avPlayer?.currentItem` at delivery time. This was previously
+        // unguarded (B-02): one player's item finishing marked every live
+        // player "completed", and one player's real failure was reported as
+        // an error on every other player.
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(playerDidFinishPlaying),
+            selector: #selector(playerDidFinishPlaying(notification:)),
             name: .AVPlayerItemDidPlayToEndTime,
             object: nil
         )
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(playerDidFailWithError),
+            selector: #selector(playerDidFailWithError(notification:)),
             name: .AVPlayerItemFailedToPlayToEndTime,
             object: nil
         )
@@ -960,11 +998,26 @@ class MediaPlayerInstance: NSObject {
         }
     }
 
-    @objc private func playerDidFinishPlaying() {
+    @objc private func playerDidFinishPlaying(notification: Notification) {
+        // `object: nil` registration (see setupObservers()) means this fires
+        // for every AVPlayerItem in the process, including ones belonging to
+        // other player instances and stale items this instance has since
+        // replaced via replaceCurrentItem(). Only react if the notification
+        // is actually about the item this instance is currently playing (B-02).
+        guard let finishedItem = notification.object as? AVPlayerItem,
+              finishedItem === avPlayer?.currentItem else {
+            return
+        }
         notifyStateChanged(state: "completed", isBuffering: false)
     }
 
     @objc private func playerDidFailWithError(notification: Notification) {
+        // See playerDidFinishPlaying(notification:) — same cross-instance /
+        // stale-item filtering is required here (B-02).
+        guard let failedItem = notification.object as? AVPlayerItem,
+              failedItem === avPlayer?.currentItem else {
+            return
+        }
         if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
             notifyError(error: error.localizedDescription)
         }
