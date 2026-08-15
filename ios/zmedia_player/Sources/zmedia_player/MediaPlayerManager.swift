@@ -1906,6 +1906,23 @@ class MediaPlayerInstance: NSObject {
     /// case below; the underlying-error-chain walk and `categorizeFailure`'s
     /// errorLog-based lookup are the parts of the fix that recover the real
     /// status without depending on that inference.
+    ///
+    /// ON-DEVICE FOLLOW-UP (same device/build/page, GCS bucket 403 case
+    /// specifically — a non-existent object in a public GCS bucket returns
+    /// 403, not 404, since GCS can't reveal non-existence without granting
+    /// list/read permission): the above -1100 fix was NOT sufficient. The
+    /// top-level error for THIS failure is `NSURLErrorNoPermissionsToReadFile`
+    /// (-1102), still falling into the `default:` (NETWORK) branch below, and
+    /// `errorLog()` again produced no usable status (see the comment on
+    /// `categorizeFailure(_:item:)`). Unlike -1100, -1102 is genuinely
+    /// ambiguous: it is the correct, honest code for a real local
+    /// `file://` permission problem too, so it is deliberately NOT added to
+    /// the unconditional `NSURLErrorFileDoesNotExist` case below. Instead it
+    /// is handled, scheme-gated, in `categorizeFailure(_:item:)` — the only
+    /// place with access to the failing asset's URL scheme — which
+    /// short-circuits to HTTP for http(s) assets before ever reaching this
+    /// function's `default:` fallback, and leaves file:// (or
+    /// scheme-unknown) failures reported as NETWORK here, unchanged.
     private func categorize(_ error: NSError) -> (category: String, httpStatusCode: Int?) {
         // Domain/code classification, usable at every level of the
         // underlying-error chain below (including the top-level error
@@ -2010,11 +2027,104 @@ class MediaPlayerInstance: NSObject {
     /// is what lets a real 404/500/etc. be recovered instead of falling back
     /// to `categorize(_:)`'s (necessarily category-only, or inferred-status)
     /// classification of the NSError alone.
+    ///
+    /// ON-DEVICE FOLLOW-UP FINDING (iPhone, iOS 26.5, release build, GCS 403
+    /// "bad URL" scenario): `errorLog()` produced NO event with a non-zero
+    /// `errorStatusCode` for this failure — `latestHTTPStatusCode(from:)`
+    /// below returned `nil` and this fell through to `categorize(error)`,
+    /// which is how the *inferred* -1100/-1102 mapping below ended up
+    /// mattering at all despite the errorLog path being the preferred,
+    /// inference-free source of truth. This is very likely not a bug in the
+    /// errorLog lookup but a property of *when* this particular failure
+    /// occurs: `AVPlayerItemAccessLog`/`AVPlayerItemErrorLog` events are
+    /// recorded per HTTP resource-loading attempt (manifest/playlist/segment
+    /// requests during an active load), and a bad `.mp4` URL that a 403
+    /// response *before* any such request/response cycle completes (i.e.
+    /// during the very first asset-metadata/HEAD-equivalent resolution) may
+    /// fail before AVFoundation ever records a loggable HTTP event for this
+    /// item. In other words: for this class of "fails immediately, before
+    /// any segment is ever requested" failure, an empty errorLog is expected
+    /// behavior, not a defect — which is exactly why the NSError-based
+    /// fallback in `categorize(_:)` below still needs to carry a correct
+    /// HTTP-vs-NETWORK classification rather than assuming errorLog will
+    /// always cover it.
     private func categorizeFailure(_ error: NSError, item: AVPlayerItem?) -> (category: String, httpStatusCode: Int?) {
         if let item = item, let statusCode = latestHTTPStatusCode(from: item) {
             return ("HTTP", statusCode)
         }
+
+        // NSURLErrorNoPermissionsToReadFile (-1102) is genuinely ambiguous by
+        // domain/code alone, unlike -1100 (NSURLErrorFileDoesNotExist)
+        // immediately below in `categorize(_:)`'s NSURLErrorDomain switch:
+        //   - For an http(s) asset, AVFoundation's HTTP resource loader can
+        //     surface a server-side refusal (403 being the common real-world
+        //     case — see the GCS bucket example this fixes) as -1102 rather
+        //     than as an embedded HTTPURLResponse/errorStatusCode. The
+        //     server DID respond and refused; that's HTTP, exactly like the
+        //     -1100 case.
+        //   - For a genuine `file://` asset, -1102 means exactly what its
+        //     name says: a local filesystem read-permission problem. There
+        //     is no server involved at all, so reporting HTTP there would be
+        //     actively wrong, not just imprecise.
+        //
+        // `categorize(_:)` cannot make this distinction itself: its exact
+        // signature — `private func categorize(_ error: NSError) -> …` — is
+        // pinned by the drift-guard test in
+        // test/exceptions/error_category_vocabulary_test.dart (which parses
+        // this file as text and locates the function by that literal
+        // signature), so it cannot be given a scheme parameter. This is the
+        // one call site with contextual access to the failing `AVPlayerItem`
+        // (and therefore its asset URL's scheme), so the scheme-gated -1102
+        // check lives here and short-circuits BEFORE falling back to
+        // `categorize(error)`, rather than inside it.
+        //
+        // When the scheme can't be determined (no `item`, `item.asset` isn't
+        // an `AVURLAsset`, or the URL has no scheme) this deliberately does
+        // NOT assume http: it falls through to `categorize(error)`, whose
+        // NSURLErrorDomain switch has no explicit -1102 case and therefore
+        // reports NETWORK — the same conservative, non-guessing behavior as
+        // before this fix for every scheme other than http(s).
+        if errorChainContainsNoPermissionsToReadFile(error) && isHTTPScheme(of: item) == true {
+            return ("HTTP", nil)
+        }
+
         return categorize(error)
+    }
+
+    /// Walks `error` and its `NSUnderlyingErrorKey` chain (the same
+    /// traversal `categorize(_:)` performs for its own classification) for
+    /// an `NSURLErrorDomain` / `NSURLErrorNoPermissionsToReadFile` (-1102)
+    /// code. Kept separate from `categorize(_:)`/`classify(_:)` because,
+    /// unlike them, this needs to be combined with scheme information that
+    /// only `categorizeFailure(_:item:)` has access to — see the call site
+    /// there for the full rationale.
+    private func errorChainContainsNoPermissionsToReadFile(_ error: NSError) -> Bool {
+        if error.domain == NSURLErrorDomain && error.code == NSURLErrorNoPermissionsToReadFile {
+            return true
+        }
+        var current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        var depth = 0
+        while let err = current, depth < 5 {
+            if err.domain == NSURLErrorDomain && err.code == NSURLErrorNoPermissionsToReadFile {
+                return true
+            }
+            current = err.userInfo[NSUnderlyingErrorKey] as? NSError
+            depth += 1
+        }
+        return false
+    }
+
+    /// Whether `item`'s asset URL uses an http/https scheme. Returns `nil`
+    /// — "unknown", not "not http" — when that can't be determined: no
+    /// `item`, `item.asset` isn't an `AVURLAsset`, or the URL has no scheme.
+    /// Callers MUST treat `nil` as "don't know" and avoid inferring HTTP
+    /// from it; see `categorizeFailure(_:item:)`.
+    private func isHTTPScheme(of item: AVPlayerItem?) -> Bool? {
+        guard let asset = item?.asset as? AVURLAsset,
+              let scheme = asset.url.scheme?.lowercased() else {
+            return nil
+        }
+        return scheme == "http" || scheme == "https"
     }
 
     /// Extracts the most recently recorded HTTP status code from an

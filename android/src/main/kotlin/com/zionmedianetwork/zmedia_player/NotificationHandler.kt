@@ -15,14 +15,127 @@ import androidx.core.app.NotificationCompat
 import androidx.media.session.MediaButtonReceiver
 import io.flutter.plugin.common.MethodChannel
 import kotlinx.coroutines.*
+import java.lang.ref.WeakReference
 import java.net.URL
 
 /**
- * Handles media notifications using MediaSession and NotificationCompat
+ * Process-wide arbiter of which [NotificationHandler] instance currently owns
+ * hardware media-button routing and the visible tray notification.
+ *
+ * This is the Android analogue of the `Ownership` type in
+ * `ios/zmedia_player/Sources/zmedia_player/NotificationHandler.swift` (see its
+ * doc comment for the full rationale) and deliberately mirrors its policy:
+ * **last `initialize()` call always wins ownership**. The underlying shared
+ * resource differs by platform, though:
+ *
+ * - On iOS, `MPRemoteCommandCenter`/`MPNowPlayingInfoCenter` are process-wide
+ *   OS singletons, so *every* instance writes to the same object and
+ *   coordination is about who is allowed to write.
+ * - On Android, each [NotificationHandler] owns its own [MediaSessionCompat]
+ *   and posts to its own, distinct notification id (derived from `playerId` —
+ *   see [NotificationHandler.notificationId]), so nothing is literally
+ *   shared. The coordination problem here is instead that (a) multiple
+ *   simultaneously-`isActive` `MediaSessionCompat` instances compete for
+ *   hardware media-button routing (the OS routes to whichever was most
+ *   recently made active, which is not necessarily the one the app/user
+ *   still cares about), and (b) device-verified behaviour shows the system's
+ *   persistent "now playing" surface can be left with nothing shown at all
+ *   once the session it was tracking is torn down, rather than falling back
+ *   to another still-active session on its own. Restricting "active +
+ *   visibly posted" to a single owner at a time avoids both problems and
+ *   gives `dispose()` an explicit, deterministic hand-off to perform.
+ */
+private object NotificationOwnership {
+    private val lock = Any()
+    private var owner: WeakReference<NotificationHandler>? = null
+    private val liveInstances = mutableListOf<WeakReference<NotificationHandler>>()
+
+    /** Registers [handler] in the live-instance registry used to pick a successor owner later. */
+    fun register(handler: NotificationHandler) {
+        synchronized(lock) {
+            liveInstances.removeAll { it.get() == null }
+            if (liveInstances.none { it.get() === handler }) {
+                liveInstances.add(WeakReference(handler))
+            }
+        }
+    }
+
+    /**
+     * Last-writer-wins: makes [handler] the current owner and returns whoever
+     * owned it before (or `null` if there was no owner, or if [handler] was
+     * already the owner), so the caller can demote that previous owner.
+     */
+    fun claimOwnership(handler: NotificationHandler): NotificationHandler? {
+        synchronized(lock) {
+            val previous = owner?.get()
+            owner = WeakReference(handler)
+            return if (previous === handler) null else previous
+        }
+    }
+
+    fun isOwner(handler: NotificationHandler): Boolean = synchronized(lock) { owner?.get() === handler }
+
+    sealed class ReleaseResult {
+        /** [handler] was not the owner; nothing to do. */
+        object NotOwner : ReleaseResult()
+
+        /** [handler] was the owner; [successor] is the new owner and must be promoted. */
+        data class HandedOff(val successor: NotificationHandler) : ReleaseResult()
+
+        /** [handler] was the owner and no other instance is alive. */
+        object TornDown : ReleaseResult()
+    }
+
+    /**
+     * Removes [handler] from the live registry and, if it was the owner,
+     * either hands ownership to another live instance (the most recently
+     * registered one still alive) or reports that a full teardown is
+     * required.
+     */
+    fun release(handler: NotificationHandler): ReleaseResult {
+        synchronized(lock) {
+            liveInstances.removeAll { it.get() == null || it.get() === handler }
+            if (owner?.get() !== handler) {
+                return ReleaseResult.NotOwner
+            }
+            val successor = liveInstances.lastOrNull()?.get()
+            return if (successor != null) {
+                owner = WeakReference(successor)
+                ReleaseResult.HandedOff(successor)
+            } else {
+                owner = null
+                ReleaseResult.TornDown
+            }
+        }
+    }
+}
+
+/**
+ * Handles media notifications using MediaSession and NotificationCompat.
+ *
+ * ## Ownership
+ *
+ * Only one [NotificationHandler] instance is ever the *owner* at a time (see
+ * [NotificationOwnership] above): its [MediaSessionCompat] is the only one
+ * kept `isActive`, and it is the only instance whose tray notification is
+ * actually posted via [NotificationManager.notify]. Non-owning instances
+ * still track their media/playback state locally (title, position,
+ * `mediaSession` metadata) and keep their [MediaSessionCompat] object alive
+ * and registered in [activeSessions], but their session is left inactive and
+ * their notification is not shown — so they can republish immediately,
+ * correctly, if they are later promoted (see [promoteToOwner]).
+ *
+ * `initialize()` always claims ownership (last-writer-wins, matching iOS).
+ * `dispose()` releases it: if the disposed instance was the owner, the most
+ * recently registered still-live instance is promoted — its session is
+ * reactivated and its notification (re)posted — so lock-screen/notification
+ * control is never left pointing at a dead player. If no other instance is
+ * alive, the disposed owner's notification/session (already cancelled by
+ * `dismiss()`, called at the top of `dispose()`) simply stays torn down.
  */
 class NotificationHandler(
     private val context: Context,
-    private val playerId: String,
+    internal val playerId: String,
     private val methodChannel: MethodChannel
 ) {
     companion object {
@@ -38,10 +151,23 @@ class NotificationHandler(
         // "playerId" extra carried on the PendingIntent built in createAction().
         // This preserves support for multiple concurrent player instances (see
         // AGENTS.md/CLAUDE.md: "Multiple instances are supported").
+        //
+        // Entries are kept here regardless of NotificationOwnership state (a
+        // non-owner's session object is still valid and still routable to —
+        // it is simply inactive and not currently posting a notification), and
+        // are only removed in dispose(), the sole teardown path for a handler.
         private val activeSessions = mutableMapOf<String, MediaSessionCompat>()
 
         internal fun sessionFor(playerId: String): MediaSessionCompat? = activeSessions[playerId]
     }
+
+    /**
+     * `true` when this instance currently owns hardware media-button routing
+     * and is allowed to post its notification / keep its media session
+     * active. See [NotificationOwnership].
+     */
+    private val isOwner: Boolean
+        get() = NotificationOwnership.isOwner(this)
 
     // Per-instance notification ID derived from playerId so that multiple concurrent
     // player instances do not overwrite or cancel each other's notifications.
@@ -153,14 +279,28 @@ class NotificationHandler(
                     // Handle seek if needed
                 }
             })
-            isActive = true
+            // isActive is set below, gated by NotificationOwnership: multiple
+            // concurrently-active MediaSessionCompat instances compete for
+            // hardware media-button routing, so only the current owner's
+            // session may be active.
         }
 
         // Publish this instance's session so NotificationActionReceiver can route
         // notification-button taps back to it (see activeSessions above).
         mediaSession?.let { activeSessions[playerId] = it }
 
-        android.util.Log.d(TAG, "Notification handler initialized successfully")
+        // Ownership: last initialize() call always wins (mirrors the iOS
+        // NotificationHandler.Ownership policy — see NotificationOwnership doc
+        // above). Claiming ownership demotes whoever held it before:
+        // deactivates their MediaSessionCompat and hides their tray
+        // notification, so at most one player's session is ever eligible for
+        // hardware media-button routing / the system's "now playing" surface.
+        NotificationOwnership.register(this)
+        val previousOwner = NotificationOwnership.claimOwnership(this)
+        previousOwner?.demoteFromOwner()
+        mediaSession?.isActive = true
+
+        android.util.Log.d(TAG, "Notification handler initialized successfully (now the notification owner)")
     }
 
     /**
@@ -207,10 +347,15 @@ class NotificationHandler(
             generateThumbnail(currentMediaUrl!!)
         }
 
-        // Build and show notification
-        buildAndShowNotification()
-
         isShowing = true
+
+        // Only the current owner may post the tray notification (see
+        // NotificationOwnership doc above). A non-owner still updates its
+        // local isShowing/mediaSession state above so it can republish
+        // immediately if promoteToOwner() is called later.
+        if (isOwner) {
+            buildAndShowNotification()
+        }
     }
 
     /**
@@ -226,7 +371,9 @@ class NotificationHandler(
         duration = (state["duration"] as? Number)?.toLong() ?: 0
 
         updateMediaSessionPlaybackState()
-        buildAndShowNotification()
+        if (isOwner) {
+            buildAndShowNotification()
+        }
     }
 
     /**
@@ -252,6 +399,46 @@ class NotificationHandler(
     }
 
     /**
+     * Called on the *previous* owner when another [NotificationHandler]
+     * instance claims ownership via `initialize()`. Deactivates this
+     * instance's [MediaSessionCompat] so it stops competing for hardware
+     * media-button routing, and cancels its tray notification so only the
+     * current owner's notification is visible. Local media/playback state
+     * (title, position, `mediaSession` metadata) is left untouched so this
+     * instance can republish immediately and correctly if it is later
+     * promoted back via [promoteToOwner].
+     */
+    internal fun demoteFromOwner() {
+        android.util.Log.d(TAG, "Player $playerId demoted from notification ownership")
+        mediaSession?.isActive = false
+        if (isShowing) {
+            notificationManager?.cancel(notificationId)
+        }
+    }
+
+    /**
+     * Called on the successor instance when the current owner disposes (see
+     * [dispose]). Reactivates this instance's [MediaSessionCompat] — so it is
+     * eligible again for hardware media-button routing / the system's "now
+     * playing" surface — and, if it has content to show, republishes its own
+     * tray notification (a distinct [notificationId] per player, so this
+     * never collides with the disposed owner's already-cancelled
+     * notification) built from its most recently tracked metadata/playback
+     * state, and applies that same state to the correct
+     * [PlaybackStateCompat] actions so the lock screen responds, not just the
+     * notification.
+     */
+    internal fun promoteToOwner() {
+        android.util.Log.d(TAG, "Player $playerId promoted to notification owner")
+        mediaSession?.isActive = true
+        if (isShowing) {
+            updateMediaSessionMetadata()
+            updateMediaSessionPlaybackState()
+            buildAndShowNotification()
+        }
+    }
+
+    /**
      * Dispose the notification handler
      */
     fun dispose() {
@@ -260,7 +447,37 @@ class NotificationHandler(
         // Cancel all coroutines owned by this handler (artwork loading, action forwarding).
         scope.cancel()
 
+        // Always clear this instance's own visible notification / session-
+        // active state first. dismiss() is a self-only operation regardless
+        // of ownership (each player has its own notification id and
+        // MediaSessionCompat — see class doc), so it never disturbs another
+        // player. It does not release ownership by itself; the hand-off is
+        // evaluated explicitly below.
         dismiss()
+
+        when (val result = NotificationOwnership.release(this)) {
+            is NotificationOwnership.ReleaseResult.NotOwner -> {
+                // This instance never owned hardware routing / the tray
+                // notification (or had already lost it to a later
+                // initialize() call elsewhere), so its disposal does not
+                // affect any other player.
+            }
+            is NotificationOwnership.ReleaseResult.HandedOff -> {
+                android.util.Log.d(
+                    TAG,
+                    "Notification ownership handed off from $playerId to ${result.successor.playerId}"
+                )
+                result.successor.promoteToOwner()
+            }
+            NotificationOwnership.ReleaseResult.TornDown -> {
+                android.util.Log.d(TAG, "No other player active — notification ownership fully released")
+            }
+        }
+
+        // Always remove this instance's own registry entry, on every dispose
+        // path, regardless of the ownership outcome above — a static registry
+        // holding MediaSessionCompat objects would otherwise leak if this
+        // were ever skipped.
         activeSessions.remove(playerId)
         mediaSession?.release()
         mediaSession = null
@@ -508,7 +725,9 @@ class NotificationHandler(
                     currentArtworkBitmap = bitmap
                     if (isShowing) {
                         updateMediaSessionMetadata()
-                        buildAndShowNotification()
+                        if (isOwner) {
+                            buildAndShowNotification()
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -592,7 +811,9 @@ class NotificationHandler(
                         currentArtworkBitmap = bitmap
                         if (isShowing && bitmap != null) {
                             updateMediaSessionMetadata()
-                            buildAndShowNotification()
+                            if (isOwner) {
+                                buildAndShowNotification()
+                            }
                             android.util.Log.d(TAG, "Video thumbnail generated and applied")
                         }
                     } else {

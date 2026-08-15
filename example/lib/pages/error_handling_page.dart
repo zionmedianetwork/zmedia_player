@@ -28,12 +28,27 @@ import '../widgets/player_scaffold.dart';
 /// `controller.player.errorStream`, which this page subscribes to and
 /// mirrors on screen.
 ///
-/// The page provides four buttons:
+/// The page provides five buttons:
 ///   1. Load a valid URL → happy path
-///   2. Load a bad URL (404) → HTTP category → [MediaLoadException]
-///   3. Load a non-existent host → NETWORK category → [NetworkException]
-///   4. Load a real, reachable, non-media file → SOURCE category →
+///   2. Load a forbidden object (GCS bucket, 403) → HTTP category →
+///      [MediaLoadException]
+///   3. Load a genuinely missing object (404) → HTTP category →
+///      [MediaLoadException]
+///   4. Load a non-existent host → NETWORK category → [NetworkException]
+///   5. Load a real, reachable, non-media file → SOURCE category →
 ///      [PlaybackException] (container/format cannot be parsed)
+///
+/// ### Why "403" and "404" are separate scenarios
+/// They were originally conflated: a non-existent object in a public GCS
+/// bucket (scenario 2's URL) returns **403 Forbidden**, not 404 — GCS can't
+/// reveal that an object doesn't exist without granting list/read
+/// permission on the bucket, so it refuses instead. That's still a useful,
+/// dependable "server responds and refuses" HTTP case, just mislabeled if
+/// called "404". Scenario 3 is a genuine 404: a non-existent path under a
+/// real GitHub repo, which returns a plain 404 with no such permission
+/// ambiguity. Both must land in the HTTP category; see
+/// `MediaPlayerManager.categorizeFailure`/`categorize` (iOS) and
+/// `categorizeExoPlayerError` (Android) for the native classification.
 ///
 /// DRM (category `drm` / [DrmException]) cannot be provoked from this page:
 /// every DRM scenario in this package requires a real license server and
@@ -122,15 +137,54 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
     }
   }
 
-  Future<void> _loadBadUrl() async {
+  /// A non-existent object in a **public** GCS bucket. GCS returns **403
+  /// Forbidden** for this, not 404: determining whether the object exists
+  /// would itself require list/read permission on the bucket, so GCS
+  /// refuses the request outright rather than confirming non-existence.
+  /// This is deliberately kept as its own scenario (distinct from the
+  /// genuine 404 in [_loadNotFound]) because it exercises a different, real
+  /// or-server-refusal shape than a plain "no such path" 404 — both must be
+  /// classified as HTTP, but this one previously tripped up the iOS native
+  /// classifier (`NSURLErrorNoPermissionsToReadFile` / -1102) in a way a
+  /// plain 404 (`NSURLErrorFileDoesNotExist` / -1100) did not.
+  Future<void> _loadForbidden() async {
     setState(() => _isLoading = true);
     try {
       await _controller.load(
         const MediaItem(
-          id: 'bad_url',
-          title: 'Bad URL (404)',
+          id: 'forbidden_403',
+          title: 'Forbidden (403)',
           url:
               'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/THIS_DOES_NOT_EXIST.mp4',
+        ),
+      );
+    } on MediaPlayerException catch (e) {
+      _logTypedError(e, source: 'catch(load)');
+    } catch (e) {
+      _logUnknown(e, source: 'catch(load)');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// A genuinely missing file under a real, public GitHub repository path.
+  /// Chosen over a generic "status code" test service (e.g. httpbin.org)
+  /// for two reasons: (1) it reuses the same `raw.githubusercontent.com`
+  /// host already exercised by [_loadUnsupportedFormat] above, so this page
+  /// depends on one external host instead of two, and (2) GitHub's raw CDN
+  /// is high-uptime and returns a plain, unambiguous 404 (with a small body)
+  /// for a non-existent path in an existing public repo — unlike the GCS
+  /// bucket case in [_loadForbidden], there's no permission-checking
+  /// ambiguity that could turn this into a 403.
+  Future<void> _loadNotFound() async {
+    setState(() => _isLoading = true);
+    try {
+      await _controller.load(
+        const MediaItem(
+          id: 'not_found_404',
+          title: 'Not Found (404)',
+          url:
+              'https://raw.githubusercontent.com/flutter/flutter/master/THIS_PATH_DOES_NOT_EXIST_404_TEST.mp4',
         ),
       );
     } on MediaPlayerException catch (e) {
@@ -299,7 +353,8 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
         _ScenarioButtons(
           isLoading: _isLoading,
           onLoadGood: _loadGood,
-          onLoadBadUrl: _loadBadUrl,
+          onLoadForbidden: _loadForbidden,
+          onLoadNotFound: _loadNotFound,
           onLoadBadHost: _loadBadHost,
           onLoadUnsupportedFormat: _loadUnsupportedFormat,
         ),
@@ -325,14 +380,16 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
 class _ScenarioButtons extends StatelessWidget {
   final bool isLoading;
   final VoidCallback onLoadGood;
-  final VoidCallback onLoadBadUrl;
+  final VoidCallback onLoadForbidden;
+  final VoidCallback onLoadNotFound;
   final VoidCallback onLoadBadHost;
   final VoidCallback onLoadUnsupportedFormat;
 
   const _ScenarioButtons({
     required this.isLoading,
     required this.onLoadGood,
-    required this.onLoadBadUrl,
+    required this.onLoadForbidden,
+    required this.onLoadNotFound,
     required this.onLoadBadHost,
     required this.onLoadUnsupportedFormat,
   });
@@ -349,9 +406,14 @@ class _ScenarioButtons extends StatelessWidget {
           onPressed: isLoading ? null : onLoadGood,
         ),
         OutlinedButton.icon(
+          icon: const Icon(Icons.block),
+          label: const Text('Forbidden (403)'),
+          onPressed: isLoading ? null : onLoadForbidden,
+        ),
+        OutlinedButton.icon(
           icon: const Icon(Icons.broken_image),
-          label: const Text('Bad URL (404)'),
-          onPressed: isLoading ? null : onLoadBadUrl,
+          label: const Text('Not Found (404)'),
+          onPressed: isLoading ? null : onLoadNotFound,
         ),
         OutlinedButton.icon(
           icon: const Icon(Icons.wifi_off),
@@ -514,8 +576,8 @@ class _ErrorHandlingNote extends StatelessWidget {
         '[native code / HTTP status, if any] [extra flags] [message].\n\n'
         'DRM (category `drm`) cannot be provoked from this page — every '
         'DRM path needs a real license server + credentials this example '
-        'does not have. Reachable here: NETWORK (Bad Host), HTTP (Bad URL '
-        '404), SOURCE (Unsupported Format).',
+        'does not have. Reachable here: NETWORK (Bad Host), HTTP (Forbidden '
+        '403, Not Found 404), SOURCE (Unsupported Format).',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     );
