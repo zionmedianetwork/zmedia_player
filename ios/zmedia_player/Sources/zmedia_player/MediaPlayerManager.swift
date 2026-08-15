@@ -776,7 +776,7 @@ class MediaPlayerInstance: NSObject {
 
         itemStatusObserver = playerItem.observe(\.status, options: [.new]) { [weak self] item, _ in
             guard let self = self else { return }
-            self.handlePlayerItemStatusChange(status: item.status)
+            self.handlePlayerItemStatusChange(status: item.status, item: item)
         }
 
         // Ensure we're on main thread for player operations
@@ -1231,7 +1231,7 @@ class MediaPlayerInstance: NSObject {
             let nsError = avPlayer?.error as NSError?
             print("MediaPlayerInstance: Player failed with error: \(nsError?.localizedDescription ?? "Unknown")")
             if let nsError = nsError {
-                let (category, httpStatusCode) = categorize(nsError)
+                let (category, httpStatusCode) = categorizeFailure(nsError, item: avPlayer?.currentItem)
                 notifyError(
                     error: nsError.localizedDescription,
                     category: category,
@@ -1376,7 +1376,7 @@ class MediaPlayerInstance: NSObject {
         }
         if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
             let nsError = error as NSError
-            let (category, httpStatusCode) = categorize(nsError)
+            let (category, httpStatusCode) = categorizeFailure(nsError, item: failedItem)
             notifyError(
                 error: nsError.localizedDescription,
                 category: category,
@@ -1390,7 +1390,7 @@ class MediaPlayerInstance: NSObject {
     // which handles observation via closures. The old-style KVO that required this method
     // has been replaced with modern Swift observers in loadMediaItem().
 
-    private func handlePlayerItemStatusChange(status: AVPlayerItem.Status) {
+    private func handlePlayerItemStatusChange(status: AVPlayerItem.Status, item: AVPlayerItem? = nil) {
         print("MediaPlayerInstance: PlayerItem status changed to: \(status.rawValue)")
 
         switch status {
@@ -1425,9 +1425,10 @@ class MediaPlayerInstance: NSObject {
             }
         case .failed:
             print("MediaPlayerInstance: PlayerItem status = failed")
-            if let error = avPlayer?.currentItem?.error {
+            let failedItem = item ?? avPlayer?.currentItem
+            if let error = failedItem?.error {
                 let nsError = error as NSError
-                let (category, httpStatusCode) = categorize(nsError)
+                let (category, httpStatusCode) = categorizeFailure(nsError, item: failedItem)
                 notifyError(
                     error: nsError.localizedDescription,
                     category: category,
@@ -1884,52 +1885,152 @@ class MediaPlayerInstance: NSObject {
     /// in MediaPlayerManager.kt. All three call sites must stay in lockstep
     /// — the Dart test suite (test/exceptions/error_category_vocabulary_test.dart)
     /// parses this file's category string literals as text and fails if they
-    /// drift from the Dart vocabulary.
+    /// drift from the Dart vocabulary. That test also hard-matches this
+    /// function's exact signature text, so it deliberately keeps taking a
+    /// bare `NSError` — see `categorizeFailure(_:item:)` below for the
+    /// item-aware entry point every call site actually uses.
     ///
-    /// NEEDS ON-DEVICE VERIFICATION: exact NSError domains/codes surfaced
-    /// for each real-world failure (bad HTTP status, DNS failure,
-    /// unsupported codec, FairPlay license failure, etc.) can only be
-    /// confirmed against real network/DRM conditions.
+    /// ON-DEVICE FINDING (confirmed against a physical iPhone, iOS 26.5,
+    /// release build via the example app's Error Handling page): a genuine
+    /// HTTP 404 (bad URL, server responds and refuses) was being reported as
+    /// category NETWORK, not HTTP, while a bad host correctly reported
+    /// NETWORK. The `NSError` AVFoundation hands back for the 404 case does
+    /// NOT carry an embedded `NSErrorFailingURLResponseKey` `HTTPURLResponse`
+    /// at the top level, and its domain/code is `NSURLErrorDomain` with a
+    /// code that fell into the old unconditional `default:` (NETWORK)
+    /// branch — almost certainly `NSURLErrorFileDoesNotExist` (-1100), which
+    /// is the documented shape AVFoundation's HTTP resource loader produces
+    /// for a 404 response on an http(s) URL (the server DID respond; it just
+    /// refused the request). That inference (not confirmed on-device — see
+    /// `categorizeFailure`) is what motivates the new `NSURLErrorFileDoesNotExist`
+    /// case below; the underlying-error-chain walk and `categorizeFailure`'s
+    /// errorLog-based lookup are the parts of the fix that recover the real
+    /// status without depending on that inference.
     private func categorize(_ error: NSError) -> (category: String, httpStatusCode: Int?) {
-        // An HTTPURLResponse embedded in userInfo (when present) gives the
-        // most precise signal: the server responded, so this is an HTTP
-        // failure with a concrete status code, regardless of domain.
+        // Domain/code classification, usable at every level of the
+        // underlying-error chain below (including the top-level error
+        // itself). A local function so its literal returns are still part
+        // of this function's own source text for the drift-guard test.
+        // Returns nil when `err`'s domain/code isn't recognized, so the
+        // caller can keep walking the chain or fall back to UNKNOWN.
+        func classify(_ err: NSError) -> (category: String, httpStatusCode: Int?)? {
+            if err.domain == NSURLErrorDomain {
+                switch err.code {
+                case NSURLErrorBadServerResponse, NSURLErrorZeroByteResource:
+                    return ("HTTP", nil)
+                case NSURLErrorFileDoesNotExist:
+                    // AVFoundation's HTTP resource loader maps a 404
+                    // response for an http(s):// URL onto this
+                    // NSURLErrorDomain code rather than
+                    // NSURLErrorBadServerResponse or an embedded
+                    // HTTPURLResponse (see the on-device finding above) —
+                    // the server DID respond and refused the request, so
+                    // this is an HTTP failure, not a connectivity failure.
+                    // `categorizeFailure`'s errorLog lookup is preferred and
+                    // returns a concrete status when available; this is the
+                    // fallback for when no AVPlayerItem was available at the
+                    // call site, or its error log recorded no status.
+                    return ("HTTP", nil)
+                default:
+                    // Everything else in NSURLErrorDomain (timeouts,
+                    // offline, DNS/host failures, connection lost,
+                    // cleartext/ATS rejections, etc.) means the request
+                    // never got a response from a server to refuse it — a
+                    // connectivity problem.
+                    return ("NETWORK", nil)
+                }
+            }
+
+            if err.domain == AVFoundationErrorDomain {
+                switch err.code {
+                case AVError.contentIsProtected.rawValue:
+                    return ("DRM", nil)
+                case AVError.decoderNotFound.rawValue,
+                     AVError.decoderTemporarilyUnavailable.rawValue,
+                     AVError.encoderNotFound.rawValue:
+                    return ("DECODER", nil)
+                case AVError.fileFormatNotRecognized.rawValue,
+                     AVError.fileFailedToParse.rawValue,
+                     AVError.noSourceTrack.rawValue,
+                     AVError.invalidSourceMedia.rawValue,
+                     AVError.mediaDiscontinuity.rawValue:
+                    return ("SOURCE", nil)
+                default:
+                    return nil
+                }
+            }
+
+            return nil
+        }
+
+        // An HTTPURLResponse embedded directly in the top-level error's
+        // userInfo (when present) gives the most precise signal: the server
+        // responded, so this is an HTTP failure with a concrete status
+        // code, regardless of domain.
         if let response = error.userInfo["NSErrorFailingURLResponseKey"] as? HTTPURLResponse {
             return ("HTTP", response.statusCode)
         }
 
-        if error.domain == NSURLErrorDomain {
-            switch error.code {
-            case NSURLErrorBadServerResponse, NSURLErrorZeroByteResource:
-                return ("HTTP", nil)
-            default:
-                // Everything else in NSURLErrorDomain (timeouts, offline,
-                // DNS/host failures, connection lost, cleartext/ATS
-                // rejections, etc.) is a connectivity problem.
-                return ("NETWORK", nil)
+        // Walk the underlying-error chain: AVFoundation frequently wraps the
+        // real cause (an embedded HTTPURLResponse, or a more specific
+        // NSURLErrorDomain/AVFoundationErrorDomain code) one or more levels
+        // down inside NSUnderlyingErrorKey rather than surfacing it at the
+        // top level.
+        var current = error.userInfo[NSUnderlyingErrorKey] as? NSError
+        var depth = 0
+        while let err = current, depth < 5 {
+            if let response = err.userInfo["NSErrorFailingURLResponseKey"] as? HTTPURLResponse {
+                return ("HTTP", response.statusCode)
             }
+            if let classified = classify(err) {
+                return classified
+            }
+            current = err.userInfo[NSUnderlyingErrorKey] as? NSError
+            depth += 1
         }
 
-        if error.domain == AVFoundationErrorDomain {
-            switch error.code {
-            case AVError.contentIsProtected.rawValue:
-                return ("DRM", nil)
-            case AVError.decoderNotFound.rawValue,
-                 AVError.decoderTemporarilyUnavailable.rawValue,
-                 AVError.encoderNotFound.rawValue:
-                return ("DECODER", nil)
-            case AVError.fileFormatNotRecognized.rawValue,
-                 AVError.fileFailedToParse.rawValue,
-                 AVError.noSourceTrack.rawValue,
-                 AVError.invalidSourceMedia.rawValue,
-                 AVError.mediaDiscontinuity.rawValue:
-                return ("SOURCE", nil)
-            default:
-                return ("UNKNOWN", nil)
-            }
+        // Fall back to classifying the top-level error's own domain/code.
+        if let classified = classify(error) {
+            return classified
         }
 
         return ("UNKNOWN", nil)
+    }
+
+    /// Item-aware entry point every call site uses instead of `categorize(_:)`
+    /// directly. `item`, when available, is the `AVPlayerItem` whose failure
+    /// produced `error`; it is optional because not every call site can
+    /// cheaply recover one.
+    ///
+    /// `AVPlayerItem.errorLog()` is the most authoritative source available:
+    /// it records the actual HTTP status code the server returned for every
+    /// HTTP(S) resource-loading failure (manifest/playlist and segment
+    /// requests) via `AVPlayerItemErrorLogEvent.errorStatusCode`, independent
+    /// of whatever shape the NSError handed to KVO/notifications takes. This
+    /// is what lets a real 404/500/etc. be recovered instead of falling back
+    /// to `categorize(_:)`'s (necessarily category-only, or inferred-status)
+    /// classification of the NSError alone.
+    private func categorizeFailure(_ error: NSError, item: AVPlayerItem?) -> (category: String, httpStatusCode: Int?) {
+        if let item = item, let statusCode = latestHTTPStatusCode(from: item) {
+            return ("HTTP", statusCode)
+        }
+        return categorize(error)
+    }
+
+    /// Extracts the most recently recorded HTTP status code from an
+    /// `AVPlayerItem`'s error log, if any. Per Apple's documentation,
+    /// `AVPlayerItemErrorLogEvent.errorStatusCode` is "the HTTP status code
+    /// most recently returned by the server" for that log event; `0` means
+    /// no HTTP status was recorded for it (e.g. the failure never reached a
+    /// server), which is why events reporting `0` are skipped rather than
+    /// treated as a literal status. Walked newest-to-oldest since the most
+    /// recent event is the one relevant to the failure that just occurred.
+    private func latestHTTPStatusCode(from item: AVPlayerItem) -> Int? {
+        guard let errorLog = item.errorLog() else { return nil }
+        for event in errorLog.events.reversed() where event.errorStatusCode != 0 {
+            return event.errorStatusCode
+        }
+        return nil
     }
 
     private func notifyError(
