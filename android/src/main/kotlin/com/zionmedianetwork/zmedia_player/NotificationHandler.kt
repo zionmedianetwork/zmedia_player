@@ -141,6 +141,17 @@ class NotificationHandler(
     companion object {
         private const val TAG = "NotificationHandler"
 
+        // java.net.URLConnection has no timeout by default and will block
+        // connect()/getInputStream() indefinitely on a stalled or
+        // misbehaving connection. A non-owner resolves artwork entirely in
+        // the background with no user-visible symptom if that hangs (see
+        // resolveArtworkIfNeeded doc), so an unbounded wait here could
+        // silently leave a later-promoted player with no artwork forever,
+        // long past the point promoteToOwner() ran. Bounding it lets a
+        // stuck fetch fail and (via promoteToOwner's retry) be attempted
+        // again instead.
+        private const val ARTWORK_FETCH_TIMEOUT_MS = 8000
+
         // Registry of active MediaSessionCompat instances keyed by playerId.
         //
         // NotificationActionReceiver (below) is a manifest-registered
@@ -206,6 +217,14 @@ class NotificationHandler(
     private var currentArtworkUrl: String? = null
     private var currentMediaUrl: String? = null
     private var currentArtworkBitmap: Bitmap? = null
+
+    // True while a loadArtwork()/generateThumbnail() coroutine is between
+    // being launched and finishing (success or failure). Prevents
+    // resolveArtworkIfNeeded() from starting a redundant concurrent fetch
+    // -- e.g. one launched from showNotification() and another from a
+    // promoteToOwner() retry that races with it.
+    private var artworkLoadInFlight: Boolean = false
+
     private var isPlaying: Boolean = false
     private var position: Long = 0
     private var duration: Long = 0
@@ -337,15 +356,10 @@ class NotificationHandler(
         // Update playback state
         updateMediaSessionPlaybackState()
 
-        // Artwork resolution:
-        // 1. If an artworkUrl is provided, load from URL (takes priority).
-        // 2. Otherwise, if the media URL is present, generate a thumbnail frame.
-        if (currentArtworkUrl != null && currentArtworkBitmap == null) {
-            loadArtwork(currentArtworkUrl!!)
-        } else if (currentArtworkUrl.isNullOrEmpty() && currentArtworkBitmap == null
-            && !currentMediaUrl.isNullOrEmpty()) {
-            generateThumbnail(currentMediaUrl!!)
-        }
+        // Artwork resolution (see resolveArtworkIfNeeded doc): started here
+        // unconditionally, regardless of ownership -- acquiring the bitmap
+        // is never ownership-gated, only *posting* it is.
+        resolveArtworkIfNeeded()
 
         isShowing = true
 
@@ -370,6 +384,23 @@ class NotificationHandler(
         position = (state["position"] as? Number)?.toLong() ?: 0
         duration = (state["duration"] as? Number)?.toLong() ?: 0
 
+        // Keep METADATA_KEY_DURATION in sync here too, not just
+        // PlaybackStateCompat's position/state. These live on two separate
+        // objects on MediaSessionCompat (MediaMetadataCompat vs
+        // PlaybackStateCompat) -- previously only the latter was refreshed
+        // in this method, via updateMediaSessionPlaybackState() below. If
+        // the real duration became known (or changed) only after the
+        // initial showNotification() call, the session's *declared total*
+        // duration -- which is what drives the notification's progress-bar
+        // "total" -- could stay stale (or 0) here indefinitely. That
+        // mattered least for an owner, which rebuilds/reposts its
+        // notification on every one of these calls anyway (see
+        // buildAndShowNotification() below) and so gets many chances to
+        // pick up a corrected value; a non-owner never posts at all until
+        // promoteToOwner() runs, so it only ever gets whichever duration
+        // was last written to the session's metadata -- which, without
+        // this call, would not necessarily be the latest one.
+        updateMediaSessionMetadata()
         updateMediaSessionPlaybackState()
         if (isOwner) {
             buildAndShowNotification()
@@ -432,6 +463,17 @@ class NotificationHandler(
         android.util.Log.d(TAG, "Player $playerId promoted to notification owner")
         mediaSession?.isActive = true
         if (isShowing) {
+            // Give artwork resolution one more explicit chance. A
+            // non-owner's background attempt (kicked off unconditionally by
+            // resolveArtworkIfNeeded from showNotification()) may still be
+            // missing here -- still in flight, already failed, or (before
+            // the ARTWORK_FETCH_TIMEOUT_MS fix on loadArtwork) silently
+            // hung -- and a non-owner had no way to notice or retry on its
+            // own, since buildAndShowNotification() below (the only thing
+            // that would have surfaced a missing bitmap) was never called
+            // for it. No-ops if a bitmap is already resolved or a fetch is
+            // already in flight (see artworkLoadInFlight).
+            resolveArtworkIfNeeded()
             updateMediaSessionMetadata()
             updateMediaSessionPlaybackState()
             buildAndShowNotification()
@@ -691,6 +733,38 @@ class NotificationHandler(
         mediaSession?.setMetadata(metadata.build())
     }
 
+    /**
+     * Kicks off artwork resolution (network fetch of [currentArtworkUrl], or
+     * a generated video-frame thumbnail from [currentMediaUrl] if no artwork
+     * URL was provided) if no bitmap is available yet and nothing is already
+     * in flight. A no-op otherwise.
+     *
+     * Deliberately **not** gated on [isOwner]: acquiring the bitmap and
+     * *posting* a notification that displays it are two different concerns.
+     * Only the latter is ownership-gated (in [showNotification],
+     * [updateState], and the completion callbacks below, all of which check
+     * `if (isOwner)` before calling [buildAndShowNotification]). A non-owner
+     * still needs the data resolved and cached on [currentArtworkBitmap] so
+     * that whenever it *is* promoted (see [promoteToOwner]), it has
+     * something to show immediately instead of starting from scratch.
+     *
+     * Called from three places: [showNotification] (the original,
+     * unconditional attempt every player instance makes, owner or not),
+     * [promoteToOwner] (a safety-net retry — see its doc for why one may
+     * still be needed), and nowhere else; [updateState] intentionally does
+     * not call this since it never changes which media item is showing.
+     */
+    private fun resolveArtworkIfNeeded() {
+        if (currentArtworkBitmap != null || artworkLoadInFlight) return
+        val artworkUrl = currentArtworkUrl
+        val mediaUrl = currentMediaUrl
+        if (!artworkUrl.isNullOrEmpty()) {
+            loadArtwork(artworkUrl)
+        } else if (!mediaUrl.isNullOrEmpty()) {
+            generateThumbnail(mediaUrl)
+        }
+    }
+
     private fun updateMediaSessionPlaybackState() {
         val state = PlaybackStateCompat.Builder()
             .setState(
@@ -712,26 +786,40 @@ class NotificationHandler(
     }
 
     private fun loadArtwork(url: String) {
+        artworkLoadInFlight = true
         // Load artwork asynchronously on the IO dispatcher via the owned scope.
         scope.launch(Dispatchers.IO) {
             try {
                 val connection = URL(url).openConnection()
+                // URLConnection has no timeout by default and will block
+                // connect()/getInputStream() indefinitely on a stalled
+                // connection -- see ARTWORK_FETCH_TIMEOUT_MS doc.
+                connection.connectTimeout = ARTWORK_FETCH_TIMEOUT_MS
+                connection.readTimeout = ARTWORK_FETCH_TIMEOUT_MS
                 connection.connect()
                 val input = connection.getInputStream()
                 val bitmap = android.graphics.BitmapFactory.decodeStream(input)
                 input.close()
 
                 withContext(Dispatchers.Main) {
-                    currentArtworkBitmap = bitmap
-                    if (isShowing) {
-                        updateMediaSessionMetadata()
-                        if (isOwner) {
-                            buildAndShowNotification()
+                    // Discard a stale fetch if the media item's artwork URL
+                    // changed while this request was in flight (mirrors the
+                    // equivalent guard in generateThumbnail).
+                    if (currentArtworkUrl == url && currentArtworkBitmap == null) {
+                        currentArtworkBitmap = bitmap
+                        if (isShowing) {
+                            updateMediaSessionMetadata()
+                            if (isOwner) {
+                                buildAndShowNotification()
+                            }
                         }
                     }
                 }
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Failed to load artwork: ${e.message}")
+            }
+            withContext(Dispatchers.Main) {
+                artworkLoadInFlight = false
             }
         }
     }
@@ -762,6 +850,7 @@ class NotificationHandler(
      *   • fallback (unknown / 0)      → 5 000 ms fixed
      */
     private fun generateThumbnail(url: String) {
+        artworkLoadInFlight = true
         scope.launch(Dispatchers.IO) {
             val retriever = android.media.MediaMetadataRetriever()
             try {
@@ -828,6 +917,9 @@ class NotificationHandler(
                 } catch (ignore: Exception) {
                     // release() itself can throw on some older API levels; ignore.
                 }
+            }
+            withContext(Dispatchers.Main) {
+                artworkLoadInFlight = false
             }
         }
     }
