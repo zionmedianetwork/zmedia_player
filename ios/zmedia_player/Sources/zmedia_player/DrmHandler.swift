@@ -48,7 +48,40 @@ class DrmHandler: NSObject {
 
     // DRM configuration
     private var drmConfig: [String: Any]?
-    private var certificateData: Data?
+
+    // MARK: - Certificate handoff (thread-safe)
+    //
+    // `configure()` kicks off an async certificate download and returns
+    // immediately (its `Bool` result only reflects config *validation*, not
+    // download completion) so that `createContentKeySession(for:)` can be
+    // called right after it, per the existing DRM wiring order in
+    // MediaPlayerManager. That means a content-key request can legitimately
+    // arrive before the certificate has finished loading. `certificateState`
+    // plus `pendingCertificateRequests` turn that into a queue-and-drain
+    // instead of a permanent failure (see `certificate(completion:)` and
+    // `resolveCertificateState(_:)` below).
+    //
+    // `certificateLock` guards both of the properties below because they are
+    // written from `configure()`/`dispose()` (main thread) and read/written
+    // from URLSession's completion queue (certificate + licence downloads)
+    // and from the DRM content-key delegate's dedicated background queue
+    // (`com.zmedia_player.drm.content_key`, see `createContentKeySession`).
+    // A single `NSLock` is sufficient here — the critical sections are tiny
+    // (state reads/enqueue/drain), and lock ownership never crosses into the
+    // callback bodies themselves (see the `unlock()` placement below), so
+    // there's no risk of holding the lock across arbitrary user callback
+    // work or blocking the DRM background queue for any length of time.
+    private let certificateLock = NSLock()
+
+    private enum CertificateState {
+        case pending
+        case loaded(Data)
+        case failed(Error)
+        case disposed
+    }
+
+    private var certificateState: CertificateState = .pending
+    private var pendingCertificateRequests: [(Result<Data, Error>) -> Void] = []
 
     // Certificate pinning: domain → list of 64-char lowercase hex pins.
     // Populated from drmConfig["certificatePinning"]["pins"] in configure().
@@ -132,11 +165,17 @@ class DrmHandler: NSObject {
         // Create content key session
         let keySession = AVContentKeySession(keySystem: .fairPlayStreaming)
 
-        // Create and set delegate
+        // Create and set delegate. Note: the delegate deliberately does NOT
+        // capture the certificate at construction time (that was the root
+        // cause of B-01 — `certificateData` is frequently still `nil` here
+        // because `configure()` returns before the async download
+        // completes). Instead the delegate asks `drmHandler` for the
+        // certificate at request time via `certificate(completion:)`, which
+        // transparently queues the request if the download is still in
+        // flight.
         let delegate = ContentKeyDelegate(
             playerId: playerId,
-            drmHandler: self,
-            certificateData: certificateData
+            drmHandler: self
         )
         self.contentKeyDelegate = delegate
 
@@ -158,6 +197,7 @@ class DrmHandler: NSObject {
     private func loadCertificate(from urlString: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: urlString) else {
             print("DrmHandler: Invalid certificate URL")
+            resolveCertificateState(.failed(DrmError.invalidCertificateUrl))
             completion(false)
             return
         }
@@ -179,22 +219,104 @@ class DrmHandler: NSObject {
 
             if let error = error {
                 print("DrmHandler: Certificate loading error: \(error.localizedDescription)")
+                self.resolveCertificateState(.failed(error))
                 completion(false)
                 return
             }
 
             guard let data = data, !data.isEmpty else {
                 print("DrmHandler: No certificate data received")
+                self.resolveCertificateState(.failed(DrmError.certificateNotLoaded))
                 completion(false)
                 return
             }
 
-            self.certificateData = data
             print("DrmHandler: Certificate loaded successfully (\(data.count) bytes)")
+            self.resolveCertificateState(.loaded(data))
             completion(true)
         }
 
         task.resume()
+    }
+
+    // MARK: - Certificate handoff helpers
+
+    /// Resolve the FairPlay application certificate for a content-key
+    /// request. If the certificate has already resolved (loaded, failed, or
+    /// this handler was disposed), `completion` runs synchronously on the
+    /// calling thread. Otherwise it is queued and drained by
+    /// `resolveCertificateState(_:)` once `loadCertificate` finishes — see
+    /// B-01 in the Phase 1 remediation plan. `completion` may therefore run
+    /// on the caller's thread OR on whatever thread the pending download's
+    /// `URLSession` completion handler runs on; callers must not assume main
+    /// thread here.
+    fileprivate func certificate(completion: @escaping (Result<Data, Error>) -> Void) {
+        certificateLock.lock()
+        switch certificateState {
+        case .loaded(let data):
+            certificateLock.unlock()
+            completion(.success(data))
+        case .failed(let error):
+            certificateLock.unlock()
+            completion(.failure(error))
+        case .disposed:
+            certificateLock.unlock()
+            completion(.failure(DrmError.disposed))
+        case .pending:
+            pendingCertificateRequests.append(completion)
+            certificateLock.unlock()
+        }
+    }
+
+    /// Transitions `certificateState` out of `.pending` and drains any
+    /// content-key requests that were queued while the certificate was still
+    /// downloading. Called exactly once per handler lifetime from
+    /// `loadCertificate`'s completion (success or failure), and again from
+    /// `dispose()` to fail any requests still waiting when the handler is
+    /// torn down (so a disposed handler never leaves a `keyRequest` hanging
+    /// forever).
+    private func resolveCertificateState(_ newState: CertificateState) {
+        let waiters: [(Result<Data, Error>) -> Void]
+        certificateLock.lock()
+        // Only overwrite a still-pending state. `dispose()` may race a
+        // late-arriving URLSession completion; whichever terminal state
+        // lands first (loaded/failed from the network, or disposed from
+        // teardown) wins, and the queue is only ever drained once.
+        if case .pending = certificateState {
+            certificateState = newState
+            waiters = pendingCertificateRequests
+            pendingCertificateRequests.removeAll()
+        } else {
+            waiters = []
+        }
+        certificateLock.unlock()
+
+        guard !waiters.isEmpty else { return }
+        let result: Result<Data, Error>
+        switch newState {
+        case .loaded(let data):
+            result = .success(data)
+        case .failed(let error):
+            result = .failure(error)
+        case .disposed:
+            result = .failure(DrmError.disposed)
+        case .pending:
+            return
+        }
+        for waiter in waiters {
+            waiter(result)
+        }
+    }
+
+    /// Whether the FairPlay certificate has finished loading. Used only for
+    /// diagnostics (`getDrmSystemInfo()`); does not affect request handling.
+    private var isCertificateLoaded: Bool {
+        certificateLock.lock()
+        defer { certificateLock.unlock() }
+        if case .loaded = certificateState {
+            return true
+        }
+        return false
     }
 
     // MARK: - License Acquisition
@@ -399,7 +521,7 @@ class DrmHandler: NSObject {
         info["fairplaySupported"] = DrmHandler.isFairPlaySupported()
         info["deviceModel"] = UIDevice.current.model
         info["systemVersion"] = UIDevice.current.systemVersion
-        info["certificateLoaded"] = (certificateData != nil)
+        info["certificateLoaded"] = isCertificateLoaded
 
         return info
     }
@@ -414,34 +536,57 @@ class DrmHandler: NSObject {
     func notifyDrmError(_ message: String) {
         print("DrmHandler Error: \(message)")
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        channel.invokeMethod(
-            "onDrmSessionUpdate",
-            arguments: buildDrmSessionPayload(
-                state: "error",
-                license: nil,
-                errorMessage: message,
-                nowMs: nowMs
-            )
+        let sessionPayload = buildDrmSessionPayload(
+            state: "error",
+            license: nil,
+            errorMessage: message,
+            nowMs: nowMs
         )
-        channel.invokeMethod("onDrmError", arguments: [
+        let errorPayload: [String: Any] = [
             "playerId": playerId,
             "error": message,
             "timestamp": nowMs
-        ])
+        ]
+        invokeOnMain { [channel] in
+            channel.invokeMethod("onDrmSessionUpdate", arguments: sessionPayload)
+            channel.invokeMethod("onDrmError", arguments: errorPayload)
+        }
     }
 
     /// Notify Flutter of DRM session state changes via ``onDrmSessionUpdate``.
     func notifyDrmSessionState(state: String, license: [String: Any]? = nil) {
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
-        channel.invokeMethod(
-            "onDrmSessionUpdate",
-            arguments: buildDrmSessionPayload(
-                state: state,
-                license: license,
-                errorMessage: nil,
-                nowMs: nowMs
-            )
+        let sessionPayload = buildDrmSessionPayload(
+            state: state,
+            license: license,
+            errorMessage: nil,
+            nowMs: nowMs
         )
+        invokeOnMain { [channel] in
+            channel.invokeMethod("onDrmSessionUpdate", arguments: sessionPayload)
+        }
+    }
+
+    /// Hops to the main thread before invoking a Flutter method channel call.
+    /// `FlutterMethodChannel.invokeMethod` requires the platform (main)
+    /// thread; `DrmHandler`'s notify helpers are reached from URLSession
+    /// completion queues (certificate + licence downloads) and the DRM
+    /// content-key delegate's dedicated background queue, none of which are
+    /// the main thread (see B-04 in the Phase 1 remediation plan).
+    ///
+    /// Centralised here (rather than at each `channel.invokeMethod` call
+    /// site) so future call sites can't reintroduce the bug. Uses `async`
+    /// unconditionally rather than checking `Thread.isMainThread` first:
+    /// the ordering guarantee we actually need — DRM notifications observed
+    /// in the order they were raised — only requires that hops enqueue in
+    /// call order, which `async` alone already provides; conditionally
+    /// short-circuiting on-main-thread invocations would risk publishing a
+    /// same-thread caller's event ahead of an earlier cross-thread caller's
+    /// still-enqueued one. Never `sync` — that would risk deadlocking a
+    /// caller already on the main thread (or on a queue the main thread is
+    /// waiting on).
+    private func invokeOnMain(_ block: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: block)
     }
 
     private func buildDrmSessionPayload(
@@ -473,7 +618,12 @@ class DrmHandler: NSObject {
         pinnedSession = nil
         contentKeySession = nil
         contentKeyDelegate = nil
-        certificateData = nil
+        // Fail (rather than silently drop) any content-key requests still
+        // queued on a certificate download that hasn't resolved yet — a
+        // request must never hang forever just because the handler was torn
+        // down mid-flight. No-ops if the certificate already resolved
+        // (loaded/failed) — see `resolveCertificateState(_:)`.
+        resolveCertificateState(.disposed)
         print("DrmHandler: Disposed")
     }
 }
@@ -569,12 +719,10 @@ extension DrmHandler: URLSessionDelegate {
 private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
     private let playerId: String
     private weak var drmHandler: DrmHandler?
-    private let certificateData: Data?
 
-    init(playerId: String, drmHandler: DrmHandler, certificateData: Data?) {
+    init(playerId: String, drmHandler: DrmHandler) {
         self.playerId = playerId
         self.drmHandler = drmHandler
-        self.certificateData = certificateData
     }
 
     func contentKeySession(
@@ -603,18 +751,48 @@ private class ContentKeyDelegate: NSObject, AVContentKeySessionDelegate {
     }
 
     private func handleStreamingContentKeyRequest(_ keyRequest: AVContentKeyRequest) {
-        guard let certificateData = certificateData else {
-            drmHandler?.notifyDrmError("Certificate not loaded")
-            keyRequest.processContentKeyResponseError(DrmError.certificateNotLoaded)
-            return
-        }
-
         guard let contentIdentifier = keyRequest.identifier as? String else {
             drmHandler?.notifyDrmError("Invalid content identifier")
             keyRequest.processContentKeyResponseError(DrmError.invalidContentIdentifier)
             return
         }
 
+        guard let drmHandler = drmHandler else {
+            // Handler already deallocated (e.g. player disposed mid-request).
+            keyRequest.processContentKeyResponseError(DrmError.disposed)
+            return
+        }
+
+        // The FairPlay application certificate may still be downloading when
+        // the first key request arrives — `configure()` returns before its
+        // async `loadCertificate()` completes, so this delegate can no
+        // longer assume the certificate is ready (see B-01 in the Phase 1
+        // remediation plan). `certificate(completion:)` queues the request
+        // transparently if needed and fails it only once the download has
+        // genuinely failed (or the handler is disposed).
+        drmHandler.certificate { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let certificateData):
+                self.processStreamingContentKeyRequest(
+                    keyRequest,
+                    contentIdentifier: contentIdentifier,
+                    certificateData: certificateData
+                )
+            case .failure(let error):
+                self.drmHandler?.notifyDrmError(
+                    "FairPlay certificate unavailable: \(error.localizedDescription)"
+                )
+                keyRequest.processContentKeyResponseError(error)
+            }
+        }
+    }
+
+    private func processStreamingContentKeyRequest(
+        _ keyRequest: AVContentKeyRequest,
+        contentIdentifier: String,
+        certificateData: Data
+    ) {
         print("ContentKeyDelegate: Processing key request for: \(contentIdentifier)")
 
         let contentIdentifierData = contentIdentifier.data(using: .utf8)!
@@ -674,6 +852,8 @@ enum DrmError: Error, LocalizedError {
     case invalidContentIdentifier
     case noSpcData
     case noCkcData
+    case disposed
+    case invalidCertificateUrl
 
     var errorDescription: String? {
         switch self {
@@ -691,6 +871,10 @@ enum DrmError: Error, LocalizedError {
             return "No SPC data generated"
         case .noCkcData:
             return "No CKC data received from server"
+        case .disposed:
+            return "DRM handler was disposed before this request completed"
+        case .invalidCertificateUrl:
+            return "Invalid FairPlay certificate URL"
         }
     }
 }

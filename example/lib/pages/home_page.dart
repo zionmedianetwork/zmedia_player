@@ -12,6 +12,7 @@ import 'fullscreen_page.dart';
 import 'adaptive_controls_page.dart';
 import 'custom_controls_page.dart';
 import 'error_handling_page.dart';
+import 'multi_player_page.dart';
 
 /// Home page displaying a scrollable gallery of ZMedia Player feature demos.
 ///
@@ -171,6 +172,17 @@ class HomePage extends StatelessWidget {
                       'Bad URL, network failure, typed exceptions, error state.',
                   icon: Icons.error_outline,
                   page: const ErrorHandlingPage(),
+                  iconColor: Colors.red,
+                ),
+                const SizedBox(height: 8),
+                _feature(
+                  context,
+                  title: 'Multi-Player (B-02 / H-07)',
+                  description:
+                      'Two concurrent players; scripted regression check for '
+                      'cross-instance completion and Now Playing ownership.',
+                  icon: Icons.view_column_outlined,
+                  page: const MultiPlayerPage(),
                   iconColor: Colors.red,
                 ),
               ]),

@@ -34,6 +34,18 @@ class MediaPlayer {
   static final Map<String, DateTime> _lastActivity = {};
   static Timer? _cleanupTimer;
 
+  /// Monotonically increasing counter used to generate collision-free
+  /// player ids when no explicit [playerId] is supplied to the factory.
+  ///
+  /// A plain millisecond timestamp is not sufficient: constructing several
+  /// players within the same event-loop tick (e.g. building a `ListView` of
+  /// players in one frame) can produce identical timestamps, which would
+  /// silently alias two independent players onto the same native instance.
+  /// The counter never resets — including after instances are disposed and
+  /// swept by [_cleanupStaleInstances] — so a recycled counter value can
+  /// never collide with, or resurrect, a previously-used id.
+  static int _autoIdCounter = 0;
+
   /// Global crash reporter (set once at app startup)
   static CrashReporter? crashReporter;
 
@@ -283,12 +295,25 @@ class MediaPlayer {
     String? playerId,
     MediaConfig? config,
   }) {
-    final id = playerId ?? DateTime.now().millisecondsSinceEpoch.toString();
+    // An explicitly-passed playerId keeps its documented singleton-per-id
+    // behaviour: reuse the existing (non-disposed) instance if present.
+    if (playerId != null) {
+      if (_instances.containsKey(playerId) &&
+          !_instances[playerId]!._isDisposed) {
+        return _instances[playerId]!;
+      }
 
-    // Return existing instance if it exists and hasn't been disposed
-    if (_instances.containsKey(id) && !_instances[id]!._isDisposed) {
-      return _instances[id]!;
+      final playerConfig = config ?? const MediaConfig();
+      return MediaPlayer._(playerId, playerConfig);
     }
+
+    // No explicit id: generate a collision-free id. A monotonic counter
+    // (rather than a bare timestamp) guarantees uniqueness even when
+    // multiple players are constructed within the same millisecond, and
+    // never repeats, so a swept/disposed instance's id can never be
+    // reissued to a new instance.
+    final id =
+        'player_${DateTime.now().millisecondsSinceEpoch}_${_autoIdCounter++}';
 
     final playerConfig = config ?? const MediaConfig();
     return MediaPlayer._(id, playerConfig);

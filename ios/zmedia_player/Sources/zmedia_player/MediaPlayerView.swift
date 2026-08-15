@@ -224,6 +224,32 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
     }
 }
 
+// MARK: - Placeholder platform view
+
+/// A minimal `FlutterPlatformView` returned by `MediaPlayerViewFactory` when
+/// a real `MediaPlayerView` cannot be resolved (see B-03 in the Phase 1
+/// remediation plan). Platform-view creation and the async native
+/// `initialize()` round-trip are not intrinsically ordered — fast
+/// navigation, a widget rebuild racing `initialize()`, or a stale
+/// `playerId` after `dispose()` can all reach `create(...)` before (or
+/// after) a live player exists for the requested id. Crashing the entire
+/// host app in that situation is not acceptable, so this stands in as an
+/// inert placeholder; Flutter typically requests a new platform view once
+/// `initialize()` resolves and the widget rebuilds.
+private final class PlaceholderPlatformView: NSObject, FlutterPlatformView {
+    private let placeholder: UIView
+
+    init(frame: CGRect) {
+        placeholder = UIView(frame: frame)
+        placeholder.backgroundColor = .black
+        super.init()
+    }
+
+    func view() -> UIView {
+        return placeholder
+    }
+}
+
 // MARK: - Factory
 
 class MediaPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
@@ -241,15 +267,25 @@ class MediaPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
     ) -> FlutterPlatformView {
 
         guard let creationParams = args as? [String: Any] else {
-            fatalError("MediaPlayerViewFactory: Invalid arguments - expected dictionary")
+            print("MediaPlayerViewFactory: Invalid arguments for view \(viewId) - expected a dictionary, got \(String(describing: args)). Returning placeholder view.")
+            playerManager.notifyPlatformViewCreationFailed(playerId: nil, reason: "invalid_arguments")
+            return PlaceholderPlatformView(frame: frame)
         }
 
         guard let playerId = creationParams["playerId"] as? String, !playerId.isEmpty else {
-            fatalError("MediaPlayerViewFactory: Missing or invalid playerId")
+            print("MediaPlayerViewFactory: Missing or invalid playerId for view \(viewId) in params: \(creationParams). Returning placeholder view.")
+            playerManager.notifyPlatformViewCreationFailed(playerId: nil, reason: "missing_player_id")
+            return PlaceholderPlatformView(frame: frame)
         }
 
         guard let playerView = playerManager.getPlayerView(playerId: playerId) else {
-            fatalError("MediaPlayerViewFactory: Player not found for id: \(playerId)")
+            // No live MediaPlayerInstance for this id yet (or any more) —
+            // e.g. the platform view was created before initialize(playerId:)
+            // completed, or after the player was disposed. Returning a
+            // placeholder keeps the host app alive; see the type doc above.
+            print("MediaPlayerViewFactory: No player found for id '\(playerId)' (view \(viewId)). Returning placeholder view.")
+            playerManager.notifyPlatformViewCreationFailed(playerId: playerId, reason: "player_not_initialized")
+            return PlaceholderPlatformView(frame: frame)
         }
 
         print("MediaPlayerViewFactory: Created view for player \(playerId)")
