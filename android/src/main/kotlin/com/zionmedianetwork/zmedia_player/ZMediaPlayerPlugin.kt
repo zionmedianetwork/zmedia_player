@@ -2,6 +2,8 @@ package com.zionmedianetwork.zmedia_player
 
 import android.app.Activity
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.NonNull
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
@@ -28,6 +30,12 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
     // onAttachedToEngine, stopped in onDetachedFromEngine, mirroring
     // `playerManager`'s own lifecycle in this class.
     private lateinit var networkMonitor: NetworkMonitor
+
+    // H-06 fix: NetworkMonitor.Callback methods run on ConnectivityManager's
+    // internal `ConnectivityThread`, not the platform thread — see the doc on
+    // `broadcastNetworkStatus` below. This posts `invokeMethod` calls back to
+    // the main thread, which `MethodChannel` requires.
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     // Player ids currently between a successful `initialize` and `dispose`
     // call, used to fan the single NetworkMonitor's events out to every live
@@ -188,6 +196,34 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
             // device-global, not per-player) can be fanned out to it — see
             // onNetworkAvailable/onNetworkLost/onNetworkQualityChanged below.
             activePlayerIds.add(playerId)
+            // H-06 snapshot fix: NetworkMonitor.startMonitoring() runs once,
+            // at plugin attach, and only fans events out to players present
+            // in activePlayerIds *at the moment an event fires*. A player
+            // initialized after the last connectivity transition would
+            // otherwise never learn the current status and would read
+            // `networkStatus` as "unknown" indefinitely. Emit the
+            // synchronously-queried current status to this player right now
+            // so its Dart-side NetworkStatus starts correct instead of
+            // waiting for the next transition. Safe re: ordering — the Dart
+            // `MediaPlayer` instance is registered in `_instances` by its
+            // constructor before `initialize()` (which awaits this native
+            // call) ever runs, so `_staticMethodCallHandler` can always
+            // resolve this playerId whenever this event is actually
+            // delivered to Dart, regardless of relative timing with the
+            // `initialize` call's own result.
+            try {
+                val currentStatus = networkMonitor.getCurrentNetworkStatus()
+                channel.invokeMethod(
+                    "onNetworkStatusChanged",
+                    currentStatus + mapOf("playerId" to playerId)
+                )
+            } catch (e: Exception) {
+                android.util.Log.e(
+                    "ZMediaPlayerPlugin",
+                    "Failed to emit initial network status to $playerId: ${e.message}",
+                    e
+                )
+            }
             // Report our own version back so Dart can, symmetrically, detect
             // a native build too old for what it's about to call (see
             // MediaPlayer.initialize()'s minSupportedNativeProtocolVersion
@@ -927,22 +963,37 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
 
     /**
      * Forwards a NetworkMonitor status map to every currently-initialized
-     * player. `ConnectivityManager.NetworkCallback` methods are delivered on
-     * the thread that called `registerNetworkCallback` when that thread has
-     * a prepared `Looper` (true here: `startMonitoring()` is always called
-     * from `onAttachedToEngine`, which runs on the platform/main thread), so
-     * this can call `invokeMethod` directly without an extra `Handler` hop —
-     * consistent with how other native->Dart events are sent elsewhere in
-     * this plugin (e.g. `MediaPlayerManager.notifyStateChanged`).
+     * player.
+     *
+     * IMPORTANT: `ConnectivityManager.registerNetworkCallback(request,
+     * callback)` — the 2-arg overload `NetworkMonitor.startMonitoring()`
+     * uses — does **not** deliver callbacks on the registering thread. Per
+     * the AOSP `ConnectivityManager` source, that overload posts to an
+     * internal, lazily-created `ConnectivityThread` HandlerThread shared by
+     * the whole process, not to the caller's `Looper`. (The registering
+     * thread only matters for the 3-arg overload that takes an explicit
+     * `Handler`, which requires API 26+ and isn't usable here unconditionally
+     * since `minSdkVersion` is 21.) So every `NetworkMonitor.Callback` method
+     * — and therefore this function — runs on that background thread, never
+     * the platform/main thread `MethodChannel.invokeMethod` requires. Calling
+     * it directly here silently threw internally and was swallowed by the
+     * try/catch below, which is why no `onNetworkStatusChanged` event ever
+     * reached Dart on-device despite the callback itself firing correctly.
+     * `Handler(Looper.getMainLooper()).post` works on every API level >= 21,
+     * unlike the 3-arg `registerNetworkCallback` overload, so it's used here
+     * instead of switching `NetworkMonitor` to that overload.
      */
     private fun broadcastNetworkStatus(status: Map<String, Any>) {
         if (activePlayerIds.isEmpty()) return
-        for (id in activePlayerIds) {
-            try {
-                val payload: Map<String, Any> = status + mapOf("playerId" to id)
-                channel.invokeMethod("onNetworkStatusChanged", payload)
-            } catch (e: Exception) {
-                android.util.Log.e("ZMediaPlayerPlugin", "Failed to broadcast network status to $id: ${e.message}", e)
+        val playerIdsSnapshot = activePlayerIds.toList()
+        mainHandler.post {
+            for (id in playerIdsSnapshot) {
+                try {
+                    val payload: Map<String, Any> = status + mapOf("playerId" to id)
+                    channel.invokeMethod("onNetworkStatusChanged", payload)
+                } catch (e: Exception) {
+                    android.util.Log.e("ZMediaPlayerPlugin", "Failed to broadcast network status to $id: ${e.message}", e)
+                }
             }
         }
     }

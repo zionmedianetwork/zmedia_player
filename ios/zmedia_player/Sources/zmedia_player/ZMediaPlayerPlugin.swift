@@ -229,6 +229,22 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             // device-global, not per-player) can be fanned out to it — see
             // the NetworkMonitor.NetworkCallback conformance below.
             activePlayerIds.insert(playerId)
+            // H-06 snapshot fix: NetworkMonitor.startMonitoring() runs once,
+            // at plugin attach, and only fans events out to players present
+            // in activePlayerIds *at the moment an event fires*. A player
+            // initialized after the last connectivity transition would
+            // otherwise never learn the current status and would read
+            // `networkStatus` as "unknown" indefinitely. Emit the
+            // synchronously-queried current status to this player right now
+            // so its Dart-side NetworkStatus starts correct instead of
+            // waiting for the next transition. Mirrors the equivalent fix in
+            // `ZMediaPlayerPlugin.kt`'s `handleInitialize`.
+            if let channel = methodChannel {
+                let currentStatus = networkMonitor.getCurrentNetworkStatus()
+                var payload = currentStatus
+                payload["playerId"] = playerId
+                channel.invokeMethod("onNetworkStatusChanged", arguments: payload)
+            }
             // Report our own version back so Dart can, symmetrically, detect
             // a native build too old for what it's about to call (see
             // MediaPlayer.initialize()'s minSupportedNativeProtocolVersion
