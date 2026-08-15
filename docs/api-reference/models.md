@@ -62,6 +62,14 @@ const MediaConfig({
 Android. `boxFit` maps to native video gravity (`contain` = aspect-fit, `cover` = aspect-fill,
 `fill` = stretch) and updates the native view at runtime.
 
+**`speed` is a setting, never a transport command.** Setting `speed` (via `MediaConfig` or
+`setSpeed`) changes the rate playback *will* run at; it never starts or stops playback. A paused
+player stays paused when its speed changes, and the new speed applies on the next `play()`.
+Conversely, with `autoPlay: false` the package guarantees no playback begins until you call
+`play()` explicitly — on either platform. (Before 0.2.6 the iOS implementation violated this:
+setting a speed assigned `AVPlayer.rate`, which *is* a play command, so `autoPlay: false` was
+silently defeated. Fixed in 0.2.6.)
+
 ## PlaybackState / PlayerState
 
 ```dart

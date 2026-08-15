@@ -154,6 +154,10 @@ player.volumeStream.listen((double volume) {
 
 Emits playback speed changes (0.25x to 4.0x).
 
+Speed is a *setting*, not a transport command: a speed change never starts or pauses playback.
+An event on this stream says nothing about whether the player is playing — listen to
+`playbackStateStream` for that.
+
 #### Usage Example:
 ```dart
 player.speedStream.listen((double speed) {

@@ -599,12 +599,17 @@ class MediaPlayer {
         _qualityTracksController.add(_qualityTracks);
       }
 
-      // Reset playback speed to normal (1.0x) when loading new media
-      try {
-        await setSpeed(1.0);
-      } catch (e) {
-        // Ignore errors from speed reset - don't block media loading
-        debugPrint('Failed to reset speed: $e');
+      // Reset playback speed to normal (1.0x) when loading new media.
+      // Skipped when already 1.0: the round trip is pure overhead, and on iOS
+      // this call was what defeated `autoPlay: false` before the
+      // rate/defaultRate split.
+      if (_currentState.speed != 1.0) {
+        try {
+          await setSpeed(1.0);
+        } catch (e) {
+          // Ignore errors from speed reset - don't block media loading
+          debugPrint('Failed to reset speed: $e');
+        }
       }
 
       await _channel.invokeMethod('load', {
@@ -712,12 +717,17 @@ class MediaPlayer {
         _qualityTracksController.add(_qualityTracks);
       }
 
-      // Reset playback speed to normal (1.0x) when loading new playlist
-      try {
-        await setSpeed(1.0);
-      } catch (e) {
-        // Ignore errors from speed reset - don't block playlist loading
-        debugPrint('Failed to reset speed: $e');
+      // Reset playback speed to normal (1.0x) when loading new playlist.
+      // Skipped when already 1.0: the round trip is pure overhead, and on iOS
+      // this call was what defeated `autoPlay: false` before the
+      // rate/defaultRate split.
+      if (_currentState.speed != 1.0) {
+        try {
+          await setSpeed(1.0);
+        } catch (e) {
+          // Ignore errors from speed reset - don't block playlist loading
+          debugPrint('Failed to reset speed: $e');
+        }
       }
 
       await _channel.invokeMethod('setPlaylist', {

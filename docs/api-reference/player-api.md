@@ -24,7 +24,7 @@ Creates the controller and its underlying `MediaPlayer`, and calls `initialize()
 | `Future<void> setVolume(double volume)` | 0.0–1.0 |
 | `Future<void> increaseVolume([double amount])` / `decreaseVolume([double amount])` | Step volume |
 | `Future<void> toggleMute()` | Mute/unmute |
-| `Future<void> setSpeed(double speed)` | 0.25–4.0 |
+| `Future<void> setSpeed(double speed)` | 0.25–4.0. A setting, not a transport command — never starts or pauses playback |
 | `Future<void> cycleSpeed()` | Cycle preset speeds |
 
 ### Playlist navigation
