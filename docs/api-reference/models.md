@@ -116,12 +116,11 @@ const Playlist({
 enum DrmScheme { token, widevine, fairplay, ezdrm, playready, clearkey }
 
 // Factories:
-DrmConfig.widevine({required String licenseUrl, Map<String, String>? headers,
-    bool allowOffline = false, int? offlineLicenseDuration, ...});
+DrmConfig.widevine({required String licenseUrl, Map<String, String>? headers, ...});
 DrmConfig.fairplay({required String licenseUrl, required String certificateUrl,
     String? contentId, Map<String, String>? headers, ...});
 DrmConfig.token({required String licenseUrl, required String token, String? keyId, ...});
-DrmConfig.ezdrm({required EzdrmConfig ezdrmConfig, bool allowOffline = false, ...});
+DrmConfig.ezdrm({required EzdrmConfig ezdrmConfig, ...});
 ```
 
 DRM requires HTTPS for license and media URLs (enforced by `InputValidator`). Each factory

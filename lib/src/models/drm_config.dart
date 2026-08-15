@@ -49,15 +49,6 @@ class DrmConfig {
   /// Content ID (for FairPlay)
   final String? contentId;
 
-  /// Whether to allow offline playback
-  final bool allowOffline;
-
-  /// Offline license duration in seconds
-  final int? offlineLicenseDuration;
-
-  /// Whether to automatically renew licenses
-  final bool autoRenewLicense;
-
   /// Custom license request data
   final Map<String, dynamic>? customData;
 
@@ -83,9 +74,6 @@ class DrmConfig {
     this.token,
     this.keyId,
     this.contentId,
-    this.allowOffline = false,
-    this.offlineLicenseDuration,
-    this.autoRenewLicense = true,
     this.customData,
     this.ezdrmConfig,
     this.certificatePinning,
@@ -115,8 +103,6 @@ class DrmConfig {
   factory DrmConfig.widevine({
     required String licenseUrl,
     Map<String, String>? headers,
-    bool allowOffline = false,
-    int? offlineLicenseDuration,
     Map<String, dynamic>? customData,
     CertificatePinningConfig? certificatePinning,
   }) {
@@ -124,8 +110,6 @@ class DrmConfig {
       scheme: DrmScheme.widevine,
       licenseUrl: licenseUrl,
       headers: headers,
-      allowOffline: allowOffline,
-      offlineLicenseDuration: offlineLicenseDuration,
       customData: customData,
       certificatePinning: certificatePinning,
     );
@@ -154,7 +138,6 @@ class DrmConfig {
   /// Create an EZDRM configuration
   factory DrmConfig.ezdrm({
     required EzdrmConfig ezdrmConfig,
-    bool allowOffline = false,
     CertificatePinningConfig? certificatePinning,
   }) {
     return DrmConfig(
@@ -162,7 +145,6 @@ class DrmConfig {
       licenseUrl: ezdrmConfig.licenseUrl,
       certificateUrl: ezdrmConfig.certificateUrl,
       headers: ezdrmConfig.headers,
-      allowOffline: allowOffline,
       ezdrmConfig: ezdrmConfig,
       certificatePinning: certificatePinning,
     );
@@ -178,9 +160,6 @@ class DrmConfig {
       'token': token,
       'keyId': keyId,
       'contentId': contentId,
-      'allowOffline': allowOffline,
-      'offlineLicenseDuration': offlineLicenseDuration,
-      'autoRenewLicense': autoRenewLicense,
       'customData': customData,
       'ezdrmConfig': ezdrmConfig?.toMap(),
       'certificatePinning': certificatePinning?.toMap(),
@@ -209,9 +188,6 @@ class DrmConfig {
       token: map['token'] as String?,
       keyId: map['keyId'] as String?,
       contentId: map['contentId'] as String?,
-      allowOffline: map['allowOffline'] as bool? ?? false,
-      offlineLicenseDuration: map['offlineLicenseDuration'] as int?,
-      autoRenewLicense: map['autoRenewLicense'] as bool? ?? true,
       customData: map['customData'] as Map<String, dynamic>?,
       ezdrmConfig: map['ezdrmConfig'] != null
           ? EzdrmConfig.fromMap(map['ezdrmConfig'] as Map<String, dynamic>)
@@ -229,10 +205,7 @@ class DrmConfig {
         other.certificateUrl == certificateUrl &&
         other.token == token &&
         other.keyId == keyId &&
-        other.contentId == contentId &&
-        other.allowOffline == allowOffline &&
-        other.offlineLicenseDuration == offlineLicenseDuration &&
-        other.autoRenewLicense == autoRenewLicense;
+        other.contentId == contentId;
   }
 
   @override
@@ -243,9 +216,6 @@ class DrmConfig {
         token,
         keyId,
         contentId,
-        allowOffline,
-        offlineLicenseDuration,
-        autoRenewLicense,
       );
 
   DrmConfig copyWith({
@@ -256,9 +226,6 @@ class DrmConfig {
     String? token,
     String? keyId,
     String? contentId,
-    bool? allowOffline,
-    int? offlineLicenseDuration,
-    bool? autoRenewLicense,
     Map<String, dynamic>? customData,
     EzdrmConfig? ezdrmConfig,
     CertificatePinningConfig? certificatePinning,
@@ -271,10 +238,6 @@ class DrmConfig {
       token: token ?? this.token,
       keyId: keyId ?? this.keyId,
       contentId: contentId ?? this.contentId,
-      allowOffline: allowOffline ?? this.allowOffline,
-      offlineLicenseDuration:
-          offlineLicenseDuration ?? this.offlineLicenseDuration,
-      autoRenewLicense: autoRenewLicense ?? this.autoRenewLicense,
       customData: customData ?? this.customData,
       ezdrmConfig: ezdrmConfig ?? this.ezdrmConfig,
       certificatePinning: certificatePinning ?? this.certificatePinning,

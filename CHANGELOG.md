@@ -18,6 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### BREAKING
+- Removed `DrmConfig.allowOffline`, `DrmConfig.offlineLicenseDuration`, and
+  `DrmConfig.autoRenewLicense` (and the corresponding constructor/factory parameters,
+  `toMap`/`fromMap` keys, `==`/`hashCode`, and `copyWith` params). These fields never
+  functioned: on Android, the offline-license methods they configured
+  (`DrmHandler.acquireOfflineLicense`, `releaseOfflineLicense`, `renewOfflineLicense`)
+  were stubs that always failed or no-op'd, and none of the three was reachable from the
+  MethodChannel; iOS had no equivalent at all. Removing them changes no runtime
+  behaviour — callers setting these fields were already getting no offline support and
+  no auto-renewal. Offline DRM remains a planned future feature (see the
+  [Offline DRM Roadmap](docs/api-reference/drm.md#offline-drm-roadmap) in the DRM guide);
+  it will be reintroduced with a real, wired implementation rather than as inert config.
+- Removed `CastDeviceType.dlna` and `CastDeviceType.miracast`. Neither value could ever
+  be produced by native code — Android's `CastHandler` only emits `"chromecast"`, iOS's
+  `AirPlayHandler` only emits `"airplay"`, and `CastDevice.fromMap` already falls back to
+  `CastDeviceType.unknown` for anything else — so both variants were unreachable dead
+  code. The corresponding unreachable `case CastDeviceType.dlna:` icon branch in
+  `MediaControls` was also removed.
+
 ### Fixed
 - iOS: setting the playback speed no longer starts playback, so `MediaConfig.autoPlay:
   false` is finally honoured. On `AVPlayer`, assigning a non-zero `rate` **is** a

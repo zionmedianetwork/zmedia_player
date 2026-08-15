@@ -184,7 +184,7 @@ The package follows **clean architecture** with clear separation between Flutter
 
 Both managers follow identical interface patterns defined by the MethodChannel protocol.
 
-**Native code is decomposed into per-feature handlers** (mirrored across `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and `ios/Classes/`): `MediaPlayerManager`, `DrmHandler`, `PipHandler`, `NotificationHandler`, `BufferingHandler`, `CrashHandler`, `NetworkMonitor`, `SecureStorageHandler`, plus the platform view (`MediaPlayerView`/`MediaPlayerViewFactory`). Casting/AirPlay handlers are platform-specific (`CastHandler`/`CastOptionsProvider` on Android; `AirPlayHandler`/`AirPlayButtonFactory` on iOS). The plugin entry points are `ZMediaPlayerPlugin.kt` / `ZMediaPlayerPlugin.swift`. When adding a native capability, add the same handler on both platforms to keep the MethodChannel contract symmetric.
+**Native code is decomposed into per-feature handlers** (mirrored across `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and `ios/zmedia_player/Sources/zmedia_player/`): `MediaPlayerManager`, `DrmHandler`, `PipHandler`, `NotificationHandler`, `BufferingHandler`, `CrashHandler`, `NetworkMonitor`, `SecureStorageHandler`, plus the platform view (`MediaPlayerView`/`MediaPlayerViewFactory`). Casting/AirPlay handlers are platform-specific (`CastHandler`/`CastOptionsProvider` on Android; `AirPlayHandler`/`AirPlayButtonFactory` on iOS). The plugin entry points are `ZMediaPlayerPlugin.kt` / `ZMediaPlayerPlugin.swift`. When adding a native capability, add the same handler on both platforms to keep the MethodChannel contract symmetric.
 
 ### Public API Surface
 

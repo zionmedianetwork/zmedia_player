@@ -5,6 +5,128 @@
 /// developers understand and handle errors appropriately.
 library;
 
+/// Canonical wire-format vocabulary for *why* a native playback error
+/// occurred, shared by both native platforms and the Dart exception mapper.
+///
+/// This is the H-01 fix: previously [MediaPlayer]'s error mapping tested
+/// [PlatformException.code] for values (`'NETWORK_ERROR'`, `'DRM_...'`,
+/// `'HTTP_ERROR'`) that neither native implementation ever actually sent —
+/// every real error fell through to a generic fallback, making the typed
+/// exception hierarchy effectively unreachable. [MediaErrorCategory] is the
+/// one, documented set of reasons both platforms now emit:
+///
+/// - Android: `MediaPlayerInstance.categorizeExoPlayerError` in
+///   `android/.../MediaPlayerManager.kt` maps ExoPlayer's
+///   `PlaybackException.errorCode` onto these values and sends them as the
+///   `"category"` field of the `onError` native event (plus, best-effort,
+///   from the synchronous `LOAD_ERROR` result error in `ZMediaPlayerPlugin.kt`
+///   via a `"category"` details entry — see `categorizeSynchronousLoadError`).
+/// - iOS: `MediaPlayerInstance.categorize(_:)` in
+///   `ios/.../MediaPlayerManager.swift` maps `AVError`/`NSError` onto the
+///   same values for the `onError` event.
+///
+/// Both native call sites carry a comment pointing back here, and
+/// `test/exceptions/error_category_vocabulary_test.dart` parses the native
+/// source files as text and asserts every category string literal they use
+/// is a member of this enum's [wireValue]s — that is what actually catches
+/// native/Dart drift, since the native code is not part of this package's
+/// automated test/build pipeline.
+///
+/// `docs/` should document this table for consumers (see the
+/// production-gate-assessment H-01 report for the exact wording); this file
+/// is the source of truth for the enum values and the native mapping.
+enum MediaErrorCategory {
+  /// Could not reach or read from the source at all: DNS failure, timeout,
+  /// connection refused/lost, offline, TLS/cleartext rejected, etc.
+  network('NETWORK'),
+
+  /// The server responded, but with a failure/unusable HTTP status (404,
+  /// 403, 5xx, invalid content-type for a manifest, etc.).
+  http('HTTP'),
+
+  /// DRM/license/content-protection failure (license acquisition,
+  /// certificate/provisioning, unsupported scheme, disallowed operation).
+  drm('DRM'),
+
+  /// The device's decoder/hardware cannot play this content (codec
+  /// unsupported, decoder init failed, decoding failed).
+  decoder('DECODER'),
+
+  /// The source itself is invalid/malformed/unsupported at the
+  /// container/manifest level (corrupt file, unparseable manifest,
+  /// unsupported container).
+  source('SOURCE'),
+
+  /// Native reported an error that doesn't fit (or couldn't be classified
+  /// into) one of the categories above.
+  unknown('UNKNOWN');
+
+  const MediaErrorCategory(this.wireValue);
+
+  /// The exact string native sends over the MethodChannel for this
+  /// category. Keep in sync with the Kotlin/Swift mappers referenced above.
+  final String wireValue;
+
+  /// Parses a native `"category"` string, defaulting to [unknown] for a
+  /// missing/unrecognized value (e.g. an older cached native build that
+  /// predates this vocabulary and never sends `"category"` at all).
+  static MediaErrorCategory fromWireValue(String? value) {
+    for (final category in MediaErrorCategory.values) {
+      if (category.wireValue == value) return category;
+    }
+    return MediaErrorCategory.unknown;
+  }
+}
+
+/// Maps a native error report onto a concrete [MediaPlayerException]
+/// subtype using the shared [MediaErrorCategory] vocabulary.
+///
+/// This is the single place both the asynchronous `onError` native event
+/// (routed through [MediaPlayer.errorStream]) and the synchronous
+/// method-call failure paths (e.g. `MediaPlayer.load()`'s `on
+/// PlatformException` handler) go through, so a native/Dart wire-format
+/// drift only has to be fixed in one place.
+MediaPlayerException mapNativeMediaError({
+  required String message,
+  String? categoryWireValue,
+  String? nativeErrorCode,
+  Map<String, dynamic>? details,
+}) {
+  final category = MediaErrorCategory.fromWireValue(categoryWireValue);
+  switch (category) {
+    case MediaErrorCategory.network:
+      return NetworkException(
+        message,
+        isOffline: details?['isOffline'] as bool? ?? false,
+        isTimeout: details?['isTimeout'] as bool? ?? false,
+        details: details,
+      );
+    case MediaErrorCategory.http:
+      return MediaLoadException(
+        message,
+        statusCode: details?['httpStatusCode'] as int?,
+        details: details,
+      );
+    case MediaErrorCategory.drm:
+      return DrmException(
+        message,
+        errorCode: nativeErrorCode,
+        isLicenseError: details?['isLicenseError'] as bool? ?? false,
+        isCertificateError: details?['isCertificateError'] as bool? ?? false,
+        details: details,
+      );
+    case MediaErrorCategory.decoder:
+    case MediaErrorCategory.source:
+    case MediaErrorCategory.unknown:
+      return PlaybackException(
+        message,
+        errorCode: nativeErrorCode,
+        category: category,
+        details: details,
+      );
+  }
+}
+
 /// Base exception for all media player errors
 ///
 /// This is a sealed class, meaning all subclasses must be defined in this file.
@@ -131,14 +253,24 @@ class PlaybackException extends MediaPlayerException {
   const PlaybackException(
     String message, {
     this.errorCode,
+    this.category = MediaErrorCategory.unknown,
     Map<String, dynamic>? details,
   }) : super(message, details: details);
 
   /// Platform-specific error code
   final String? errorCode;
 
+  /// Which part of the shared [MediaErrorCategory] vocabulary this failure
+  /// falls into. [PlaybackException] is the catch-all for categories that
+  /// don't have a dedicated subtype (currently
+  /// [MediaErrorCategory.decoder], [MediaErrorCategory.source], and
+  /// [MediaErrorCategory.unknown] — network/HTTP/DRM failures are instead
+  /// represented by [NetworkException]/[MediaLoadException]/[DrmException]).
+  final MediaErrorCategory category;
+
   @override
-  String toString() => 'PlaybackException: $message (Code: $errorCode)';
+  String toString() =>
+      'PlaybackException: $message (Code: $errorCode, Category: ${category.wireValue})';
 }
 
 /// Player is in invalid state for requested operation
@@ -223,6 +355,49 @@ class PlatformOperationException extends MediaPlayerException {
   @override
   String toString() =>
       'PlatformOperationException ($platform): $message (Code: $code)';
+}
+
+/// Native/Dart protocol skew detected (M-16)
+///
+/// Thrown when the Dart package and the compiled native (Android/iOS)
+/// plugin implementation disagree about the MethodChannel wire protocol.
+/// Because this package is distributed by git ref rather than pub.dev, a
+/// host app can easily end up running a newer Dart package against a
+/// stale, previously-built native binary. Two situations throw this:
+///
+/// - [MediaPlayer.initialize] explicitly negotiates a `protocolVersion`
+///   with native; either side declaring the other's version unsupported
+///   throws this with [dartProtocolVersion] and [nativeProtocolVersion]
+///   set.
+/// - Any MethodChannel call raises a raw `MissingPluginException` (native
+///   doesn't implement a method this Dart package expects at all) — that
+///   otherwise would escape this package's sealed exception hierarchy
+///   entirely; it's wrapped here instead, with [missingMethod] set.
+class ProtocolMismatchException extends MediaPlayerException {
+  const ProtocolMismatchException(
+    String message, {
+    this.dartProtocolVersion,
+    this.nativeProtocolVersion,
+    this.missingMethod,
+    Map<String, dynamic>? details,
+  }) : super(message, details: details);
+
+  /// This Dart package's declared protocol version, when known.
+  final int? dartProtocolVersion;
+
+  /// The native plugin's declared protocol version, when known (native
+  /// reports this in `initialize`'s error `details` or success payload).
+  final int? nativeProtocolVersion;
+
+  /// The MethodChannel method name that triggered a `MissingPluginException`,
+  /// when this exception was raised reactively rather than during the
+  /// `initialize` handshake.
+  final String? missingMethod;
+
+  @override
+  String toString() =>
+      'ProtocolMismatchException: $message (dart: $dartProtocolVersion, '
+      'native: $nativeProtocolVersion, missingMethod: $missingMethod)';
 }
 
 /// Operation skipped due to another operation in progress

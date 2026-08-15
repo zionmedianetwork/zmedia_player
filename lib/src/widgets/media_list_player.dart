@@ -2,6 +2,80 @@ import 'package:flutter/material.dart';
 import '../core/media_controller.dart';
 import 'media_player_widget.dart';
 
+/// Coordinates mutual exclusion of playback across every live
+/// [MediaListPlayer] whose [MediaListPlayerConfig.pauseOthersOnPlay] is
+/// enabled (e.g. a vertical feed where only one item should play at a time).
+///
+/// This follows the same shape as the native single-owner/reference-count
+/// coordinators used elsewhere in the plugin for process-wide singleton
+/// resources (`NotificationHandler.Ownership` on iOS coordinates
+/// `MPRemoteCommandCenter`/`MPNowPlayingInfoCenter`; `AudioSessionCoordinator`
+/// coordinates `AVAudioSession`): a private lock-free registry that live
+/// instances explicitly register with on `initState` and explicitly
+/// unregister from on `dispose`, rather than relying on garbage collection or
+/// weak references to avoid retaining disposed controllers.
+///
+/// Unlike those "single owner" coordinators, this one does not pick or track
+/// a single owner — it simply reacts to a *play starting* edge on any
+/// registered controller and pauses every other registered controller that
+/// is currently playing. This keeps the policy symmetric: any list item can
+/// start playback and evict the others, and there is no persistent "current
+/// owner" state to get out of sync.
+class _MediaListPlaybackCoordinator {
+  _MediaListPlaybackCoordinator._();
+
+  /// Process-wide singleton, mirroring `.shared` on the native coordinators.
+  static final _MediaListPlaybackCoordinator instance =
+      _MediaListPlaybackCoordinator._();
+
+  /// Controllers belonging to currently-mounted [MediaListPlayer] widgets.
+  /// Populated explicitly in `initState`/removed explicitly in `dispose` —
+  /// never inferred from GC, so a disposed controller can never be retained
+  /// here past its widget's teardown.
+  final Set<MediaController> _registered = <MediaController>{};
+
+  /// Registers [controller] as a participant so it can be paused by (and can
+  /// pause) other participants. Safe to call multiple times for the same
+  /// controller.
+  void register(MediaController controller) {
+    _registered.add(controller);
+  }
+
+  /// Removes [controller] from the registry. Must be called from `dispose()`
+  /// so a torn-down widget's controller is never retained or paused later.
+  void unregister(MediaController controller) {
+    _registered.remove(controller);
+  }
+
+  /// Call when [controller] has just transitioned from not-playing to
+  /// playing (an edge, not a level) and its widget's
+  /// `pauseOthersOnPlay` is enabled. Pauses every other registered,
+  /// currently-playing controller.
+  ///
+  /// Driven strictly by the play edge — callers must not invoke this on
+  /// every state notification, only when playback has just started — so
+  /// unrelated state ticks (position updates, buffering, volume changes)
+  /// never re-trigger a pause sweep and fight the user.
+  void onDidStartPlaying(MediaController controller) {
+    // Snapshot before iterating: pausing a controller synchronously updates
+    // its own state and could otherwise mutate `_registered` mid-iteration
+    // if a listener reacts by unregistering.
+    for (final other in _registered.toList()) {
+      if (identical(other, controller)) continue;
+      if (other.isDisposed) {
+        // Defensive cleanup: a controller can be disposed by its owner
+        // without going through this widget's dispose() first (e.g. the
+        // host app disposes it directly after unmounting the widget).
+        _registered.remove(other);
+        continue;
+      }
+      if (other.isPlaying) {
+        other.pause();
+      }
+    }
+  }
+}
+
 /// Configuration for media player behavior in lists
 class MediaListPlayerConfig {
   /// Minimum visibility percentage to start playing (0.0 to 1.0)
@@ -16,7 +90,13 @@ class MediaListPlayerConfig {
   /// Whether to mute when scrolled past
   final bool muteWhenNotVisible;
 
-  /// Whether to pause other players when this one plays
+  /// Whether starting playback on this player pauses every other currently
+  /// playing [MediaListPlayer] in the app (e.g. a vertical feed where only
+  /// one item should ever play at once). Coordination is scoped to
+  /// [MediaListPlayer]-hosted controllers only, keyed by controller
+  /// identity, and is edge-triggered on "playback just started" — it never
+  /// re-pauses on unrelated state ticks (position updates, buffering,
+  /// volume changes) while a player is already playing.
   final bool pauseOthersOnPlay;
 
   const MediaListPlayerConfig({
@@ -88,9 +168,23 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
   double _visibilityFraction = 0.0;
   bool _hasPlayedOnce = false;
 
+  /// Tracks the controller's playing state as of the last notification, so
+  /// [_handleControllerStateChange] can detect a play *edge* (not-playing →
+  /// playing) rather than reacting to every state tick while already
+  /// playing (position updates, buffering, volume/mute changes, etc.).
+  bool _wasPlaying = false;
+
   @override
   void initState() {
     super.initState();
+    _wasPlaying = widget.controller.isPlaying;
+    // Register with the mutual-exclusion coordinator so this controller can
+    // participate in pauseOthersOnPlay — both as a pauser (if its own config
+    // enables it) and as something other players can pause. Registration is
+    // independent of this widget's own pauseOthersOnPlay value because that
+    // flag governs whether *this* player pauses others, not whether it can
+    // itself be paused by another list item.
+    _MediaListPlaybackCoordinator.instance.register(widget.controller);
     // Listen to controller state changes
     widget.controller.addListener(_handleControllerStateChange);
   }
@@ -98,10 +192,24 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
   @override
   void dispose() {
     widget.controller.removeListener(_handleControllerStateChange);
+    // Explicit, synchronous removal — never rely on GC to drop a disposed
+    // controller from the shared registry.
+    _MediaListPlaybackCoordinator.instance.unregister(widget.controller);
     super.dispose();
   }
 
   void _handleControllerStateChange() {
+    final isPlayingNow = widget.controller.isPlaying;
+    // Edge-triggered: only act the instant playback starts, never on
+    // subsequent notifications while it continues playing. This is what
+    // keeps pauseOthersOnPlay from fighting the user — it fires once per
+    // genuine "this item started playing" event, not on arbitrary ticks.
+    if (isPlayingNow && !_wasPlaying && widget.config.pauseOthersOnPlay) {
+      _MediaListPlaybackCoordinator.instance
+          .onDidStartPlaying(widget.controller);
+    }
+    _wasPlaying = isPlayingNow;
+
     // Handle any controller state changes if needed
     if (mounted) {
       setState(() {});

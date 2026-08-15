@@ -98,7 +98,6 @@ void main() {
           'drmConfig': {
             'scheme': 'widevine',
             'licenseUrl': 'https://example.com/license',
-            'allowOffline': true,
           },
         };
 
@@ -107,7 +106,7 @@ void main() {
         expect(item.id, '1');
         expect(item.drmConfig, isNotNull);
         expect(item.drmConfig?.scheme, DrmScheme.widevine);
-        expect(item.drmConfig?.allowOffline, true);
+        expect(item.drmConfig?.licenseUrl, 'https://example.com/license');
       });
 
       test('round-trip serialization with DRM preserves data', () {

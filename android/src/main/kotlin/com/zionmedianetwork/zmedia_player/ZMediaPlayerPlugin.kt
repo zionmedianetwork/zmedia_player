@@ -21,6 +21,30 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
     private lateinit var playerManager: MediaPlayerManager
     private var activity: Activity? = null
 
+    companion object {
+        /**
+         * M-16: wire protocol version for the MethodChannel contract with the
+         * Dart package (see `MediaPlayer.protocolVersion` in
+         * lib/src/core/media_player.dart). Bump this alongside a matching
+         * Dart-side bump whenever a MethodChannel contract change requires
+         * native to be rebuilt to stay compatible (new required arguments,
+         * renamed methods, changed event payload shapes, etc.). Mirrored on
+         * iOS by `ZMediaPlayerPlugin.nativeProtocolVersion` in
+         * ZMediaPlayerPlugin.swift.
+         */
+        const val NATIVE_PROTOCOL_VERSION = 1
+
+        /**
+         * Oldest Dart `protocolVersion` this native implementation still
+         * accepts. A host app can end up running a newer Dart package
+         * against a stale cached/compiled native build (the package is
+         * distributed by git ref, not pub.dev) — `handleInitialize` rejects
+         * that combination explicitly instead of letting later calls fail
+         * ambiguously (e.g. via a raw `MissingPluginException`).
+         */
+        const val MIN_SUPPORTED_DART_PROTOCOL_VERSION = 1
+    }
+
     // Phase 3: Handler maps
     private val notificationHandlers = mutableMapOf<String, NotificationHandler>()
     private val pipHandlers = mutableMapOf<String, PipHandler>()
@@ -112,13 +136,39 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
         try {
             val playerId = call.argument<String>("playerId")
             val config = call.argument<Map<String, Any>>("config")
+            val dartProtocolVersion = call.argument<Int>("protocolVersion")
 
-            if (playerId != null) {
-                playerManager.initializePlayer(playerId, config)
-                result.success(null)
-            } else {
+            if (playerId == null) {
                 result.error("INVALID_ARGUMENT", "Player ID is required", null)
+                return
             }
+
+            // M-16: reject a Dart package too old for this native build
+            // before doing anything else. A null dartProtocolVersion means
+            // the Dart side predates version negotiation entirely — allow it
+            // through unchanged (nothing to compare against).
+            if (dartProtocolVersion != null && dartProtocolVersion < MIN_SUPPORTED_DART_PROTOCOL_VERSION) {
+                result.error(
+                    "PROTOCOL_VERSION_MISMATCH",
+                    "Dart package protocol v$dartProtocolVersion is older than the minimum " +
+                        "v$MIN_SUPPORTED_DART_PROTOCOL_VERSION this native plugin " +
+                        "(v$NATIVE_PROTOCOL_VERSION) requires. Rebuild the app against a " +
+                        "matching zmedia_player native version.",
+                    mapOf(
+                        "nativeProtocolVersion" to NATIVE_PROTOCOL_VERSION,
+                        "minSupportedDartProtocolVersion" to MIN_SUPPORTED_DART_PROTOCOL_VERSION,
+                        "dartProtocolVersion" to dartProtocolVersion
+                    )
+                )
+                return
+            }
+
+            playerManager.initializePlayer(playerId, config)
+            // Report our own version back so Dart can, symmetrically, detect
+            // a native build too old for what it's about to call (see
+            // MediaPlayer.initialize()'s minSupportedNativeProtocolVersion
+            // check).
+            result.success(mapOf("protocolVersion" to NATIVE_PROTOCOL_VERSION))
         } catch (e: Exception) {
             result.error("INITIALIZATION_ERROR", e.message, null)
         }
@@ -136,7 +186,31 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware {
                 result.error("INVALID_ARGUMENT", "Player ID and media item are required", null)
             }
         } catch (e: Exception) {
-            result.error("LOAD_ERROR", e.message, null)
+            // H-01: loadMediaItem() only builds the MediaSource graph
+            // synchronously — actual network/DRM/decoder failures surface
+            // later, asynchronously, via Player.Listener.onPlayerError ->
+            // notifyError()'s "onError" event (already categorized there).
+            // A synchronous exception here means source/DRM *configuration*
+            // itself was rejected before ExoPlayer ever started loading.
+            result.error("LOAD_ERROR", e.message, mapOf("category" to categorizeSynchronousLoadError(e)))
+        }
+    }
+
+    /**
+     * Best-effort categorization (see [MediaPlayerManager]'s
+     * `categorizeExoPlayerError`) for exceptions thrown synchronously while
+     * building the ExoPlayer MediaSource graph — i.e. before playback even
+     * starts, so there is no [com.google.android.exoplayer2.PlaybackException]
+     * with a proper error code to inspect yet.
+     */
+    private fun categorizeSynchronousLoadError(e: Exception): String {
+        val message = e.message?.lowercase() ?: ""
+        return when {
+            e is IllegalStateException &&
+                (message.contains("drm") || message.contains("license") || message.contains("https")) -> "DRM"
+            e is java.io.IOException || e is java.net.UnknownHostException -> "NETWORK"
+            e is IllegalArgumentException -> "SOURCE"
+            else -> "UNKNOWN"
         }
     }
 

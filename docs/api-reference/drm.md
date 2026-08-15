@@ -99,15 +99,6 @@ final drmConfig = DrmConfig.widevine(
 );
 ```
 
-### License Renewal
-
-```dart
-final drmConfig = DrmConfig.widevine(
-  licenseUrl: 'https://license.example.com/widevine',
-  autoRenewLicense: true, // Automatically renew expiring licenses
-);
-```
-
 ---
 
 ## DRM Session Monitoring
@@ -390,7 +381,7 @@ controller.player.drmSessionStream.listen((session) {
 
 #### "License expired"
 - **Cause:** License validity period ended
-- **Solution:** Enable `autoRenewLicense: true` or re-acquire license
+- **Solution:** Re-acquire the license (there is no built-in auto-renewal; see the note above `DrmConfig`)
 
 ### Debug Logging
 
@@ -421,9 +412,6 @@ class DrmConfig {
   final String? token;
   final String? keyId;
   final String? contentId;
-  final bool allowOffline; // Reserved for future use
-  final int? offlineLicenseDuration; // Reserved for future use
-  final bool autoRenewLicense;
   final Map<String, dynamic>? customData;
   final EzdrmConfig? ezdrmConfig;
 }

@@ -18,6 +18,7 @@
 // outgoing calls + handlePlatformMessage with StandardMethodCodec to inject
 // native events that advance the player's internal state.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zmedia_player/zmedia_player.dart';
@@ -547,6 +548,124 @@ void main() {
         mediaItemArg['url'],
         _dummyItem.url,
         reason: 'url value must match the MediaItem.url field',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
+
+  // =========================================================================
+  group('NotificationService — debug-mode "no actionStream listener" warning',
+      () {
+    late DebugPrintCallback originalDebugPrint;
+    late List<String> messages;
+
+    setUp(() {
+      originalDebugPrint = debugPrint;
+      messages = <String>[];
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) messages.add(message);
+      };
+    });
+
+    tearDown(() {
+      debugPrint = originalDebugPrint;
+    });
+
+    // -----------------------------------------------------------------------
+    test('show() logs a warning when nothing has ever listened to actionStream',
+        () async {
+      _installCapture();
+      final player = MediaPlayer(playerId: 'notif-warn-no-listener');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-warn-no-listener', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-warn-no-listener',
+      );
+
+      expect(
+        messages.any(
+          (m) => m.contains('actionStream') && m.contains('WARNING'),
+        ),
+        isTrue,
+        reason: 'show() with no actionStream listener must log a debug '
+            'warning explaining that notification buttons will be dead',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test('show() does NOT log the warning when actionStream has a listener',
+        () async {
+      _installCapture();
+      final player = MediaPlayer(playerId: 'notif-warn-with-listener');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-warn-with-listener', mediaPlayer: player);
+
+      final sub = service.actionStream.listen((_) {});
+
+      await service.show(
+        mediaItem: _dummyItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-warn-with-listener',
+      );
+
+      expect(
+        messages.any((m) => m.contains('actionStream')),
+        isFalse,
+        reason: 'No warning should be logged once a listener is attached',
+      );
+
+      await sub.cancel();
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test('the warning is only logged once across multiple show() calls',
+        () async {
+      _installCapture();
+      final player = MediaPlayer(playerId: 'notif-warn-once');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-warn-once', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-warn-once',
+      );
+      await service.show(
+        mediaItem: _dummyItem,
+        state: const PlaybackState(state: PlayerState.paused),
+        playerId: 'notif-warn-once',
+      );
+      await service.show(
+        mediaItem: _dummyItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-warn-once',
+      );
+
+      final warningCount = messages
+          .where((m) => m.contains('actionStream') && m.contains('WARNING'))
+          .length;
+
+      expect(
+        warningCount,
+        1,
+        reason: 'The no-listener warning must only be logged once, not on '
+            'every show() call',
       );
 
       service.dispose();

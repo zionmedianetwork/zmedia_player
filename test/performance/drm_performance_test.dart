@@ -76,7 +76,6 @@ void main() {
         final config = DrmConfig.widevine(
           licenseUrl: 'https://license-server.com/widevine',
           headers: {'Authorization': 'Bearer token'},
-          allowOffline: true,
           customData: {
             'userId': 'user123',
             'contentId': 'content456',
@@ -104,7 +103,6 @@ void main() {
           'scheme': 'widevine',
           'licenseUrl': 'https://license-server.com/widevine',
           'headers': {'Authorization': 'Bearer token'},
-          'allowOffline': true,
           'customData': {
             'userId': 'user123',
             'contentId': 'content456',

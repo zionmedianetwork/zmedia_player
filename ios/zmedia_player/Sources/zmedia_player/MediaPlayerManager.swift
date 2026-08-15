@@ -1214,8 +1214,19 @@ class MediaPlayerInstance: NSObject {
                 self.activateTopmostView()
             }
         case .failed:
-            print("MediaPlayerInstance: Player failed with error: \(avPlayer?.error?.localizedDescription ?? "Unknown")")
-            notifyError(error: avPlayer?.error?.localizedDescription ?? "Unknown error")
+            let nsError = avPlayer?.error as NSError?
+            print("MediaPlayerInstance: Player failed with error: \(nsError?.localizedDescription ?? "Unknown")")
+            if let nsError = nsError {
+                let (category, httpStatusCode) = categorize(nsError)
+                notifyError(
+                    error: nsError.localizedDescription,
+                    category: category,
+                    nativeErrorCode: nsError.code,
+                    httpStatusCode: httpStatusCode
+                )
+            } else {
+                notifyError(error: "Unknown error")
+            }
         @unknown default:
             break
         }
@@ -1350,7 +1361,14 @@ class MediaPlayerInstance: NSObject {
             return
         }
         if let error = notification.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error {
-            notifyError(error: error.localizedDescription)
+            let nsError = error as NSError
+            let (category, httpStatusCode) = categorize(nsError)
+            notifyError(
+                error: nsError.localizedDescription,
+                category: category,
+                nativeErrorCode: nsError.code,
+                httpStatusCode: httpStatusCode
+            )
         }
     }
 
@@ -1394,7 +1412,14 @@ class MediaPlayerInstance: NSObject {
         case .failed:
             print("MediaPlayerInstance: PlayerItem status = failed")
             if let error = avPlayer?.currentItem?.error {
-                notifyError(error: error.localizedDescription)
+                let nsError = error as NSError
+                let (category, httpStatusCode) = categorize(nsError)
+                notifyError(
+                    error: nsError.localizedDescription,
+                    category: category,
+                    nativeErrorCode: nsError.code,
+                    httpStatusCode: httpStatusCode
+                )
             } else {
                 notifyError(error: "Player item failed to load")
             }
@@ -1838,11 +1863,78 @@ class MediaPlayerInstance: NSObject {
         }
     }
 
-    private func notifyError(error: String) {
-        let arguments: [String: Any] = [
+    /// H-01: maps an `NSError` from AVPlayer/AVPlayerItem onto the small,
+    /// cross-platform error-category vocabulary shared with the Dart mapper
+    /// (see `MediaErrorCategory` in lib/src/core/exceptions.dart) and
+    /// mirrored on Android by `MediaPlayerInstance.categorizeExoPlayerError`
+    /// in MediaPlayerManager.kt. All three call sites must stay in lockstep
+    /// — the Dart test suite (test/exceptions/error_category_vocabulary_test.dart)
+    /// parses this file's category string literals as text and fails if they
+    /// drift from the Dart vocabulary.
+    ///
+    /// NEEDS ON-DEVICE VERIFICATION: exact NSError domains/codes surfaced
+    /// for each real-world failure (bad HTTP status, DNS failure,
+    /// unsupported codec, FairPlay license failure, etc.) can only be
+    /// confirmed against real network/DRM conditions.
+    private func categorize(_ error: NSError) -> (category: String, httpStatusCode: Int?) {
+        // An HTTPURLResponse embedded in userInfo (when present) gives the
+        // most precise signal: the server responded, so this is an HTTP
+        // failure with a concrete status code, regardless of domain.
+        if let response = error.userInfo["NSErrorFailingURLResponseKey"] as? HTTPURLResponse {
+            return ("HTTP", response.statusCode)
+        }
+
+        if error.domain == NSURLErrorDomain {
+            switch error.code {
+            case NSURLErrorBadServerResponse, NSURLErrorZeroByteResource:
+                return ("HTTP", nil)
+            default:
+                // Everything else in NSURLErrorDomain (timeouts, offline,
+                // DNS/host failures, connection lost, cleartext/ATS
+                // rejections, etc.) is a connectivity problem.
+                return ("NETWORK", nil)
+            }
+        }
+
+        if error.domain == AVFoundationErrorDomain {
+            switch error.code {
+            case AVError.contentIsProtected.rawValue:
+                return ("DRM", nil)
+            case AVError.decoderNotFound.rawValue,
+                 AVError.decoderTemporarilyUnavailable.rawValue,
+                 AVError.encoderNotFound.rawValue:
+                return ("DECODER", nil)
+            case AVError.fileFormatNotRecognized.rawValue,
+                 AVError.fileFailedToParse.rawValue,
+                 AVError.noSourceTrack.rawValue,
+                 AVError.invalidSourceMedia.rawValue,
+                 AVError.mediaDiscontinuity.rawValue:
+                return ("SOURCE", nil)
+            default:
+                return ("UNKNOWN", nil)
+            }
+        }
+
+        return ("UNKNOWN", nil)
+    }
+
+    private func notifyError(
+        error: String,
+        category: String = "UNKNOWN",
+        nativeErrorCode: Int? = nil,
+        httpStatusCode: Int? = nil
+    ) {
+        var arguments: [String: Any] = [
             "playerId": playerId,
-            "error": error
+            "error": error,
+            "category": category
         ]
+        if let nativeErrorCode = nativeErrorCode {
+            arguments["nativeErrorCode"] = nativeErrorCode
+        }
+        if let httpStatusCode = httpStatusCode {
+            arguments["httpStatusCode"] = httpStatusCode
+        }
         methodChannel.invokeMethod("onError", arguments: arguments)
     }
 }

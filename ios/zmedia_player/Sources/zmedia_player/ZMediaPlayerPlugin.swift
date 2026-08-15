@@ -6,6 +6,22 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
     private var playerManager: MediaPlayerManager!
     private var methodChannel: FlutterMethodChannel!
 
+    /// M-16: wire protocol version for the MethodChannel contract with the
+    /// Dart package (see `MediaPlayer.protocolVersion` in
+    /// lib/src/core/media_player.dart). Bump alongside a matching Dart-side
+    /// bump whenever a MethodChannel contract change requires native to be
+    /// rebuilt to stay compatible. Mirrored on Android by
+    /// `ZMediaPlayerPlugin.NATIVE_PROTOCOL_VERSION` in ZMediaPlayerPlugin.kt.
+    private static let nativeProtocolVersion = 1
+
+    /// Oldest Dart `protocolVersion` this native implementation still
+    /// accepts. The package is distributed by git ref (not pub.dev), so a
+    /// host app can end up running a newer Dart package against a stale
+    /// cached/compiled native build — `handleInitialize` rejects that
+    /// combination explicitly instead of letting later calls fail
+    /// ambiguously via a raw `MissingPluginException`.
+    private static let minSupportedDartProtocolVersion = 1
+
     // Phase 3: Handler maps
     private var notificationHandlers: [String: NotificationHandler] = [:]
     private var pipHandlers: [String: PipHandler] = [:]
@@ -153,10 +169,36 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         }
 
         let config = args["config"] as? [String: Any]
+        let dartProtocolVersion = args["protocolVersion"] as? Int
+
+        // M-16: reject a Dart package too old for this native build before
+        // doing anything else. A nil dartProtocolVersion means the Dart side
+        // predates version negotiation entirely — allow it through unchanged
+        // (nothing to compare against).
+        if let dartProtocolVersion = dartProtocolVersion,
+           dartProtocolVersion < ZMediaPlayerPlugin.minSupportedDartProtocolVersion {
+            result(FlutterError(
+                code: "PROTOCOL_VERSION_MISMATCH",
+                message: "Dart package protocol v\(dartProtocolVersion) is older than the minimum "
+                    + "v\(ZMediaPlayerPlugin.minSupportedDartProtocolVersion) this native plugin "
+                    + "(v\(ZMediaPlayerPlugin.nativeProtocolVersion)) requires. Rebuild the app "
+                    + "against a matching zmedia_player native version.",
+                details: [
+                    "nativeProtocolVersion": ZMediaPlayerPlugin.nativeProtocolVersion,
+                    "minSupportedDartProtocolVersion": ZMediaPlayerPlugin.minSupportedDartProtocolVersion,
+                    "dartProtocolVersion": dartProtocolVersion
+                ]
+            ))
+            return
+        }
 
         do {
             try playerManager.initializePlayer(playerId: playerId, config: config)
-            result(nil)
+            // Report our own version back so Dart can, symmetrically, detect
+            // a native build too old for what it's about to call (see
+            // MediaPlayer.initialize()'s minSupportedNativeProtocolVersion
+            // check).
+            result(["protocolVersion": ZMediaPlayerPlugin.nativeProtocolVersion])
         } catch {
             result(FlutterError(code: "INITIALIZATION_ERROR", message: error.localizedDescription, details: nil))
         }

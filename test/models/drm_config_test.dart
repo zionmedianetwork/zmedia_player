@@ -8,15 +8,11 @@ void main() {
         final config = DrmConfig.widevine(
           licenseUrl: 'https://example.com/license',
           headers: {'Authorization': 'Bearer token'},
-          allowOffline: true,
-          offlineLicenseDuration: 3600,
         );
 
         expect(config.scheme, DrmScheme.widevine);
         expect(config.licenseUrl, 'https://example.com/license');
         expect(config.headers?['Authorization'], 'Bearer token');
-        expect(config.allowOffline, true);
-        expect(config.offlineLicenseDuration, 3600);
       });
 
       test('creates FairPlay config correctly', () {
@@ -56,12 +52,10 @@ void main() {
 
         final config = DrmConfig.ezdrm(
           ezdrmConfig: ezdrmConfig,
-          allowOffline: true,
         );
 
         expect(config.scheme, DrmScheme.ezdrm);
         expect(config.ezdrmConfig, ezdrmConfig);
-        expect(config.allowOffline, true);
       });
     });
 
@@ -72,7 +66,6 @@ void main() {
           licenseUrl: 'https://example.com/license',
           headers: {'key': 'value'},
           token: 'token123',
-          allowOffline: true,
         );
 
         final map = config.toMap();
@@ -81,7 +74,6 @@ void main() {
         expect(map['licenseUrl'], 'https://example.com/license');
         expect(map['headers'], {'key': 'value'});
         expect(map['token'], 'token123');
-        expect(map['allowOffline'], true);
       });
 
       test('fromMap() deserializes correctly', () {
@@ -89,7 +81,6 @@ void main() {
           'scheme': 'fairplay',
           'licenseUrl': 'https://example.com/license',
           'certificateUrl': 'https://example.com/cert.cer',
-          'allowOffline': false,
         };
 
         final config = DrmConfig.fromMap(map);
@@ -97,14 +88,12 @@ void main() {
         expect(config.scheme, DrmScheme.fairplay);
         expect(config.licenseUrl, 'https://example.com/license');
         expect(config.certificateUrl, 'https://example.com/cert.cer');
-        expect(config.allowOffline, false);
       });
 
       test('round-trip serialization preserves data', () {
         final original = DrmConfig.widevine(
           licenseUrl: 'https://example.com/license',
           headers: {'Auth': 'Bearer token'},
-          allowOffline: true,
         );
 
         final map = original.toMap();
@@ -113,7 +102,6 @@ void main() {
         expect(deserialized.scheme, original.scheme);
         expect(deserialized.licenseUrl, original.licenseUrl);
         expect(deserialized.headers, original.headers);
-        expect(deserialized.allowOffline, original.allowOffline);
       });
     });
 
@@ -121,17 +109,14 @@ void main() {
       test('creates modified copy with new values', () {
         final original = DrmConfig.widevine(
           licenseUrl: 'https://example.com/license',
-          allowOffline: false,
         );
 
         final modified = original.copyWith(
-          allowOffline: true,
           headers: {'New': 'Header'},
         );
 
         expect(modified.licenseUrl, original.licenseUrl);
         expect(modified.scheme, original.scheme);
-        expect(modified.allowOffline, true);
         expect(modified.headers?['New'], 'Header');
       });
 

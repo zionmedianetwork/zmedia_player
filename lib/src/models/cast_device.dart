@@ -110,12 +110,6 @@ enum CastDeviceType {
   /// Apple AirPlay
   airplay,
 
-  /// DLNA device
-  dlna,
-
-  /// Miracast device
-  miracast,
-
   /// Unknown/other device
   unknown,
 }
