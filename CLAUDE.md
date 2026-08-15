@@ -1170,6 +1170,7 @@ The release workflow respects branch protection rules on `main` by creating a pu
 - `pubspec.yaml` - Package version
 - `CHANGELOG.md` - Version history with categorized changes
 - `README.md` - Version badge (`[![Version](https://img.shields.io/badge/version-X.Y.Z-blue.svg)]`)
+- `ios/zmedia_player.podspec` - CocoaPods version metadata (the workflow fails loudly if it cannot update this, rather than shipping a stale version)
 
 **Release Branch:**
 

@@ -312,6 +312,28 @@ jobs:
           sed -i "s/^version: .*/version: $NEW_VERSION/" pubspec.yaml
           echo "Updated pubspec.yaml to version $NEW_VERSION"
 
+      - name: Update iOS podspec version
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          set -e
+          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          PODSPEC="ios/zmedia_player.podspec"
+
+          # The podspec version was previously never bumped by this workflow and
+          # drifted to 0.1.0 while pubspec.yaml reached 0.2.5. It is not checked
+          # for local path installs, but it is release metadata that should not
+          # be wrong, and it would matter if this were ever published as a pod.
+          sed -i "s/^\([[:space:]]*s\.version[[:space:]]*=[[:space:]]*\).*/\1'$NEW_VERSION'/" "$PODSPEC"
+
+          # Fail loudly rather than silently shipping a stale version if the
+          # podspec's formatting ever changes out from under this sed.
+          if ! grep -q "s\.version *= *'$NEW_VERSION'" "$PODSPEC"; then
+            echo "ERROR: failed to update $PODSPEC to $NEW_VERSION. Current line:"
+            grep -n 's\.version' "$PODSPEC" || echo "  (no s.version line found)"
+            exit 1
+          fi
+          echo "Updated $PODSPEC to version $NEW_VERSION"
+
       - name: Update CHANGELOG.md
         if: ${{ github.event.inputs.dry_run != 'true' }}
         run: |
@@ -407,7 +429,7 @@ jobs:
           git checkout -B "$RELEASE_BRANCH"
 
           # Commit version bump
-          git add pubspec.yaml CHANGELOG.md README.md
+          git add pubspec.yaml CHANGELOG.md README.md ios/zmedia_player.podspec
           git commit -m "chore(release): bump version to $NEW_VERSION"
 
           # Force-push the release branch. It is ephemeral (created per release,

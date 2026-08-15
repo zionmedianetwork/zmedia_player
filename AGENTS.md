@@ -128,12 +128,30 @@ also re-emits via `ChangeNotifier`, so for UI you can just `AnimatedBuilder(anim
 | `drmSessionStream` | `DrmSession` |
 | `pipStatusStream` / `castStatusStream` / `castDevicesStream` | `PipStatus` / `CastStatus` / `List<CastDevice>` |
 | `notificationActionStream` | `String` (action id) |
+| `errorStream` | `MediaPlayerException` (typed — see error categories below) |
+| `pauseReasonStream` | `PlayerPauseReason` (distinguishes an audio-focus-loss pause from a user pause) |
+| `networkStatusStream` / `networkChangeStream` | `NetworkStatus` / `NetworkChangeEvent` |
 
 Native→Dart events (handled in `MediaPlayer._handleMethodCall`, dispatched by `playerId`):
 `onPlaybackStateChanged`, `onPositionChanged`, `onDurationChanged`, `onVolumeChanged`,
 `onSpeedChanged`, `onQualityTracksChanged`, `onSubtitleTracksChanged`, `onAudioTracksChanged`,
 `onBandwidthUpdate`, `onBufferHealthUpdate`, `onDrmSessionUpdate`, `onNotificationAction`,
-`onPipStatusChanged`, `onCastStatusChanged`, `onCastDevicesChanged`, `onError`.
+`onPipStatusChanged`, `onCastStatusChanged`, `onCastDevicesChanged`,
+`onNetworkStatusChanged`, `onPlatformViewError`, `onError`.
+
+**Error categories.** `onError` carries a `category` in its details, drawn from a vocabulary both
+platforms share: `NETWORK`, `HTTP`, `DRM`, `DECODER`, `SOURCE`, `UNKNOWN`. Dart maps these onto the
+sealed exception hierarchy and emits typed exceptions on `errorStream`. **The vocabulary is
+guarded by a test that parses the native sources as text**
+(`test/exceptions/error_category_vocabulary_test.dart`) — if you add or rename a category on one
+platform, add it to `MediaErrorCategory` and to both native categorisers, or that test fails. The
+same technique guards the `connectionType` vocabulary in
+`test/models/network_status_vocabulary_test.dart`.
+
+**Protocol version.** `initialize` exchanges a protocol version in both directions; a skew raises
+`ProtocolMismatchException` rather than a raw `MissingPluginException`. If you add a MethodChannel
+method that older native builds will not have, consider whether the version needs incrementing —
+purely additive native→Dart events do not, since an old native build simply never sends them.
 
 ---
 
