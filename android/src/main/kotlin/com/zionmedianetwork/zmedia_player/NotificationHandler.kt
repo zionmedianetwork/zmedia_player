@@ -295,7 +295,15 @@ class NotificationHandler(
 
                 override fun onSeekTo(pos: Long) {
                     android.util.Log.d(TAG, "MediaSession: onSeekTo $pos")
-                    // Handle seek if needed
+                    // Forward the requested absolute position (milliseconds, per the
+                    // MediaSessionCompat.Callback.onSeekTo contract) to Flutter so it
+                    // can drive the actual seek -- mirrors iOS's
+                    // changePlaybackPositionCommand handling, which forwards via the
+                    // same "seekTo" action + "position" payload shape (see
+                    // NotificationHandler.swift). This handler does not seek the
+                    // player itself; Dart/the host app owns that (same contract as
+                    // every other transport action here).
+                    sendActionToFlutter("seekTo", pos)
                 }
             })
             // isActive is set below, gated by NotificationOwnership: multiple
@@ -942,12 +950,20 @@ class NotificationHandler(
         }
     }
 
-    private fun sendActionToFlutter(action: String) {
+    private fun sendActionToFlutter(action: String, position: Long? = null) {
         scope.launch {
-            methodChannel.invokeMethod("onNotificationAction", mapOf(
+            val arguments = mutableMapOf<String, Any>(
                 "playerId" to playerId,
                 "action" to action
-            ))
+            )
+            // Only "seekTo" ever carries a position; matches the iOS payload
+            // shape exactly (see NotificationHandler.swift's
+            // sendActionToFlutter) so Dart's NotificationActionEvent.fromMap
+            // parses the same map shape from either platform.
+            if (position != null) {
+                arguments["position"] = position
+            }
+            methodChannel.invokeMethod("onNotificationAction", arguments)
         }
     }
 }

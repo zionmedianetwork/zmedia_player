@@ -9,7 +9,9 @@ import '../widgets/player_scaffold.dart';
 /// - [NotificationService.initialize] with a [MediaPlayer]
 /// - [NotificationService.show] to display / update the notification
 /// - [NotificationService.dismiss] to remove the notification
-/// - [NotificationService.actionStream] to receive play/pause/next actions
+/// - [NotificationService.actionEventStream] to receive play/pause/next/seekTo
+///   actions (typed as [NotificationActionEvent], which carries the seek
+///   position for "seekTo")
 ///
 /// REQUIREMENTS:
 ///   Android 13+ requires POST_NOTIFICATIONS permission at runtime.
@@ -18,8 +20,8 @@ import '../widgets/player_scaffold.dart';
 ///
 /// NOTE: On Android, the notification is shown in the system tray.
 /// On iOS, it appears in the lock screen and Control Center.
-/// The notification actions (play, pause, next, previous) call back via
-/// [MediaPlayer.notificationActionStream].
+/// The notification actions (play, pause, next, previous, seekTo) call back via
+/// [MediaPlayer.notificationActionEventStream].
 class NotificationsPage extends StatefulWidget {
   const NotificationsPage({super.key});
 
@@ -30,7 +32,7 @@ class NotificationsPage extends StatefulWidget {
 class _NotificationsPageState extends State<NotificationsPage> {
   late final MediaController _controller;
   late final NotificationService _notificationService;
-  StreamSubscription<String>? _actionSub;
+  StreamSubscription<NotificationActionEvent>? _actionSub;
 
   bool _isLoading = false;
   bool _notifShowing = false;
@@ -92,15 +94,21 @@ class _NotificationsPageState extends State<NotificationsPage> {
         mediaPlayer: _controller.player,
       );
 
-      // Listen for notification actions
+      // Listen for notification actions. actionEventStream (not the
+      // deprecated actionStream) is required here because "seekTo" (dragging
+      // the lock-screen / Control Center scrub bar) only carries its target
+      // position on the typed event stream.
       _actionSub?.cancel();
-      _actionSub = _notificationService.actionStream.listen((action) {
+      _actionSub = _notificationService.actionEventStream.listen((event) {
         if (mounted) {
           setState(() {
-            _receivedActions.insert(0, action);
+            final label = event.position != null
+                ? '${event.action} (${event.position})'
+                : event.action;
+            _receivedActions.insert(0, label);
             if (_receivedActions.length > 10) _receivedActions.removeLast();
           });
-          _handleNotificationAction(action);
+          _handleNotificationAction(event);
         }
       });
 
@@ -125,8 +133,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
-  void _handleNotificationAction(String action) {
-    switch (action) {
+  void _handleNotificationAction(NotificationActionEvent event) {
+    switch (event.action) {
       case 'play':
         _controller.play();
         break;
@@ -147,6 +155,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
         break;
       case 'seekBackward':
         _controller.seekBackward();
+        break;
+      case NotificationActions.seekTo:
+        // The host app -- not the package -- is responsible for performing
+        // this seek: NotificationService only forwards the event.
+        final position = event.position;
+        if (position != null) {
+          _controller.seekTo(position);
+        }
         break;
     }
   }
@@ -358,7 +374,9 @@ class _NotifNote extends StatelessWidget {
         'iOS requires user permission and UIBackgroundModes (audio) in Info.plist.\n'
         'API: NotificationService(config) -> initialize(playerId, mediaPlayer) -> '
         'show(mediaItem, state, playerId) / dismiss(playerId).\n'
-        'Actions arrive on actionStream.',
+        'Actions arrive on actionEventStream (drag the lock-screen / Control '
+        'Center scrub bar to test "seekTo", which carries the target '
+        'position).',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     );

@@ -7,14 +7,16 @@ For live streaming see [Live Streaming](live-streaming.md); for DRM see [DRM](dr
 
 Lock-screen / Control Center controls backed by `NotificationService`.
 
-> **Required: subscribe to `actionStream`.** `NotificationService` only renders the
-> lock-screen / Control Center UI and forwards taps as string events on
-> `actionStream` — it does **not** call `play()`/`pause()`/`skipToNext()` etc. on your
-> behalf. If your app shows a notification without listening to `actionStream` and
-> routing each action to the controller (as in the snippet below), the notification
-> will render correctly but every button on it will do nothing when tapped. This is
-> easy to miss because there is no error: the notification looks complete, and only
-> manual testing reveals the dead buttons.
+> **Required: subscribe to `actionEventStream`.** `NotificationService` only renders
+> the lock-screen / Control Center UI and forwards taps as events on
+> `actionEventStream` — it does **not** call `play()`/`pause()`/`skipToNext()`/
+> `seekTo()` etc. on your behalf. If your app shows a notification without listening
+> to `actionEventStream` and routing each event to the controller (as in the snippet
+> below), the notification will render correctly but every button on it will do
+> nothing when tapped. This is easy to miss because there is no error: the
+> notification looks complete, and only manual testing reveals the dead buttons.
+> **This is the package's contract, not a bug**: `NotificationService` renders and
+> forwards; your host app performs the actual playback calls.
 
 ```dart
 final notifications = NotificationService(const NotificationConfig(
@@ -34,14 +36,20 @@ await notifications.show(
   playerId: controller.playerId,
 );
 
-notifications.actionStream.listen((action) {
-  switch (action) {
+notifications.actionEventStream.listen((event) {
+  switch (event.action) {
     case 'play': controller.play(); break;
     case 'pause': controller.pause(); break;
     case 'next': controller.skipToNext(); break;
     case 'previous': controller.skipToPrevious(); break;
     case 'seekForward': controller.seekForward(); break;
     case 'seekBackward': controller.seekBackward(); break;
+    case NotificationActions.seekTo:
+      // Dragging the lock-screen / Control Center scrub bar. event.position
+      // is only ever non-null for this action — your app must call seekTo()
+      // itself; NotificationService does not.
+      if (event.position != null) controller.seekTo(event.position!);
+      break;
   }
 });
 
@@ -53,6 +61,11 @@ await notifications.dismiss(controller.playerId);
   `AVAssetImageGenerator`, Android `MediaMetadataRetriever`).
 - iOS background audio requires `UIBackgroundModes: audio`; Android 13+ requires the
   `POST_NOTIFICATIONS` runtime permission.
+- `actionEventStream` emits `NotificationActionEvent` (`action` + an optional
+  `position`). The older `Stream<String> actionStream` still works and receives every
+  action (including `"seekTo"`) but is `@Deprecated` because it cannot carry
+  `position` — dragging the scrub bar is unactionable through it. Prefer
+  `actionEventStream` in new code.
 
 ## Picture-in-Picture
 

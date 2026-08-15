@@ -13,6 +13,7 @@ import '../models/drm_config.dart';
 import '../models/buffering_config.dart';
 import '../models/buffer_health.dart';
 import '../models/network_status.dart';
+import '../models/notification_config.dart';
 import '../services/buffering_service.dart';
 import '../services/network_resilience_service.dart';
 import '../security/input_validation.dart';
@@ -133,6 +134,9 @@ class MediaPlayer {
       StreamController<DrmSession>.broadcast();
   final StreamController<String> _notificationActionController =
       StreamController<String>.broadcast();
+  final StreamController<NotificationActionEvent>
+      _notificationActionEventController =
+      StreamController<NotificationActionEvent>.broadcast();
   final StreamController<int> _bandwidthController =
       StreamController<int>.broadcast();
   final StreamController<BufferHealth> _bufferHealthController =
@@ -746,10 +750,34 @@ class MediaPlayer {
     return _drmSessionController.stream;
   }
 
-  /// Stream of notification action events
+  /// Stream of notification action identifiers only (no position).
+  ///
+  /// Cannot carry the position a `"seekTo"` (lock-screen / Control Center scrub
+  /// bar) action was requested at. Prefer [notificationActionEventStream], which
+  /// emits [NotificationActionEvent] and carries [NotificationActionEvent.position]
+  /// for that action.
+  @Deprecated(
+    'Use notificationActionEventStream instead, which carries '
+    'NotificationActionEvent.position for "seekTo" — required to make '
+    'lock-screen/Control Center scrub-bar seeking work. Kept for backward '
+    'compatibility; still receives every action (including "seekTo", with no '
+    'position).',
+  )
   Stream<String> get notificationActionStream {
     _throwIfDisposed();
     return _notificationActionController.stream;
+  }
+
+  /// Stream of notification action events, typed as [NotificationActionEvent].
+  ///
+  /// Carries [NotificationActionEvent.position] for `"seekTo"` (dragging the
+  /// lock-screen / Control Center scrub bar) — see that class's dartdoc. This
+  /// stream does not perform the seek itself; whoever consumes it (typically
+  /// [NotificationService.actionEventStream], forwarded to the host app) is
+  /// responsible for calling `seekTo(event.position)`.
+  Stream<NotificationActionEvent> get notificationActionEventStream {
+    _throwIfDisposed();
+    return _notificationActionEventController.stream;
   }
 
   /// Whether the player is initialized
@@ -1847,6 +1875,7 @@ class MediaPlayer {
       _castDevicesController,
       _drmSessionController,
       _notificationActionController,
+      _notificationActionEventController,
       _errorController,
       _pauseReasonController,
     ];
@@ -1904,6 +1933,7 @@ class MediaPlayer {
       'castDevicesController',
       'drmSessionController',
       'notificationActionController',
+      'notificationActionEventController',
       'errorController',
       'pauseReasonController',
     ];
@@ -2393,13 +2423,17 @@ class MediaPlayer {
     if (_isDisposed) return;
 
     try {
-      final action = arguments['action'] as String;
+      final event = NotificationActionEvent.fromMap(arguments);
 
+      if (!_notificationActionEventController.isClosed) {
+        _notificationActionEventController.add(event);
+      }
       if (!_notificationActionController.isClosed) {
-        _notificationActionController.add(action);
+        _notificationActionController.add(event.action);
       }
 
-      debugPrint('Notification action received: $action');
+      debugPrint('Notification action received: ${event.action}'
+          '${event.position != null ? ' (position: ${event.position})' : ''}');
     } catch (e) {
       debugPrint('Error processing notification action: $e');
     }
