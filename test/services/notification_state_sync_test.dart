@@ -417,6 +417,159 @@ void main() {
       service.dispose();
       await player.dispose();
     });
+
+    // -----------------------------------------------------------------------
+    test(
+        'show() falls back to the MediaItem\'s declared duration when the '
+        'live PlaybackState duration is still zero (promoted-notification '
+        'progress-bar fix)', () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-duration-fallback-show');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-duration-fallback-show',
+          mediaPlayer: player);
+
+      // A MediaItem with a statically-declared duration, e.g. a fixture like
+      // SampleMedia.bigBuckBunny (Duration(seconds: 10)).
+      const itemWithDeclaredDuration = MediaItem(
+        id: 'declared-duration-item',
+        title: 'Has Declared Duration',
+        url: 'https://example.com/video.mp4',
+        duration: Duration(seconds: 10),
+      );
+
+      // The live PlaybackState's duration is still Duration.zero (default) —
+      // simulating a non-owner player that never received a native
+      // onDurationChanged tick.
+      await service.show(
+        mediaItem: itemWithDeclaredDuration,
+        state: const PlaybackState(state: PlayerState.completed),
+        playerId: 'notif-duration-fallback-show',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final stateArg = showCall.arguments['state'] as Map<dynamic, dynamic>;
+
+      expect(
+        stateArg['duration'],
+        const Duration(seconds: 10).inMilliseconds,
+        reason:
+            'When the live state duration is unknown (zero), showNotification '
+            'must fall back to the MediaItem\'s declared duration so '
+            'METADATA_KEY_DURATION is never 0 for a media item whose total '
+            'duration is actually known.',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test(
+        'updateState() falls back to the currently-shown MediaItem\'s declared '
+        'duration when the live PlaybackState duration is still zero',
+        () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-duration-fallback-update');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-duration-fallback-update',
+          mediaPlayer: player);
+
+      const itemWithDeclaredDuration = MediaItem(
+        id: 'declared-duration-item-2',
+        title: 'Has Declared Duration',
+        url: 'https://example.com/video2.mp4',
+        duration: Duration(seconds: 10),
+      );
+
+      await service.show(
+        mediaItem: itemWithDeclaredDuration,
+        state: const PlaybackState(state: PlayerState.paused),
+        playerId: 'notif-duration-fallback-update',
+      );
+
+      calls.clear();
+
+      await service.updateState(
+        state: const PlaybackState(state: PlayerState.completed),
+        playerId: 'notif-duration-fallback-update',
+      );
+
+      final updateCall = calls.firstWhere(
+        (c) => c.method == 'updateNotificationState',
+        orElse: () => fail('No updateNotificationState call found'),
+      );
+      final stateArg =
+          updateCall.arguments['state'] as Map<dynamic, dynamic>;
+
+      expect(
+        stateArg['duration'],
+        const Duration(seconds: 10).inMilliseconds,
+        reason:
+            'updateState must also fall back to the declared MediaItem '
+            'duration when the live PlaybackState duration is unknown, not '
+            'just show().',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test(
+        'a non-zero live PlaybackState duration always takes priority over '
+        'the declared MediaItem duration', () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-duration-live-priority');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-duration-live-priority',
+          mediaPlayer: player);
+
+      const itemWithDeclaredDuration = MediaItem(
+        id: 'declared-duration-item-3',
+        title: 'Has Declared Duration',
+        url: 'https://example.com/video3.mp4',
+        duration: Duration(seconds: 10),
+      );
+
+      await service.show(
+        mediaItem: itemWithDeclaredDuration,
+        state: const PlaybackState(
+          state: PlayerState.playing,
+          duration: Duration(milliseconds: 123456),
+        ),
+        playerId: 'notif-duration-live-priority',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final stateArg = showCall.arguments['state'] as Map<dynamic, dynamic>;
+
+      expect(
+        stateArg['duration'],
+        123456,
+        reason:
+            'A known live duration must never be overridden by the declared '
+            'MediaItem duration.',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
   });
 
   // =========================================================================

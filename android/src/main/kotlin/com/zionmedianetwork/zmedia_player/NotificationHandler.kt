@@ -382,7 +382,25 @@ class NotificationHandler(
 
         isPlaying = state["isPlaying"] as? Boolean ?: false
         position = (state["position"] as? Number)?.toLong() ?: 0
-        duration = (state["duration"] as? Number)?.toLong() ?: 0
+
+        // Never let an already-known-good duration regress to 0/absent here.
+        // updateState() never changes which media item is showing (see the
+        // doc above), so a previously established duration is always still
+        // correct for the *current* item -- there is no legitimate reason
+        // for it to become unknown again mid-playback. Guarding against that
+        // is cheap insurance against any caller (present or future, Dart or
+        // native) that forwards a transient/unknown zero: without it, one
+        // such call would permanently blank METADATA_KEY_DURATION -- the
+        // progress bar's denominator -- for the rest of this instance's
+        // life, since nothing else ever re-derives it once showNotification()
+        // has already run. (showNotification() itself is deliberately NOT
+        // guarded this way: a genuine media-item change there *should* reset
+        // duration to whatever the new item's is, including 0/unknown, until
+        // it becomes known.)
+        val incomingDuration = (state["duration"] as? Number)?.toLong() ?: 0
+        if (incomingDuration > 0) {
+            duration = incomingDuration
+        }
 
         // Keep METADATA_KEY_DURATION in sync here too, not just
         // PlaybackStateCompat's position/state. These live on two separate

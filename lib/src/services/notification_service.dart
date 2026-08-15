@@ -53,6 +53,36 @@ class NotificationService {
   /// Whether notification is currently showing
   bool get isShowing => _isShowing;
 
+  /// The duration value to actually send to the native notification.
+  ///
+  /// The native side (`NotificationHandler.showNotification`/`updateState`
+  /// on Android, the equivalent on iOS) only ever reads whatever is placed
+  /// in the `'state'` map's `'duration'` key here — it never falls back to
+  /// the media item's own declared duration on its own. [state]'s duration
+  /// is the *live*, natively-tracked value (populated from the platform's
+  /// `onDurationChanged` callback), which is reliably known for a player
+  /// that has been actively playing/ticking, but can still be
+  /// `Duration.zero` for a player that has spent most of its life as a
+  /// non-owner: Android's position-update loop only calls
+  /// `notifyPositionChanged` while `ExoPlayer.isPlaying` is true (see
+  /// `MediaPlayerManager.kt`'s `startPositionUpdates`), so a
+  /// paused/completed/rarely-playing player gets far fewer natural
+  /// opportunities to (re)confirm its duration than a continuously-playing
+  /// owner does.
+  ///
+  /// [declaredDuration] — the [MediaItem]'s own statically-declared
+  /// `duration` — has no such dependency: it is known from the moment the
+  /// item is loaded, regardless of native playback ticks. Falling back to
+  /// it here, once, in the single place both [show] and [updateState] funnel
+  /// through, closes that gap for both platforms without native changes:
+  /// without this, a promoted (previously non-owner) player's notification
+  /// can permanently lack a progress bar, since Android's MediaStyle
+  /// notification requires `METADATA_KEY_DURATION > 0` to draw one at all.
+  Duration _effectiveDuration(PlaybackState state, Duration? declaredDuration) {
+    if (state.duration > Duration.zero) return state.duration;
+    return declaredDuration ?? Duration.zero;
+  }
+
   /// Initialize the notification service
   Future<void> initialize(String playerId, {MediaPlayer? mediaPlayer}) async {
     if (!_config.enabled) return;
@@ -118,6 +148,7 @@ class NotificationService {
     }
 
     try {
+      final effectiveDuration = _effectiveDuration(state, mediaItem.duration);
       await _channel.invokeMethod('showNotification', {
         'playerId': playerId,
         'mediaItem': {
@@ -132,7 +163,7 @@ class NotificationService {
         'state': {
           'state': state.state.name,
           'position': state.position.inMilliseconds,
-          'duration': state.duration.inMilliseconds,
+          'duration': effectiveDuration.inMilliseconds,
           'isPlaying': state.state == PlayerState.playing,
         },
       });
@@ -159,12 +190,14 @@ class NotificationService {
     }
 
     try {
+      final effectiveDuration =
+          _effectiveDuration(state, _currentMedia?.duration);
       await _channel.invokeMethod('updateNotificationState', {
         'playerId': playerId,
         'state': {
           'state': state.state.name,
           'position': state.position.inMilliseconds,
-          'duration': state.duration.inMilliseconds,
+          'duration': effectiveDuration.inMilliseconds,
           'isPlaying': state.state == PlayerState.playing,
         },
       });
