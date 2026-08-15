@@ -412,6 +412,107 @@ void main() {
   });
 
   // -------------------------------------------------------------------------
+  group('load / setPlaylist — speed reset guard', () {
+    // Regression coverage for the iOS "setSpeed defeats autoPlay" bug: the
+    // load-time speed reset to 1.0x must be skipped when the tracked speed
+    // is already 1.0 (the common case), and must still fire once the tracked
+    // speed has genuinely diverged from 1.0.
+    const item = MediaItem(
+      id: 'speed-guard-item',
+      title: 'Speed Guard Video',
+      url: 'https://cdn.example.com/video.mp4',
+      mediaType: MediaType.video,
+    );
+
+    test('load does not send "setSpeed" when speed is already 1.0',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-load-speed-noop');
+      await player.initialize();
+      calls.clear();
+
+      await player.load(item);
+
+      expect(calls.where((c) => c.method == 'setSpeed'), isEmpty,
+          reason: 'load() must not reset speed when it is already 1.0x — '
+              'the round trip is pure overhead and, on iOS, was what '
+              'defeated autoPlay: false');
+
+      player.dispose();
+    });
+
+    test('load sends exactly one "setSpeed" after a real speed change',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-load-speed-reset');
+      await player.initialize();
+      calls.clear();
+
+      await player.setSpeed(2.0);
+      calls.clear(); // ignore the explicit setSpeed(2.0) call itself
+
+      await player.load(item);
+
+      final setSpeedCalls =
+          calls.where((c) => c.method == 'setSpeed').toList();
+      expect(setSpeedCalls.length, 1,
+          reason: 'load() must reset speed back to 1.0x exactly once when '
+              'the tracked speed diverged from 1.0');
+      expect(setSpeedCalls.single.arguments['speed'], closeTo(1.0, 0.001));
+
+      player.dispose();
+    });
+
+    test('setPlaylist does not send "setSpeed" when speed is already 1.0',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-playlist-speed-noop');
+      await player.initialize();
+      calls.clear();
+
+      const playlist = Playlist(
+        id: 'speed-guard-playlist',
+        title: 'Speed Guard Playlist',
+        items: [item],
+      );
+      await player.setPlaylist(playlist);
+
+      expect(calls.where((c) => c.method == 'setSpeed'), isEmpty,
+          reason: 'setPlaylist() must not reset speed when it is already '
+              '1.0x');
+
+      player.dispose();
+    });
+
+    test('setPlaylist sends exactly one "setSpeed" after a real speed change',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'ch-playlist-speed-reset');
+      await player.initialize();
+      calls.clear();
+
+      await player.setSpeed(1.5);
+      calls.clear(); // ignore the explicit setSpeed(1.5) call itself
+
+      const playlist = Playlist(
+        id: 'speed-guard-playlist-2',
+        title: 'Speed Guard Playlist 2',
+        items: [item],
+      );
+      await player.setPlaylist(playlist);
+
+      final setSpeedCalls =
+          calls.where((c) => c.method == 'setSpeed').toList();
+      expect(setSpeedCalls.length, 1,
+          reason: 'setPlaylist() must reset speed back to 1.0x exactly once '
+              'when the tracked speed diverged from 1.0');
+      expect(setSpeedCalls.single.arguments['speed'], closeTo(1.0, 0.001));
+
+      player.dispose();
+    });
+  });
+
+  // -------------------------------------------------------------------------
   group('setQualityTrack / setAudioTrack / enableAutoQuality', () {
     // Inject tracks into the player via the platform event path so the
     // validation in setQualityTrack / setAudioTrack can succeed.

@@ -265,6 +265,12 @@ class MediaPlayerInstance: NSObject {
     private let methodChannel: FlutterMethodChannel
     private var config: [String: Any]?
 
+    /// The playback speed the consumer has ASKED for, independent of whether the
+    /// player is currently playing. `rate` cannot hold this: on AVPlayer a non-zero
+    /// `rate` is a transport command, so storing a speed there starts playback.
+    /// Applied on the next transition into playing — see `play()`.
+    private var requestedSpeed: Float = 1.0
+
     private var avPlayer: AVPlayer?
 
     // Per-host view tracking — each UiKitView host gets its own MediaPlayerView
@@ -542,10 +548,12 @@ class MediaPlayerInstance: NSObject {
                 print("MediaPlayerInstance.loadMediaItem(): No player views exist yet")
             }
 
-            // Auto play if configured
+            // Auto play if configured. Route through play() (not a bare
+            // avPlayer?.play()) so autoplay honours the requested speed and
+            // configures the audio session the same way an explicit play() would.
             if self.config?["autoPlay"] as? Bool == true {
                 print("MediaPlayerInstance.loadMediaItem(): Auto-playing")
-                self.avPlayer?.play()
+                self.play()
             }
         }
     }
@@ -573,7 +581,16 @@ class MediaPlayerInstance: NSObject {
         } catch {
             print("MediaPlayerInstance.play(): Failed to activate playback audio session: \(error)")
         }
-        avPlayer?.play()
+
+        guard let player = avPlayer else { return }
+        if #available(iOS 16.0, *) {
+            player.defaultRate = requestedSpeed
+            player.play()                      // plays at defaultRate
+        } else {
+            // Pre-16 has no defaultRate: assigning `rate` is the only way to
+            // start at a non-default speed, and here starting IS the intent.
+            player.rate = requestedSpeed
+        }
     }
 
     func pause() {
@@ -595,8 +612,23 @@ class MediaPlayerInstance: NSObject {
     }
 
     func setPlaybackSpeed(speed: Float) {
-        let clampedSpeed = max(0.25, min(4.0, speed))
-        avPlayer?.rate = clampedSpeed
+        let clamped = max(0.25, min(4.0, speed))
+        requestedSpeed = clamped
+
+        guard let player = avPlayer else { return }
+
+        // iOS 16+: `defaultRate` is the rate `play()` will use. Setting it never
+        // starts playback, which is precisely the separation this bug needs.
+        if #available(iOS 16.0, *) {
+            player.defaultRate = clamped
+        }
+
+        // Only touch `rate` when the player is already in a playing state.
+        // `.waitingToPlayAtSpecifiedRate` counts: playback has been requested and
+        // is merely stalled, so a speed change should apply to it.
+        if player.timeControlStatus != .paused {
+            player.rate = clamped
+        }
     }
 
     func setMuted(muted: Bool) {
@@ -774,7 +806,7 @@ class MediaPlayerInstance: NSObject {
 
     func isPlaying() -> Bool {
         guard let player = avPlayer else { return false }
-        return player.rate > 0
+        return player.timeControlStatus != .paused
     }
 
     func getBufferHealth() -> [String: Any] {
@@ -869,9 +901,10 @@ class MediaPlayerInstance: NSObject {
             player.isMuted = startMuted
         }
 
-        // Apply playback speed
+        // Apply playback speed. MUST go through setPlaybackSpeed — assigning
+        // `player.rate` here started playback on every initialize, defeating autoPlay.
         if let speed = config["speed"] as? Double {
-            player.rate = Float(speed)
+            setPlaybackSpeed(speed: Float(speed))
         }
 
         // Apply BoxFit to all live views
@@ -950,8 +983,11 @@ class MediaPlayerInstance: NSObject {
             notifyStateChanged(state: "buffering", isBuffering: true)
         case .readyToPlay:
             print("MediaPlayerInstance: PlayerItem status = readyToPlay")
-            // Check if player is currently playing to set correct state
-            if let player = avPlayer, player.rate > 0 {
+            // Check if player is currently playing to set correct state.
+            // Uses timeControlStatus (not `rate > 0`) for the same reason as
+            // isPlaying(): a player that has been told to play but is still
+            // buffering has rate == 0 yet is not "ready but not playing".
+            if let player = avPlayer, player.timeControlStatus != .paused {
                 print("MediaPlayerInstance: Player is playing (rate: \(player.rate))")
                 notifyStateChanged(state: "playing", isBuffering: false)
             } else {

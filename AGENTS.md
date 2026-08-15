@@ -201,6 +201,7 @@ await controller.connectAndLoadMedia(device);
 - **Quality/subtitle/audio tracks appear only after `play()`** — native reports them once buffering starts.
 - **Notifications need the player**: `initialize(playerId, mediaPlayer: …)` or lock-screen state won't sync.
 - **MethodChannel calls are async** — always `await`.
+- **Speed is a setting, transport is `play`/`pause`** — never conflate them. `setSpeed`/`MediaConfig.speed` must not start or stop playback on either platform, and with `autoPlay: false` nothing plays until an explicit `play()`. On iOS this means `AVPlayer.defaultRate` (+ a stored requested speed), *not* `rate`, which is a play command.
 - **Multiple players**: use distinct `playerId`s (e.g. in a `ListView` with `MediaListPlayer`); events route by `playerId`.
 - **iOS audio + silent switch**: the plugin sets `AVAudioSession` to `.playback` on `play()`; background audio needs `UIBackgroundModes: audio` in the host `Info.plist`.
 - **`boxFit`** maps to native video gravity: `contain`→aspect-fit, `cover`→aspect-fill, `fill`→stretch. Changing it at runtime propagates to the native view.

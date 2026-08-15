@@ -211,6 +211,34 @@ flutter drive --target=test_driver/fairplay_test.dart
 - Content key session
 - AirPlay with DRM
 
+### Known gaps: native unit tests
+
+Neither native layer currently has runnable unit tests. This is the reason the iOS
+"speed change starts playback" bug (fixed in `[Unreleased]`, see `CHANGELOG.md`) shipped:
+it was entirely native, so a mocked `MethodChannel` in a Dart test reported success.
+What each platform needs before native regression tests can be written:
+
+**iOS (`example/ios/RunnerTests/`)** — the target is not linked against the plugin.
+`Runner.xcodeproj` wires `FlutterGeneratedPluginSwiftPackage` (which pulls in the
+`zmedia_player` SPM package) into the **Runner** target only; the **RunnerTests** target
+has no `packageProductDependencies` entry, so `@testable import zmedia_player` fails with
+"no such module". The Podfile's `inherit! :search_paths` does not help — that propagates
+CocoaPods search paths, not Xcode's SPM package graph. `MediaPlayerInstance`,
+`avPlayer` and `isPlaying()` are `internal`, so access control is not the blocker.
+To unlock it, in Xcode: RunnerTests → General → *Frameworks, Libraries, and Embedded
+Content* → add the `zmedia-player` library product, then add the test file to the target's
+*Compile Sources*. (Hand-editing `project.pbxproj` risks corrupting it.) A regression test
+for the speed/transport split then needs a `FlutterMethodChannel` double and a short
+bundled fixture: initialize with `["autoPlay": false, "speed": 1.0]`, `loadMediaItem`, wait
+for `.readyToPlay`, assert `timeControlStatus == .paused` and `rate == 0`.
+
+**Android (`android/`)** — there is no `src/test/` directory (the `build.gradle`
+`sourceSets` entry points at one that does not exist) and the only test dependency is bare
+JUnit; no Robolectric, no Mockito. `MediaPlayerManager.exoPlayer` is a private field built
+internally by `ExoPlayer.Builder(context).build()`, with no injection seam for a fake
+`Player`. A parity test asserting `setPlaybackSpeed` leaves `playWhenReady` false needs
+both the test toolchain and an injectable player.
+
 ## Test Coverage Goals
 
 ### Minimum Coverage Targets

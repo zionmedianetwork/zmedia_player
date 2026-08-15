@@ -19,6 +19,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- iOS: setting the playback speed no longer starts playback, so `MediaConfig.autoPlay:
+  false` is finally honoured. On `AVPlayer`, assigning a non-zero `rate` **is** a
+  transport command (equivalent to `play()` at that rate), and both
+  `setPlaybackSpeed(speed:)` and `applyConfig()` assigned it directly. Because
+  `MediaPlayer.load()`/`setPlaylist()` reset the speed to 1.0x on every load, every iOS
+  player began playing as soon as its item reached `readyToPlay` — regardless of
+  `autoPlay`. Any host keeping more than one `MediaController` alive (feeds, carousels,
+  pre-warmed neighbours) got audio from players it never asked to play. Android was
+  unaffected: ExoPlayer's `setPlaybackSpeed` changes `PlaybackParameters` and never
+  touches `playWhenReady`.
+  - `MediaPlayerInstance` now stores the requested speed separately from transport
+    state. `setPlaybackSpeed` sets `AVPlayer.defaultRate` (iOS 16+), which never starts
+    playback, and only assigns `rate` when the player is not paused. `play()` applies
+    the stored speed (via `defaultRate` on iOS 16+, via `rate` pre-16, where starting
+    *is* the intent), so a speed set while paused is honoured on the next play instead
+    of being dropped.
+  - `applyConfig()` routes `config["speed"]` through `setPlaybackSpeed` instead of
+    assigning `player.rate`, which had started playback on every initialize.
+  - `loadMediaItem`'s autoplay branch calls `play()` rather than `avPlayer?.play()`, so
+    autoplay starts at the requested speed and configures the audio session identically
+    to an explicit play.
+  - Dart: the load-time speed reset in `MediaPlayer.load()` and `setPlaylist()` is now
+    skipped when the speed is already 1.0 — the round trip was pure overhead, and it was
+    the call that reached the iOS defect. The reset itself is kept, so a 2x speed still
+    does not leak from one media item into the next.
+
 - Grey video surface and Android "System UI has stopped" after prolonged use
   resolved — both were the same root cause: one shared player driving multiple
   native render surfaces as the host app mounts the player at up to three sites
@@ -62,6 +88,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `getRenderTargetWidth → getWidth()`-on-null NPE that fired when a resize was posted to
   the platform `Handler` after the `SurfaceProducer` was released on exit. iOS `UiKitView`
   is unchanged.
+
+### Changed
+- iOS: `isPlaying` is now `timeControlStatus != .paused` instead of `rate > 0`, and the
+  `readyToPlay` state notification uses the same test. **Behaviour change:** a player
+  that has been told to play but is still buffering now reports `isPlaying == true`
+  (previously `false` whenever `rate` dropped to 0 mid-stall). This reports intent to
+  play rather than "currently emitting frames"; consumers keying UI off `isPlaying`
+  should verify the new semantics suit them.
 
 ### Added
 - `FullscreenMediaPlayer` orientation control (non-breaking; defaults preserve the prior
