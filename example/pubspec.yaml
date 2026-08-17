@@ -13,6 +13,11 @@ dependencies:
     path: ../
   cupertino_icons: ^1.0.2
   fluentui_system_icons: ^1.1.273
+  # Only a transitive dependency of zmedia_player otherwise; declared
+  # directly here because the Local File Playback page (C-02 Stage 1,
+  # lib/pages/local_file_playback_page.dart) uses it directly to resolve
+  # the app's documents directory.
+  path_provider: ^2.1.0
 
 dev_dependencies:
   flutter_test:

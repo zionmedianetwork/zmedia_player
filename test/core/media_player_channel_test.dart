@@ -73,6 +73,76 @@ void main() {
 
       player.dispose();
     });
+
+    // C-03b: transparent Android-only adaptive-stream segment cache. The
+    // native (Kotlin) side reads this key directly off the "initialize" /
+    // "updateConfig" config map — see MediaPlayerInstance.loadMediaItem in
+    // MediaPlayerManager.kt — so the wire contract itself is the thing worth
+    // pinning down at the Dart layer; native behaviour is not exercised by
+    // this (pure-Dart) test suite.
+    group('adaptiveCacheConfig — outgoing contract', () {
+      test('omits "adaptiveCacheConfig" key when not configured', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(playerId: 'ch-init-cache-absent');
+        await player.initialize();
+
+        final initCall = calls.firstWhere((c) => c.method == 'initialize');
+        final config = initCall.arguments['config'] as Map;
+        expect(config.containsKey('adaptiveCacheConfig'), isFalse,
+            reason:
+                'no adaptiveCacheConfig on MediaConfig must mean no key at '
+                'all is sent, not a null/disabled placeholder — keeps '
+                'default behaviour byte-for-byte identical to before this '
+                'feature existed');
+
+        player.dispose();
+      });
+
+      test(
+          'sends "adaptiveCacheConfig" with enabled + maxCacheSizeBytes when '
+          'configured', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(
+          playerId: 'ch-init-cache-enabled',
+          config: const MediaConfig(
+            adaptiveCacheConfig: AdaptiveCacheConfig(
+              enabled: true,
+              maxCacheSizeBytes: 42 * 1024 * 1024,
+            ),
+          ),
+        );
+        await player.initialize();
+
+        final initCall = calls.firstWhere((c) => c.method == 'initialize');
+        final config = initCall.arguments['config'] as Map;
+        expect(config.containsKey('adaptiveCacheConfig'), isTrue);
+        final cacheConfig = config['adaptiveCacheConfig'] as Map;
+        expect(cacheConfig['enabled'], true);
+        expect(cacheConfig['maxCacheSizeBytes'], 42 * 1024 * 1024);
+
+        player.dispose();
+      });
+
+      test(
+          'sends "adaptiveCacheConfig" with enabled: false when explicitly '
+          'configured but not opted in', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(
+          playerId: 'ch-init-cache-explicit-off',
+          config: const MediaConfig(
+            adaptiveCacheConfig: AdaptiveCacheConfig(enabled: false),
+          ),
+        );
+        await player.initialize();
+
+        final initCall = calls.firstWhere((c) => c.method == 'initialize');
+        final config = initCall.arguments['config'] as Map;
+        final cacheConfig = config['adaptiveCacheConfig'] as Map;
+        expect(cacheConfig['enabled'], false);
+
+        player.dispose();
+      });
+    });
   });
 
   // -------------------------------------------------------------------------

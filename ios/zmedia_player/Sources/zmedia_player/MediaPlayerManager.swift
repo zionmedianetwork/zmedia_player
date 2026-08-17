@@ -740,7 +740,7 @@ class MediaPlayerInstance: NSObject {
                     // license/certificate URL, unsupported scheme, etc.) must never
                     // fall back to unprotected playback. configure() has already
                     // called notifyDrmError() internally (emits
-                    // onDrmSessionUpdate(state=error)/onDrmError), so the Dart-side
+                    // onDrmSessionUpdate(state=error)), so the Dart-side
                     // errorStream/drmSessionStream already knows why. Refuse to
                     // create the AVPlayerItem at all and leave whatever was
                     // previously loaded untouched rather than silently playing this

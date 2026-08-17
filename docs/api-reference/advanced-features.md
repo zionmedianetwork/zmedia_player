@@ -114,16 +114,39 @@ Use distinct `playerId`s for concurrent players; native events route by `playerI
 
 ## Caching / offline
 
+Only progressive (single-file) media can be cached — HLS/DASH manifests are not
+supported by `CacheService`.
+
 ```dart
 final cache = CacheService(const CacheConfig(
   maxCacheSize: 200 * 1024 * 1024,
   cacheExpiration: Duration(days: 7),
   enabled: true,
 ));
-await cache.cacheMedia(mediaItem.url);
-final cached = await cache.isCached(mediaItem.url);
+await cache.initialize();
+
+// Download once (requires network). Safe to call again: it's a no-op if the
+// item is already cached.
+await cache.downloadAndCache(mediaItem);
+
+final cached = await cache.isCached(mediaItem.id);
+
+// Later — with or without network — build a MediaItem that points at the
+// on-disk copy and play it through the normal load path.
+final cachedItem = await cache.getCachedMediaItem(mediaItem.id);
+if (cachedItem != null) {
+  await controller.load(cachedItem);
+}
+
 await cache.clearCache();
 ```
+
+`getCachedMediaItem` returns `null` once the entry has expired
+(`cacheExpiration`) or been evicted for space — fall back to downloading
+`mediaItem` again in that case. DRM-protected items cannot be played from a
+cached copy: DRM requires an HTTPS media URL, and the cached copy is always a
+`file://` URI, so it's rejected by validation — offline DRM playback isn't
+supported.
 
 ## Fullscreen & display
 

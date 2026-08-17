@@ -199,6 +199,19 @@ class CastService {
     // the try/catch below for the same reason as the DRM gate above.
     InputValidator.validateUrl(mediaItem.url);
 
+    // C-02 Stage 1: validateUrl() now accepts file:// media URLs for local
+    // playback on this device, but a cast receiver is a separate device with
+    // no access to this device's filesystem — a file:// URL cannot possibly
+    // work there. Refuse explicitly rather than letting native fail opaquely.
+    if (Uri.parse(mediaItem.url).scheme.toLowerCase() == 'file') {
+      throw ConfigurationException(
+        'Cannot cast a local file:// URL: the cast receiver has no access '
+        "to this device's filesystem.",
+        parameter: 'url',
+        value: mediaItem.url,
+      );
+    }
+
     try {
       await _channel.invokeMethod('loadMediaOnCastDevice', {
         'playerId': playerId,

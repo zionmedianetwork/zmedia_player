@@ -31,10 +31,13 @@ enum ErrorCategory {
 ///
 /// Example usage:
 /// ```dart
-/// if (controller.state.state == PlayerState.error) {
+/// if (controller.hasError) {
 ///   ErrorOverlay(
 ///     error: controller.error,
-///     onRetry: () => controller.retry(),
+///     onRetry: () {
+///       final item = controller.currentItem;
+///       if (item != null) controller.load(item);
+///     },
 ///     onDismiss: () => Navigator.of(context).pop(),
 ///   )
 /// }

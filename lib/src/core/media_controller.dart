@@ -25,6 +25,11 @@ class MediaController extends ChangeNotifier {
   /// Current playback state
   PlaybackState _currentState = const PlaybackState(state: PlayerState.idle);
 
+  /// C-01: most recently observed typed error from [MediaPlayer.errorStream]
+  /// (network, DRM, playback, ...), or `null` if none has been observed yet.
+  /// See [error].
+  MediaPlayerException? _lastError;
+
   /// Whether controls are currently visible
   bool _controlsVisible = false; // Start hidden, show on user interaction
 
@@ -140,6 +145,29 @@ class MediaController extends ChangeNotifier {
   /// Whether the player has an error
   bool get hasError => _currentState.state == PlayerState.error;
 
+  /// C-01: the most recently observed typed playback error (network, DRM,
+  /// playback, configuration, ...), or `null` if none has been observed
+  /// since this controller was created (or since the player last recovered
+  /// from an error — see below).
+  ///
+  /// This is a synchronous snapshot of the same [MediaPlayerException]
+  /// values delivered by [errorStream]; use whichever is more convenient
+  /// for a given call site (e.g. reading this in `build()` vs. reacting to
+  /// [errorStream] events directly). Cleared automatically once
+  /// [PlaybackState.state] transitions away from [PlayerState.error] (e.g.
+  /// after a successful retry/reload), so it never reports a stale error for
+  /// a player that has since recovered.
+  ///
+  /// ```dart
+  /// if (controller.hasError) {
+  ///   ErrorOverlay(
+  ///     error: controller.error,
+  ///     onRetry: () => controller.load(item),
+  ///   )
+  /// }
+  /// ```
+  MediaPlayerException? get error => _lastError;
+
   /// Current position
   Duration get position => _currentState.position;
 
@@ -216,6 +244,15 @@ class MediaController extends ChangeNotifier {
 
   /// Whether opt-in screen-capture protection is currently enabled.
   bool get isSecureSurfaceEnabled => _player.isSecureSurfaceEnabled;
+
+  // C-01: error surface getters
+  /// Stream of typed playback errors — see [MediaPlayer.errorStream] for
+  /// the full contract (every [MediaErrorCategory], including DRM session
+  /// failures). Forwarded here so consumers building UI against
+  /// [MediaController] (the documented facade for reactive state — see
+  /// CLAUDE.md) don't have to reach around it via `controller.player` to
+  /// observe failures; see also the synchronous [error] snapshot.
+  Stream<MediaPlayerException> get errorStream => _player.errorStream;
 
   /// Initialize the controller and underlying player
   Future<void> initialize() async {
@@ -782,11 +819,37 @@ class MediaController extends ChangeNotifier {
               return;
             }
 
+            // C-01: once the player has moved on from an error state (e.g.
+            // a successful retry/reload), the previously-observed error is
+            // no longer current — clear it so [error] doesn't keep
+            // reporting a failure the player has since recovered from.
+            final wasError = _currentState.state == PlayerState.error;
             _currentState = state;
+            if (wasError && state.state != PlayerState.error) {
+              _lastError = null;
+            }
             _notifyListeners();
           },
           onError: (error) {
             debugPrint('MediaController: State stream error: $error');
+          },
+        ),
+      );
+
+      // C-01: error stream subscription — keeps the synchronous [error]
+      // snapshot in sync with every typed error [MediaPlayer.errorStream]
+      // emits (including DRM session failures), and drives listener
+      // rebuilds so `hasError`/`error`-reading UI updates without needing
+      // to subscribe to [errorStream] itself.
+      _subscriptions.add(
+        _player.errorStream.listen(
+          (error) {
+            if (_isDisposed) return;
+            _lastError = error;
+            _notifyListeners();
+          },
+          onError: (error) {
+            debugPrint('MediaController: Error stream error: $error');
           },
         ),
       );

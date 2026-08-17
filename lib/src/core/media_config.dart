@@ -68,6 +68,11 @@ class MediaConfig {
   /// DASH configuration
   final DashConfig? dashConfig;
 
+  /// Transparent Media3 segment cache configuration for adaptive (HLS/DASH)
+  /// streams (C-03b). **Android-only** — see [AdaptiveCacheConfig] for the
+  /// full contract, including why this has no iOS equivalent today.
+  final AdaptiveCacheConfig? adaptiveCacheConfig;
+
   /// Whether to enable subtitles by default
   final bool enableSubtitles;
 
@@ -113,6 +118,7 @@ class MediaConfig {
     this.bufferConfig,
     this.hlsConfig,
     this.dashConfig,
+    this.adaptiveCacheConfig,
     this.enableSubtitles = true,
     this.respectSafeArea = false,
     this.immersiveLandscape = false,
@@ -141,6 +147,7 @@ class MediaConfig {
     BufferConfig? bufferConfig,
     HlsConfig? hlsConfig,
     DashConfig? dashConfig,
+    AdaptiveCacheConfig? adaptiveCacheConfig,
     bool? enableSubtitles,
     bool? respectSafeArea,
     bool? immersiveLandscape,
@@ -169,6 +176,7 @@ class MediaConfig {
       bufferConfig: bufferConfig ?? this.bufferConfig,
       hlsConfig: hlsConfig ?? this.hlsConfig,
       dashConfig: dashConfig ?? this.dashConfig,
+      adaptiveCacheConfig: adaptiveCacheConfig ?? this.adaptiveCacheConfig,
       enableSubtitles: enableSubtitles ?? this.enableSubtitles,
       respectSafeArea: respectSafeArea ?? this.respectSafeArea,
       immersiveLandscape: immersiveLandscape ?? this.immersiveLandscape,
@@ -181,6 +189,114 @@ class MediaConfig {
     return 'MediaConfig(autoPlay: $autoPlay, boxFit: $boxFit, volume: $volume, '
         'speed: $speed, respectSafeArea: $respectSafeArea, '
         'immersiveLandscape: $immersiveLandscape, secureSurface: $secureSurface)';
+  }
+}
+
+/// Configuration for transparent segment caching of adaptive (HLS/DASH)
+/// streams (C-03b).
+///
+/// **Android-only.** On Android this wraps ExoPlayer/Media3's data source
+/// chain in a `CacheDataSource` backed by a single, process-wide
+/// `SimpleCache` (see `AdaptiveCacheHolder.kt`): segments, init segments and
+/// manifests/playlists are transparently written to disk as they're
+/// downloaded during normal playback, and served from disk on any
+/// subsequent playback of the same URL — including with no network
+/// connection, as long as the requested byte ranges are already cached.
+/// There is no download-ahead/prefetch here; only what has actually played
+/// gets cached.
+///
+/// iOS has **no** equivalent today. AVFoundation has no transparent
+/// read-through segment cache comparable to Media3's `CacheDataSource`;
+/// offline HLS on iOS requires the explicit-download `AVAssetDownloadTask`
+/// API (producing a `.movpkg`), which is a fundamentally different,
+/// explicit-download model and a separate, not-yet-implemented piece of
+/// work. Setting this config has **no effect whatsoever on iOS** — it is
+/// simply never read there. This mirrors how [DashConfig] is Android-only
+/// today: an honestly asymmetric, documented gap rather than a silent no-op
+/// masquerading as cross-platform.
+///
+/// This is opt-in and **off by default** ([enabled] defaults to `false`):
+/// transparent caching writes to the user's device storage without an
+/// explicit per-request prompt, so a host app must deliberately turn it on
+/// via this config rather than have it happen as a surprise side effect of
+/// upgrading the package.
+///
+/// **DRM interaction:** regardless of this config, a media item that
+/// carries a `drmConfig` is never wrapped in `CacheDataSource` on the
+/// native side — protected segments are always fetched directly from the
+/// upstream `DataSource.Factory` and never written to the plaintext segment
+/// cache. This is a deliberate fail-safe: Media3's `CacheDataSource` caches
+/// the raw (still-encrypted-on-disk, for most DRM schemes) bytes it reads
+/// from its upstream, but ExoPlayer's DRM session is wired at the
+/// `MediaSource` level, not the `DataSource` level — nothing in the
+/// `CacheDataSource` layer itself re-validates that a caller decrypting
+/// cached bytes later still holds a valid license. Rather than depend on
+/// that distinction holding for every current and future DRM scheme this
+/// package supports (Widevine, ClearKey, FairPlay-via-EZDRM), DRM-configured
+/// items simply never enter the segment cache at all.
+class AdaptiveCacheConfig {
+  /// Opt-in switch. Defaults to `false` — must be explicitly enabled.
+  final bool enabled;
+
+  /// Maximum size, in bytes, of the shared on-disk segment cache before the
+  /// LRU evictor (`LeastRecentlyUsedCacheEvictor` on Android) starts
+  /// removing the least-recently-used cached spans to make room for new
+  /// ones. Defaults to 250MB — larger than the progressive-download
+  /// [CacheConfig.maxCacheSize] default (100MB) since a single adaptive
+  /// stream can accumulate cached segments across multiple quality
+  /// renditions as ABR switches tracks.
+  ///
+  /// Because the underlying native cache is a single process-wide instance
+  /// shared by every player (Media3 requires exactly one `SimpleCache` per
+  /// cache directory, per process — see `AdaptiveCacheHolder.kt`), only the
+  /// value supplied by whichever player *first* enables caching in a given
+  /// app process actually takes effect; a later player enabling caching
+  /// with a different [maxCacheSizeBytes] has no effect on the already-sized
+  /// cache (a warning is logged natively when this happens). Configure this
+  /// consistently across players in the same app if it matters.
+  final int maxCacheSizeBytes;
+
+  const AdaptiveCacheConfig({
+    this.enabled = false,
+    this.maxCacheSizeBytes = 250 * 1024 * 1024, // 250MB default
+  });
+
+  /// Creates a copy of this config with updated values
+  AdaptiveCacheConfig copyWith({
+    bool? enabled,
+    int? maxCacheSizeBytes,
+  }) {
+    return AdaptiveCacheConfig(
+      enabled: enabled ?? this.enabled,
+      maxCacheSizeBytes: maxCacheSizeBytes ?? this.maxCacheSizeBytes,
+    );
+  }
+
+  /// Converts this config to a map for platform communication. Consumed
+  /// only by the Android native layer (`MediaPlayerInstance.loadMediaItem`
+  /// in `MediaPlayerManager.kt`) — iOS never reads this key.
+  Map<String, dynamic> toMap() {
+    return {
+      'enabled': enabled,
+      'maxCacheSizeBytes': maxCacheSizeBytes,
+    };
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is AdaptiveCacheConfig &&
+        other.enabled == enabled &&
+        other.maxCacheSizeBytes == maxCacheSizeBytes;
+  }
+
+  @override
+  int get hashCode => Object.hash(enabled, maxCacheSizeBytes);
+
+  @override
+  String toString() {
+    return 'AdaptiveCacheConfig(enabled: $enabled, '
+        'maxCacheSizeBytes: $maxCacheSizeBytes)';
   }
 }
 

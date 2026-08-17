@@ -1836,6 +1836,19 @@ class MediaPlayer {
     // (drmConfig is already known-null above), so validate the URL/headers
     // directly instead.
     InputValidator.validateUrl(mediaItem.url);
+
+    // C-02 Stage 1: validateUrl() now accepts file:// media URLs for local
+    // playback on this device, but a cast receiver is a separate device with
+    // no access to this device's filesystem — a file:// URL cannot possibly
+    // work there. Refuse explicitly rather than letting native fail opaquely.
+    if (Uri.parse(mediaItem.url).scheme.toLowerCase() == 'file') {
+      throw ConfigurationException(
+        'Cannot cast a local file:// URL: the cast receiver has no access '
+        "to this device's filesystem.",
+        parameter: 'url',
+        value: mediaItem.url,
+      );
+    }
     if (mediaItem.httpHeaders != null) {
       InputValidator.validateHeaders(mediaItem.httpHeaders!);
     }
@@ -2478,23 +2491,41 @@ class MediaPlayer {
         _drmSessionController.add(session);
       }
 
-      // H-01: bridge a DRM session error into the typed exception hierarchy
-      // too, so DRM/license failures are reachable via [errorStream] and
-      // not only as an untyped [DrmSessionState.error] on [drmSessionStream].
-      // [DrmSession] carries no structured error classification (only a
-      // free-text [DrmSession.errorMessage]), so isLicenseError/
-      // isCertificateError are best-effort text matches, same pattern as
-      // the platform-code substring checks below in [load]'s catch block.
-      if (session.state == DrmSessionState.error &&
-          !_errorController.isClosed) {
+      // H-01/C-01: bridge a DRM session error into the typed exception
+      // hierarchy too, so DRM/license failures are reachable via
+      // [errorStream] and not only as an untyped [DrmSessionState.error] on
+      // [drmSessionStream]. [DrmSession] carries no structured error
+      // classification (only a free-text [DrmSession.errorMessage]), so
+      // isLicenseError/isCertificateError are best-effort text matches, same
+      // pattern as the platform-code substring checks below in [load]'s
+      // catch block.
+      if (session.state == DrmSessionState.error) {
         final message = session.errorMessage ?? 'DRM session error';
-        final lowerMessage = message.toLowerCase();
-        _errorController.add(DrmException(
-          message,
-          isLicenseError: lowerMessage.contains('license'),
-          isCertificateError: lowerMessage.contains('certificate') ||
-              lowerMessage.contains('provisioning'),
+
+        // C-01: unlike a synchronous `load()` failure or a native `onError`
+        // callback (see [_handleError]), a DRM session error previously only
+        // ever emitted on [_errorController] and never called [_updateState]
+        // — so [PlaybackState.state] stayed wherever it was (typically
+        // `buffering`) and never became [PlayerState.error]. That made a DRM
+        // failure invisible to [MediaController.hasError] and to anything
+        // driven by [stateStream]/[PlaybackState] rather than [errorStream]
+        // directly. Mirror [_handleError]'s behaviour here so a DRM failure
+        // is reachable through both surfaces, exactly like every other
+        // playback error category.
+        _updateState(_currentState.copyWith(
+          state: PlayerState.error,
+          errorMessage: message,
         ));
+
+        if (!_errorController.isClosed) {
+          final lowerMessage = message.toLowerCase();
+          _errorController.add(DrmException(
+            message,
+            isLicenseError: lowerMessage.contains('license'),
+            isCertificateError: lowerMessage.contains('certificate') ||
+                lowerMessage.contains('provisioning'),
+          ));
+        }
       }
     } catch (e) {
       debugPrint('Error processing DRM session update: $e');
@@ -2698,6 +2729,12 @@ class MediaPlayer {
       'controlsTimeout': config.controlsTimeout.inMilliseconds,
       'allowBackgroundPlayback': config.allowBackgroundPlayback,
       'useHardwareAcceleration': config.useHardwareAcceleration,
+      // C-03b: Android-only transparent adaptive-stream segment cache.
+      // Absent/null is treated by native as disabled; see
+      // AdaptiveCacheConfig's dartdoc for the full Android-only contract
+      // and the DRM fail-safe. iOS never reads this key.
+      if (config.adaptiveCacheConfig != null)
+        'adaptiveCacheConfig': config.adaptiveCacheConfig!.toMap(),
     };
   }
 

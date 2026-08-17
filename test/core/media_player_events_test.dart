@@ -648,6 +648,51 @@ void main() {
 
       player.dispose();
     });
+
+    // C-01: a DRM session error must also flip PlaybackState.state to
+    // PlayerState.error (mirroring _handleError), not just emit on
+    // errorStream. Before this fix, currentState.state stayed wherever it
+    // was — a DRM failure was reachable via errorStream but invisible to
+    // anything driven by stateStream/currentState (e.g.
+    // MediaController.hasError).
+    test('DRM session error also drives PlaybackState.state to error',
+        () async {
+      final player = MediaPlayer(playerId: 'ev-drm-error-state');
+      await player.initialize();
+
+      // Simulate the player having been mid-buffering (the normal state
+      // load() leaves it in) when the DRM session fails, so this test can't
+      // pass by coincidence of the default idle state already being
+      // "error"-like.
+      await _injectEvent('onStateChanged', {
+        'playerId': 'ev-drm-error-state',
+        'state': 'buffering',
+        'isBuffering': true,
+        'bufferPercentage': 0.0,
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(player.currentState.state, PlayerState.buffering);
+
+      final stateFuture = player.stateStream.first;
+      final now = DateTime.now();
+
+      await _injectEvent('onDrmSessionUpdate', {
+        'playerId': 'ev-drm-error-state',
+        'id': 'session-state-bridge',
+        'state': 'error',
+        'license': null,
+        'errorMessage': 'License server rejected request',
+        'createdAt': now.millisecondsSinceEpoch,
+        'updatedAt': now.millisecondsSinceEpoch,
+      });
+
+      final state = await stateFuture.timeout(const Duration(seconds: 2));
+      expect(state.state, PlayerState.error);
+      expect(state.errorMessage, 'License server rejected request');
+      expect(player.currentState.state, PlayerState.error);
+
+      player.dispose();
+    });
   });
 
   // -------------------------------------------------------------------------

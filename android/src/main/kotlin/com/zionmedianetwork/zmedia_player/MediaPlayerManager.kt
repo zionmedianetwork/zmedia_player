@@ -14,6 +14,8 @@ import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.DataSource
+import androidx.media3.datasource.cache.CacheDataSource
+import androidx.media3.datasource.cache.SimpleCache
 import androidx.media3.ui.AspectRatioFrameLayout
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.ConcurrentHashMap
@@ -25,6 +27,29 @@ class MediaPlayerManager(
     private val players = ConcurrentHashMap<String, MediaPlayerInstance>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val crashHandler = CrashHandler(methodChannel)
+
+    // C-03b: this MediaPlayerManager's own handle onto the process-wide
+    // shared adaptive-stream SimpleCache (see AdaptiveCacheHolder). Null
+    // until the first player lazily enables adaptive caching; non-null
+    // exactly once acquired, so shutdown() knows whether it owes a matching
+    // AdaptiveCacheHolder.release() call.
+    @Volatile
+    private var sharedAdaptiveCache: SimpleCache? = null
+
+    /**
+     * Lazily acquires (idempotently, per this manager instance) and returns
+     * the shared adaptive-stream [SimpleCache]. Called from
+     * [MediaPlayerInstance.loadMediaItem] only when that player's config has
+     * adaptive caching enabled for the item currently being loaded.
+     */
+    @Synchronized
+    fun acquireSharedAdaptiveCache(maxSizeBytes: Long): SimpleCache {
+        val existing = sharedAdaptiveCache
+        if (existing != null) return existing
+        val created = AdaptiveCacheHolder.acquire(context, maxSizeBytes)
+        sharedAdaptiveCache = created
+        return created
+    }
 
     // Activity tracking for memory leak prevention
     private val lastActivity = ConcurrentHashMap<String, Long>()
@@ -76,12 +101,16 @@ class MediaPlayerManager(
 
         // Initialize synchronously on main thread to avoid timing issues with platform view creation
         if (Looper.myLooper() == Looper.getMainLooper()) {
-            val playerInstance = MediaPlayerInstance(context, playerId, methodChannel, config)
+            val playerInstance = MediaPlayerInstance(
+                context, playerId, methodChannel, config, this::acquireSharedAdaptiveCache
+            )
             players[playerId] = playerInstance
             android.util.Log.d("MediaPlayerManager", "Player instance created synchronously")
         } else {
             mainHandler.post {
-                val playerInstance = MediaPlayerInstance(context, playerId, methodChannel, config)
+                val playerInstance = MediaPlayerInstance(
+                    context, playerId, methodChannel, config, this::acquireSharedAdaptiveCache
+                )
                 players[playerId] = playerInstance
                 android.util.Log.d("MediaPlayerManager", "Player instance created via handler post")
             }
@@ -243,6 +272,14 @@ class MediaPlayerManager(
     fun shutdown() {
         mainHandler.removeCallbacks(cleanupRunnable)
         dispose()
+        // C-03b: release this manager's reference (if any was ever acquired)
+        // on the process-wide shared adaptive-stream cache. Pairs 1:1 with
+        // acquireSharedAdaptiveCache() — see AdaptiveCacheHolder for why this
+        // is reference-counted rather than a hard release.
+        if (sharedAdaptiveCache != null) {
+            AdaptiveCacheHolder.release()
+            sharedAdaptiveCache = null
+        }
     }
 }
 
@@ -250,8 +287,21 @@ class MediaPlayerInstance(
     private val context: Context,
     private val playerId: String,
     private val methodChannel: MethodChannel,
-    private var config: Map<String, Any>?
+    private var config: Map<String, Any>?,
+    // C-03b: lazily acquires (idempotently, at the MediaPlayerManager level)
+    // the process-wide shared adaptive-stream SimpleCache. Only invoked when
+    // this instance's config opts into adaptive caching for the item
+    // currently being loaded — see loadMediaItem().
+    private val acquireAdaptiveCache: (Long) -> SimpleCache
 ) {
+    companion object {
+        // C-03b: fallback only — normally the Dart side always sends
+        // maxCacheSizeBytes alongside adaptiveCacheConfig.enabled (see
+        // AdaptiveCacheConfig's default in lib/src/core/media_config.dart,
+        // which matches this value).
+        private const val DEFAULT_ADAPTIVE_CACHE_MAX_SIZE_BYTES = 250L * 1024 * 1024
+    }
+
     private var exoPlayer: ExoPlayer? = null
     private var playerView: MediaPlayerView? = null
     // Shared bandwidth meter — passed to ExoPlayer.Builder so that ExoPlayer
@@ -441,11 +491,57 @@ class MediaPlayerInstance(
                 dataSourceFactory
             }
 
-        // --- DRM wiring ---
         // If the media item carries a drmConfig, create a DrmHandler and obtain a
-        // DrmSessionManager so that ExoPlayer can decrypt the content.
+        // DrmSessionManager so that ExoPlayer can decrypt the content. Read here
+        // (ahead of the C-03b block below) because the caching decision itself
+        // depends on drmConfig being absent.
         @Suppress("UNCHECKED_CAST")
         val drmConfig = mediaItem["drmConfig"] as? Map<String, Any>
+
+        // --- C-03b: transparent adaptive-stream segment caching (Android only) ---
+        // Wraps activeDataSourceFactory in a CacheDataSource.Factory backed by the
+        // shared, process-wide SimpleCache — but ONLY when ALL of: this player's
+        // config opted in (AdaptiveCacheConfig.enabled), the URL is HLS/DASH, and
+        // the item carries no drmConfig. A DRM-configured item must never have its
+        // segments written to the plaintext on-disk cache — see
+        // AdaptiveCacheConfig's dartdoc for the full rationale — so drmConfig !=
+        // null short-circuits this entirely (the shared cache isn't even
+        // acquired). Progressive (non-HLS/DASH) media is intentionally excluded
+        // too: C-03a already covers progressive caching via explicit
+        // download-then-play through CacheService, and mixing that with a second,
+        // transparent caching path for the same file would be confusing and
+        // redundant.
+        @Suppress("UNCHECKED_CAST")
+        val adaptiveCacheConfig = config?.get("adaptiveCacheConfig") as? Map<String, Any>
+        val adaptiveCachingEnabled = adaptiveCacheConfig?.get("enabled") as? Boolean ?: false
+        val cacheAwareDataSourceFactory: androidx.media3.datasource.DataSource.Factory =
+            if (adaptiveCachingEnabled && drmConfig == null && isAdaptiveStreamUri(uri)) {
+                try {
+                    val maxSizeBytes = (adaptiveCacheConfig?.get("maxCacheSizeBytes") as? Number)
+                        ?.toLong() ?: DEFAULT_ADAPTIVE_CACHE_MAX_SIZE_BYTES
+                    val simpleCache = acquireAdaptiveCache(maxSizeBytes)
+                    CacheDataSource.Factory()
+                        .setCache(simpleCache)
+                        .setUpstreamDataSourceFactory(activeDataSourceFactory)
+                        // A corrupt/unreadable cache entry falls back to the
+                        // upstream factory rather than failing playback outright —
+                        // this is an opt-in performance/offline convenience, not a
+                        // feature playback correctness should ever depend on.
+                        .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                } catch (e: Exception) {
+                    android.util.Log.e(
+                        "MediaPlayerInstance",
+                        "Failed to enable adaptive segment cache, falling back to " +
+                            "uncached playback: ${e.message}",
+                        e
+                    )
+                    activeDataSourceFactory
+                }
+            } else {
+                activeDataSourceFactory
+            }
+
+        // --- DRM wiring ---
         val mediaSource: MediaSource
 
         if (drmConfig != null) {
@@ -486,8 +582,8 @@ class MediaPlayerInstance(
                 // rejecting this device (see DrmHandler.createDrmSessionManager /
                 // validateDrmConfig) — must never fall back to unprotected
                 // playback. DrmHandler has already emitted
-                // onDrmSessionUpdate(state=error)/onDrmError via notifyDrmError(),
-                // so the Dart-side errorStream/drmSessionStream already knows why.
+                // onDrmSessionUpdate(state=error) via notifyDrmError(), so the
+                // Dart-side errorStream/drmSessionStream already knows why.
                 // Refuse to build ANY media source and stop whatever was
                 // previously loaded so nothing plays.
                 android.util.Log.e(
@@ -503,8 +599,11 @@ class MediaPlayerInstance(
                 return
             }
         } else {
-            // Non-DRM path — unchanged behaviour.
-            mediaSource = createMediaSource(uri, activeDataSourceFactory)
+            // Non-DRM path. cacheAwareDataSourceFactory is either
+            // activeDataSourceFactory unchanged (adaptive caching off, not an
+            // HLS/DASH URL, or wrapping failed) or that same factory wrapped in
+            // the shared CacheDataSource — see the C-03b block above.
+            mediaSource = createMediaSource(uri, cacheAwareDataSourceFactory)
         }
 
         exoPlayer?.apply {
@@ -835,6 +934,16 @@ class MediaPlayerInstance(
 
         // Release DRM resources.
         drmHandler = null
+    }
+
+    /**
+     * C-03b: true for URLs this plugin already treats as adaptive-manifest
+     * formats (same detection used by [createMediaSource]) — the only
+     * formats the shared segment cache is wired for.
+     */
+    private fun isAdaptiveStreamUri(uri: Uri): Boolean {
+        val s = uri.toString()
+        return s.contains(".m3u8") || s.contains(".mpd")
     }
 
     private fun createMediaSource(uri: Uri, dataSourceFactory: DataSource.Factory = this.dataSourceFactory): MediaSource {
