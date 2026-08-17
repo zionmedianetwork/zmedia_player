@@ -101,7 +101,12 @@ void main() {
       expect(entries.any((e) => e.endsWith('.part')), isFalse,
           reason: 'no temp .part file must remain after a successful, '
               'committed download');
-      expect(entries.any((e) => e.endsWith('.cache')), isTrue,
+      // The committed filename preserves the source media's extension
+      // (`.mp4`, from `item.url`) rather than the old hardcoded `.cache` —
+      // see cache_service_extension_test.dart for the dedicated coverage
+      // of that behavior; this assertion just confirms the H-12 streaming
+      // path produces a real, discoverable committed file.
+      expect(entries.any((e) => e.endsWith('.mp4')), isTrue,
           reason: 'the committed cache file must exist on disk');
     });
 

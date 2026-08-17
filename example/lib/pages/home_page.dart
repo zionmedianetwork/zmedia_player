@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../widgets/feature_card.dart';
 import 'simple_playback_page.dart';
 import 'local_file_playback_page.dart';
+import 'cache_playback_page.dart';
 import 'playlist_page.dart';
 import 'streaming_quality_page.dart';
 import 'subtitles_page.dart';
@@ -84,6 +85,16 @@ class HomePage extends StatelessWidget {
                       'URL -- no network required.',
                   icon: Icons.folder_open,
                   page: const LocalFilePlaybackPage(),
+                ),
+                const SizedBox(height: 8),
+                _feature(
+                  context,
+                  title: 'Cache -> Playback (C-03a)',
+                  description:
+                      'Download a progressive file into CacheService, then '
+                      'play it back from disk -- verify with airplane mode.',
+                  icon: Icons.download_for_offline_outlined,
+                  page: const CachePlaybackPage(),
                 ),
                 const SizedBox(height: 16),
                 _SectionLabel('Streaming'),
