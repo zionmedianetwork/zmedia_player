@@ -171,7 +171,7 @@ The package follows **clean architecture** with clear separation between Flutter
 #### 3. Native Platform Managers
 
 **Android:** `MediaPlayerManager.kt`
-- ExoPlayer-based implementation
+- AndroidX Media3 (ExoPlayer) implementation
 - Handles Widevine DRM
 - Manages HLS/DASH adaptive streaming
 - Chromecast integration via CastHandler
@@ -615,8 +615,8 @@ The control overlay consists of three main zones:
 ## Platform-Specific Notes
 
 ### Android
-- Min SDK: 21 (Lollipop)
-- Uses ExoPlayer 2.x
+- Min SDK: 23 (Marshmallow)
+- Uses AndroidX Media3 (androidx.media3.exoplayer)
 - Requires INTERNET and ACCESS_NETWORK_STATE permissions
 - Chromecast requires Google Play Services
 

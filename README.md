@@ -68,7 +68,7 @@ dependencies:
 ```
 
 **Requirements:** Flutter `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**),
-iOS **13.0+**, Android **minSdk 21**. On iOS the plugin builds with **Swift Package Manager
+iOS **13.0+**, Android **minSdk 23**. On iOS the plugin builds with **Swift Package Manager
 or CocoaPods** (see [Platform Setup](#ios)).
 
 ## Quick Start

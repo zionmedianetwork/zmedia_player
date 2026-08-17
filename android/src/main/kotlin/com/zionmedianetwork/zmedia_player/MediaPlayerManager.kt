@@ -4,18 +4,17 @@ import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
-import com.google.android.exoplayer2.*
-import com.google.android.exoplayer2.source.MediaSource
-import com.google.android.exoplayer2.source.ProgressiveMediaSource
-import com.google.android.exoplayer2.source.hls.HlsMediaSource
-import com.google.android.exoplayer2.source.dash.DashMediaSource
-import com.google.android.exoplayer2.audio.AudioAttributes
-import com.google.android.exoplayer2.trackselection.TrackSelectionOverride
-import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
-import com.google.android.exoplayer2.upstream.DefaultDataSource
-import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
-import com.google.android.exoplayer2.upstream.DataSource
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout
+import androidx.media3.common.*
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.dash.DashMediaSource
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.DataSource
+import androidx.media3.ui.AspectRatioFrameLayout
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.ConcurrentHashMap
 
@@ -430,7 +429,7 @@ class MediaPlayerInstance(
         val uri = Uri.parse(url)
 
         // Determine which DataSource.Factory to use (custom headers or default).
-        val activeDataSourceFactory: com.google.android.exoplayer2.upstream.DataSource.Factory =
+        val activeDataSourceFactory: androidx.media3.datasource.DataSource.Factory =
             if (httpHeaders != null && httpHeaders.isNotEmpty()) {
                 val customHttpFactory = DefaultHttpDataSource.Factory()
                     .setUserAgent("Flutter Media Player")
@@ -460,22 +459,22 @@ class MediaPlayerInstance(
                 // Widevine or ClearKey license automatically during prepare().
                 mediaSource = when {
                     uri.toString().contains(".m3u8") ->
-                        com.google.android.exoplayer2.source.hls.HlsMediaSource.Factory(
+                        androidx.media3.exoplayer.hls.HlsMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(uri))
+                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
 
                     uri.toString().contains(".mpd") ->
-                        com.google.android.exoplayer2.source.dash.DashMediaSource.Factory(
+                        androidx.media3.exoplayer.dash.DashMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(uri))
+                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
 
                     else ->
-                        com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(
+                        androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(com.google.android.exoplayer2.MediaItem.fromUri(uri))
+                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
                 }
 
                 drmHandler = handler
@@ -1310,7 +1309,7 @@ class MediaPlayerInstance(
 
     /**
      * Walks the error's cause chain looking for ExoPlayer's
-     * [com.google.android.exoplayer2.upstream.HttpDataSource.InvalidResponseCodeException]
+     * [androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException]
      * to surface the actual HTTP status code to Dart (mirrors
      * `httpStatusCode` in the iOS notifyError payload). Bounded depth guards
      * against a pathological/cyclical cause chain.
@@ -1319,7 +1318,7 @@ class MediaPlayerInstance(
         var cause: Throwable? = error
         var depth = 0
         while (cause != null && depth < 10) {
-            if (cause is com.google.android.exoplayer2.upstream.HttpDataSource.InvalidResponseCodeException) {
+            if (cause is androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException) {
                 return cause.responseCode
             }
             cause = cause.cause

@@ -2,14 +2,14 @@ group 'com.zionmedianetwork.zmedia_player'
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = '1.7.10'
+    ext.kotlin_version = '2.1.0'
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        classpath 'com.android.tools.build:gradle:7.3.0'
+        classpath 'com.android.tools.build:gradle:8.9.1'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
     }
 }
@@ -25,7 +25,7 @@ apply plugin: 'com.android.library'
 apply plugin: 'kotlin-android'
 
 android {
-    compileSdkVersion 33
+    compileSdkVersion 35
     namespace "com.zionmedianetwork.zmedia_player"
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
@@ -34,6 +34,23 @@ android {
 
     kotlinOptions {
         jvmTarget = '1.8'
+        // Media3 marks most ExoPlayer-level API (DRM session management,
+        // OkHttp/HTTP data sources, track selection overrides, bandwidth
+        // meter, PlayerView/AspectRatioFrameLayout constants, etc.)
+        // @androidx.media3.common.util.UnstableApi. Unlike a Kotlin-authored
+        // opt-in marker (meta-annotated with kotlin.RequiresOptIn),
+        // @UnstableApi is meta-annotated with androidx.annotation.RequiresOptIn
+        // (verified by inspecting the compiled annotation in the
+        // media3-common 1.11.0 AAR) so it can also gate plain-Java callers.
+        // kotlinc does not recognise that marker at all — a Kotlin
+        // `-opt-in=androidx.media3.common.util.UnstableApi` compiler flag was
+        // tried here and kotlinc rejected it ("is not an opt-in requirement
+        // marker"); it compiled clean regardless, confirming @UnstableApi is
+        // enforced only by Android Lint's RequiresOptIn/OptIn checks, not by
+        // the Kotlin or Java compiler. Per CLAUDE.md this plugin's native code
+        // has no lint step in its build gates (compileReleaseKotlin, then
+        // `flutter build apk --release`'s R8 pass), so no @OptIn annotation
+        // or compiler flag is functionally required for either gate to pass.
     }
 
     sourceSets {
@@ -42,7 +59,7 @@ android {
     }
 
     defaultConfig {
-        minSdkVersion 21
+        minSdkVersion 23
     }
 
     buildTypes {
@@ -59,25 +76,32 @@ android {
     dependencies {
         implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
 
-        // ExoPlayer dependencies
-        implementation 'com.google.android.exoplayer:exoplayer:2.19.1'
-        implementation 'com.google.android.exoplayer:exoplayer-core:2.19.1'
-        implementation 'com.google.android.exoplayer:exoplayer-ui:2.19.1'
-        implementation 'com.google.android.exoplayer:exoplayer-hls:2.19.1'
-        implementation 'com.google.android.exoplayer:exoplayer-dash:2.19.1'
+        // Media3 1.11.0 (H-04 migration from ExoPlayer 2.19.1). Media3 raised
+        // its own floor to minSdk 23 at 1.9.0 (verified by decompiling
+        // media3-common AAR manifests) — see android/build.gradle's
+        // defaultConfig.minSdkVersion, raised to 23 alongside this bump.
+        implementation 'androidx.media3:media3-exoplayer:1.11.0'
+        implementation 'androidx.media3:media3-ui:1.11.0'
+        implementation 'androidx.media3:media3-exoplayer-hls:1.11.0'
+        implementation 'androidx.media3:media3-exoplayer-dash:1.11.0'
 
         // AndroidX dependencies
         implementation 'androidx.core:core-ktx:1.9.0'
         implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
 
-        // Phase 1: Security - Encrypted storage
-        implementation 'androidx.security:security-crypto:1.1.0-alpha06'
+        // Phase 1: Security - Encrypted storage. 1.1.0 is now stable (was
+        // 1.1.0-alpha06); still declares minSdk 21 itself, but MasterKeys is
+        // @RequiresApi(23) and this module's own floor is now 23, so the
+        // API-21/22 mismatch that motivated H-09's SDK_INT guard structurally
+        // cannot occur here anymore. The guard stays in SecureStorageHandler
+        // regardless — harmless, and protects anyone who lowers the floor.
+        implementation 'androidx.security:security-crypto:1.1.0'
 
         // Certificate pinning for DRM license requests.
-        // OkHttp 4.12.0 targets JVM 8 and is compatible with ExoPlayer 2.19.1 on minSdk 21.
-        // The extension-okhttp artifact replaces DefaultHttpDataSource with OkHttpDataSource
-        // when pinning is configured; the no-pinning path continues to use DefaultHttpDataSource.
-        implementation 'com.google.android.exoplayer:extension-okhttp:2.19.1'
+        // media3-datasource-okhttp replaces DefaultHttpDataSource with
+        // OkHttpDataSource when pinning is configured; the no-pinning path
+        // continues to use DefaultHttpDataSource.
+        implementation 'androidx.media3:media3-datasource-okhttp:1.11.0'
         implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 
         // Phase 3: Media notifications

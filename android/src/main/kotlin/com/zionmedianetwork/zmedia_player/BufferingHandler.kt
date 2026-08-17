@@ -1,9 +1,9 @@
 package com.zionmedianetwork.zmedia_player
 
-import com.google.android.exoplayer2.ExoPlayer
-import com.google.android.exoplayer2.DefaultLoadControl
-import com.google.android.exoplayer2.LoadControl
-import com.google.android.exoplayer2.upstream.DefaultBandwidthMeter
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.LoadControl
+import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
 
 /**
  * Handler for adaptive buffer management in ExoPlayer.

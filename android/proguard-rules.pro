@@ -26,50 +26,50 @@
 }
 
 # ============================================================================
-# ExoPlayer / AndroidX Media3
+# AndroidX Media3 (H-04: migrated from ExoPlayer 2.19.1 / com.google.android.exoplayer2.*)
 # ============================================================================
 
-# Keep all ExoPlayer classes
--keep class com.google.android.exoplayer2.** { *; }
--keep interface com.google.android.exoplayer2.** { *; }
--keepclassmembers class com.google.android.exoplayer2.** {
+# Keep all Media3 classes
+-keep class androidx.media3.** { *; }
+-keep interface androidx.media3.** { *; }
+-keepclassmembers class androidx.media3.** {
     *;
 }
 
-# Don't warn about ExoPlayer
--dontwarn com.google.android.exoplayer2.**
+# Don't warn about Media3
+-dontwarn androidx.media3.**
 
-# Keep ExoPlayer DataSource and MediaSource implementations
--keep class * extends com.google.android.exoplayer2.upstream.DataSource { *; }
--keep class * extends com.google.android.exoplayer2.source.MediaSource { *; }
+# Keep Media3 DataSource and MediaSource implementations
+-keep class * extends androidx.media3.datasource.DataSource { *; }
+-keep class * extends androidx.media3.exoplayer.source.MediaSource { *; }
 
-# Keep ExoPlayer Renderer implementations
--keep class * extends com.google.android.exoplayer2.Renderer { *; }
--keep class * extends com.google.android.exoplayer2.RendererCapabilities { *; }
+# Keep Media3 Renderer implementations
+-keep class * extends androidx.media3.exoplayer.Renderer { *; }
+-keep class * extends androidx.media3.exoplayer.RendererCapabilities { *; }
 
-# Keep ExoPlayer extractor implementations
--keep class * extends com.google.android.exoplayer2.extractor.Extractor { *; }
+# Keep Media3 extractor implementations
+-keep class * extends androidx.media3.extractor.Extractor { *; }
 
 # ============================================================================
 # DRM (Digital Rights Management)
 # ============================================================================
 
 # Keep all DRM-related classes
--keep class com.google.android.exoplayer2.drm.** { *; }
--keep interface com.google.android.exoplayer2.drm.** { *; }
--keepclassmembers class com.google.android.exoplayer2.drm.** {
+-keep class androidx.media3.exoplayer.drm.** { *; }
+-keep interface androidx.media3.exoplayer.drm.** { *; }
+-keepclassmembers class androidx.media3.exoplayer.drm.** {
     *;
 }
 
 # Don't warn about DRM
--dontwarn com.google.android.exoplayer2.drm.**
+-dontwarn androidx.media3.exoplayer.drm.**
 
 # Keep MediaDrm classes
 -keep class android.media.MediaDrm { *; }
 -keep class android.media.MediaDrm$** { *; }
 
 # Keep DRM scheme UUIDs (critical for DRM to work)
--keepclassmembers class com.google.android.exoplayer2.C {
+-keepclassmembers class androidx.media3.common.C {
     public static final java.util.UUID WIDEVINE_UUID;
     public static final java.util.UUID PLAYREADY_UUID;
     public static final java.util.UUID CLEARKEY_UUID;
@@ -230,11 +230,11 @@
 # ============================================================================
 
 # Keep HTTP data source factories
--keep class * extends com.google.android.exoplayer2.upstream.HttpDataSource$Factory { *; }
--keep class com.google.android.exoplayer2.upstream.DefaultHttpDataSource { *; }
--keep class com.google.android.exoplayer2.upstream.DefaultHttpDataSource$** { *; }
--keep class com.google.android.exoplayer2.ext.okhttp.OkHttpDataSource { *; }
--keep class com.google.android.exoplayer2.ext.okhttp.OkHttpDataSource$** { *; }
+-keep class * extends androidx.media3.datasource.HttpDataSource$Factory { *; }
+-keep class androidx.media3.datasource.DefaultHttpDataSource { *; }
+-keep class androidx.media3.datasource.DefaultHttpDataSource$** { *; }
+-keep class androidx.media3.datasource.okhttp.OkHttpDataSource { *; }
+-keep class androidx.media3.datasource.okhttp.OkHttpDataSource$** { *; }
 
 # OkHttp certificate pinning
 -keep class okhttp3.** { *; }

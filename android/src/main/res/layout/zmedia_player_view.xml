@@ -10,7 +10,7 @@
   stopped"). A TextureView renders into the normal view hierarchy, is released
   with the view, and is the recommended surface type under Hybrid Composition.
 -->
-<com.google.android.exoplayer2.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.media3.ui.PlayerView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/zmedia_player_view"
     android:layout_width="match_parent"

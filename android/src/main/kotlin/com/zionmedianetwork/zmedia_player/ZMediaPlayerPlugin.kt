@@ -274,7 +274,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
      * Best-effort categorization (see [MediaPlayerManager]'s
      * `categorizeExoPlayerError`) for exceptions thrown synchronously while
      * building the ExoPlayer MediaSource graph — i.e. before playback even
-     * starts, so there is no [com.google.android.exoplayer2.PlaybackException]
+     * starts, so there is no [androidx.media3.common.PlaybackException]
      * with a proper error code to inspect yet.
      */
     private fun categorizeSynchronousLoadError(e: Exception): String {

@@ -3,16 +3,16 @@ package com.zionmedianetwork.zmedia_player
 import android.content.Context
 import android.util.Base64
 import android.util.Log
-import com.google.android.exoplayer2.C
-import com.google.android.exoplayer2.drm.DefaultDrmSessionManager
-import com.google.android.exoplayer2.drm.DrmSessionManager
-import com.google.android.exoplayer2.drm.ExoMediaDrm
-import com.google.android.exoplayer2.drm.FrameworkMediaDrm
-import com.google.android.exoplayer2.drm.HttpMediaDrmCallback
-import com.google.android.exoplayer2.ext.okhttp.OkHttpDataSource
-import com.google.android.exoplayer2.upstream.DefaultHttpDataSource
-import com.google.android.exoplayer2.upstream.HttpDataSource
-import com.google.android.exoplayer2.util.Util
+import androidx.media3.common.C
+import androidx.media3.exoplayer.drm.DefaultDrmSessionManager
+import androidx.media3.exoplayer.drm.DrmSessionManager
+import androidx.media3.exoplayer.drm.ExoMediaDrm
+import androidx.media3.exoplayer.drm.FrameworkMediaDrm
+import androidx.media3.exoplayer.drm.HttpMediaDrmCallback
+import androidx.media3.datasource.okhttp.OkHttpDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
+import androidx.media3.common.util.Util
 import io.flutter.plugin.common.MethodChannel
 import okhttp3.CertificatePinner
 import okhttp3.OkHttpClient
@@ -547,9 +547,9 @@ class DrmHandler(
  * Extension to FrameworkMediaDrm for easier instantiation.
  */
 object FrameworkMediaDrm {
-    val DEFAULT_PROVIDER = com.google.android.exoplayer2.drm.FrameworkMediaDrm.DEFAULT_PROVIDER
+    val DEFAULT_PROVIDER = androidx.media3.exoplayer.drm.FrameworkMediaDrm.DEFAULT_PROVIDER
 
-    fun newInstance(uuid: UUID): com.google.android.exoplayer2.drm.ExoMediaDrm {
-        return com.google.android.exoplayer2.drm.FrameworkMediaDrm.newInstance(uuid)
+    fun newInstance(uuid: UUID): androidx.media3.exoplayer.drm.ExoMediaDrm {
+        return androidx.media3.exoplayer.drm.FrameworkMediaDrm.newInstance(uuid)
     }
 }
