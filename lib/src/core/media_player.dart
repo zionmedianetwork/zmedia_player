@@ -2729,6 +2729,12 @@ class MediaPlayer {
       'controlsTimeout': config.controlsTimeout.inMilliseconds,
       'allowBackgroundPlayback': config.allowBackgroundPlayback,
       'useHardwareAcceleration': config.useHardwareAcceleration,
+      // C-03b: Android-only transparent adaptive-stream segment cache.
+      // Absent/null is treated by native as disabled; see
+      // AdaptiveCacheConfig's dartdoc for the full Android-only contract
+      // and the DRM fail-safe. iOS never reads this key.
+      if (config.adaptiveCacheConfig != null)
+        'adaptiveCacheConfig': config.adaptiveCacheConfig!.toMap(),
     };
   }
 

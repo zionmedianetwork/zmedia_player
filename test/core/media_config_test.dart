@@ -373,5 +373,124 @@ void main() {
         expect(config.immersiveLandscape, true);
       });
     });
+
+    // -------------------------------------------------------------------------
+    // adaptiveCacheConfig (C-03b, Android-only transparent segment cache)
+    // -------------------------------------------------------------------------
+    group('adaptiveCacheConfig', () {
+      test('defaults to null (feature untouched unless explicitly opted in)',
+          () {
+        const config = MediaConfig();
+        expect(config.adaptiveCacheConfig, isNull);
+      });
+
+      test('can be set via constructor', () {
+        const config = MediaConfig(
+          adaptiveCacheConfig: AdaptiveCacheConfig(enabled: true),
+        );
+        expect(config.adaptiveCacheConfig, isNotNull);
+        expect(config.adaptiveCacheConfig!.enabled, true);
+      });
+
+      test('copyWith sets adaptiveCacheConfig without touching other fields',
+          () {
+        const original = MediaConfig(autoPlay: true, volume: 0.6);
+        final updated = original.copyWith(
+          adaptiveCacheConfig: const AdaptiveCacheConfig(enabled: true),
+        );
+
+        expect(updated.adaptiveCacheConfig?.enabled, true);
+        expect(updated.autoPlay, true); // unchanged
+        expect(updated.volume, 0.6); // unchanged
+      });
+
+      test('copyWith preserves adaptiveCacheConfig when not specified', () {
+        const original = MediaConfig(
+          adaptiveCacheConfig: AdaptiveCacheConfig(enabled: true),
+        );
+        final copy = original.copyWith();
+        expect(copy.adaptiveCacheConfig?.enabled, true);
+      });
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // AdaptiveCacheConfig (C-03b)
+  // ---------------------------------------------------------------------------
+  group('AdaptiveCacheConfig', () {
+    test('defaults to disabled with a 250MB cap', () {
+      const config = AdaptiveCacheConfig();
+      expect(config.enabled, false,
+          reason: 'transparent adaptive-stream caching must be opt-in, not '
+              'on by default');
+      expect(config.maxCacheSizeBytes, 250 * 1024 * 1024);
+    });
+
+    test('can be constructed with custom values', () {
+      const config = AdaptiveCacheConfig(
+        enabled: true,
+        maxCacheSizeBytes: 50 * 1024 * 1024,
+      );
+      expect(config.enabled, true);
+      expect(config.maxCacheSizeBytes, 50 * 1024 * 1024);
+    });
+
+    test('copyWith updates enabled without touching maxCacheSizeBytes', () {
+      const original = AdaptiveCacheConfig(maxCacheSizeBytes: 10 * 1024 * 1024);
+      final updated = original.copyWith(enabled: true);
+      expect(updated.enabled, true);
+      expect(updated.maxCacheSizeBytes, 10 * 1024 * 1024);
+    });
+
+    test('copyWith updates maxCacheSizeBytes without touching enabled', () {
+      const original = AdaptiveCacheConfig(enabled: true);
+      final updated = original.copyWith(maxCacheSizeBytes: 5 * 1024 * 1024);
+      expect(updated.enabled, true);
+      expect(updated.maxCacheSizeBytes, 5 * 1024 * 1024);
+    });
+
+    test('copyWith with no arguments preserves all values', () {
+      const original =
+          AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 42);
+      final copy = original.copyWith();
+      expect(copy.enabled, original.enabled);
+      expect(copy.maxCacheSizeBytes, original.maxCacheSizeBytes);
+    });
+
+    test('toMap serializes both fields for the native (Android-only) channel',
+        () {
+      const config =
+          AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 12345);
+      final map = config.toMap();
+      expect(map['enabled'], true);
+      expect(map['maxCacheSizeBytes'], 12345);
+    });
+
+    test('equal configs compare equal and share a hashCode', () {
+      const a = AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 100);
+      const b = AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 100);
+      expect(a, equals(b));
+      expect(a.hashCode, b.hashCode);
+    });
+
+    test('configs differing in enabled are not equal', () {
+      const a = AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 100);
+      const b = AdaptiveCacheConfig(enabled: false, maxCacheSizeBytes: 100);
+      expect(a == b, false);
+    });
+
+    test('configs differing in maxCacheSizeBytes are not equal', () {
+      const a = AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 100);
+      const b = AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 200);
+      expect(a == b, false);
+    });
+
+    test('toString reports both fields', () {
+      const config =
+          AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 999);
+      final str = config.toString();
+      expect(str, contains('enabled: true'));
+      expect(str, contains('maxCacheSizeBytes: 999'));
+    });
   });
 }
