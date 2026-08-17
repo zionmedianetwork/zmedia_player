@@ -101,7 +101,7 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
             object: nil
         )
 
-        print("MediaPlayerView.init(): Configured — player: \(player != nil)")
+        zlog("MediaPlayerView.init(): Configured — player: \(player != nil)")
     }
 
     // MARK: - Active-render-target binding
@@ -150,7 +150,7 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
             guard let self = self else { return }
             self.container.setNeedsLayout()
             self.container.layoutIfNeeded()
-            print("MediaPlayerView.view(): frame=\(self.container.frame), layerFrame=\(self.container.playerLayer.frame)")
+            zlog("MediaPlayerView.view(): frame=\(self.container.frame), layerFrame=\(self.container.playerLayer.frame)")
         }
         return container
     }
@@ -159,7 +159,7 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
 
     func setVideoGravity(boxFit: String) {
         let gravity = videoGravity(from: boxFit)
-        print("MediaPlayerView: setVideoGravity '\(boxFit)' → \(gravity.rawValue)")
+        zlog("MediaPlayerView: setVideoGravity '\(boxFit)' → \(gravity.rawValue)")
 
         if Thread.isMainThread {
             container.playerLayer.videoGravity = gravity
@@ -181,7 +181,7 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
         case "contain", "fitwidth", "fitheight", "none", "scaledown", "":
             return .resizeAspect
         default:
-            print("MediaPlayerView: Unknown boxFit '\(boxFit)', defaulting to .resizeAspect")
+            zlog("MediaPlayerView: Unknown boxFit '\(boxFit)', defaulting to .resizeAspect")
             return .resizeAspect
         }
     }
@@ -189,7 +189,7 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
     // MARK: - Player Update
 
     func updatePlayer(_ newPlayer: AVPlayer?) {
-        print("MediaPlayerView: updatePlayer — player: \(newPlayer != nil), hasItem: \(newPlayer?.currentItem != nil)")
+        zlog("MediaPlayerView: updatePlayer — player: \(newPlayer != nil), hasItem: \(newPlayer?.currentItem != nil)")
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -203,10 +203,10 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
                 self.container.setNeedsLayout()
                 self.container.layoutIfNeeded()
                 self.container.playerLayer.setNeedsDisplay()
-                print("MediaPlayerView: updatePlayer done — layerFrame=\(self.container.playerLayer.frame)")
+                zlog("MediaPlayerView: updatePlayer done — layerFrame=\(self.container.playerLayer.frame)")
             } else {
                 self.container.playerLayer.isHidden = true
-                print("MediaPlayerView: Player set to nil")
+                zlog("MediaPlayerView: Player set to nil")
             }
         }
     }
@@ -214,7 +214,7 @@ class MediaPlayerView: NSObject, FlutterPlatformView {
     // MARK: - Cleanup
 
     deinit {
-        print("MediaPlayerView: Deallocating")
+        zlog("MediaPlayerView: Deallocating")
         NotificationCenter.default.removeObserver(self)
         container.playerLayer.player = nil
         player = nil
@@ -267,13 +267,13 @@ class MediaPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
     ) -> FlutterPlatformView {
 
         guard let creationParams = args as? [String: Any] else {
-            print("MediaPlayerViewFactory: Invalid arguments for view \(viewId) - expected a dictionary, got \(String(describing: args)). Returning placeholder view.")
+            zlog("MediaPlayerViewFactory: Invalid arguments for view \(viewId) - expected a dictionary, got \(String(describing: args)). Returning placeholder view.")
             playerManager.notifyPlatformViewCreationFailed(playerId: nil, reason: "invalid_arguments")
             return PlaceholderPlatformView(frame: frame)
         }
 
         guard let playerId = creationParams["playerId"] as? String, !playerId.isEmpty else {
-            print("MediaPlayerViewFactory: Missing or invalid playerId for view \(viewId) in params: \(creationParams). Returning placeholder view.")
+            zlog("MediaPlayerViewFactory: Missing or invalid playerId for view \(viewId) in params: \(creationParams). Returning placeholder view.")
             playerManager.notifyPlatformViewCreationFailed(playerId: nil, reason: "missing_player_id")
             return PlaceholderPlatformView(frame: frame)
         }
@@ -283,12 +283,12 @@ class MediaPlayerViewFactory: NSObject, FlutterPlatformViewFactory {
             // e.g. the platform view was created before initialize(playerId:)
             // completed, or after the player was disposed. Returning a
             // placeholder keeps the host app alive; see the type doc above.
-            print("MediaPlayerViewFactory: No player found for id '\(playerId)' (view \(viewId)). Returning placeholder view.")
+            zlog("MediaPlayerViewFactory: No player found for id '\(playerId)' (view \(viewId)). Returning placeholder view.")
             playerManager.notifyPlatformViewCreationFailed(playerId: playerId, reason: "player_not_initialized")
             return PlaceholderPlatformView(frame: frame)
         }
 
-        print("MediaPlayerViewFactory: Created view for player \(playerId)")
+        zlog("MediaPlayerViewFactory: Created view for player \(playerId)")
         return playerView
     }
 

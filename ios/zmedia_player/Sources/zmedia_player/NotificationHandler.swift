@@ -187,7 +187,7 @@ class NotificationHandler: NSObject {
     // MARK: - Initialization
 
     func initialize(config: [String: Any]) {
-        print("NotificationHandler: Initializing for player: \(playerId)")
+        zlog("NotificationHandler: Initializing for player: \(playerId)")
 
         self.config = config
 
@@ -216,7 +216,7 @@ class NotificationHandler: NSObject {
         Ownership.shared.claimOwnership(for: self)
         applyCommandAvailability()
 
-        print("NotificationHandler: Initialized successfully")
+        zlog("NotificationHandler: Initialized successfully")
     }
 
     // MARK: - Audio Session Setup
@@ -236,9 +236,9 @@ class NotificationHandler: NSObject {
         do {
             let audioSession = AVAudioSession.sharedInstance()
             try audioSession.setCategory(.playback, mode: .moviePlayback)
-            print("NotificationHandler: Audio session category configured (activation is owned by AudioSessionCoordinator)")
+            zlog("NotificationHandler: Audio session category configured (activation is owned by AudioSessionCoordinator)")
         } catch {
-            print("NotificationHandler: Failed to configure audio session category: \(error.localizedDescription)")
+            zlog("NotificationHandler: Failed to configure audio session category: \(error.localizedDescription)")
         }
     }
 
@@ -252,26 +252,26 @@ class NotificationHandler: NSObject {
     /// per player's configuration is handled separately by
     /// `applyCommandAvailability()`, which runs whenever ownership changes.
     private func setupRemoteCommandCenter() {
-        print("NotificationHandler: Setting up remote command center (process-wide, first initialization)")
+        zlog("NotificationHandler: Setting up remote command center (process-wide, first initialization)")
 
         var addedTargets: [(MPRemoteCommand, Any)] = []
 
         let playTarget = remoteCommandCenter.playCommand.addTarget { _ in
-            print("NotificationHandler: Play command received")
+            zlog("NotificationHandler: Play command received")
             Ownership.shared.currentOwner()?.sendActionToFlutter("play")
             return .success
         }
         addedTargets.append((remoteCommandCenter.playCommand, playTarget))
 
         let pauseTarget = remoteCommandCenter.pauseCommand.addTarget { _ in
-            print("NotificationHandler: Pause command received")
+            zlog("NotificationHandler: Pause command received")
             Ownership.shared.currentOwner()?.sendActionToFlutter("pause")
             return .success
         }
         addedTargets.append((remoteCommandCenter.pauseCommand, pauseTarget))
 
         let toggleTarget = remoteCommandCenter.togglePlayPauseCommand.addTarget { _ in
-            print("NotificationHandler: Toggle play/pause command received")
+            zlog("NotificationHandler: Toggle play/pause command received")
             if let owner = Ownership.shared.currentOwner() {
                 owner.sendActionToFlutter(owner.isPlaying ? "pause" : "play")
             }
@@ -280,35 +280,35 @@ class NotificationHandler: NSObject {
         addedTargets.append((remoteCommandCenter.togglePlayPauseCommand, toggleTarget))
 
         let nextTarget = remoteCommandCenter.nextTrackCommand.addTarget { _ in
-            print("NotificationHandler: Next track command received")
+            zlog("NotificationHandler: Next track command received")
             Ownership.shared.currentOwner()?.sendActionToFlutter("next")
             return .success
         }
         addedTargets.append((remoteCommandCenter.nextTrackCommand, nextTarget))
 
         let previousTarget = remoteCommandCenter.previousTrackCommand.addTarget { _ in
-            print("NotificationHandler: Previous track command received")
+            zlog("NotificationHandler: Previous track command received")
             Ownership.shared.currentOwner()?.sendActionToFlutter("previous")
             return .success
         }
         addedTargets.append((remoteCommandCenter.previousTrackCommand, previousTarget))
 
         let stopTarget = remoteCommandCenter.stopCommand.addTarget { _ in
-            print("NotificationHandler: Stop command received")
+            zlog("NotificationHandler: Stop command received")
             Ownership.shared.currentOwner()?.sendActionToFlutter("stop")
             return .success
         }
         addedTargets.append((remoteCommandCenter.stopCommand, stopTarget))
 
         let skipForwardTarget = remoteCommandCenter.skipForwardCommand.addTarget { _ in
-            print("NotificationHandler: Skip forward command received")
+            zlog("NotificationHandler: Skip forward command received")
             Ownership.shared.currentOwner()?.sendActionToFlutter("seekForward")
             return .success
         }
         addedTargets.append((remoteCommandCenter.skipForwardCommand, skipForwardTarget))
 
         let skipBackwardTarget = remoteCommandCenter.skipBackwardCommand.addTarget { _ in
-            print("NotificationHandler: Skip backward command received")
+            zlog("NotificationHandler: Skip backward command received")
             Ownership.shared.currentOwner()?.sendActionToFlutter("seekBackward")
             return .success
         }
@@ -326,7 +326,7 @@ class NotificationHandler: NSObject {
                 return .commandFailed
             }
             let positionSeconds = positionEvent.positionTime
-            print("NotificationHandler: Change playback position to: \(positionSeconds)")
+            zlog("NotificationHandler: Change playback position to: \(positionSeconds)")
             let positionMs = Int64((positionSeconds * 1000.0).rounded())
             Ownership.shared.currentOwner()?.sendActionToFlutter("seekTo", position: positionMs)
             return .success
@@ -335,7 +335,7 @@ class NotificationHandler: NSObject {
 
         Ownership.shared.recordCommandTargets(addedTargets)
 
-        print("NotificationHandler: Remote command center configured")
+        zlog("NotificationHandler: Remote command center configured")
     }
 
     /// Enables/disables each remote command and configures skip intervals
@@ -362,7 +362,7 @@ class NotificationHandler: NSObject {
     // MARK: - Show/Update Notification
 
     func showNotification(mediaItem: [String: Any], state: [String: Any]) {
-        print("NotificationHandler: Showing notification")
+        zlog("NotificationHandler: Showing notification")
 
         let newArtworkUrl = mediaItem["artworkUrl"] as? String
         let newMediaUrl = mediaItem["url"] as? String
@@ -418,13 +418,13 @@ class NotificationHandler: NSObject {
             updateNowPlayingInfo()
         }
 
-        print("NotificationHandler: Notification updated - Title: \(currentTitle ?? "nil"), Playing: \(isPlaying)")
+        zlog("NotificationHandler: Notification updated - Title: \(currentTitle ?? "nil"), Playing: \(isPlaying)")
     }
 
     func updateState(state: [String: Any]) {
         guard isShowing else { return }
 
-        print("NotificationHandler: Updating state")
+        zlog("NotificationHandler: Updating state")
 
         isPlaying = state["isPlaying"] as? Bool ?? false
 
@@ -498,18 +498,18 @@ class NotificationHandler: NSObject {
         // Update
         nowPlayingInfoCenter.nowPlayingInfo = nowPlayingInfo
 
-        print("NotificationHandler: Now playing info updated - Position: \(position)s / \(duration)s")
+        zlog("NotificationHandler: Now playing info updated - Position: \(position)s / \(duration)s")
     }
 
     // MARK: - Artwork Loading
 
     private func loadArtwork(from urlString: String) {
         guard let url = URL(string: urlString) else {
-            print("NotificationHandler: Invalid artwork URL")
+            zlog("NotificationHandler: Invalid artwork URL")
             return
         }
 
-        print("NotificationHandler: Loading artwork from: \(urlString)")
+        zlog("NotificationHandler: Loading artwork from: \(redactedURL(urlString))")
 
         DispatchQueue.global(qos: .background).async { [weak self] in
             guard let self = self else { return }
@@ -525,12 +525,12 @@ class NotificationHandler: NSObject {
                     DispatchQueue.main.async {
                         if self.isShowing && self.isOwner {
                             self.updateNowPlayingInfo()
-                            print("NotificationHandler: Artwork loaded and updated")
+                            zlog("NotificationHandler: Artwork loaded and updated")
                         }
                     }
                 }
             } catch {
-                print("NotificationHandler: Failed to load artwork: \(error.localizedDescription)")
+                zlog("NotificationHandler: Failed to load artwork: \(error.localizedDescription)")
             }
         }
     }
@@ -563,11 +563,11 @@ class NotificationHandler: NSObject {
     ///   • fallback (unknown duration) → 5 s fixed offset
     private func generateThumbnail(from urlString: String) {
         guard let url = URL(string: urlString) else {
-            print("NotificationHandler: Invalid media URL for thumbnail generation")
+            zlog("NotificationHandler: Invalid media URL for thumbnail generation")
             return
         }
 
-        print("NotificationHandler: Generating thumbnail from media: \(urlString)")
+        zlog("NotificationHandler: Generating thumbnail from media: \(redactedURL(urlString))")
 
         let asset = AVURLAsset(url: url)
 
@@ -580,7 +580,7 @@ class NotificationHandler: NSObject {
 
             // If the media changed while we were loading, discard this work.
             guard self.currentMediaUrl == urlString else {
-                print("NotificationHandler: Thumbnail load cancelled — media changed while loading asset")
+                zlog("NotificationHandler: Thumbnail load cancelled — media changed while loading asset")
                 return
             }
 
@@ -593,7 +593,7 @@ class NotificationHandler: NSObject {
                 assetDurationSeconds = (d.isFinite && d > 0) ? d : 0
             } else {
                 assetDurationSeconds = 0
-                print("NotificationHandler: Asset duration not loaded (status \(durationStatus.rawValue)); using fallback target time")
+                zlog("NotificationHandler: Asset duration not loaded (status \(durationStatus.rawValue)); using fallback target time")
             }
 
             // Compute a target time well into real content.
@@ -609,7 +609,7 @@ class NotificationHandler: NSObject {
                 targetSeconds = 5.0
             }
 
-            print("NotificationHandler: Asset duration \(assetDurationSeconds)s → thumbnail target \(targetSeconds)s")
+            zlog("NotificationHandler: Asset duration \(assetDurationSeconds)s → thumbnail target \(targetSeconds)s")
 
             let targetTime = CMTime(seconds: targetSeconds, preferredTimescale: 600)
 
@@ -634,7 +634,7 @@ class NotificationHandler: NSObject {
                     return image
                 }
 
-                print("NotificationHandler: Frame captured at actual time \(CMTimeGetSeconds(actualTime))s (requested \(targetSeconds)s)")
+                zlog("NotificationHandler: Frame captured at actual time \(CMTimeGetSeconds(actualTime))s (requested \(targetSeconds)s)")
 
                 DispatchQueue.main.async {
                     // Only apply if the media item hasn't changed while we were
@@ -644,14 +644,14 @@ class NotificationHandler: NSObject {
                         self.currentArtwork = artwork
                         if self.isShowing && self.isOwner {
                             self.updateNowPlayingInfo()
-                            print("NotificationHandler: Video thumbnail generated and applied")
+                            zlog("NotificationHandler: Video thumbnail generated and applied")
                         }
                     } else {
-                        print("NotificationHandler: Thumbnail discarded — media changed during generation")
+                        zlog("NotificationHandler: Thumbnail discarded — media changed during generation")
                     }
                 }
             } catch {
-                print("NotificationHandler: Failed to generate thumbnail: \(error.localizedDescription)")
+                zlog("NotificationHandler: Failed to generate thumbnail: \(error.localizedDescription)")
             }
         }
     }
@@ -663,7 +663,7 @@ class NotificationHandler: NSObject {
     /// dismissing its own (already invisible, since it isn't the owner)
     /// notification must not collaterally wipe the owner's Now Playing info.
     func dismiss() {
-        print("NotificationHandler: Dismissing notification")
+        zlog("NotificationHandler: Dismissing notification")
 
         if isOwner {
             nowPlayingInfoCenter.nowPlayingInfo = nil
@@ -703,7 +703,7 @@ class NotificationHandler: NSObject {
     /// command objects). A non-owning instance's dispose only clears its own
     /// local state and never touches the shared singletons.
     func dispose() {
-        print("NotificationHandler: Disposing")
+        zlog("NotificationHandler: Disposing")
 
         // Always clear this instance's own visible state first. `dismiss()`
         // itself only touches the shared center if `self` is (still) the
@@ -717,14 +717,14 @@ class NotificationHandler: NSObject {
             break
 
         case .handedOff(to: let successor):
-            print("NotificationHandler: Ownership handed off to player \(successor.playerId)")
+            zlog("NotificationHandler: Ownership handed off to player \(successor.playerId)")
             successor.applyCommandAvailability()
             if successor.isShowing {
                 successor.updateNowPlayingInfo()
             }
 
         case .tornDown(let targetsToRemove):
-            print("NotificationHandler: No other player active — tearing down shared Now Playing / remote commands")
+            zlog("NotificationHandler: No other player active — tearing down shared Now Playing / remote commands")
 
             nowPlayingInfoCenter.nowPlayingInfo = nil
 

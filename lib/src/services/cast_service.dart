@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import '../models/cast_device.dart';
 import '../models/media_item.dart';
 import '../core/media_player.dart';
+import '../core/exceptions.dart';
+import '../security/input_validation.dart';
 
 /// Service for managing screencast (Chromecast, AirPlay, etc.)
 class CastService {
@@ -176,6 +178,26 @@ class CastService {
     required String playerId,
   }) async {
     if (!_config.enabled || !_currentStatus.isCasting) return;
+
+    // M-07: this service forwards only id/title/url/artwork/duration to the
+    // receiver device with no DRM session at all — refuse to cast
+    // DRM-protected content rather than silently exposing it to an
+    // unauthenticated receiver. Deliberately thrown *before* the try/catch
+    // below (which otherwise swallows every failure via debugPrint) so a
+    // caller cannot silently lose this refusal (B-11: must not be
+    // swallowed).
+    if (mediaItem.drmConfig != null) {
+      throw ConfigurationException(
+        'Cannot cast DRM-protected media: casting has no DRM session and '
+        'would expose protected content to an unauthenticated receiver.',
+        parameter: 'drmConfig',
+        value: mediaItem.id,
+      );
+    }
+
+    // B-11: validate the url before handing it to native. Also kept outside
+    // the try/catch below for the same reason as the DRM gate above.
+    InputValidator.validateUrl(mediaItem.url);
 
     try {
       await _channel.invokeMethod('loadMediaOnCastDevice', {

@@ -26,6 +26,70 @@ enum DrmScheme {
   clearkey,
 }
 
+/// Widevine security levels, from most to least secure.
+///
+/// **Android/Widevine only.** FairPlay (iOS) has no directly comparable,
+/// queryable device security tier — Apple's trust model for FairPlay is
+/// built into code-signing and hardware attestation at the OS level rather
+/// than exposed as an app-queryable enum the way `MediaDrm.getPropertyString
+/// ("securityLevel")` is on Android. Setting
+/// [DrmConfig.minWidevineSecurityLevel] has no effect on iOS: the `fairplay`
+/// scheme is the only one iOS's native `DrmHandler` accepts at all, so a
+/// `widevine` [DrmConfig] (the only scheme this field is meaningful for)
+/// never reaches iOS DRM code in the first place. See
+/// `DrmHandler.validateDrmConfig` (Android) / the class doc on
+/// `DrmHandler.swift` (iOS) for where this is enforced natively.
+enum WidevineSecurityLevel {
+  /// Hardware-backed cryptography operations and key storage in a trusted
+  /// execution environment (TEE). Widevine's highest security tier.
+  l1,
+
+  /// Software-based cryptography with some hardware isolation. Rarely seen
+  /// on shipping devices; included for completeness of the enum space
+  /// `MediaDrm` can report.
+  l2,
+
+  /// Software-only cryptography with no hardware protection. Widevine's
+  /// lowest security tier.
+  l3,
+}
+
+/// Wire-format helpers for [WidevineSecurityLevel], matching the string
+/// values `android.media.MediaDrm.getPropertyString("securityLevel")`
+/// returns on Android (`"L1"` / `"L2"` / `"L3"`).
+extension WidevineSecurityLevelWire on WidevineSecurityLevel {
+  /// Serializes to the string native `DrmHandler.getWidevineSecurityLevel()`
+  /// compares against.
+  String get wireValue {
+    switch (this) {
+      case WidevineSecurityLevel.l1:
+        return 'L1';
+      case WidevineSecurityLevel.l2:
+        return 'L2';
+      case WidevineSecurityLevel.l3:
+        return 'L3';
+    }
+  }
+}
+
+/// Parses a [WidevineSecurityLevel] from its wire value ([wireValue]).
+/// Returns `null` for an unrecognized/absent value rather than throwing —
+/// callers decide how to treat an unparseable level (typically: fail
+/// closed, exactly like the native fail-closed policy this field drives).
+WidevineSecurityLevel? widevineSecurityLevelFromWire(String? value) {
+  if (value == null) return null;
+  switch (value.trim().toUpperCase()) {
+    case 'L1':
+      return WidevineSecurityLevel.l1;
+    case 'L2':
+      return WidevineSecurityLevel.l2;
+    case 'L3':
+      return WidevineSecurityLevel.l3;
+    default:
+      return null;
+  }
+}
+
 /// DRM configuration
 class DrmConfig {
   /// DRM scheme to use
@@ -66,6 +130,28 @@ class DrmConfig {
   /// Leave null to use the platform's default TLS validation (no pinning).
   final CertificatePinningConfig? certificatePinning;
 
+  /// Opt-in, fail-closed minimum Widevine security level (B-12 wave 2 / gate
+  /// item "Wire validateDrmConfig / getWidevineSecurityLevel into the load
+  /// path").
+  ///
+  /// **Android/Widevine only** — see [WidevineSecurityLevel] for why there
+  /// is no iOS/FairPlay equivalent. Default `null` means "no policy" and
+  /// preserves existing behaviour exactly (no device is rejected on
+  /// security-level grounds unless a host app opts in here).
+  ///
+  /// When set, native `DrmHandler.validateDrmConfig()` (Android) checks the
+  /// device's actual Widevine security level (`getWidevineSecurityLevel()`)
+  /// against this minimum **before** a DRM session manager is created, and
+  /// refuses to create one — failing the load rather than falling back to
+  /// unprotected playback — when:
+  ///   - the device's level is below the requested minimum, or
+  ///   - the device's level cannot be determined at all (fail-closed: an
+  ///     indeterminate level is always treated as not meeting the policy).
+  ///
+  /// Only meaningful when [scheme] is [DrmScheme.widevine];
+  /// [InputValidator.validateDrmConfig] rejects any other combination.
+  final WidevineSecurityLevel? minWidevineSecurityLevel;
+
   const DrmConfig({
     required this.scheme,
     required this.licenseUrl,
@@ -77,6 +163,7 @@ class DrmConfig {
     this.customData,
     this.ezdrmConfig,
     this.certificatePinning,
+    this.minWidevineSecurityLevel,
   });
 
   /// Create a token-based DRM configuration
@@ -105,6 +192,7 @@ class DrmConfig {
     Map<String, String>? headers,
     Map<String, dynamic>? customData,
     CertificatePinningConfig? certificatePinning,
+    WidevineSecurityLevel? minWidevineSecurityLevel,
   }) {
     return DrmConfig(
       scheme: DrmScheme.widevine,
@@ -112,6 +200,7 @@ class DrmConfig {
       headers: headers,
       customData: customData,
       certificatePinning: certificatePinning,
+      minWidevineSecurityLevel: minWidevineSecurityLevel,
     );
   }
 
@@ -163,6 +252,7 @@ class DrmConfig {
       'customData': customData,
       'ezdrmConfig': ezdrmConfig?.toMap(),
       'certificatePinning': certificatePinning?.toMap(),
+      'minWidevineSecurityLevel': minWidevineSecurityLevel?.wireValue,
     };
   }
 
@@ -193,6 +283,8 @@ class DrmConfig {
           ? EzdrmConfig.fromMap(map['ezdrmConfig'] as Map<String, dynamic>)
           : null,
       certificatePinning: pinning,
+      minWidevineSecurityLevel:
+          widevineSecurityLevelFromWire(map['minWidevineSecurityLevel'] as String?),
     );
   }
 
@@ -229,6 +321,7 @@ class DrmConfig {
     Map<String, dynamic>? customData,
     EzdrmConfig? ezdrmConfig,
     CertificatePinningConfig? certificatePinning,
+    WidevineSecurityLevel? minWidevineSecurityLevel,
   }) {
     return DrmConfig(
       scheme: scheme ?? this.scheme,
@@ -241,6 +334,8 @@ class DrmConfig {
       customData: customData ?? this.customData,
       ezdrmConfig: ezdrmConfig ?? this.ezdrmConfig,
       certificatePinning: certificatePinning ?? this.certificatePinning,
+      minWidevineSecurityLevel:
+          minWidevineSecurityLevel ?? this.minWidevineSecurityLevel,
     );
   }
 }

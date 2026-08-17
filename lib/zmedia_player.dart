@@ -90,3 +90,6 @@ export 'src/widgets/airplay_button.dart';
 export 'src/security/certificate_pinning.dart';
 export 'src/security/secure_storage.dart';
 export 'src/security/input_validation.dart';
+
+// Security (Phase 5 wave 2 - B-12: screen-capture protection)
+export 'src/security/screen_capture_protection.dart';

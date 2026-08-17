@@ -69,7 +69,10 @@ class CrashHandler(
         error: Exception,
         context: Map<String, Any>
     ) {
-        Log.e(TAG, "Native error in $operation for player $playerId: ${error.message}", error)
+        // error.message can embed a media/license URL (with query-string tokens) from any
+        // wrapped operation (DRM, network, media loading). Log.e is not stripped from
+        // release builds, so redact before logging (H-03).
+        Log.e(TAG, "Native error in $operation for player $playerId: ${LogSanitizer.redactUrls(error.message)}", error)
 
         try {
             val errorData = buildMap<String, Any?> {

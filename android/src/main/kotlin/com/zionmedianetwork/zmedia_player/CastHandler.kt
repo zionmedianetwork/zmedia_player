@@ -331,7 +331,10 @@ class CastHandler(
 
                     android.util.Log.d(TAG, "========================================")
                 } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Error loading media on cast: ${e.message}", e)
+                    // e.message can embed the media URL logged above at Log.d (Media URL:
+                    // ..., stripped from release by ProGuard) — redact here too since Log.e
+                    // is not stripped (H-03).
+                    android.util.Log.e(TAG, "Error loading media on cast: ${LogSanitizer.redactUrls(e.message)}", e)
                     android.util.Log.e(TAG, "========================================")
                 }
             }

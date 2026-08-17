@@ -1,8 +1,18 @@
 /// Certificate pinning for secure connections
 ///
 /// Prevents man-in-the-middle attacks by validating server certificates
-/// against known good certificates (pins). Used for DRM license servers
-/// and media CDNs.
+/// against known good certificates (pins).
+///
+/// LICENSE-ONLY (H-02): pinning currently applies only to the DRM license
+/// server request — NOT to media segment/CDN traffic. Android attaches the
+/// pinned `OkHttpClient` solely to the DRM license callback in
+/// `DrmHandler.kt`; media itself is fetched through a plain
+/// `DefaultHttpDataSource.Factory` with no pinning. iOS uses a bare
+/// `AVURLAsset` with no resource-loader delegate, so no pinning is applied
+/// to media/CDN traffic there either. Segment/CDN pinning is a known,
+/// deliberately deferred follow-up and is out of scope for this phase — do
+/// not rely on this config to protect anything other than license
+/// requests.
 ///
 /// Pin format: lowercase hex string of SHA-256 over the DER-encoded
 /// SubjectPublicKeyInfo (SPKI) of a certificate in the server's TLS chain.

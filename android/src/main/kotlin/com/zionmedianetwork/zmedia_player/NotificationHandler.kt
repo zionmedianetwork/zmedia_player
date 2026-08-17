@@ -842,7 +842,9 @@ class NotificationHandler(
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to load artwork: ${e.message}")
+                // e.message may embed the artwork URL (with any query-string token) — redact
+                // before logging since Log.e is not stripped from release builds (H-03).
+                android.util.Log.e(TAG, "Failed to load artwork: ${LogSanitizer.redactUrls(e.message)}")
             }
             withContext(Dispatchers.Main) {
                 artworkLoadInFlight = false
@@ -936,7 +938,8 @@ class NotificationHandler(
                     }
                 }
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to generate thumbnail: ${e.message}")
+                // e.message may embed the source media URL — redact before logging (H-03).
+                android.util.Log.e(TAG, "Failed to generate thumbnail: ${LogSanitizer.redactUrls(e.message)}")
             } finally {
                 try {
                     retriever.release()

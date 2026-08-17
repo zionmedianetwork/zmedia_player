@@ -133,9 +133,9 @@ final class AudioSessionCoordinator {
                     try audioSession.setCategory(.playback, mode: .moviePlayback)
                     try audioSession.setActive(true)
                     self.sessionIsActive = true
-                    print("AudioSessionCoordinator: Session active (exclusive)")
+                    zlog("AudioSessionCoordinator: Session active (exclusive)")
                 } catch {
-                    print("AudioSessionCoordinator: Failed to activate session (exclusive): \(error)")
+                    zlog("AudioSessionCoordinator: Failed to activate session (exclusive): \(error)")
                 }
 
             case .activeMixWithOthers:
@@ -143,9 +143,9 @@ final class AudioSessionCoordinator {
                     try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
                     try audioSession.setActive(true)
                     self.sessionIsActive = true
-                    print("AudioSessionCoordinator: Session active (mixWithOthers, muted/silent playback)")
+                    zlog("AudioSessionCoordinator: Session active (mixWithOthers, muted/silent playback)")
                 } catch {
-                    print("AudioSessionCoordinator: Failed to activate session (mixWithOthers): \(error)")
+                    zlog("AudioSessionCoordinator: Failed to activate session (mixWithOthers): \(error)")
                 }
 
             case .inactive:
@@ -153,9 +153,9 @@ final class AudioSessionCoordinator {
                 do {
                     try audioSession.setActive(false, options: [.notifyOthersOnDeactivation])
                     self.sessionIsActive = false
-                    print("AudioSessionCoordinator: Session deactivated (no live requester) — notifying other apps")
+                    zlog("AudioSessionCoordinator: Session deactivated (no live requester) — notifying other apps")
                 } catch {
-                    print("AudioSessionCoordinator: Failed to deactivate session: \(error)")
+                    zlog("AudioSessionCoordinator: Failed to deactivate session: \(error)")
                 }
             }
         }
@@ -209,7 +209,7 @@ class MediaPlayerManager {
         }
 
         for playerId in stalePlayers {
-            print("MediaPlayerManager: Auto-cleaning stale instance: \(playerId)")
+            zlog("MediaPlayerManager: Auto-cleaning stale instance: \(playerId)")
             players[playerId]?.dispose()
             players.removeValue(forKey: playerId)
             lastActivity.removeValue(forKey: playerId)
@@ -393,13 +393,13 @@ class MediaPlayerManager {
 
     func getPlayerLayer(playerId: String) throws -> AVPlayerLayer? {
         guard let playerInstance = players[playerId] else {
-            print("MediaPlayerManager: Player instance not found for \(playerId)")
+            zlog("MediaPlayerManager: Player instance not found for \(playerId)")
             throw MediaPlayerError.playerNotFound
         }
 
         // Use currentPlayerLayer() which reads the active view WITHOUT creating a new one.
         let layer = playerInstance.currentPlayerLayer()
-        print("MediaPlayerManager: getPlayerLayer - returning active player layer: \(layer != nil)")
+        zlog("MediaPlayerManager: getPlayerLayer - returning active player layer: \(layer != nil)")
         return layer
     }
 
@@ -649,7 +649,7 @@ class MediaPlayerInstance: NSObject {
         // Reset access log event counter for new media
         previousAccessLogEventCount = 0
 
-        print("MediaPlayerInstance.loadMediaItem(): Loading URL: \(urlString)")
+        zlog("MediaPlayerInstance.loadMediaItem(): Loading URL: \(redactedURL(urlString))")
 
         // Clear previous track data immediately to prevent stale UI
         notifyQualityTracksChanged(tracks: [])
@@ -696,7 +696,7 @@ class MediaPlayerInstance: NSObject {
                     if let cookie = HTTPCookie(properties: props) {
                         cookies.append(cookie)
                     } else {
-                        print("MediaPlayerInstance: HTTPCookie construction failed for cookie \(name)")
+                        zlog("MediaPlayerInstance: HTTPCookie construction failed for cookie \(name)")
                     }
                 }
                 if !cookies.isEmpty {
@@ -706,7 +706,7 @@ class MediaPlayerInstance: NSObject {
                     // drops on some out-of-process requests). Using only the cookies
                     // key applies the cookies to every request.
                     headerFields.removeValue(forKey: "Cookie")
-                    print("MediaPlayerInstance: forwarding \(cookies.count) cookie(s) via AVURLAssetHTTPCookiesKey for host \(host)")
+                    zlog("MediaPlayerInstance: forwarding \(cookies.count) cookie(s) via AVURLAssetHTTPCookiesKey for host \(host)")
                 }
             }
             if !headerFields.isEmpty {
@@ -722,20 +722,45 @@ class MediaPlayerInstance: NSObject {
         // the AVContentKeySession to the asset BEFORE creating the AVPlayerItem.
         // The AVContentKeySession MUST have the asset added as a recipient before
         // the item is created; otherwise the key request callback is never triggered.
-        if #available(iOS 10.0, *),
-           let drmConfig = mediaItem["drmConfig"] as? [String: Any],
-           let player = avPlayer {
-            print("MediaPlayerInstance.loadMediaItem(): DRM config found, initializing DrmHandler")
-            let handler = DrmHandler(playerId: playerId, channel: methodChannel)
-            let configured = handler.configure(drmConfig: drmConfig)
-            if configured {
-                let session = handler.createContentKeySession(for: player)
-                // Register the asset as a content key recipient BEFORE creating AVPlayerItem.
-                session.addContentKeyRecipient(asset)
-                drmHandler = handler
-                print("MediaPlayerInstance.loadMediaItem(): DRM content key session configured")
+        if let drmConfig = mediaItem["drmConfig"] as? [String: Any] {
+            if #available(iOS 10.0, *), let player = avPlayer {
+                zlog("MediaPlayerInstance.loadMediaItem(): DRM config found, initializing DrmHandler")
+                let handler = DrmHandler(playerId: playerId, channel: methodChannel)
+                let configured = handler.configure(drmConfig: drmConfig)
+                if configured {
+                    let session = handler.createContentKeySession(for: player)
+                    // Register the asset as a content key recipient BEFORE creating AVPlayerItem.
+                    session.addContentKeyRecipient(asset)
+                    drmHandler = handler
+                    zlog("MediaPlayerInstance.loadMediaItem(): DRM content key session configured")
+                } else {
+                    // Fail-closed (wave 2 security hardening, mirrors the equivalent
+                    // fix in MediaPlayerManager.kt's loadMediaItem): a DRM-configured
+                    // item whose DrmHandler.configure() rejected the config (missing
+                    // license/certificate URL, unsupported scheme, etc.) must never
+                    // fall back to unprotected playback. configure() has already
+                    // called notifyDrmError() internally (emits
+                    // onDrmSessionUpdate(state=error)/onDrmError), so the Dart-side
+                    // errorStream/drmSessionStream already knows why. Refuse to
+                    // create the AVPlayerItem at all and leave whatever was
+                    // previously loaded untouched rather than silently playing this
+                    // item unprotected.
+                    zlog("MediaPlayerInstance.loadMediaItem(): DrmHandler.configure() failed - refusing to load DRM-configured media without protection")
+                    currentMediaItem = nil
+                    return
+                }
             } else {
-                print("MediaPlayerInstance.loadMediaItem(): DrmHandler.configure() failed, loading without DRM")
+                // drmConfig was present but DRM cannot be enforced on this run —
+                // either the AVContentKeySession API is unavailable (iOS < 10; the
+                // package's own minimum is iOS 13, so this is effectively
+                // unreachable but kept as a defensive fail-closed branch) or
+                // `avPlayer` is nil (e.g. instance mid-teardown). Fail closed the
+                // same way rather than silently falling through to unprotected
+                // playback below.
+                zlog("MediaPlayerInstance.loadMediaItem(): DRM config present but cannot be enforced (no AVContentKeySession support or no player) - refusing to load")
+                notifyError(error: "DRM could not be enforced for this media item")
+                currentMediaItem = nil
+                return
             }
         }
 
@@ -788,23 +813,23 @@ class MediaPlayerInstance: NSObject {
 
             self.avPlayer?.replaceCurrentItem(with: playerItem)
 
-            print("MediaPlayerInstance.loadMediaItem(): Item replaced, player: \(self.avPlayer != nil)")
+            zlog("MediaPlayerInstance.loadMediaItem(): Item replaced, player: \(self.avPlayer != nil)")
 
             // Re-bind ONLY the topmost live view to the (new) current item;
             // every other view stays unbound (single-layer-per-player rule).
             let liveCount = self.playerViews.filter { $0.view != nil }.count
             if liveCount > 0 {
-                print("MediaPlayerInstance.loadMediaItem(): Re-activating topmost of \(liveCount) live view(s)")
+                zlog("MediaPlayerInstance.loadMediaItem(): Re-activating topmost of \(liveCount) live view(s)")
                 self.activateTopmostView()
             } else {
-                print("MediaPlayerInstance.loadMediaItem(): No player views exist yet")
+                zlog("MediaPlayerInstance.loadMediaItem(): No player views exist yet")
             }
 
             // Auto play if configured. Route through play() (not a bare
             // avPlayer?.play()) so autoplay honours the requested speed and
             // configures the audio session the same way an explicit play() would.
             if self.config?["autoPlay"] as? Bool == true {
-                print("MediaPlayerInstance.loadMediaItem(): Auto-playing")
+                zlog("MediaPlayerInstance.loadMediaItem(): Auto-playing")
                 self.play()
             }
         }
@@ -921,29 +946,29 @@ class MediaPlayerInstance: NSObject {
     func setSubtitleTrack(subtitleTrack: [String: Any]?) {
         guard let playerItem = avPlayer?.currentItem,
               let asset = playerItem.asset as? AVURLAsset else {
-            print("MediaPlayerInstance: Cannot set subtitle track - no player item or not AVURLAsset")
+            zlog("MediaPlayerInstance: Cannot set subtitle track - no player item or not AVURLAsset")
             return
         }
 
         // Get subtitle selection group
         guard let subtitleGroup = asset.mediaSelectionGroup(forMediaCharacteristic: .legible) else {
-            print("MediaPlayerInstance: No subtitle selection group found")
+            zlog("MediaPlayerInstance: No subtitle selection group found")
             return
         }
 
         // If nil, disable subtitles
         if subtitleTrack == nil {
-            print("MediaPlayerInstance: Disabling subtitles")
+            zlog("MediaPlayerInstance: Disabling subtitles")
             playerItem.select(nil, in: subtitleGroup)
             return
         }
 
         guard let trackId = subtitleTrack?["id"] as? String else {
-            print("MediaPlayerInstance: Invalid subtitle track data - no id")
+            zlog("MediaPlayerInstance: Invalid subtitle track data - no id")
             return
         }
 
-        print("MediaPlayerInstance: Setting subtitle track: \(subtitleTrack?["title"] ?? "unknown"), id: \(trackId)")
+        zlog("MediaPlayerInstance: Setting subtitle track: \(subtitleTrack?["title"] ?? "unknown"), id: \(trackId)")
 
         // Find the matching option
         var targetOption: AVMediaSelectionOption?
@@ -957,48 +982,48 @@ class MediaPlayerInstance: NSObject {
         }
 
         if let option = targetOption {
-            print("MediaPlayerInstance: Subtitle track found, selecting")
+            zlog("MediaPlayerInstance: Subtitle track found, selecting")
             playerItem.select(option, in: subtitleGroup)
         } else {
-            print("MediaPlayerInstance: Subtitle track not found: \(trackId)")
+            zlog("MediaPlayerInstance: Subtitle track not found: \(trackId)")
         }
     }
 
     func setQualityTrack(qualityTrack: [String: Any]) {
         guard let bitrate = qualityTrack["bitrate"] as? Int,
               let name = qualityTrack["name"] as? String else {
-            print("MediaPlayerInstance: Invalid quality track data")
+            zlog("MediaPlayerInstance: Invalid quality track data")
             return
         }
 
-        print("MediaPlayerInstance: Setting quality track: \(name), bitrate: \(bitrate)")
+        zlog("MediaPlayerInstance: Setting quality track: \(name), bitrate: \(bitrate)")
 
         // Set preferred peak bitrate to limit maximum quality
         // AVPlayer will select the best track that doesn't exceed this bitrate
         avPlayer?.currentItem?.preferredPeakBitRate = Double(bitrate)
 
-        print("MediaPlayerInstance: Quality track set with preferredPeakBitRate: \(bitrate)")
+        zlog("MediaPlayerInstance: Quality track set with preferredPeakBitRate: \(bitrate)")
     }
 
     func setAudioTrack(audioTrack: [String: Any]) {
         guard let playerItem = avPlayer?.currentItem,
               let asset = playerItem.asset as? AVURLAsset else {
-            print("MediaPlayerInstance: Cannot set audio track - no player item or not AVURLAsset")
+            zlog("MediaPlayerInstance: Cannot set audio track - no player item or not AVURLAsset")
             return
         }
 
         // Get audio selection group
         guard let audioGroup = asset.mediaSelectionGroup(forMediaCharacteristic: .audible) else {
-            print("MediaPlayerInstance: No audio selection group found")
+            zlog("MediaPlayerInstance: No audio selection group found")
             return
         }
 
         guard let trackId = audioTrack["id"] as? String else {
-            print("MediaPlayerInstance: Invalid audio track data - no id")
+            zlog("MediaPlayerInstance: Invalid audio track data - no id")
             return
         }
 
-        print("MediaPlayerInstance: Setting audio track: \(audioTrack["name"] ?? "unknown"), id: \(trackId)")
+        zlog("MediaPlayerInstance: Setting audio track: \(audioTrack["name"] ?? "unknown"), id: \(trackId)")
 
         // Find the matching option
         var targetOption: AVMediaSelectionOption?
@@ -1012,20 +1037,20 @@ class MediaPlayerInstance: NSObject {
         }
 
         if let option = targetOption {
-            print("MediaPlayerInstance: Audio track found, selecting")
+            zlog("MediaPlayerInstance: Audio track found, selecting")
             playerItem.select(option, in: audioGroup)
         } else {
-            print("MediaPlayerInstance: Audio track not found: \(trackId)")
+            zlog("MediaPlayerInstance: Audio track not found: \(trackId)")
         }
     }
 
     func enableAutoQuality() {
-        print("MediaPlayerInstance: Enabling auto quality (ABR)")
+        zlog("MediaPlayerInstance: Enabling auto quality (ABR)")
 
         // Clear preferred peak bitrate to enable full adaptive bitrate
         avPlayer?.currentItem?.preferredPeakBitRate = 0
 
-        print("MediaPlayerInstance: Auto quality enabled - preferredPeakBitRate cleared")
+        zlog("MediaPlayerInstance: Auto quality enabled - preferredPeakBitRate cleared")
     }
 
     func skipToIndex(index: Int) {
@@ -1045,7 +1070,7 @@ class MediaPlayerInstance: NSObject {
     /// Only the platform-view factory should call this method.
     /// All other code that needs the active layer must use currentPlayerLayer().
     func getPlayerView() -> MediaPlayerView {
-        print("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil), has item: \(avPlayer?.currentItem != nil)")
+        zlog("MediaPlayerInstance.getPlayerView(): Creating new player view with player: \(avPlayer != nil), has item: \(avPlayer?.currentItem != nil)")
         let newView = MediaPlayerView(player: avPlayer)
 
         // Promote the next-topmost view when this host is torn down so the
@@ -1122,7 +1147,7 @@ class MediaPlayerInstance: NSObject {
 
             // If new events were added (indicates bitrate switch), re-extract quality tracks
             if currentEventCount > previousAccessLogEventCount {
-                print("MediaPlayerInstance: New access log events detected (\(previousAccessLogEventCount) -> \(currentEventCount)), re-extracting quality tracks")
+                zlog("MediaPlayerInstance: New access log events detected (\(previousAccessLogEventCount) -> \(currentEventCount)), re-extracting quality tracks")
                 extractAndNotifyQualityTracks()
                 previousAccessLogEventCount = currentEventCount
             }
@@ -1216,7 +1241,7 @@ class MediaPlayerInstance: NSObject {
         case .unknown:
             notifyStateChanged(state: "idle", isBuffering: false)
         case .readyToPlay:
-            print("MediaPlayerInstance: Player status changed to readyToPlay")
+            zlog("MediaPlayerInstance: Player status changed to readyToPlay")
             notifyStateChanged(state: "ready", isBuffering: false)
             notifyDurationChanged()
 
@@ -1224,12 +1249,12 @@ class MediaPlayerInstance: NSObject {
             // unbound to avoid multiple layers on one AVPlayer → grey).
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                print("MediaPlayerInstance: Re-activating topmost live view on ready state")
+                zlog("MediaPlayerInstance: Re-activating topmost live view on ready state")
                 self.activateTopmostView()
             }
         case .failed:
             let nsError = avPlayer?.error as NSError?
-            print("MediaPlayerInstance: Player failed with error: \(nsError?.localizedDescription ?? "Unknown")")
+            zlog("MediaPlayerInstance: Player failed with error: \(nsError?.localizedDescription ?? "Unknown")")
             if let nsError = nsError {
                 let (category, httpStatusCode) = categorizeFailure(nsError, item: avPlayer?.currentItem)
                 notifyError(
@@ -1299,7 +1324,7 @@ class MediaPlayerInstance: NSObject {
 
         switch type {
         case .began:
-            print("MediaPlayerInstance: Audio session interruption began (playerId: \(playerId))")
+            zlog("MediaPlayerInstance: Audio session interruption began (playerId: \(playerId))")
             // The system silences/pauses playback itself; timeControlStatus
             // will transition to .paused and the observer above already
             // reports that to Dart via the existing notifyStateChanged path
@@ -1323,7 +1348,7 @@ class MediaPlayerInstance: NSObject {
                 shouldResume = AVAudioSession.InterruptionOptions(rawValue: optionsValue).contains(.shouldResume)
             }
 
-            print("MediaPlayerInstance: Audio session interruption ended (playerId: \(playerId), wasPlaying: \(wasPlayingBeforeInterruption), shouldResume: \(shouldResume))")
+            zlog("MediaPlayerInstance: Audio session interruption ended (playerId: \(playerId), wasPlaying: \(wasPlayingBeforeInterruption), shouldResume: \(shouldResume))")
 
             if wasPlayingBeforeInterruption && shouldResume {
                 // Route through play() (not a bare avPlayer?.play()) so the
@@ -1350,7 +1375,7 @@ class MediaPlayerInstance: NSObject {
               stalledItem === avPlayer?.currentItem else {
             return
         }
-        print("MediaPlayerInstance: Playback stalled (playerId: \(playerId)) — reporting buffering")
+        zlog("MediaPlayerInstance: Playback stalled (playerId: \(playerId)) — reporting buffering")
         notifyStateChanged(state: "buffering", isBuffering: true)
     }
 
@@ -1391,23 +1416,23 @@ class MediaPlayerInstance: NSObject {
     // has been replaced with modern Swift observers in loadMediaItem().
 
     private func handlePlayerItemStatusChange(status: AVPlayerItem.Status, item: AVPlayerItem? = nil) {
-        print("MediaPlayerInstance: PlayerItem status changed to: \(status.rawValue)")
+        zlog("MediaPlayerInstance: PlayerItem status changed to: \(status.rawValue)")
 
         switch status {
         case .unknown:
-            print("MediaPlayerInstance: PlayerItem status = unknown")
+            zlog("MediaPlayerInstance: PlayerItem status = unknown")
             notifyStateChanged(state: "buffering", isBuffering: true)
         case .readyToPlay:
-            print("MediaPlayerInstance: PlayerItem status = readyToPlay")
+            zlog("MediaPlayerInstance: PlayerItem status = readyToPlay")
             // Check if player is currently playing to set correct state.
             // Uses timeControlStatus (not `rate > 0`) for the same reason as
             // isPlaying(): a player that has been told to play but is still
             // buffering has rate == 0 yet is not "ready but not playing".
             if let player = avPlayer, player.timeControlStatus != .paused {
-                print("MediaPlayerInstance: Player is playing (rate: \(player.rate))")
+                zlog("MediaPlayerInstance: Player is playing (rate: \(player.rate))")
                 notifyStateChanged(state: "playing", isBuffering: false)
             } else {
-                print("MediaPlayerInstance: Player is ready but not playing")
+                zlog("MediaPlayerInstance: Player is ready but not playing")
                 notifyStateChanged(state: "ready", isBuffering: false)
             }
             notifyDurationChanged()
@@ -1424,7 +1449,7 @@ class MediaPlayerInstance: NSObject {
                 self?.extractAndNotifySubtitleTracks()
             }
         case .failed:
-            print("MediaPlayerInstance: PlayerItem status = failed")
+            zlog("MediaPlayerInstance: PlayerItem status = failed")
             let failedItem = item ?? avPlayer?.currentItem
             if let error = failedItem?.error {
                 let nsError = error as NSError
@@ -1439,7 +1464,7 @@ class MediaPlayerInstance: NSObject {
                 notifyError(error: "Player item failed to load")
             }
         @unknown default:
-            print("MediaPlayerInstance: PlayerItem status = unknown default")
+            zlog("MediaPlayerInstance: PlayerItem status = unknown default")
             break
         }
     }
@@ -1520,7 +1545,7 @@ class MediaPlayerInstance: NSObject {
     private func extractAndNotifyQualityTracks() {
         guard let playerItem = avPlayer?.currentItem,
               let asset = playerItem.asset as? AVURLAsset else {
-            print("MediaPlayerInstance: Cannot extract tracks - no player item or not AVURLAsset")
+            zlog("MediaPlayerInstance: Cannot extract tracks - no player item or not AVURLAsset")
             return
         }
 
@@ -1532,7 +1557,7 @@ class MediaPlayerInstance: NSObject {
             guard let self = self else { return }
 
             if !manifestTracks.isEmpty {
-                print("MediaPlayerInstance: Parsed \(manifestTracks.count) quality tracks from HLS manifest")
+                zlog("MediaPlayerInstance: Parsed \(manifestTracks.count) quality tracks from HLS manifest")
                 self.notifyQualityTracksChanged(tracks: manifestTracks)
                 return
             }
@@ -1540,7 +1565,7 @@ class MediaPlayerInstance: NSObject {
             // Fallback: For iOS 15+, use AVAssetVariant API
             if #available(iOS 15.0, *) {
                 if let variants = asset.variants as? [AVAssetVariant] {
-                    print("MediaPlayerInstance: Found \(variants.count) variants from AVAsset")
+                    zlog("MediaPlayerInstance: Found \(variants.count) variants from AVAsset")
 
                     for (index, variant) in variants.enumerated() {
                         let peakBitRateValue = variant.peakBitRate ?? 0.0
@@ -1590,7 +1615,7 @@ class MediaPlayerInstance: NSObject {
 
             // Last resort: access log (only shows tracks used during playback)
             if qualityTracks.isEmpty {
-                print("MediaPlayerInstance: Trying access log fallback")
+                zlog("MediaPlayerInstance: Trying access log fallback")
 
                 if let accessLog = playerItem.accessLog() {
                     for event in accessLog.events {
@@ -1620,10 +1645,10 @@ class MediaPlayerInstance: NSObject {
             qualityTracks.sort { ($0["bitrate"] as? Int ?? 0) > ($1["bitrate"] as? Int ?? 0) }
 
             if !qualityTracks.isEmpty {
-                print("MediaPlayerInstance: Notifying \(qualityTracks.count) quality tracks")
+                zlog("MediaPlayerInstance: Notifying \(qualityTracks.count) quality tracks")
                 self.notifyQualityTracksChanged(tracks: qualityTracks)
             } else {
-                print("MediaPlayerInstance: No quality tracks found")
+                zlog("MediaPlayerInstance: No quality tracks found")
             }
         }
     }
@@ -1631,12 +1656,12 @@ class MediaPlayerInstance: NSObject {
     private func parseHLSManifest(url: URL, completion: @escaping ([[String: Any]]) -> Void) {
         // Only parse if it's an HLS URL (.m3u8)
         guard url.absoluteString.contains(".m3u8") else {
-            print("MediaPlayerInstance: Not an HLS URL, skipping manifest parsing")
+            zlog("MediaPlayerInstance: Not an HLS URL, skipping manifest parsing")
             completion([])
             return
         }
 
-        print("MediaPlayerInstance: Fetching HLS manifest from: \(url)")
+        zlog("MediaPlayerInstance: Fetching HLS manifest from: \(redactedURL(url.absoluteString))")
 
         // Parse HLS master playlist to extract all variant streams
         var request = URLRequest(url: url)
@@ -1644,19 +1669,19 @@ class MediaPlayerInstance: NSObject {
 
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error = error {
-                print("MediaPlayerInstance: Failed to fetch HLS manifest: \(error.localizedDescription)")
+                zlog("MediaPlayerInstance: Failed to fetch HLS manifest: \(error.localizedDescription)")
                 completion([])
                 return
             }
 
             guard let data = data,
                   let manifestString = String(data: data, encoding: .utf8) else {
-                print("MediaPlayerInstance: Failed to decode HLS manifest data")
+                zlog("MediaPlayerInstance: Failed to decode HLS manifest data")
                 completion([])
                 return
             }
 
-            print("MediaPlayerInstance: Fetched HLS manifest (\(manifestString.count) chars), parsing...")
+            zlog("MediaPlayerInstance: Fetched HLS manifest (\(manifestString.count) chars), parsing...")
             var tracks: [[String: Any]] = []
             var seenBitrates = Set<Int>()
 
@@ -1665,7 +1690,7 @@ class MediaPlayerInstance: NSObject {
 
             for (lineNum, line) in lines.enumerated() {
                 if line.hasPrefix("#EXT-X-STREAM-INF:") {
-                    print("MediaPlayerInstance: Found STREAM-INF at line \(lineNum): \(line)")
+                    zlog("MediaPlayerInstance: Found STREAM-INF at line \(lineNum): \(line)")
 
                     // Extract BANDWIDTH using regex
                     let bandwidthPattern = "BANDWIDTH=(\\d+)"
@@ -1708,14 +1733,14 @@ class MediaPlayerInstance: NSObject {
                                     "codec": "unknown"
                                 ])
 
-                                print("MediaPlayerInstance: Parsed variant: \(finalHeight)p @ \(bandwidth / 1000)kbps, resolution: \(finalWidth)x\(finalHeight)")
+                                zlog("MediaPlayerInstance: Parsed variant: \(finalHeight)p @ \(bandwidth / 1000)kbps, resolution: \(finalWidth)x\(finalHeight)")
                             }
                         }
                     }
                 }
             }
 
-            print("MediaPlayerInstance: Parsed \(tracks.count) tracks from manifest")
+            zlog("MediaPlayerInstance: Parsed \(tracks.count) tracks from manifest")
             DispatchQueue.main.async {
                 completion(tracks)
             }
@@ -1745,7 +1770,7 @@ class MediaPlayerInstance: NSObject {
     private func extractAndNotifyAudioTracks() {
         guard let playerItem = avPlayer?.currentItem,
               let asset = playerItem.asset as? AVURLAsset else {
-            print("MediaPlayerInstance: Cannot extract audio tracks - no player item or not AVURLAsset")
+            zlog("MediaPlayerInstance: Cannot extract audio tracks - no player item or not AVURLAsset")
             return
         }
 
@@ -1753,7 +1778,7 @@ class MediaPlayerInstance: NSObject {
 
         // Get audio media selection group
         if let audioGroup = asset.mediaSelectionGroup(forMediaCharacteristic: .audible) {
-            print("MediaPlayerInstance: Found \(audioGroup.options.count) audio options")
+            zlog("MediaPlayerInstance: Found \(audioGroup.options.count) audio options")
 
             // Extract all audio tracks
             for (index, option) in audioGroup.options.enumerated() {
@@ -1779,11 +1804,11 @@ class MediaPlayerInstance: NSObject {
                 ])
             }
         } else {
-            print("MediaPlayerInstance: No audio selection group found")
+            zlog("MediaPlayerInstance: No audio selection group found")
         }
 
         // ALWAYS notify, even with empty list (to clear UI when switching videos)
-        print("MediaPlayerInstance: Found \(audioTracks.count) audio tracks")
+        zlog("MediaPlayerInstance: Found \(audioTracks.count) audio tracks")
         notifyAudioTracksChanged(tracks: audioTracks)
     }
 
@@ -1798,7 +1823,7 @@ class MediaPlayerInstance: NSObject {
     private func extractAndNotifySubtitleTracks() {
         guard let playerItem = avPlayer?.currentItem,
               let asset = playerItem.asset as? AVURLAsset else {
-            print("MediaPlayerInstance: Cannot extract subtitle tracks - no player item or not AVURLAsset")
+            zlog("MediaPlayerInstance: Cannot extract subtitle tracks - no player item or not AVURLAsset")
             return
         }
 
@@ -1806,7 +1831,7 @@ class MediaPlayerInstance: NSObject {
 
         // Get legible (subtitle/caption) media selection group
         if let subtitleGroup = asset.mediaSelectionGroup(forMediaCharacteristic: .legible) {
-            print("MediaPlayerInstance: Found \(subtitleGroup.options.count) subtitle options")
+            zlog("MediaPlayerInstance: Found \(subtitleGroup.options.count) subtitle options")
 
             // Extract all subtitle tracks
             for (index, option) in subtitleGroup.options.enumerated() {
@@ -1835,11 +1860,11 @@ class MediaPlayerInstance: NSObject {
                 ])
             }
         } else {
-            print("MediaPlayerInstance: No subtitle selection group found")
+            zlog("MediaPlayerInstance: No subtitle selection group found")
         }
 
         // ALWAYS notify, even with empty list (to clear UI when switching to video without subtitles)
-        print("MediaPlayerInstance: Found \(subtitleTracks.count) subtitle tracks")
+        zlog("MediaPlayerInstance: Found \(subtitleTracks.count) subtitle tracks")
         notifySubtitleTracksChanged(tracks: subtitleTracks)
     }
 

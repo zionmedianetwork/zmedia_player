@@ -46,6 +46,12 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
     // playerId — see MediaPlayer._staticMethodCallHandler).
     private var activePlayerIds: Set<String> = []
 
+    // B-12 (wave 2): opt-in screen-capture *detection* (see
+    // ScreenCaptureHandler's class doc for why iOS can only detect, not
+    // block, unlike Android's FLAG_SECURE). Single plugin-lifetime instance,
+    // same rationale as `networkMonitor`.
+    private var screenCaptureHandler: ScreenCaptureHandler!
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(name: "zmedia_player", binaryMessenger: registrar.messenger())
         let instance = ZMediaPlayerPlugin()
@@ -82,6 +88,12 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         // one instance rather than one per player).
         instance.networkMonitor = NetworkMonitor(callback: instance)
         instance.networkMonitor.startMonitoring()
+
+        // B-12 (wave 2): screen-capture detection handler, plugin-lifetime
+        // like networkMonitor above. No "start monitoring" call here —
+        // ScreenCaptureHandler only observes once at least one player opts in
+        // via setSecureSurface (see setMonitoring/startObservingIfNeeded).
+        instance.screenCaptureHandler = ScreenCaptureHandler(channel: channel)
     }
 
     /// H-06: unregisters the `NWPathMonitor` when the plugin detaches from
@@ -92,6 +104,7 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
     public func detachFromEngine(for registrar: FlutterPluginRegistrar) {
         networkMonitor?.stopMonitoring()
         activePlayerIds.removeAll()
+        screenCaptureHandler?.dispose()
     }
 
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -132,6 +145,10 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             handleUpdateConfig(call, result: result)
         case "dispose":
             handleDispose(call, result: result)
+
+        // B-12 (wave 2): opt-in screen-capture detection
+        case "setSecureSurface":
+            handleSetSecureSurface(call, result: result)
 
         // Phase 1: Buffering handlers
         case "getBufferHealth":
@@ -530,12 +547,29 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         // H-06: stop fanning NetworkMonitor events to this playerId.
         activePlayerIds.remove(playerId)
 
+        // B-12: stop monitoring screen-capture state for this playerId.
+        screenCaptureHandler?.clear(playerId: playerId)
+
         do {
             try playerManager.disposePlayer(playerId: playerId)
             result(nil)
         } catch {
             result(FlutterError(code: "DISPOSE_ERROR", message: error.localizedDescription, details: nil))
         }
+    }
+
+    // MARK: - B-12 (wave 2): Screen-capture detection handler
+
+    private func handleSetSecureSurface(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String,
+              let enabled = args["enabled"] as? Bool else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID and enabled flag are required", details: nil))
+            return
+        }
+
+        screenCaptureHandler?.setMonitoring(playerId: playerId, enabled: enabled)
+        result(nil)
     }
 
     // MARK: - Phase 1: Buffering Handlers
@@ -645,16 +679,16 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        print("ZMediaPlayerPlugin: checkPipAvailability called for player: \(playerId)")
+        zlog("ZMediaPlayerPlugin: checkPipAvailability called for player: \(playerId)")
 
         // Get or create PiP handler
         var handler = pipHandlers[playerId]
         if handler == nil {
-            print("ZMediaPlayerPlugin: Creating new PiP handler for \(playerId)")
+            zlog("ZMediaPlayerPlugin: Creating new PiP handler for \(playerId)")
             handler = PipHandler(playerId: playerId, channel: methodChannel)
             pipHandlers[playerId] = handler
         } else {
-            print("ZMediaPlayerPlugin: Using existing PiP handler for \(playerId)")
+            zlog("ZMediaPlayerPlugin: Using existing PiP handler for \(playerId)")
         }
 
         let pipConfig = args["config"] as? [String: Any]
@@ -662,23 +696,23 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         // Always re-initialize with current player and player layer (in case media changed)
         do {
             if let player = try playerManager.getPlayer(playerId: playerId) {
-                print("ZMediaPlayerPlugin: Got player: \(player)")
+                zlog("ZMediaPlayerPlugin: Got player: \(player)")
 
                 if let playerLayer = try playerManager.getPlayerLayer(playerId: playerId) {
-                    print("ZMediaPlayerPlugin: Got player layer: \(playerLayer)")
+                    zlog("ZMediaPlayerPlugin: Got player layer: \(playerLayer)")
                     handler?.initialize(player: player, playerLayer: playerLayer, config: pipConfig)
                 } else {
-                    print("ZMediaPlayerPlugin: WARNING - Could not get player layer")
+                    zlog("ZMediaPlayerPlugin: WARNING - Could not get player layer")
                 }
             } else {
-                print("ZMediaPlayerPlugin: WARNING - Could not get player")
+                zlog("ZMediaPlayerPlugin: WARNING - Could not get player")
             }
         } catch {
-            print("ZMediaPlayerPlugin: ERROR getting player/layer: \(error)")
+            zlog("ZMediaPlayerPlugin: ERROR getting player/layer: \(error)")
         }
 
         let isAvailable = handler?.checkAvailability() ?? false
-        print("ZMediaPlayerPlugin: PiP availability result: \(isAvailable)")
+        zlog("ZMediaPlayerPlugin: PiP availability result: \(isAvailable)")
         result(isAvailable)
     }
 

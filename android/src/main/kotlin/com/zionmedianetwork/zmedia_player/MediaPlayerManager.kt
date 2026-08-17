@@ -342,9 +342,13 @@ class MediaPlayerInstance(
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            // error.message frequently embeds the failing request URI (HttpDataSource /
+            // manifest fetch failures), which may carry signed-cookie or DRM token query
+            // params. Log.e is not stripped from release builds (see H-03), so redact it.
             android.util.Log.e(
                 "MediaPlayerInstance",
-                "Player error: ${error.message} (errorCode=${error.errorCode}/${error.errorCodeName})"
+                "Player error: ${LogSanitizer.redactUrls(error.message)} " +
+                    "(errorCode=${error.errorCode}/${error.errorCodeName})"
             )
             val category = categorizeExoPlayerError(error.errorCode)
             val httpStatusCode = extractHttpStatusCode(error)
@@ -477,8 +481,27 @@ class MediaPlayerInstance(
                 drmHandler = handler
                 android.util.Log.d("MediaPlayerInstance", "DRM media source created successfully")
             } else {
-                android.util.Log.e("MediaPlayerInstance", "Failed to create DRM session manager, loading without DRM")
-                mediaSource = createMediaSource(uri, activeDataSourceFactory)
+                // Fail-closed (wave 2 security hardening): a DRM-configured item
+                // whose DrmSessionManager could not be created — invalid config,
+                // unsupported scheme, or the minWidevineSecurityLevel policy
+                // rejecting this device (see DrmHandler.createDrmSessionManager /
+                // validateDrmConfig) — must never fall back to unprotected
+                // playback. DrmHandler has already emitted
+                // onDrmSessionUpdate(state=error)/onDrmError via notifyDrmError(),
+                // so the Dart-side errorStream/drmSessionStream already knows why.
+                // Refuse to build ANY media source and stop whatever was
+                // previously loaded so nothing plays.
+                android.util.Log.e(
+                    "MediaPlayerInstance",
+                    "Failed to create DRM session manager - refusing to load DRM-configured media without protection"
+                )
+                currentMediaItem = null
+                exoPlayer?.apply {
+                    stop()
+                    clearMediaItems()
+                }
+                currentMediaSource = null
+                return
             }
         } else {
             // Non-DRM path — unchanged behaviour.

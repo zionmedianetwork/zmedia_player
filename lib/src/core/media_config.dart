@@ -81,6 +81,17 @@ class MediaConfig {
   /// when the device returns to portrait.  Has no effect in portrait.
   final bool immersiveLandscape;
 
+  /// Opt-in screen-capture protection for this player's video surface
+  /// (B-12). Defaults to `false` — no existing consumer's behaviour changes
+  /// unless this is explicitly set.
+  ///
+  /// Sets the initial value applied at [MediaPlayer.initialize]; toggle it
+  /// afterwards via [MediaPlayer.setSecureSurface]. See
+  /// `lib/src/security/screen_capture_protection.dart` for the full,
+  /// deliberately-asymmetric Android (hard block via `FLAG_SECURE`) vs iOS
+  /// (`UIScreen.isCaptured` detection only) behaviour this controls.
+  final bool secureSurface;
+
   const MediaConfig({
     this.autoPlay = false,
     this.looping = false,
@@ -105,6 +116,7 @@ class MediaConfig {
     this.enableSubtitles = true,
     this.respectSafeArea = false,
     this.immersiveLandscape = false,
+    this.secureSurface = false,
   });
 
   /// Creates a copy of this config with updated values
@@ -132,6 +144,7 @@ class MediaConfig {
     bool? enableSubtitles,
     bool? respectSafeArea,
     bool? immersiveLandscape,
+    bool? secureSurface,
   }) {
     return MediaConfig(
       autoPlay: autoPlay ?? this.autoPlay,
@@ -159,6 +172,7 @@ class MediaConfig {
       enableSubtitles: enableSubtitles ?? this.enableSubtitles,
       respectSafeArea: respectSafeArea ?? this.respectSafeArea,
       immersiveLandscape: immersiveLandscape ?? this.immersiveLandscape,
+      secureSurface: secureSurface ?? this.secureSurface,
     );
   }
 
@@ -166,7 +180,7 @@ class MediaConfig {
   String toString() {
     return 'MediaConfig(autoPlay: $autoPlay, boxFit: $boxFit, volume: $volume, '
         'speed: $speed, respectSafeArea: $respectSafeArea, '
-        'immersiveLandscape: $immersiveLandscape)';
+        'immersiveLandscape: $immersiveLandscape, secureSurface: $secureSurface)';
   }
 }
 

@@ -411,13 +411,24 @@ Flutter uses CocoaPods by default; to build via SPM, enable it once:
 flutter config --enable-swift-package-manager
 ```
 
-Add to `ios/Runner/Info.plist` for HTTP media (adjust to your security needs):
+HTTPS media needs no App Transport Security (ATS) changes. If you must serve
+plain **HTTP** media, add a domain-scoped exception to
+`ios/Runner/Info.plist` rather than disabling ATS globally with
+`NSAllowsArbitraryLoads` (see `docs/implementation/security.md` for the
+recommended, whitelisted-domain approach) — the plugin does not read, add,
+or modify `Info.plist` on your behalf:
 
 ```xml
 <key>NSAppTransportSecurity</key>
 <dict>
-  <key>NSAllowsArbitraryLoads</key>
-  <true/>
+  <key>NSExceptionDomains</key>
+  <dict>
+    <key>your-http-media-domain.example.com</key>
+    <dict>
+      <key>NSExceptionAllowsInsecureHTTPLoads</key>
+      <true/>
+    </dict>
+  </dict>
 </dict>
 ```
 

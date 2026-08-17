@@ -17,6 +17,7 @@ import '../models/notification_config.dart';
 import '../services/buffering_service.dart';
 import '../services/network_resilience_service.dart';
 import '../security/input_validation.dart';
+import '../security/screen_capture_protection.dart';
 import 'media_config.dart';
 import 'crash_reporter.dart';
 import 'exceptions.dart';
@@ -40,6 +41,29 @@ enum PlayerPauseReason {
   /// `MediaPlayerInstance.onPlayWhenReadyChanged`/`onIsPlayingChanged` in
   /// `android/.../MediaPlayerManager.kt`.
   audioFocusLoss,
+}
+
+/// M-09: strips the query string and fragment from [url] before it is
+/// handed to the crash reporter (custom keys / error context). Signed
+/// cookies and auth tokens for authenticated media/license URLs commonly
+/// live in the query string, and crash reports are frequently stored and
+/// transmitted by a third-party service outside this app's control — so
+/// the full URL must never reach it.
+///
+/// Deliberately does plain substring truncation at the first `?`/`#`
+/// rather than round-tripping through [Uri] — `Uri.replace(query: '',
+/// fragment: '')` sets an *empty* query/fragment component rather than
+/// removing it, which leaves a dangling `?`/`#` in the output (and would
+/// still leak the fact that query params existed, though not their
+/// content). Never throws: an unparseable/malformed [url] is truncated the
+/// same way, rather than being passed through unredacted.
+String _redactUrlForCrashReporting(String url) {
+  final queryIndex = url.indexOf('?');
+  final fragmentIndex = url.indexOf('#');
+  var cut = url.length;
+  if (queryIndex != -1 && queryIndex < cut) cut = queryIndex;
+  if (fragmentIndex != -1 && fragmentIndex < cut) cut = fragmentIndex;
+  return url.substring(0, cut);
 }
 
 /// Main media player controller class
@@ -145,6 +169,8 @@ class MediaPlayer {
       StreamController<MediaPlayerException>.broadcast();
   final StreamController<PlayerPauseReason> _pauseReasonController =
       StreamController<PlayerPauseReason>.broadcast();
+  final StreamController<ScreenCaptureStatus> _screenCaptureController =
+      StreamController<ScreenCaptureStatus>.broadcast();
 
   /// Buffering service for adaptive buffer management
   late final BufferingService _bufferingService;
@@ -182,6 +208,16 @@ class MediaPlayer {
     isAvailable: false,
     isCasting: false,
   );
+
+  /// Whether opt-in screen-capture protection (B-12) is currently enabled
+  /// for this player. See [setSecureSurface].
+  bool _secureSurfaceEnabled = false;
+
+  /// Most recently reported screen-capture status. Always reflects
+  /// `isCaptured: false` until a native `onScreenCaptureChanged` event
+  /// arrives (iOS only — see [screenCaptureStream]).
+  ScreenCaptureStatus _screenCaptureStatus =
+      const ScreenCaptureStatus(isCaptured: false);
 
   /// Available subtitle tracks
   List<SubtitleTrack> _subtitleTracks = [];
@@ -587,6 +623,31 @@ class MediaPlayer {
     return _pauseReasonController.stream;
   }
 
+  /// Stream of [ScreenCaptureStatus] updates (B-12).
+  ///
+  /// Only emits on iOS, and only after [setSecureSurface] has been called
+  /// with `enabled: true` — Android's `FLAG_SECURE` blocks capture at the OS
+  /// level so there is nothing to detect/report there. See
+  /// `lib/src/security/screen_capture_protection.dart` for the full
+  /// Android/iOS asymmetry.
+  Stream<ScreenCaptureStatus> get screenCaptureStream {
+    _throwIfDisposed();
+    return _screenCaptureController.stream;
+  }
+
+  /// Most recently known [ScreenCaptureStatus]. See [screenCaptureStream].
+  ScreenCaptureStatus get screenCaptureStatus {
+    _throwIfDisposed();
+    return _screenCaptureStatus;
+  }
+
+  /// Whether opt-in screen-capture protection (B-12) is currently enabled
+  /// for this player. See [setSecureSurface].
+  bool get isSecureSurfaceEnabled {
+    _throwIfDisposed();
+    return _secureSurfaceEnabled;
+  }
+
   /// Current network quality based on bandwidth measurements
   NetworkQuality get networkQuality {
     _throwIfDisposed();
@@ -880,6 +941,20 @@ class MediaPlayer {
         'playerId': playerId,
         'nativeProtocolVersion': nativeProtocolVersion,
       });
+
+      // B-12: apply the config-declared initial secureSurface value now that
+      // the player is initialized. Best-effort — a failure here must not
+      // fail initialize() itself, matching how other post-init convenience
+      // calls in this package (e.g. reclaimVideoSurface) are treated as
+      // non-fatal.
+      if (_config.secureSurface) {
+        try {
+          await setSecureSurface(true);
+        } catch (e) {
+          debugPrint(
+              'MediaPlayer: failed to apply initial secureSurface=true: $e');
+        }
+      }
     } on ProtocolMismatchException catch (exception, stack) {
       crashReporter?.reportError(exception, stack,
           context: {
@@ -954,7 +1029,13 @@ class MediaPlayer {
 
     try {
       crashReporter?.setCustomKey('media_id', item.id);
-      crashReporter?.setCustomKey('media_url', item.url);
+      // M-09: strip the query string (and fragment) before this ever
+      // reaches a crash reporter — signed cookies/tokens for authenticated
+      // media URLs commonly live there, and crash reports are frequently
+      // stored/transmitted by a third-party service outside this app's
+      // control.
+      crashReporter?.setCustomKey(
+          'media_url', _redactUrlForCrashReporting(item.url));
       crashReporter?.setCustomKey('drm_enabled', item.drmConfig != null);
 
       _currentItem = item;
@@ -1005,7 +1086,8 @@ class MediaPlayer {
       crashReporter?.reportError(e, stack, context: {
         'operation': 'load',
         'mediaId': item.id,
-        'url': item.url,
+        // M-09: redacted — see _redactUrlForCrashReporting.
+        'url': _redactUrlForCrashReporting(item.url),
         'playerId': playerId,
         'errorCode': e.code,
       });
@@ -1069,7 +1151,8 @@ class MediaPlayer {
       crashReporter?.reportError(e, stack, context: {
         'operation': 'load',
         'mediaId': item.id,
-        'url': item.url,
+        // M-09: redacted — see _redactUrlForCrashReporting.
+        'url': _redactUrlForCrashReporting(item.url),
         'playerId': playerId,
       });
 
@@ -1100,6 +1183,19 @@ class MediaPlayer {
 
     final index = (startIndex ?? playlist.currentIndex)
         .clamp(0, playlist.items.length - 1);
+
+    // B-11: setPlaylist() was the one bulk-load entry point that skipped
+    // InputValidator entirely — every item's url/drmConfig/httpHeaders was
+    // serialized and sent to native unvalidated, so the "DRM requires
+    // HTTPS" invariant did not actually hold for playlist-driven playback.
+    // Validate every item up front, before any state changes, exactly like
+    // load() does for a single item. Left outside the try/catch below (like
+    // load()) so a validation failure surfaces as its own typed
+    // [ConfigurationException] rather than being re-wrapped as a generic
+    // [MediaLoadException].
+    for (final item in playlist.items) {
+      InputValidator.validateMediaItemWithDrm(item);
+    }
 
     try {
       _currentPlaylist = playlist.copyWith(currentIndex: index);
@@ -1356,6 +1452,42 @@ class MediaPlayer {
         'Failed to set muted: ${e.message ?? e.code}',
         parameter: 'muted',
         value: muted,
+        details: e.details as Map<String, dynamic>?,
+      );
+    }
+  }
+
+  /// Enable or disable screen-capture protection for this player's video
+  /// surface (B-12). Opt-in, defaults to off — see
+  /// `lib/src/security/screen_capture_protection.dart` for the full,
+  /// deliberately-asymmetric behaviour this maps to on each platform:
+  ///
+  ///  - **Android**: `enabled: true` adds `FLAG_SECURE` to the host
+  ///    `Activity`'s window, blocking screenshots/screen recording of it at
+  ///    the OS level for as long as ANY player in that Activity has this
+  ///    enabled (the flag is window-scoped, not per-surface — `false`
+  ///    clears it only once no player in that Activity still wants it).
+  ///  - **iOS**: `enabled: true` starts observing `UIScreen.isCaptured` and
+  ///    reports changes via [screenCaptureStream]. This is detection only;
+  ///    it does not prevent capture.
+  ///
+  /// Safe to call before or after media is loaded.
+  Future<void> setSecureSurface(bool enabled) async {
+    await _ensureInitialized();
+    _markActivity();
+
+    try {
+      await _invokeMethod('setSecureSurface', {
+        'playerId': playerId,
+        'enabled': enabled,
+      });
+
+      _secureSurfaceEnabled = enabled;
+    } on PlatformException catch (e) {
+      throw ConfigurationException(
+        'Failed to set secure surface: ${e.message ?? e.code}',
+        parameter: 'secureSurface',
+        value: enabled,
         details: e.details as Map<String, dynamic>?,
       );
     }
@@ -1684,6 +1816,30 @@ class MediaPlayer {
     await _ensureInitialized();
     await _ensureCastInitialized();
 
+    // M-07: the cast path forwards only id/title/url/artwork/duration to
+    // the receiver device — there is no DRM session on this path at all.
+    // Casting a DRM-protected item would either fail opaquely on the
+    // receiver or, worse, could expose a stream that was assumed to be
+    // protected to an unauthenticated receiver. Refuse outright rather than
+    // silently stripping the drmConfig and casting anyway.
+    if (mediaItem.drmConfig != null) {
+      throw ConfigurationException(
+        'Cannot cast DRM-protected media: casting has no DRM session and '
+        'would expose protected content to an unauthenticated receiver.',
+        parameter: 'drmConfig',
+        value: mediaItem.id,
+      );
+    }
+
+    // B-11: validate the url/headers before handing them to native, same as
+    // load()/setPlaylist(). validateMediaItemWithDrm() would no-op here
+    // (drmConfig is already known-null above), so validate the URL/headers
+    // directly instead.
+    InputValidator.validateUrl(mediaItem.url);
+    if (mediaItem.httpHeaders != null) {
+      InputValidator.validateHeaders(mediaItem.httpHeaders!);
+    }
+
     try {
       await _invokeMethod('loadMediaOnCastDevice', {
         'playerId': playerId,
@@ -1823,6 +1979,22 @@ class MediaPlayer {
           details: e.details as Map<String, dynamic>?,
         );
       }
+
+      // B-12: secureSurface is applied via the dedicated setSecureSurface
+      // MethodChannel call (see setSecureSurface's doc for why — it needs
+      // Activity/window access on Android that generic config application
+      // doesn't have), not through the 'updateConfig' map above. Mirror any
+      // change here too so updateConfig() stays a complete way to change
+      // this setting. Best-effort: a failure here does not roll back the
+      // rest of the config update that already succeeded above.
+      if (config.secureSurface != oldConfig.secureSurface) {
+        try {
+          await setSecureSurface(config.secureSurface);
+        } catch (e) {
+          debugPrint('MediaPlayer: failed to apply secureSurface change '
+              'from updateConfig: $e');
+        }
+      }
     }
   }
 
@@ -1878,6 +2050,7 @@ class MediaPlayer {
       _notificationActionEventController,
       _errorController,
       _pauseReasonController,
+      _screenCaptureController,
     ];
 
     final errors = <String, dynamic>{};
@@ -1936,6 +2109,7 @@ class MediaPlayer {
       'notificationActionEventController',
       'errorController',
       'pauseReasonController',
+      'screenCaptureController',
     ];
     return index < names.length ? names[index] : 'unknownController';
   }
@@ -2070,6 +2244,9 @@ class MediaPlayer {
           break;
         case 'onDrmSessionUpdate':
           _handleDrmSessionUpdate(arguments!);
+          break;
+        case 'onScreenCaptureChanged':
+          _handleScreenCaptureChanged(arguments!);
           break;
         case 'onError':
           _handleError(arguments!);
@@ -2321,6 +2498,25 @@ class MediaPlayer {
       }
     } catch (e) {
       debugPrint('Error processing DRM session update: $e');
+    }
+  }
+
+  /// Handle screen-capture status change events from platform (B-12,
+  /// iOS-only — see [screenCaptureStream]).
+  void _handleScreenCaptureChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final status = ScreenCaptureStatus.fromMap(
+        Map<String, dynamic>.from(arguments),
+      );
+      _screenCaptureStatus = status;
+
+      if (!_screenCaptureController.isClosed) {
+        _screenCaptureController.add(status);
+      }
+    } catch (e) {
+      debugPrint('Error processing screen capture status: $e');
     }
   }
 

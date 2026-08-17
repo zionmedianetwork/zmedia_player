@@ -148,8 +148,33 @@ class MediaItem {
 
   @override
   String toString() {
-    return 'MediaItem(id: $id, title: $title, url: $url, mediaType: $mediaType, isLive: $isLive)';
+    return 'MediaItem(id: $id, title: $title, url: ${_redactUrlForDisplay(url)}, mediaType: $mediaType, isLive: $isLive)';
   }
+}
+
+/// M-19: strips the query string and fragment from [url] before
+/// [MediaItem.toString] embeds it. Query strings frequently carry signed
+/// cookies/auth tokens for authenticated media URLs, and `toString()`
+/// output routinely ends up in logs (print statements, log frameworks,
+/// debugger watch expressions) that this package has no control over once
+/// emitted.
+///
+/// Deliberately does plain substring truncation at the first `?`/`#` rather
+/// than round-tripping through [Uri] — `Uri.replace(query: '', fragment:
+/// '')` sets an *empty* query/fragment component rather than removing it,
+/// which leaves a dangling `?`/`#` in the output. Never throws: an
+/// unparseable/malformed [url] is truncated the same way, rather than being
+/// passed through unredacted. Mirrors `_redactUrlForCrashReporting` in
+/// `lib/src/core/media_player.dart` (kept as a separate, self-contained
+/// copy here rather than a shared import, to avoid coupling this model file
+/// to `core/`).
+String _redactUrlForDisplay(String url) {
+  final queryIndex = url.indexOf('?');
+  final fragmentIndex = url.indexOf('#');
+  var cut = url.length;
+  if (queryIndex != -1 && queryIndex < cut) cut = queryIndex;
+  if (fragmentIndex != -1 && fragmentIndex < cut) cut = fragmentIndex;
+  return url.substring(0, cut);
 }
 
 /// Enum representing the type of media content
