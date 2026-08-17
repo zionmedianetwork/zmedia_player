@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show ProcessInfo;
 
 import 'package:flutter/material.dart';
 import 'package:zmedia_player/zmedia_player.dart';
@@ -36,18 +37,36 @@ import '../../widgets/measurement_log_panel.dart';
 /// folded silently into "N players".
 ///
 /// ### In-app vs external
-/// This page cannot read process memory itself — Dart has no portable API
-/// for it, and the number that matters (native decoder/buffer allocation)
-/// lives below the Dart/Flutter heap entirely. It only creates the
-/// condition and marks it clearly:
-/// `[7A-MEASURE] start:memory-paused-vs-playing condition=<c> n=<n>` /
-/// `end:memory-paused-vs-playing ...`. The operator reads memory with
-/// `adb shell dumpsys meminfo <package>` (Android) or Xcode's memory
-/// gauge / Instruments Allocations (iOS) once the batch has settled —
-/// wait a few seconds after the `end:` marker before reading, so any
-/// native buffering triggered by `play()` has stabilized, and check the
-/// on-screen alive/dead count hasn't changed in that window before trusting
-/// the reading.
+/// This page samples whole-process memory itself via `dart:io`'s
+/// `ProcessInfo.currentRss` — the one memory API that is both portable
+/// (identical on Android and iOS) and reaches native allocations, since it
+/// reports the entire process's resident set rather than just the
+/// Dart/Flutter heap. That reading is shown live on screen (updated on a
+/// 1s timer), sampled once at page load with zero players as the
+/// [_baselineRssBytes] baseline, and — critically — sampled again and
+/// stamped as `rssMb=<mb>` into every `[7A-MEASURE]` marker this page
+/// emits, so a reading is anchored to a known condition (e.g.
+/// `[7A-MEASURE] end:memory-paused-vs-playing condition=playing
+/// requested=8 succeeded=8 failed=0 rssMb=NNN`) rather than whatever the
+/// operator happened to see when they looked. That is what makes this
+/// measurement finally runnable on iOS from a log stream alone: capture
+/// `[7A-MEASURE]` lines with `idevicesyslog` and the memory reading comes
+/// with them, with no need to also be looking at the device — unlike
+/// `xcrun devicectl device info processes`, which reports only PID and
+/// executable path with no memory figure, the only other on-iOS routes
+/// (Xcode's Debug Navigator, Instruments' Allocations template) require
+/// watching the device directly.
+///
+/// In-app RSS is whole-process, so unlike `adb shell dumpsys meminfo` it
+/// does not break out separate "Native Heap" / "Graphics" lines — it is
+/// the equivalent of `dumpsys`'s single TOTAL RSS figure, which is exactly
+/// what it should be compared against to validate the method (see the
+/// operator card below). External tooling remains available as an
+/// Android-only cross-check, but in-app RSS is now the primary,
+/// cross-platform reading. Wait a few seconds after the `end:` marker
+/// before trusting either reading, so any native buffering triggered by
+/// `play()` has stabilized, and check the on-screen alive/dead count
+/// hasn't changed in that window.
 class MemoryPausedPlayingPage extends StatefulWidget {
   const MemoryPausedPlayingPage({super.key});
 
@@ -89,14 +108,57 @@ class _MemoryPausedPlayingPageState extends State<MemoryPausedPlayingPage>
   bool _busy = false;
   String? _currentCondition;
 
+  /// Sampled once, at page load, with zero players alive — the reference
+  /// point every delta/per-player figure in this page is measured against.
+  int? _baselineRssBytes;
+
+  /// Refreshed by [_rssTimer] every second, and eagerly re-sampled right
+  /// after a batch settles (so the on-screen figure doesn't lag the marker
+  /// that was just logged by up to a second).
+  int _currentRssBytes = 0;
+
+  Timer? _rssTimer;
+
   int get _aliveCount =>
       _spawned.where((e) => e.outcome == _Outcome.alive).length;
   int get _deadCount =>
       _spawned.where((e) => e.outcome == _Outcome.dead).length;
 
+  /// The actual measurement: growth over the zero-player baseline. Not
+  /// clamped to >=0 — a negative reading (e.g. after GC settles) is itself
+  /// informative rather than something to hide.
+  int get _deltaRssBytes => _currentRssBytes - (_baselineRssBytes ?? 0);
+
+  /// Whole-process resident set size, in bytes. Portable across Android and
+  /// iOS (unlike `adb shell dumpsys meminfo`, which has no iOS
+  /// equivalent), and reaches native decoder/buffer allocations because it
+  /// is the entire process, not just the Dart/Flutter heap.
+  int _sampleRssBytes() => ProcessInfo.currentRss;
+
+  String _mb(int bytes) => (bytes / (1024 * 1024)).toStringAsFixed(1);
+
+  @override
+  void initState() {
+    super.initState();
+    final baseline = _sampleRssBytes();
+    _baselineRssBytes = baseline;
+    _currentRssBytes = baseline;
+    logMarker('mark', 'memory-paused-vs-playing', {
+      'note': 'baseline',
+      'n': 0,
+      'rssMb': _mb(baseline),
+    });
+    _rssTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted || loggerDisposed) return;
+      setState(() => _currentRssBytes = _sampleRssBytes());
+    });
+  }
+
   @override
   void dispose() {
     loggerDisposed = true;
+    _rssTimer?.cancel();
+    _rssTimer = null;
     for (final entry in _spawned) {
       _teardown(entry);
     }
@@ -131,6 +193,7 @@ class _MemoryPausedPlayingPageState extends State<MemoryPausedPlayingPage>
       'n': entry.index,
       if (entry.nativeErrorCode != null)
         'nativeErrorCode': entry.nativeErrorCode,
+      'rssMb': _mb(_sampleRssBytes()),
       'error': entry.error,
     });
 
@@ -143,6 +206,7 @@ class _MemoryPausedPlayingPageState extends State<MemoryPausedPlayingPage>
       logMarker('mark', 'memory-paused-vs-playing', {
         'note': 'teardown-previous-batch',
         'n': _spawned.length,
+        'rssMb': _mb(_sampleRssBytes()),
       });
     }
     final toDispose = _spawned;
@@ -162,7 +226,11 @@ class _MemoryPausedPlayingPageState extends State<MemoryPausedPlayingPage>
     logMarker(
       'start',
       'memory-paused-vs-playing',
-      {'condition': condition, 'n': _count},
+      {
+        'condition': condition,
+        'n': _count,
+        'rssMb': _mb(_sampleRssBytes()),
+      },
     );
 
     var failures = 0;
@@ -201,22 +269,28 @@ class _MemoryPausedPlayingPageState extends State<MemoryPausedPlayingPage>
       } catch (e) {
         failures++;
         log('[7A-MEASURE] mark:memory-paused-vs-playing '
-            'note=spawn-failed n=$n error=$e');
+            'note=spawn-failed n=$n rssMb=${_mb(_sampleRssBytes())} '
+            'error=$e');
         _spawned.remove(entry);
         _teardown(entry);
       }
     }
 
+    final endRssBytes = _sampleRssBytes();
     logMarker('end', 'memory-paused-vs-playing', {
       'condition': condition,
       'requested': _count,
       'succeeded': _spawned.length,
       'failed': failures,
+      'rssMb': _mb(endRssBytes),
     });
 
     safeSetState(() {
       _busy = false;
       _currentCondition = condition;
+      // Refresh eagerly rather than waiting up to 1s for `_rssTimer`, so
+      // the on-screen figure matches the `end:` marker just logged above.
+      _currentRssBytes = endRssBytes;
     });
   }
 
@@ -236,25 +310,61 @@ class _MemoryPausedPlayingPageState extends State<MemoryPausedPlayingPage>
                   '"Spawn PREPARED+PAUSED" — either fully tears down the '
                   'previous batch first, so only one condition is ever '
                   'live at once. Wait a few seconds after the batch '
-                  'settles, then read memory externally. Each entry keeps '
-                  'watching for a late playback error the whole time it '
-                  'stays alive — if the "Dead" count moves while you\'re '
-                  'reading memory, discard that reading and re-run the '
-                  'batch, since a dead player corrupts the number. Run '
+                  'settles, then read the memory card below (or the '
+                  'rssMb= field on the matching `[7A-MEASURE]` marker, if '
+                  'reading a log stream instead of the screen). Each entry '
+                  'keeps watching for a late playback error the whole time '
+                  'it stays alive — if the "Dead" count moves while '
+                  'you\'re reading memory, discard that reading and re-run '
+                  'the batch, since a dead player corrupts the number. Run '
                   'both conditions at the same count and compare.',
             ),
             const SizedBox(height: 12),
-            const MeasurementOperatorCard(
-              text: 'Android: `adb shell dumpsys meminfo '
-                  'com.zionmedianetwork.zmedia_player_example` — look at '
-                  'TOTAL PSS, plus the "Native Heap" and "Graphics" rows. '
-                  'Take one reading per condition, at the same player '
-                  'count, a few seconds after this page\'s `end:` marker — '
-                  'and only if the Alive/Dead split is still stable at '
-                  'that point.\n'
-                  'iOS: Xcode\'s Debug Navigator memory gauge, or '
-                  'Instruments\' Allocations template, sampled the same '
-                  'way.',
+            MeasurementOperatorCard(
+              title: 'Operator steps (memory)',
+              text: 'In-app RSS (the card below, and the rssMb= field on '
+                  'every `[7A-MEASURE]` marker this page emits) is the '
+                  'primary, cross-platform reading — it is whole-process '
+                  "resident set size (dart:io's ProcessInfo.currentRss), "
+                  'so unlike `dumpsys` it does not break out separate '
+                  '"Native Heap" / "Graphics" lines, only a single TOTAL '
+                  '-equivalent figure. On iOS, capture the marker lines '
+                  'with `idevicesyslog` — `xcrun devicectl device info '
+                  'processes` reports only PID and executable path, no '
+                  'memory, and Xcode\'s Debug Navigator / Instruments '
+                  'Allocations require watching the device directly.\n'
+                  'Android: cross-check the in-app number against `adb '
+                  'shell dumpsys meminfo '
+                  'com.zionmedianetwork.zmedia_player_example` (TOTAL '
+                  'RSS / TOTAL PSS) at the same moment — if they track '
+                  'each other, the in-app method is trustworthy on iOS '
+                  'too. Take one reading per condition, at the same '
+                  'player count, a few seconds after this page\'s `end:` '
+                  'marker, and only if the Alive/Dead split is still '
+                  'stable at that point.',
+            ),
+            const SizedBox(height: 16),
+            Card(
+              margin: EdgeInsets.zero,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Memory (RSS)', style: theme.textTheme.titleSmall),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Baseline (0 players): ${_mb(_baselineRssBytes ?? 0)} '
+                      'MB\n'
+                      'Current: ${_mb(_currentRssBytes)} MB   '
+                      'Delta: ${_deltaRssBytes >= 0 ? '+' : ''}'
+                      '${_mb(_deltaRssBytes)} MB'
+                      '${aliveCount > 0 ? '   Per player: ${_mb((_deltaRssBytes / aliveCount).round())} MB (n=$aliveCount alive)' : ''}',
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 16),
             Card(
@@ -304,6 +414,9 @@ class _MemoryPausedPlayingPageState extends State<MemoryPausedPlayingPage>
                                   safeSetState(() {
                                     _busy = false;
                                     _currentCondition = null;
+                                    // Refresh eagerly rather than waiting
+                                    // up to 1s for `_rssTimer`.
+                                    _currentRssBytes = _sampleRssBytes();
                                   });
                                 },
                         ),
@@ -323,9 +436,8 @@ class _MemoryPausedPlayingPageState extends State<MemoryPausedPlayingPage>
                           'condition=$_currentCondition — read memory now.',
                           style: theme.textTheme.bodyMedium?.copyWith(
                             fontWeight: FontWeight.w600,
-                            color: deadCount > 0
-                                ? theme.colorScheme.error
-                                : null,
+                            color:
+                                deadCount > 0 ? theme.colorScheme.error : null,
                           ),
                         ),
                       ),
