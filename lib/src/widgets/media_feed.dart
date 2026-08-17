@@ -7,6 +7,7 @@ import '../core/media_config.dart';
 import '../core/media_controller.dart';
 import '../core/media_player_pool.dart';
 import '../models/media_item.dart';
+import '../models/network_status.dart';
 import '../models/player_state.dart';
 import 'media_player_widget.dart';
 
@@ -25,6 +26,44 @@ typedef MediaFeedConfigLookup = MediaConfig? Function(
 /// [MediaFeed.keyAt] for when a feed needs to disambiguate the same item id
 /// appearing at more than one simultaneously-active index.
 typedef MediaFeedKeyLookup = String Function(int index, MediaItem item);
+
+/// Decides whether [MediaFeed] should autoplay an item once it becomes the
+/// active/visible one, given the device's current [NetworkStatus] — Stage
+/// 7d / F-06. Set via [MediaFeedConfig.autoPlayPolicy]; `null` (the default)
+/// means "autoplay regardless of network", i.e. no behaviour change from
+/// every release before Stage 7d. Return `false` to hold the item loaded
+/// (or prewarmed, if [MediaFeedConfig.prewarmWindow] already prepared it)
+/// without starting playback — the host's [MediaFeedItemState.play] callback
+/// remains available so the user can start it manually. See
+/// [conservativeAutoPlayPolicy] for a ready-made policy that refuses on a
+/// metered connection or poor/offline/unknown quality.
+typedef MediaFeedAutoPlayPolicy = bool Function(NetworkStatus status);
+
+/// A ready-made [MediaFeedAutoPlayPolicy]: refuses autoplay when
+/// [NetworkStatus.isMetered] is `true`, or when [NetworkStatus.quality] is
+/// [NetworkQuality.poor], [NetworkQuality.offline] or
+/// [NetworkQuality.unknown] (treating "we don't know yet" as "don't spend
+/// the user's data automatically"); allows it for [NetworkQuality.fair],
+/// [NetworkQuality.good] and [NetworkQuality.excellent] on an unmetered
+/// connection.
+///
+/// This is opt-in — pass it as [MediaFeedConfig.autoPlayPolicy] explicitly.
+/// [MediaFeedConfig.autoPlayPolicy] itself defaults to `null` ("autoplay
+/// regardless"), so supplying this function is what changes behaviour, not
+/// upgrading the package.
+bool conservativeAutoPlayPolicy(NetworkStatus status) {
+  if (status.isMetered) return false;
+  switch (status.quality) {
+    case NetworkQuality.poor:
+    case NetworkQuality.offline:
+    case NetworkQuality.unknown:
+      return false;
+    case NetworkQuality.fair:
+    case NetworkQuality.good:
+    case NetworkQuality.excellent:
+      return true;
+  }
+}
 
 /// Builds the widget for one feed item from its current [MediaFeedItemState].
 /// Called on every rebuild the item's underlying playback state or pool
@@ -91,6 +130,16 @@ class MediaFeedItemState {
   /// Seeks to a position. `null` when [isActive] is `false`.
   final ValueChanged<Duration>? seekTo;
 
+  /// Stage 7d / F-06: `true` when this item became active and would
+  /// otherwise have autoplayed, but [MediaFeedConfig.autoPlayPolicy]
+  /// refused given the device's network status at the time — the slot is
+  /// still loaded (see [isActive]) and [play] is still available for the
+  /// user to start it manually. Always `false` when
+  /// [MediaFeedConfig.autoPlayPolicy] is `null` (the default) or when
+  /// [isActive] is `false`. Convenience for hosts that want to surface a
+  /// "paused for your data" affordance instead of a silent non-autoplay.
+  final bool autoPlayBlockedByPolicy;
+
   const MediaFeedItemState({
     required this.index,
     required this.item,
@@ -103,6 +152,7 @@ class MediaFeedItemState {
     this.togglePlayPause,
     this.toggleMute,
     this.seekTo,
+    this.autoPlayBlockedByPolicy = false,
   });
 
   /// Whether this index holds a live pool slot but is *not* currently
@@ -143,9 +193,25 @@ class MediaFeedConfig {
   /// [autoPlayDelay], and only if the item is still visible then).
   final bool autoPlay;
 
-  /// Whether becoming invisible should pause playback. The item's pool slot
-  /// itself is not released on invisibility — see [MediaPlayerPool.acquire]
-  /// — only actually reassigned once another item needs the capacity.
+  /// Whether becoming invisible should stop playback. For a VOD item this
+  /// pauses: the item's pool slot itself is not released on invisibility —
+  /// see [MediaPlayerPool.acquire] — only actually reassigned once another
+  /// item needs the capacity, so scrolling back resumes instantly.
+  ///
+  /// For a **live** item ([MediaItem.isLive]) this instead **releases** the
+  /// pool slot outright (Stage 7d / F-04) rather than pausing it. On-device
+  /// measurement found a paused, off-screen live stream still pulls ~13% of
+  /// its playing bandwidth and never actually stops — pausing throttles a
+  /// live session, it does not end it. Releasing tears the native player
+  /// down; scrolling back re-acquires a slot and calls [MediaController.load]
+  /// again, which is a full rejoin because a live stream is always joined at
+  /// the live edge on load — no `seekToLive` call is needed or exists.
+  /// Rejoining a released live item therefore costs a fresh `load()`
+  /// (Measurement 3's cold-start numbers apply, uncushioned by prewarm,
+  /// since a released item is not pinned) rather than an instant resume, in
+  /// exchange for not leaking bandwidth for however long the item stays
+  /// off-screen. VOD is unaffected and keeps the original pause-and-retain
+  /// behaviour.
   final bool autoPause;
 
   /// Whether to mute an item while it is below [visibilityThreshold] (and
@@ -207,6 +273,66 @@ class MediaFeedConfig {
   /// upper bound this should stay well under, not a target to reach for.
   final int prewarmWindow;
 
+  /// Stage 7d / F-05: how long an item must stay continuously visible
+  /// (past [visibilityThreshold]) before [MediaFeed] actually acquires a
+  /// pool slot for it (and, transitively, prewarms its neighbours). Reset
+  /// on every visibility crossing, so an item the user merely flings past
+  /// — visible for less than this duration — never triggers a pool
+  /// [MediaPlayerPool.acquire] at all.
+  ///
+  /// This exists because the debouncing that made a fast fling through 50
+  /// items instantiate only ~5 players (rather than 50) was previously
+  /// accidental: it came entirely from the `visibility_detector` package's
+  /// own global `VisibilityDetectorController.instance.updateInterval`
+  /// (default 500ms), which [MediaFeed] never set, read, or even referenced
+  /// — any part of the host app (or a future version of that dependency)
+  /// changing that *global, process-wide* value would silently change
+  /// [MediaFeed]'s behaviour with it. [MediaFeed] deliberately does not
+  /// mutate that global itself, either — doing so from inside a widget
+  /// would reach out and change every other [VisibilityDetector] in the
+  /// host app, including ones [MediaFeed] has no business touching. This
+  /// field is a feed-local timer instead: owned, documented, testable
+  /// independently of whatever the global happens to be set to (including
+  /// `Duration.zero`, which this package's own tests set the global to for
+  /// deterministic visibility delivery).
+  ///
+  /// Defaults to `500ms`, matching `visibility_detector`'s own default —
+  /// chosen so a host that has never touched the global sees essentially
+  /// the same fling behaviour as before, now for an owned reason instead of
+  /// an accidental one. Pass [Duration.zero] to acquire a slot immediately
+  /// on every visibility crossing (the pre-Stage-7d behaviour, and still
+  /// exactly what happens if a host's own global `updateInterval` is what
+  /// they want to rely on instead). Only *activation* (the [acquire] call
+  /// this triggers, and the prewarm/play that follow it) is debounced —
+  /// visibility bookkeeping ([muteWhenNotVisible], and the fraction used to
+  /// re-check visibility after [autoPlayDelay]) is never deferred.
+  ///
+  /// Not asserted non-negative in the constructor below: [Duration]'s
+  /// comparison operators are not const-evaluable, and this constructor
+  /// must stay `const` (every existing caller in the package constructs
+  /// `const MediaFeedConfig(...)`). A negative value is harmless in
+  /// practice regardless — every read site compares with `<= Duration.zero`
+  /// (see `_handleVisibility`), so a negative duration is simply treated
+  /// the same as [Duration.zero]: immediate activation, no debounce.
+  final Duration activationDebounce;
+
+  /// Stage 7d / F-06: consulted immediately before autoplay would start for
+  /// an item that just became active, given the device's current
+  /// [NetworkStatus] at that moment. Return `false` to hold the item loaded
+  /// without starting playback — see [MediaFeedAutoPlayPolicy].
+  ///
+  /// Defaults to `null`, meaning **no network policy is applied and
+  /// [autoPlay] behaves exactly as it always has** — autoplay is not
+  /// conditioned on network status unless a host opts in by supplying a
+  /// policy (see [conservativeAutoPlayPolicy] for a ready-made one).
+  /// Deliberately not "refuse on metered by default": every release before
+  /// Stage 7d autoplayed regardless of connection, and changing that
+  /// silently out from under existing hosts — some of whom may already
+  /// handle metered connections themselves, or intentionally autoplay
+  /// regardless — would be a behavioural regression disguised as a bug fix.
+  /// Hosts that want the safer behaviour opt in explicitly.
+  final MediaFeedAutoPlayPolicy? autoPlayPolicy;
+
   const MediaFeedConfig({
     this.visibilityThreshold = 0.6,
     this.autoPlay = true,
@@ -215,6 +341,8 @@ class MediaFeedConfig {
     this.pauseOthersOnPlay = true,
     this.autoPlayDelay = const Duration(milliseconds: 300),
     this.prewarmWindow = 1,
+    this.activationDebounce = const Duration(milliseconds: 500),
+    this.autoPlayPolicy,
   }) : assert(
           prewarmWindow >= 0,
           'MediaFeedConfig.prewarmWindow must not be negative',
@@ -352,6 +480,21 @@ class _MediaFeedState extends State<MediaFeed> {
   /// visibility after [MediaFeedConfig.autoPlayDelay] elapses.
   final Map<int, double> _visibleFraction = <int, double>{};
 
+  /// Stage 7d / F-05: pending feed-local activation-debounce timers, keyed
+  /// by index. An index only has an entry while it is visible but has not
+  /// yet stayed visible for [MediaFeedConfig.activationDebounce] — see
+  /// [_handleVisibility] and [MediaFeedConfig.activationDebounce]'s own doc
+  /// comment for why this is a feed-local timer rather than the shared
+  /// `visibility_detector` global.
+  final Map<int, Timer> _activationTimers = <int, Timer>{};
+
+  /// Stage 7d / F-06: indices whose most recent autoplay attempt was
+  /// refused by [MediaFeedConfig.autoPlayPolicy] — mirrored to
+  /// [MediaFeedItemState.autoPlayBlockedByPolicy]. Cleared whenever the
+  /// index deactivates, so a stale "blocked" badge never survives a
+  /// scroll-away-and-back.
+  final Set<int> _autoPlayBlockedByPolicy = <int>{};
+
   bool _disposed = false;
 
   @override
@@ -365,6 +508,10 @@ class _MediaFeedState extends State<MediaFeed> {
   @override
   void dispose() {
     _disposed = true;
+    for (final timer in _activationTimers.values) {
+      timer.cancel();
+    }
+    _activationTimers.clear();
     _pool.removeListener(_onPoolChanged);
     if (_ownsPool) {
       _pool.dispose();
@@ -399,25 +546,61 @@ class _MediaFeedState extends State<MediaFeed> {
     }
 
     if (isVisible == wasVisible) return;
+
+    // Stage 7d / F-05: whichever direction this crossing just went, any
+    // activation timer scheduled from an *earlier* crossing is stale and
+    // must never fire using state from before this one — see
+    // MediaFeedConfig.activationDebounce.
+    _activationTimers.remove(index)?.cancel();
+
     if (isVisible) {
-      if (widget.config.prewarmWindow > 0) {
-        // Pinned synchronously, BEFORE either this item's own acquire or
-        // any prewarm acquire below is even enqueued on the pool's mutex
-        // (both `acquire` calls only reach their first `await` after
-        // enqueueing — see MediaPlayerPool._runExclusive). Pinning here
-        // closes a race where a concurrently-requested prewarm neighbour
-        // could otherwise be processed by the pool before this item's own
-        // acquire finishes registering its slot, i.e. before `_activate`
-        // itself would get a chance to pin it.
-        final item = widget.itemAt(index);
-        _pool.pin(_keyFor(index, item));
-      }
-      unawaited(_activate(index));
-      if (widget.config.prewarmWindow > 0) {
-        unawaited(_prewarmAround(index));
+      final debounce = widget.config.activationDebounce;
+      if (debounce <= Duration.zero) {
+        _beginActivation(index);
+      } else {
+        _activationTimers[index] = Timer(debounce, () {
+          _activationTimers.remove(index);
+          if (_disposed) return;
+          final fraction = _visibleFraction[index] ?? 0.0;
+          if (fraction < widget.config.visibilityThreshold) {
+            // Scrolled away again before the debounce settled -- exactly
+            // the fast-fling case F-05 exists to protect: an item merely
+            // flown past never reaches a pool acquire() at all.
+            return;
+          }
+          _beginActivation(index);
+        });
       }
     } else {
       _deactivate(index);
+    }
+  }
+
+  /// Pins [index]'s key (if prewarming is on), kicks off its own
+  /// [_activate], and requests prewarm slots for its neighbours — the work
+  /// that used to run directly inside [_handleVisibility]'s `isVisible`
+  /// branch before Stage 7d's activation debounce (see
+  /// [MediaFeedConfig.activationDebounce]) interposed a settle delay ahead
+  /// of it. Called either synchronously (debounce == [Duration.zero]) or
+  /// from the fired [_activationTimers] entry -- both call sites run
+  /// synchronously up to [_activate]'s first `await`, preserving the pin
+  /// race-closing guarantee described below.
+  void _beginActivation(int index) {
+    if (widget.config.prewarmWindow > 0) {
+      // Pinned synchronously, BEFORE either this item's own acquire or any
+      // prewarm acquire below is even enqueued on the pool's mutex (both
+      // `acquire` calls only reach their first `await` after enqueueing —
+      // see MediaPlayerPool._runExclusive). Pinning here closes a race
+      // where a concurrently-requested prewarm neighbour could otherwise be
+      // processed by the pool before this item's own acquire finishes
+      // registering its slot, i.e. before `_activate` itself would get a
+      // chance to pin it.
+      final item = widget.itemAt(index);
+      _pool.pin(_keyFor(index, item));
+    }
+    unawaited(_activate(index));
+    if (widget.config.prewarmWindow > 0) {
+      unawaited(_prewarmAround(index));
     }
   }
 
@@ -433,7 +616,7 @@ class _MediaFeedState extends State<MediaFeed> {
       if (widget.config.prewarmWindow > 0) {
         // The slot never came to exist under this key, so nothing should
         // continue protecting it — undoes the pin set in
-        // `_handleVisibility` before this call.
+        // `_beginActivation` before this call.
         _pool.unpin(key);
       }
       debugPrint(
@@ -455,7 +638,30 @@ class _MediaFeedState extends State<MediaFeed> {
           return;
         }
       }
-      unawaited(controller.play());
+      if (!controller.isDisposed) {
+        // Stage 7d / F-06: give the host's network policy the final say,
+        // immediately before starting playback. `null` (the default)
+        // preserves the exact pre-Stage-7d behaviour of autoplaying
+        // unconditionally — see MediaFeedConfig.autoPlayPolicy.
+        final policy = widget.config.autoPlayPolicy;
+        final networkAllows =
+            policy == null || policy(controller.player.networkStatus);
+        if (networkAllows) {
+          if (_autoPlayBlockedByPolicy.remove(index) && mounted) {
+            setState(() {});
+          }
+          unawaited(controller.play());
+        } else {
+          debugPrint(
+            'MediaFeed: autoplay held for index $index (key=$key) — '
+            'refused by autoPlayPolicy given the current network status; '
+            'the item stays loaded and playable via a manual play() call',
+          );
+          if (_autoPlayBlockedByPolicy.add(index) && mounted) {
+            setState(() {});
+          }
+        }
+      }
     }
 
     if (widget.config.pauseOthersOnPlay) {
@@ -474,11 +680,33 @@ class _MediaFeedState extends State<MediaFeed> {
     // so it cannot linger and make a key permanently non-evictable.
     _pool.unpin(key);
 
+    if (_autoPlayBlockedByPolicy.remove(index) && mounted) {
+      setState(() {});
+    }
+
     final controller = _pool.controllerFor(key);
-    if (controller != null &&
-        !controller.isDisposed &&
-        widget.config.autoPause &&
-        controller.isPlaying) {
+    if (controller == null ||
+        controller.isDisposed ||
+        !widget.config.autoPause) {
+      return;
+    }
+
+    if (item.isLive) {
+      // Stage 7d / F-04: a paused, off-screen live stream still measured
+      // ~13% of its playing bandwidth and never actually stopped, so
+      // pausing (VOD's behaviour, below) is not enough for live -- release
+      // the slot entirely. This tears the native player down; scrolling
+      // back re-acquires a fresh slot and calls MediaController.load()
+      // again, which rejoins at the live edge (no seekToLive call exists or
+      // is needed -- a freshly loaded live stream always joins at the live
+      // edge). The pin above is already dropped before this branch runs, so
+      // release never fights the pin/eviction guarantees Stage 7c relies
+      // on.
+      unawaited(_pool.release(key));
+      return;
+    }
+
+    if (controller.isPlaying) {
       controller.pause();
     }
   }
@@ -618,6 +846,13 @@ class _MediaFeedState extends State<MediaFeed> {
       togglePlayPause: () => controller.togglePlayPause(),
       toggleMute: () => controller.toggleMute(),
       seekTo: (position) => controller.seekTo(position),
+      // Derived rather than the raw set membership so a manual play() via
+      // the callback above (or any other path that starts playback) clears
+      // the "blocked" badge immediately on the very next state broadcast,
+      // without this widget needing to eagerly mutate its own bookkeeping
+      // in response to a call it does not own.
+      autoPlayBlockedByPolicy:
+          _autoPlayBlockedByPolicy.contains(index) && !controller.isPlaying,
     );
   }
 }

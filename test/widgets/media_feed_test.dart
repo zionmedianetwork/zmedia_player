@@ -104,6 +104,12 @@ void main() {
                 itemAt: _item,
                 pool: pool,
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: this file predates the activation debounce and
+                  // asserts on synchronous (same-frame) activation timing; isolate
+                  // every test here from the (now non-zero-by-default)
+                  // activationDebounce so those timing assumptions still hold.
+                  // Dedicated F-05 tests below set a non-zero value explicitly.
+                  activationDebounce: Duration.zero,
                   autoPlay: false,
                   autoPause: false,
                   pauseOthersOnPlay: false,
@@ -166,6 +172,9 @@ void main() {
                 itemAt: _item,
                 pool: pool,
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: false,
                   autoPause: true,
                   pauseOthersOnPlay: false,
@@ -228,6 +237,9 @@ void main() {
                 itemAt: _item,
                 maxPoolSize: 2,
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: false,
                   autoPause: false,
                   pauseOthersOnPlay: false,
@@ -287,6 +299,9 @@ void main() {
                 itemAt: _item,
                 pool: pool,
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: false,
                   autoPause: false,
                   pauseOthersOnPlay: false,
@@ -361,6 +376,9 @@ void main() {
                 itemAt: (_) => insecureDrmItem,
                 pool: pool,
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: false,
                   autoPause: false,
                   pauseOthersOnPlay: false,
@@ -418,6 +436,9 @@ void main() {
                 itemAt: _item,
                 pool: pool,
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: true,
                   autoPlayDelay: Duration(milliseconds: 50),
                   pauseOthersOnPlay: false,
@@ -509,6 +530,9 @@ void main() {
                 pool: pool,
                 scrollController: ScrollController(initialScrollOffset: 800),
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: true,
                   autoPlayDelay: Duration.zero,
                   pauseOthersOnPlay: false,
@@ -578,6 +602,9 @@ void main() {
                 pool: pool,
                 scrollController: ScrollController(initialScrollOffset: 800),
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: false,
                   pauseOthersOnPlay: false,
                   prewarmWindow: 0,
@@ -632,6 +659,9 @@ void main() {
                 pool: pool,
                 scrollController: ScrollController(initialScrollOffset: 800),
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: true,
                   autoPlayDelay: Duration.zero,
                   pauseOthersOnPlay: false,
@@ -693,6 +723,9 @@ void main() {
                 itemAt: _item,
                 pool: pool,
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   autoPlay: false,
                   pauseOthersOnPlay: false,
                 ),
@@ -746,6 +779,9 @@ void main() {
                 mediaConfigAt: (index, item) =>
                     const MediaConfig(autoPlay: true),
                 config: const MediaFeedConfig(
+                  // Stage 7d / F-05: isolate from the non-zero-by-default debounce
+                  // -- see the first occurrence above for the full rationale.
+                  activationDebounce: Duration.zero,
                   // Off, so the only source of an `initialize`
                   // `autoPlay: true` argument is the per-item MediaConfig
                   // above, isolating what this test checks.
