@@ -722,20 +722,45 @@ class MediaPlayerInstance: NSObject {
         // the AVContentKeySession to the asset BEFORE creating the AVPlayerItem.
         // The AVContentKeySession MUST have the asset added as a recipient before
         // the item is created; otherwise the key request callback is never triggered.
-        if #available(iOS 10.0, *),
-           let drmConfig = mediaItem["drmConfig"] as? [String: Any],
-           let player = avPlayer {
-            zlog("MediaPlayerInstance.loadMediaItem(): DRM config found, initializing DrmHandler")
-            let handler = DrmHandler(playerId: playerId, channel: methodChannel)
-            let configured = handler.configure(drmConfig: drmConfig)
-            if configured {
-                let session = handler.createContentKeySession(for: player)
-                // Register the asset as a content key recipient BEFORE creating AVPlayerItem.
-                session.addContentKeyRecipient(asset)
-                drmHandler = handler
-                zlog("MediaPlayerInstance.loadMediaItem(): DRM content key session configured")
+        if let drmConfig = mediaItem["drmConfig"] as? [String: Any] {
+            if #available(iOS 10.0, *), let player = avPlayer {
+                zlog("MediaPlayerInstance.loadMediaItem(): DRM config found, initializing DrmHandler")
+                let handler = DrmHandler(playerId: playerId, channel: methodChannel)
+                let configured = handler.configure(drmConfig: drmConfig)
+                if configured {
+                    let session = handler.createContentKeySession(for: player)
+                    // Register the asset as a content key recipient BEFORE creating AVPlayerItem.
+                    session.addContentKeyRecipient(asset)
+                    drmHandler = handler
+                    zlog("MediaPlayerInstance.loadMediaItem(): DRM content key session configured")
+                } else {
+                    // Fail-closed (wave 2 security hardening, mirrors the equivalent
+                    // fix in MediaPlayerManager.kt's loadMediaItem): a DRM-configured
+                    // item whose DrmHandler.configure() rejected the config (missing
+                    // license/certificate URL, unsupported scheme, etc.) must never
+                    // fall back to unprotected playback. configure() has already
+                    // called notifyDrmError() internally (emits
+                    // onDrmSessionUpdate(state=error)/onDrmError), so the Dart-side
+                    // errorStream/drmSessionStream already knows why. Refuse to
+                    // create the AVPlayerItem at all and leave whatever was
+                    // previously loaded untouched rather than silently playing this
+                    // item unprotected.
+                    zlog("MediaPlayerInstance.loadMediaItem(): DrmHandler.configure() failed - refusing to load DRM-configured media without protection")
+                    currentMediaItem = nil
+                    return
+                }
             } else {
-                zlog("MediaPlayerInstance.loadMediaItem(): DrmHandler.configure() failed, loading without DRM")
+                // drmConfig was present but DRM cannot be enforced on this run —
+                // either the AVContentKeySession API is unavailable (iOS < 10; the
+                // package's own minimum is iOS 13, so this is effectively
+                // unreachable but kept as a defensive fail-closed branch) or
+                // `avPlayer` is nil (e.g. instance mid-teardown). Fail closed the
+                // same way rather than silently falling through to unprotected
+                // playback below.
+                zlog("MediaPlayerInstance.loadMediaItem(): DRM config present but cannot be enforced (no AVContentKeySession support or no player) - refusing to load")
+                notifyError(error: "DRM could not be enforced for this media item")
+                currentMediaItem = nil
+                return
             }
         }
 

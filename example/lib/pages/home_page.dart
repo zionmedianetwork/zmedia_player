@@ -15,6 +15,7 @@ import 'error_handling_page.dart';
 import 'multi_player_page.dart';
 import 'network_status_page.dart';
 import 'feed_page.dart';
+import 'secure_output_page.dart';
 
 /// Home page displaying a scrollable gallery of ZMedia Player feature demos.
 ///
@@ -101,6 +102,18 @@ class HomePage extends StatelessWidget {
                       'Construct DrmConfig and monitor DRM session state.',
                   icon: Icons.lock,
                   page: const DrmPage(),
+                  iconColor: Colors.deepOrange,
+                ),
+                const SizedBox(height: 8),
+                _feature(
+                  context,
+                  title: 'Screen-Capture Protection (B-12)',
+                  description:
+                      'Toggle secure output at runtime; live isCaptured '
+                      'status; Android (FLAG_SECURE block) vs iOS '
+                      '(detection-only) device test steps.',
+                  icon: Icons.screenshot_monitor,
+                  page: const SecureOutputPage(),
                   iconColor: Colors.deepOrange,
                 ),
                 const SizedBox(height: 16),

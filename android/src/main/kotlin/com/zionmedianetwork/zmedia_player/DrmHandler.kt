@@ -58,6 +58,26 @@ class DrmHandler(
             return null
         }
 
+        // Wave 2 security hardening (gate item: "Wire validateDrmConfig /
+        // getWidevineSecurityLevel into the load path with a fail-closed
+        // minimum-security-level policy"). validateDrmConfig() previously
+        // existed but was never called from anywhere in the load path — see
+        // its own doc for what it now enforces, including the opt-in
+        // minWidevineSecurityLevel policy. Structural checks (URL format,
+        // HTTPS) already ran on the Dart side (InputValidator.validateDrmConfig);
+        // this adds checks only native code can make: whether this device
+        // actually supports the requested DRM scheme, and whether its actual
+        // Widevine security level satisfies the configured minimum. On
+        // failure we refuse to build a DrmSessionManager at all — the caller
+        // (MediaPlayerInstance.loadMediaItem) must NOT fall back to loading
+        // the item without DRM protection.
+        val (isValid, validationError) = validateDrmConfig(drmConfig)
+        if (!isValid) {
+            Log.e(TAG, "DRM configuration rejected: $validationError")
+            notifyDrmError(validationError ?: "DRM configuration is invalid")
+            return null
+        }
+
         val scheme = drmConfig["scheme"] as? String ?: "widevine"
         val licenseUrl = drmConfig["licenseUrl"] as? String
             ?: run {
@@ -428,6 +448,19 @@ class DrmHandler(
 
     /**
      * Validate DRM configuration.
+     *
+     * Wired into the load path from [createDrmSessionManager] (wave 2
+     * security hardening — previously this function existed but was dead
+     * code, never called from anywhere). In addition to the original
+     * scheme/URL/device-support checks, this also enforces the opt-in,
+     * fail-closed minimum Widevine security-level policy carried by
+     * `drmConfig["minWidevineSecurityLevel"]` (populated from
+     * `DrmConfig.minWidevineSecurityLevel` on the Dart side — see its
+     * dartdoc). Absent means no policy was requested (default, unchanged
+     * behaviour). Present means: the device's *actual* security level
+     * (queried live via [getWidevineSecurityLevel]) must meet or exceed the
+     * requested minimum, and an indeterminate device level always fails the
+     * check — see [meetsMinimumSecurityLevel].
      */
     fun validateDrmConfig(drmConfig: Map<String, Any>): Pair<Boolean, String?> {
         val scheme = drmConfig["scheme"] as? String
@@ -446,6 +479,19 @@ class DrmHandler(
                 if (!isWidevineSupported()) {
                     return Pair(false, "Widevine DRM is not supported on this device")
                 }
+
+                val minLevel = drmConfig["minWidevineSecurityLevel"] as? String
+                if (minLevel != null) {
+                    val actualLevel = getWidevineSecurityLevel()
+                    if (!meetsMinimumSecurityLevel(actualLevel, minLevel)) {
+                        return Pair(
+                            false,
+                            "Widevine security level '$actualLevel' does not satisfy the " +
+                                "configured minimum '$minLevel' (fail-closed: refusing DRM " +
+                                "playback)"
+                        )
+                    }
+                }
             }
             "playready" -> {
                 if (!isPlayReadySupported()) {
@@ -463,6 +509,37 @@ class DrmHandler(
         }
 
         return Pair(true, null)
+    }
+
+    /**
+     * Ranks a Widevine security-level string, most secure first: L1 (1) <
+     * L2 (2) < L3 (3). Returns `null` for anything unrecognized (including
+     * `"Unknown"`, which [getWidevineSecurityLevel] itself returns when the
+     * underlying `MediaDrm` property read fails) so that an unranked level
+     * can never be treated as satisfying a policy — see
+     * [meetsMinimumSecurityLevel].
+     */
+    private fun securityLevelRank(level: String): Int? = when (level.trim().uppercase()) {
+        "L1" -> 1
+        "L2" -> 2
+        "L3" -> 3
+        else -> null
+    }
+
+    /**
+     * Fail-closed comparison for the minimum-security-level policy: returns
+     * `true` only when both [actualLevel] and [minLevel] rank to a known
+     * value AND the device's actual rank is numerically <= the requested
+     * minimum's rank (lower number = more secure, since L1 is Widevine's
+     * highest tier). Returns `false` — never throws — whenever either level
+     * cannot be ranked, so an indeterminate device level (or a malformed
+     * policy value) always refuses playback rather than silently allowing
+     * it through.
+     */
+    internal fun meetsMinimumSecurityLevel(actualLevel: String, minLevel: String): Boolean {
+        val actualRank = securityLevelRank(actualLevel) ?: return false
+        val minRank = securityLevelRank(minLevel) ?: return false
+        return actualRank <= minRank
     }
 }
 

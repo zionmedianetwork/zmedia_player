@@ -119,6 +119,19 @@ class InputValidator {
     if (config.headers != null) {
       validateHeaders(config.headers!);
     }
+
+    // B-12 wave 2 / gate item: minWidevineSecurityLevel only makes sense
+    // for DrmScheme.widevine — see WidevineSecurityLevel's dartdoc for why
+    // there is no FairPlay/iOS equivalent. Reject the misconfiguration here,
+    // before it ever reaches native code, rather than silently ignoring it.
+    if (config.minWidevineSecurityLevel != null &&
+        config.scheme != DrmScheme.widevine) {
+      throw ConfigurationException(
+        'minWidevineSecurityLevel only applies to DrmScheme.widevine '
+        '(got ${config.scheme.name})',
+        parameter: 'minWidevineSecurityLevel',
+      );
+    }
   }
 
   /// Validates an authentication token

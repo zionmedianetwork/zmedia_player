@@ -17,6 +17,7 @@ import '../models/notification_config.dart';
 import '../services/buffering_service.dart';
 import '../services/network_resilience_service.dart';
 import '../security/input_validation.dart';
+import '../security/screen_capture_protection.dart';
 import 'media_config.dart';
 import 'crash_reporter.dart';
 import 'exceptions.dart';
@@ -168,6 +169,8 @@ class MediaPlayer {
       StreamController<MediaPlayerException>.broadcast();
   final StreamController<PlayerPauseReason> _pauseReasonController =
       StreamController<PlayerPauseReason>.broadcast();
+  final StreamController<ScreenCaptureStatus> _screenCaptureController =
+      StreamController<ScreenCaptureStatus>.broadcast();
 
   /// Buffering service for adaptive buffer management
   late final BufferingService _bufferingService;
@@ -205,6 +208,16 @@ class MediaPlayer {
     isAvailable: false,
     isCasting: false,
   );
+
+  /// Whether opt-in screen-capture protection (B-12) is currently enabled
+  /// for this player. See [setSecureSurface].
+  bool _secureSurfaceEnabled = false;
+
+  /// Most recently reported screen-capture status. Always reflects
+  /// `isCaptured: false` until a native `onScreenCaptureChanged` event
+  /// arrives (iOS only — see [screenCaptureStream]).
+  ScreenCaptureStatus _screenCaptureStatus =
+      const ScreenCaptureStatus(isCaptured: false);
 
   /// Available subtitle tracks
   List<SubtitleTrack> _subtitleTracks = [];
@@ -610,6 +623,31 @@ class MediaPlayer {
     return _pauseReasonController.stream;
   }
 
+  /// Stream of [ScreenCaptureStatus] updates (B-12).
+  ///
+  /// Only emits on iOS, and only after [setSecureSurface] has been called
+  /// with `enabled: true` — Android's `FLAG_SECURE` blocks capture at the OS
+  /// level so there is nothing to detect/report there. See
+  /// `lib/src/security/screen_capture_protection.dart` for the full
+  /// Android/iOS asymmetry.
+  Stream<ScreenCaptureStatus> get screenCaptureStream {
+    _throwIfDisposed();
+    return _screenCaptureController.stream;
+  }
+
+  /// Most recently known [ScreenCaptureStatus]. See [screenCaptureStream].
+  ScreenCaptureStatus get screenCaptureStatus {
+    _throwIfDisposed();
+    return _screenCaptureStatus;
+  }
+
+  /// Whether opt-in screen-capture protection (B-12) is currently enabled
+  /// for this player. See [setSecureSurface].
+  bool get isSecureSurfaceEnabled {
+    _throwIfDisposed();
+    return _secureSurfaceEnabled;
+  }
+
   /// Current network quality based on bandwidth measurements
   NetworkQuality get networkQuality {
     _throwIfDisposed();
@@ -903,6 +941,20 @@ class MediaPlayer {
         'playerId': playerId,
         'nativeProtocolVersion': nativeProtocolVersion,
       });
+
+      // B-12: apply the config-declared initial secureSurface value now that
+      // the player is initialized. Best-effort — a failure here must not
+      // fail initialize() itself, matching how other post-init convenience
+      // calls in this package (e.g. reclaimVideoSurface) are treated as
+      // non-fatal.
+      if (_config.secureSurface) {
+        try {
+          await setSecureSurface(true);
+        } catch (e) {
+          debugPrint(
+              'MediaPlayer: failed to apply initial secureSurface=true: $e');
+        }
+      }
     } on ProtocolMismatchException catch (exception, stack) {
       crashReporter?.reportError(exception, stack,
           context: {
@@ -1405,6 +1457,42 @@ class MediaPlayer {
     }
   }
 
+  /// Enable or disable screen-capture protection for this player's video
+  /// surface (B-12). Opt-in, defaults to off — see
+  /// `lib/src/security/screen_capture_protection.dart` for the full,
+  /// deliberately-asymmetric behaviour this maps to on each platform:
+  ///
+  ///  - **Android**: `enabled: true` adds `FLAG_SECURE` to the host
+  ///    `Activity`'s window, blocking screenshots/screen recording of it at
+  ///    the OS level for as long as ANY player in that Activity has this
+  ///    enabled (the flag is window-scoped, not per-surface — `false`
+  ///    clears it only once no player in that Activity still wants it).
+  ///  - **iOS**: `enabled: true` starts observing `UIScreen.isCaptured` and
+  ///    reports changes via [screenCaptureStream]. This is detection only;
+  ///    it does not prevent capture.
+  ///
+  /// Safe to call before or after media is loaded.
+  Future<void> setSecureSurface(bool enabled) async {
+    await _ensureInitialized();
+    _markActivity();
+
+    try {
+      await _invokeMethod('setSecureSurface', {
+        'playerId': playerId,
+        'enabled': enabled,
+      });
+
+      _secureSurfaceEnabled = enabled;
+    } on PlatformException catch (e) {
+      throw ConfigurationException(
+        'Failed to set secure surface: ${e.message ?? e.code}',
+        parameter: 'secureSurface',
+        value: enabled,
+        details: e.details as Map<String, dynamic>?,
+      );
+    }
+  }
+
   /// Notify the native layer that a new platform-view host has been attached
   /// and that it should re-assert the player onto the newly-active surface.
   ///
@@ -1891,6 +1979,22 @@ class MediaPlayer {
           details: e.details as Map<String, dynamic>?,
         );
       }
+
+      // B-12: secureSurface is applied via the dedicated setSecureSurface
+      // MethodChannel call (see setSecureSurface's doc for why — it needs
+      // Activity/window access on Android that generic config application
+      // doesn't have), not through the 'updateConfig' map above. Mirror any
+      // change here too so updateConfig() stays a complete way to change
+      // this setting. Best-effort: a failure here does not roll back the
+      // rest of the config update that already succeeded above.
+      if (config.secureSurface != oldConfig.secureSurface) {
+        try {
+          await setSecureSurface(config.secureSurface);
+        } catch (e) {
+          debugPrint('MediaPlayer: failed to apply secureSurface change '
+              'from updateConfig: $e');
+        }
+      }
     }
   }
 
@@ -1946,6 +2050,7 @@ class MediaPlayer {
       _notificationActionEventController,
       _errorController,
       _pauseReasonController,
+      _screenCaptureController,
     ];
 
     final errors = <String, dynamic>{};
@@ -2004,6 +2109,7 @@ class MediaPlayer {
       'notificationActionEventController',
       'errorController',
       'pauseReasonController',
+      'screenCaptureController',
     ];
     return index < names.length ? names[index] : 'unknownController';
   }
@@ -2138,6 +2244,9 @@ class MediaPlayer {
           break;
         case 'onDrmSessionUpdate':
           _handleDrmSessionUpdate(arguments!);
+          break;
+        case 'onScreenCaptureChanged':
+          _handleScreenCaptureChanged(arguments!);
           break;
         case 'onError':
           _handleError(arguments!);
@@ -2389,6 +2498,25 @@ class MediaPlayer {
       }
     } catch (e) {
       debugPrint('Error processing DRM session update: $e');
+    }
+  }
+
+  /// Handle screen-capture status change events from platform (B-12,
+  /// iOS-only — see [screenCaptureStream]).
+  void _handleScreenCaptureChanged(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final status = ScreenCaptureStatus.fromMap(
+        Map<String, dynamic>.from(arguments),
+      );
+      _screenCaptureStatus = status;
+
+      if (!_screenCaptureController.isClosed) {
+        _screenCaptureController.add(status);
+      }
+    } catch (e) {
+      debugPrint('Error processing screen capture status: $e');
     }
   }
 

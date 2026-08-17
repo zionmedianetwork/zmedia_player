@@ -100,6 +100,28 @@ class DrmHandler: NSObject {
     // MARK: - Configuration
 
     /// Configure DRM with provided settings.
+    ///
+    /// Fail-closed by construction: every `guard` below that returns `false`
+    /// already calls `notifyDrmError(_:)` first, and the caller
+    /// (`MediaPlayerManager.swift`'s `loadMediaItem`) refuses to create an
+    /// `AVPlayerItem` at all when this returns `false` — a DRM-configured
+    /// item is never played back unprotected on `configure()` failure (wave
+    /// 2 security hardening, mirrors `DrmHandler.validateDrmConfig` on
+    /// Android).
+    ///
+    /// No `minWidevineSecurityLevel`-equivalent policy exists here
+    /// deliberately: Widevine security levels (L1/L2/L3) are a
+    /// Widevine-specific, Android-only concept queryable via
+    /// `MediaDrm.getPropertyString("securityLevel")`. FairPlay — the only
+    /// scheme this method accepts, enforced by the guard below — has no
+    /// directly comparable, app-queryable device security tier; Apple's
+    /// equivalent trust model (code-signing + hardware-backed key handling)
+    /// is enforced by the OS/`AVContentKeySession` itself, not exposed as a
+    /// value this handler could compare against a caller-supplied minimum.
+    /// See `WidevineSecurityLevel`'s dartdoc (`lib/src/models/drm_config.dart`)
+    /// for the full reasoning; inventing a fake iOS equivalent here would be
+    /// exactly the "declared, never actually enforced" pattern this
+    /// remediation wave exists to eliminate.
     func configure(drmConfig: [String: Any]) -> Bool {
         self.drmConfig = drmConfig
 

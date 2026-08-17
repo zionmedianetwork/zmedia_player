@@ -76,6 +76,12 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
     private lateinit var secureStorageChannel: MethodChannel
     private lateinit var secureStorageHandler: SecureStorageHandler
 
+    // B-12 (wave 2): opt-in screen-capture protection. A single
+    // plugin-lifetime instance (not one per playerId) because FLAG_SECURE is
+    // scoped to the host Activity's *window*, which every player in this
+    // Activity shares — see SecureSurfaceHandler's class doc.
+    private lateinit var secureSurfaceHandler: SecureSurfaceHandler
+
     override fun onAttachedToEngine(@NonNull flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         context = flutterPluginBinding.applicationContext
         channel = MethodChannel(flutterPluginBinding.binaryMessenger, "zmedia_player")
@@ -94,6 +100,11 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
         secureStorageChannel = MethodChannel(flutterPluginBinding.binaryMessenger, "zmedia_player/secure_storage")
         secureStorageHandler = SecureStorageHandler(context)
         secureStorageChannel.setMethodCallHandler(secureStorageHandler)
+
+        // B-12 (wave 2): no Activity yet at engine-attach time (ActivityAware
+        // callbacks fire separately) — SecureSurfaceHandler.applyFlag() defers
+        // until updateActivity() supplies one, exactly like PipHandler.
+        secureSurfaceHandler = SecureSurfaceHandler(activity)
 
         // Register platform view
         flutterPluginBinding
@@ -124,6 +135,9 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
             "skipToIndex" -> handleSkipToIndex(call, result)
             "updateConfig" -> handleUpdateConfig(call, result)
             "dispose" -> handleDispose(call, result)
+
+            // B-12 (wave 2): opt-in screen-capture protection
+            "setSecureSurface" -> handleSetSecureSurface(call, result)
 
             // Phase 1: Buffering methods
             "getBufferHealth" -> handleGetBufferHealth(call, result)
@@ -519,12 +533,33 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
                 castHandlers.remove(playerId)?.dispose()
                 // H-06: stop fanning NetworkMonitor events to this playerId.
                 activePlayerIds.remove(playerId)
+                // B-12: stop this playerId requesting FLAG_SECURE; clears the
+                // window flag if no other player in this Activity still wants it.
+                secureSurfaceHandler.clear(playerId)
                 result.success(null)
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID is required", null)
             }
         } catch (e: Exception) {
             result.error("DISPOSE_ERROR", e.message, null)
+        }
+    }
+
+    // B-12 (wave 2): screen-capture protection handler
+
+    private fun handleSetSecureSurface(call: MethodCall, result: Result) {
+        try {
+            val playerId = call.argument<String>("playerId")
+            val enabled = call.argument<Boolean>("enabled")
+
+            if (playerId != null && enabled != null) {
+                secureSurfaceHandler.setSecure(playerId, enabled)
+                result.success(null)
+            } else {
+                result.error("INVALID_ARGUMENT", "Player ID and enabled flag are required", null)
+            }
+        } catch (e: Exception) {
+            result.error("SECURE_SURFACE_ERROR", e.message, null)
         }
     }
 
@@ -1002,6 +1037,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
         refreshPipHandlersActivity()
+        secureSurfaceHandler.updateActivity(activity)
         android.util.Log.d("ZMediaPlayerPlugin", "Activity attached: ${activity != null}")
     }
 
@@ -1018,12 +1054,17 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
         // doesn't keep operating against the now-destroyed pre-rotation Activity
         // (see PipHandler.updateActivity).
         refreshPipHandlersActivity()
+        // B-12: re-apply FLAG_SECURE to the new window after rotation if any
+        // player still wants it — the pre-rotation window (and its flags) is
+        // gone once the Activity is recreated.
+        secureSurfaceHandler.updateActivity(activity)
         android.util.Log.d("ZMediaPlayerPlugin", "Activity reattached after config changes")
     }
 
     override fun onDetachedFromActivity() {
         activity = null
         refreshPipHandlersActivity()
+        secureSurfaceHandler.updateActivity(activity)
         android.util.Log.d("ZMediaPlayerPlugin", "Activity detached")
     }
 

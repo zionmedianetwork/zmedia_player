@@ -7,6 +7,7 @@ import '../models/subtitle_track.dart';
 import '../models/streaming_config.dart';
 import '../models/pip_config.dart';
 import '../models/cast_device.dart';
+import '../security/screen_capture_protection.dart';
 import 'media_player.dart';
 import 'media_config.dart';
 import 'exceptions.dart';
@@ -202,6 +203,20 @@ class MediaController extends ChangeNotifier {
   /// Whether currently casting
   bool get isCasting => _player.isCasting;
 
+  // B-12: screen-capture protection getters
+  /// Stream of screen-capture status changes. See
+  /// `lib/src/security/screen_capture_protection.dart` for the
+  /// Android/iOS asymmetry this reflects (iOS-only; never emits on
+  /// Android).
+  Stream<ScreenCaptureStatus> get screenCaptureStream =>
+      _player.screenCaptureStream;
+
+  /// Most recently known screen-capture status.
+  ScreenCaptureStatus get screenCaptureStatus => _player.screenCaptureStatus;
+
+  /// Whether opt-in screen-capture protection is currently enabled.
+  bool get isSecureSurfaceEnabled => _player.isSecureSurfaceEnabled;
+
   /// Initialize the controller and underlying player
   Future<void> initialize() async {
     if (_isDisposed) {
@@ -389,6 +404,23 @@ class MediaController extends ChangeNotifier {
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error toggling mute: $e');
+      rethrow;
+    }
+  }
+
+  /// Enable or disable opt-in screen-capture protection (B-12). See
+  /// [MediaPlayer.setSecureSurface] for the full, deliberately-asymmetric
+  /// Android (hard block) vs iOS (detection-only) behaviour.
+  Future<void> setSecureSurface(bool enabled) async {
+    if (_isDisposed) return;
+
+    try {
+      await _executeOperation(
+        () => _player.setSecureSurface(enabled),
+        isCritical: false,
+      );
+    } catch (e) {
+      debugPrint('MediaController: Error setting secure surface: $e');
       rethrow;
     }
   }
