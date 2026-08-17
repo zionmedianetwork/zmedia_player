@@ -553,8 +553,15 @@ class DrmHandler: NSObject {
     /// Notify Flutter of DRM errors.
     ///
     /// Emits an ``onDrmSessionUpdate`` with state=error so the Dart
-    /// ``drmSessionStream`` surfaces the failure.  Also emits the legacy
-    /// ``onDrmError`` event for any other consumers.
+    /// ``drmSessionStream`` surfaces the failure. This is the single event
+    /// for DRM failures - do not add a second/legacy ``onDrmError`` call
+    /// here. The Dart side only handles ``onDrmSessionUpdate`` (see
+    /// `MediaPlayer._handleDrmSessionUpdate`), which already carries a
+    /// strictly richer payload (session id, timestamps, playerId) than a
+    /// standalone error event would. A previous ``onDrmError`` call had no
+    /// Dart handler and was removed (see C-09) - re-adding it would either
+    /// be dead code again or, if wired up, would double-emit the same
+    /// failure that ``onDrmSessionUpdate`` already reports.
     func notifyDrmError(_ message: String) {
         zlog("DrmHandler Error: \(message)")
         let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
@@ -564,14 +571,8 @@ class DrmHandler: NSObject {
             errorMessage: message,
             nowMs: nowMs
         )
-        let errorPayload: [String: Any] = [
-            "playerId": playerId,
-            "error": message,
-            "timestamp": nowMs
-        ]
         invokeOnMain { [channel] in
             channel.invokeMethod("onDrmSessionUpdate", arguments: sessionPayload)
-            channel.invokeMethod("onDrmError", arguments: errorPayload)
         }
     }
 

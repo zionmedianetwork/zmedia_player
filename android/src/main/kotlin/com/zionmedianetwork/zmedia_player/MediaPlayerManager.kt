@@ -582,8 +582,8 @@ class MediaPlayerInstance(
                 // rejecting this device (see DrmHandler.createDrmSessionManager /
                 // validateDrmConfig) — must never fall back to unprotected
                 // playback. DrmHandler has already emitted
-                // onDrmSessionUpdate(state=error)/onDrmError via notifyDrmError(),
-                // so the Dart-side errorStream/drmSessionStream already knows why.
+                // onDrmSessionUpdate(state=error) via notifyDrmError(), so the
+                // Dart-side errorStream/drmSessionStream already knows why.
                 // Refuse to build ANY media source and stop whatever was
                 // previously loaded so nothing plays.
                 android.util.Log.e(
