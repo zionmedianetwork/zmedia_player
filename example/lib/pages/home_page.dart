@@ -15,6 +15,7 @@ import 'error_handling_page.dart';
 import 'multi_player_page.dart';
 import 'network_status_page.dart';
 import 'feed_page.dart';
+import 'media_feed_pool_page.dart';
 import 'secure_output_page.dart';
 import 'measurement/measurement_hub_page.dart';
 
@@ -237,6 +238,20 @@ class HomePage extends StatelessWidget {
                       'off-screen live bandwidth.',
                   icon: Icons.science_outlined,
                   page: const MeasurementHubPage(),
+                  iconColor: Colors.brown,
+                ),
+                const SizedBox(height: 8),
+                _feature(
+                  context,
+                  title: 'Feed (MediaFeed pool, Stage 7b)',
+                  description: '20-item feed backed by a package-owned '
+                      'MediaPlayerPool -- this page never touches a '
+                      'MediaController. Live pool occupancy readout proves '
+                      'concurrent decoder sessions stay bounded to '
+                      'maxPoolSize regardless of scroll distance (fixes '
+                      'F-01/F-02).',
+                  icon: Icons.dynamic_feed_outlined,
+                  page: const MediaFeedPoolPage(),
                   iconColor: Colors.brown,
                 ),
               ]),

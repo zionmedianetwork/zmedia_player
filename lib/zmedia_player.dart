@@ -86,6 +86,10 @@ export 'src/widgets/overlays/toast_notification.dart';
 export 'src/widgets/media_list_player.dart';
 export 'src/widgets/airplay_button.dart';
 
+// Phase 7 (Stage 7b): player pool + MediaFeed
+export 'src/core/media_player_pool.dart';
+export 'src/widgets/media_feed.dart';
+
 // Security (Phase 1 - P1)
 export 'src/security/certificate_pinning.dart';
 export 'src/security/secure_storage.dart';
