@@ -18,6 +18,10 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
+  # Only a transitive dependency of zmedia_player otherwise; declared
+  # directly here because the Stage 7a measurement widget tests
+  # (test/pages/measurement/) drive VisibilityDetectorController directly.
+  visibility_detector: ^0.4.0+2
 
 flutter:
   uses-material-design: true

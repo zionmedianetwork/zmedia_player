@@ -16,6 +16,7 @@ import 'multi_player_page.dart';
 import 'network_status_page.dart';
 import 'feed_page.dart';
 import 'secure_output_page.dart';
+import 'measurement/measurement_hub_page.dart';
 
 /// Home page displaying a scrollable gallery of ZMedia Player feature demos.
 ///
@@ -222,6 +223,21 @@ class HomePage extends StatelessWidget {
                   icon: Icons.view_agenda_outlined,
                   page: const FeedPage(),
                   iconColor: Colors.red,
+                ),
+                const SizedBox(height: 16),
+                _SectionLabel('Phase 7 — Feed Architecture'),
+                _feature(
+                  context,
+                  title: 'Stage 7a Measurement Harness',
+                  description:
+                      'Throwaway harness producing the numbers Stage 7b\'s '
+                      'pool/prewarm/prefetch defaults are designed against: '
+                      'decoder ceiling, paused-vs-playing memory, '
+                      'time-to-first-frame, 50-item scroll bandwidth, '
+                      'off-screen live bandwidth.',
+                  icon: Icons.science_outlined,
+                  page: const MeasurementHubPage(),
+                  iconColor: Colors.brown,
                 ),
               ]),
             ),
