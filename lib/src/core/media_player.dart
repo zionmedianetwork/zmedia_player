@@ -1836,6 +1836,19 @@ class MediaPlayer {
     // (drmConfig is already known-null above), so validate the URL/headers
     // directly instead.
     InputValidator.validateUrl(mediaItem.url);
+
+    // C-02 Stage 1: validateUrl() now accepts file:// media URLs for local
+    // playback on this device, but a cast receiver is a separate device with
+    // no access to this device's filesystem — a file:// URL cannot possibly
+    // work there. Refuse explicitly rather than letting native fail opaquely.
+    if (Uri.parse(mediaItem.url).scheme.toLowerCase() == 'file') {
+      throw ConfigurationException(
+        'Cannot cast a local file:// URL: the cast receiver has no access '
+        "to this device's filesystem.",
+        parameter: 'url',
+        value: mediaItem.url,
+      );
+    }
     if (mediaItem.httpHeaders != null) {
       InputValidator.validateHeaders(mediaItem.httpHeaders!);
     }

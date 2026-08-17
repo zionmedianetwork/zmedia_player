@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../widgets/feature_card.dart';
 import 'simple_playback_page.dart';
+import 'local_file_playback_page.dart';
 import 'playlist_page.dart';
 import 'streaming_quality_page.dart';
 import 'subtitles_page.dart';
@@ -73,6 +74,16 @@ class HomePage extends StatelessWidget {
                       'Multiple items with next/previous, repeat and shuffle modes.',
                   icon: Icons.queue_music,
                   page: const PlaylistPage(),
+                ),
+                const SizedBox(height: 8),
+                _feature(
+                  context,
+                  title: 'Local File Playback (C-02 Stage 1)',
+                  description:
+                      'Play a bundled asset copied to disk via a file:// '
+                      'URL -- no network required.',
+                  icon: Icons.folder_open,
+                  page: const LocalFilePlaybackPage(),
                 ),
                 const SizedBox(height: 16),
                 _SectionLabel('Streaming'),

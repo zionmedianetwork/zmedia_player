@@ -133,4 +133,42 @@ void main() {
     castService.dispose();
     player.dispose();
   });
+
+  test(
+      'CastService.loadMedia throws ConfigurationException and never calls '
+      'native for a file:// (local) URL (C-02 Stage 1)', () async {
+    final calls = _installCapture();
+    const playerId = 'cast-service-local-file';
+    final player = MediaPlayer(playerId: playerId);
+    await player.initialize();
+
+    final castService = CastService(const CastConfig(enabled: true));
+    await castService.initialize(playerId, player);
+
+    await _injectCastStatus(playerId, isCasting: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(castService.isCasting, isTrue);
+
+    calls.clear();
+
+    final localItem = MediaItem(
+      id: 'cast-local-item',
+      title: 'Local file',
+      url: LocalMediaUtils.fileUri('/data/user/0/app/files/clip.mp4'),
+    );
+
+    await expectLater(
+      () => castService.loadMedia(mediaItem: localItem, playerId: playerId),
+      throwsA(isA<ConfigurationException>()),
+    );
+
+    expect(
+      calls.where((c) => c.method == 'loadMediaOnCastDevice'),
+      isEmpty,
+      reason: 'A local file:// URL must never reach a cast receiver',
+    );
+
+    castService.dispose();
+    player.dispose();
+  });
 }

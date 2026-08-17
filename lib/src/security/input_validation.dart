@@ -10,7 +10,47 @@ import '../core/exceptions.dart';
 
 /// Input validator for media player inputs
 class InputValidator {
-  /// Validates a URL
+  /// Remote (network) schemes accepted for a media/license/certificate URL
+  /// when HTTPS is not specifically required.
+  static const List<String> _remoteSchemes = ['http', 'https', 'rtmp', 'rtsp'];
+
+  /// Local schemes accepted for a *media* URL (never for DRM license/
+  /// certificate URLs — see [validateUrl]'s `requireHttps` handling).
+  ///
+  /// C-02 Stage 1: only `file` is supported. Callers must pass a proper
+  /// `file://` URI (e.g. via `Uri.file(path).toString()`, or
+  /// [LocalMediaUtils.fileUri]) rather than a bare filesystem path. This is
+  /// deliberate, not an oversight:
+  ///   - A bare path (`/data/.../movie.mp4`) has no `scheme`, and every other
+  ///     input this validator accepts is scheme-qualified; special-casing
+  ///     scheme-less strings as "must be a local path" would make the
+  ///     validator's error messages ambiguous (is a malformed `http://` typo
+  ///     supposed to be treated as a path?) and would silently accept
+  ///     accidentally-relative strings.
+  ///   - Forcing `file://` pushes callers through `Uri.file()`/
+  ///     `Uri.parse()`, which correctly percent-encode spaces and other
+  ///     reserved characters. A bare path handed straight to native code has
+  ///     already caused subtle bugs elsewhere in this codebase for URLs with
+  ///     unencoded special characters.
+  ///
+  /// `content://` (Android SAF) and `asset://` (Android APK assets) are
+  /// intentionally NOT accepted yet even though the native `ExoPlayer`
+  /// `DataSource` already understands them — they carry different
+  /// permission/lifetime semantics per platform (SAF grants, package
+  /// resources) that are out of scope for this stage and deserve their own
+  /// validation pass.
+  static const List<String> _localSchemes = ['file'];
+
+  /// Validates a URL.
+  ///
+  /// By default this accepts remote schemes (`http`, `https`, `rtmp`,
+  /// `rtsp`) plus the local `file` scheme (C-02 Stage 1 — local file
+  /// playback). Pass `requireHttps: true` for anything security-sensitive
+  /// (DRM license/certificate URLs) to restrict to `https` only — `file` is
+  /// never permitted when `requireHttps` is set, by design: a local media
+  /// *file* is safe to play, but a local *license server* is not something
+  /// this validator can reason about, so DRM endpoints always stay
+  /// network+HTTPS only regardless of this method's default behavior.
   static void validateUrl(String url, {bool requireHttps = false}) {
     // Check if URL is empty
     if (url.trim().isEmpty) {
@@ -36,23 +76,29 @@ class InputValidator {
     // Check if has scheme
     if (!uri.hasScheme) {
       throw ConfigurationException(
-        'URL must include a scheme (http:// or https://)',
+        'URL must include a scheme (http://, https://, or file://)',
         parameter: 'url',
         value: url,
       );
     }
 
     // Validate scheme
+    final scheme = uri.scheme.toLowerCase();
     final validSchemes =
-        requireHttps ? ['https'] : ['http', 'https', 'rtmp', 'rtsp'];
-    if (!validSchemes.contains(uri.scheme.toLowerCase())) {
+        requireHttps ? ['https'] : [..._remoteSchemes, ..._localSchemes];
+    if (!validSchemes.contains(scheme)) {
       throw ConfigurationException(
         requireHttps
             ? 'URL must use HTTPS protocol'
-            : 'URL must use HTTP, HTTPS, RTMP, or RTSP protocol',
+            : 'URL must use HTTP, HTTPS, RTMP, RTSP, or file protocol',
         parameter: 'url',
         value: url,
       );
+    }
+
+    if (scheme == 'file') {
+      _validateFileUrl(uri, url);
+      return;
     }
 
     // Check if has host
@@ -72,6 +118,108 @@ class InputValidator {
         value: url,
       );
     }
+  }
+
+  /// Validates a `file://` URL (C-02 Stage 1 — local file playback).
+  ///
+  /// Deliberately does NOT constrain *where* the file may live (e.g. does
+  /// not require it to be under the app's documents/sandbox directory).
+  /// That boundary is already enforced by the OS: a Flutter app process can
+  /// only ever open paths it already has OS-level permission to read
+  /// (app sandbox on iOS, app-private storage / granted permissions on
+  /// Android) no matter what string is passed here, so hard-coding a single
+  /// allowed directory would not add real protection — it would only break
+  /// legitimate host-app use cases (playing a file the user picked from
+  /// external storage/Files/Photos, a file downloaded to a custom cache
+  /// directory, etc.) for no security benefit. The host app remains
+  /// responsible for only ever constructing a `file://` URL from a path it
+  /// trusts.
+  ///
+  /// What IS validated defensively, in case a `file://` URL is built by
+  /// string-concatenating partially-trusted input (e.g. a server-driven
+  /// playlist entry naming a previously-downloaded local file by name): the
+  /// decoded path must not contain `.` or `..` segments, and no decoded
+  /// segment may itself contain an (encoded) path separator — both are
+  /// classic traversal tricks for escaping an intended base directory even
+  /// when the final resolved path is still inside the OS sandbox.
+  static void _validateFileUrl(Uri uri, String original) {
+    // A file:// URL with a non-empty host (`file://host/path`, i.e. a
+    // UNC-style remote share reference) is not "local" in any sense this
+    // validator can reason about — reject it rather than silently treating
+    // it as a local path.
+    if (uri.host.isNotEmpty) {
+      throw ConfigurationException(
+        'file:// URLs must not include a host (use file:///path, not '
+        'file://host/path)',
+        parameter: 'url',
+        value: original,
+      );
+    }
+
+    if (uri.path.isEmpty || uri.path == '/') {
+      throw ConfigurationException(
+        'file:// URL must include a file path',
+        parameter: 'url',
+        value: original,
+      );
+    }
+
+    // `Uri.parse` silently applies RFC 3986 §5.2.4 dot-segment removal to
+    // `uri.path`/`uri.pathSegments` *while parsing* — by the time this code
+    // ever looks at them, `file:///base/../../etc/passwd` has already been
+    // resolved to `file:///etc/passwd`, so checking the normalized path
+    // cannot catch the traversal attempt. Walk the RAW, pre-normalization
+    // path text (still percent-encoded) instead, decoding one segment at a
+    // time so an encoded segment such as `%2e%2e` is still caught.
+    for (final rawSegment in _rawFilePath(original).split('/')) {
+      if (rawSegment.isEmpty) continue;
+      String decoded;
+      try {
+        decoded = Uri.decodeComponent(rawSegment);
+      } catch (e) {
+        throw ConfigurationException(
+          'file:// URL contains malformed percent-encoding: $e',
+          parameter: 'url',
+          value: original,
+        );
+      }
+      if (decoded == '.' || decoded == '..') {
+        throw ConfigurationException(
+          'file:// URL path must not contain "." or ".." segments',
+          parameter: 'url',
+          value: original,
+        );
+      }
+      if (decoded.contains('/') || decoded.contains(r'\')) {
+        throw ConfigurationException(
+          'file:// URL path segment must not contain an encoded path '
+          'separator',
+          parameter: 'url',
+          value: original,
+        );
+      }
+    }
+  }
+
+  /// Returns the path component of a `file://` URL as it appeared in
+  /// [original] — before `Uri.parse` normalized away any `.`/`..`
+  /// dot-segments — for use by [_validateFileUrl]'s traversal check. Only
+  /// called after the caller has already confirmed the URL parses with an
+  /// empty `host`, so the only two shapes to handle are `file:///path`
+  /// (empty authority) and the unusual-but-valid `file:/path` (no
+  /// authority at all).
+  static String _rawFilePath(String original) {
+    var rest = original.substring(original.indexOf(':') + 1);
+    if (rest.startsWith('//')) {
+      rest = rest.substring(2);
+    }
+    // Strip a query string / fragment, which are not part of the path.
+    final queryIndex = rest.indexOf('?');
+    final fragmentIndex = rest.indexOf('#');
+    var end = rest.length;
+    if (queryIndex != -1 && queryIndex < end) end = queryIndex;
+    if (fragmentIndex != -1 && fragmentIndex < end) end = fragmentIndex;
+    return rest.substring(0, end);
   }
 
   /// Validates a MediaItem that carries a DRM configuration.
