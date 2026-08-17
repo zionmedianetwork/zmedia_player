@@ -3,9 +3,9 @@ package com.zionmedianetwork.zmedia_player
 import android.content.Context
 import android.view.LayoutInflater
 import android.view.View
-import com.google.android.exoplayer2.ExoPlayer
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout
-import com.google.android.exoplayer2.ui.PlayerView
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import io.flutter.plugin.platform.PlatformView
 
 class MediaPlayerView(

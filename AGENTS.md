@@ -14,7 +14,7 @@ For the architecture narrative and contributor workflow, see [`CLAUDE.md`](CLAUD
 - Dart talks to native over a single `MethodChannel` named `zmedia_player`, routed per `playerId`.
 - Advanced features: HLS/DASH adaptive streaming, DRM (Widevine/FairPlay/EZDRM), subtitles, PiP, casting (Chromecast/AirPlay), lock-screen notifications, certificate pinning.
 
-**Versions:** package `0.2.2` · Flutter SDK `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**) · iOS **13.0+** · Android **minSdk 21**. iOS builds with **Swift Package Manager or CocoaPods**.
+**Versions:** package `0.2.2` · Flutter SDK `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**) · iOS **13.0+** · Android **minSdk 23**. iOS builds with **Swift Package Manager or CocoaPods**.
 
 ---
 

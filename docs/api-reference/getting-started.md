@@ -11,7 +11,7 @@ dependencies:
       url: https://github.com/zionmedianetwork/zmedia_player.git
 ```
 
-**Requirements:** Flutter `>=3.19.0` (verified on 3.44.3 / Dart 3.12), iOS 13.0+, Android minSdk 21.
+**Requirements:** Flutter `>=3.19.0` (verified on 3.44.3 / Dart 3.12), iOS 13.0+, Android minSdk 23.
 
 ## Platform setup
 

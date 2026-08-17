@@ -147,7 +147,7 @@ debugPrint('DRM: License acquisition failed');
 **ProGuard Rules:**
 ```proguard
 # Keep DRM classes
--keep class com.google.android.exoplayer2.drm.** { *; }
+-keep class androidx.media3.exoplayer.drm.** { *; }
 -keep class com.zionmedianetwork.zmedia_player.DrmHandler { *; }
 ```
 
