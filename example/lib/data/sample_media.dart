@@ -157,6 +157,39 @@ class SampleMedia {
   );
 
   // ---------------------------------------------------------------------------
+  // HLS live stream — Unified Streaming demo channel
+  // ---------------------------------------------------------------------------
+
+  /// Unified Streaming's public HLS live demo channel. Used by the Stage 7a
+  /// measurement harness's off-screen-pause bandwidth check
+  /// (`live_offscreen_bandwidth_page.dart`).
+  ///
+  /// The previous fixture here (Akamai's `cph-p2p-msl.akamaized.net` test
+  /// channel) looked live under a naive check — its master playlist
+  /// returned 200 and its child playlist had no `EXT-X-ENDLIST` — but the
+  /// child's variant URI actually 404'd, so "no ENDLIST" was true only
+  /// because we'd fetched an error page, not a real playlist. Do not
+  /// substitute another "live" URL without verifying it properly:
+  ///   1. Master playlist request must return HTTP 200.
+  ///   2. Resolve the first variant URI from the master and fetch it: the
+  ///      child must return HTTP 200 AND contain `#EXTINF` segment lines.
+  ///      Zero `#EXTINF` lines means you fetched an error page, not a
+  ///      playlist, even if the HTTP status was 200.
+  ///   3. The child must NOT contain `#EXT-X-ENDLIST` (that marks VOD).
+  ///   4. Fetch the child again ~15s later and confirm
+  ///      `#EXT-X-MEDIA-SEQUENCE` has advanced — this is the only positive
+  ///      proof of liveness; steps 1-3 alone are not sufficient.
+  static const hlsLiveStream = MediaItem(
+    id: 'hls_live_unified_streaming',
+    title: 'Unified Streaming Live (demo channel)',
+    artist: 'Unified Streaming',
+    url: 'https://demo.unified-streaming.com/k8s/live/stable/live.isml/.m3u8',
+    mimeType: 'application/x-mpegURL',
+    mediaType: MediaType.video,
+    isLive: true,
+  );
+
+  // ---------------------------------------------------------------------------
   // Subtitle tracks (WebVTT hosted on GitHub Gist for demo purposes)
   // The tracks are plain WebVTT so they parse cleanly with SubtitleService.
   // NOTE: setSubtitleTrack validates tracks against those the native player
