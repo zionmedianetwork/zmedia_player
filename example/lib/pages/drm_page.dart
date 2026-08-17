@@ -9,6 +9,13 @@ import '../widgets/player_scaffold.dart';
 /// - [EzdrmConfig.widevine] / [EzdrmConfig.fairplay] for EZDRM service
 /// - [CertificatePinningConfig] attached to [DrmConfig.certificatePinning]
 /// - [MediaPlayer.drmSessionStream] for session state updates
+/// - [MediaController.hasError] / [MediaController.error] /
+///   [MediaController.errorStream] (C-01) for observing a DRM/license
+///   failure through the documented facade — deliberately *without*
+///   reaching into `controller.player` — so a license failure that arrives
+///   asynchronously (see the "DRM Session" card below, driven separately via
+///   `controller.player.drmSessionStream`) is also visible as an ordinary
+///   [MediaController] error, exactly like a network or decoder failure.
 ///
 /// IMPORTANT: DRM playback requires:
 ///   1. A real physical or emulator device (not desktop/web).
@@ -205,6 +212,20 @@ class _DrmPageState extends State<DrmPage> {
         const SectionHeader('Config Preview'),
         _ConfigPreview(scheme: _selectedScheme),
         const SizedBox(height: 16),
+        // C-01: MediaController's own error surface — hasError/error/
+        // errorStream — so a DRM/license failure is visible through the
+        // documented facade, not only via the lower-level DRM session card
+        // below. Rebuilds on every MediaController.notifyListeners() call,
+        // which now includes errorStream events (see MediaController).
+        const SectionHeader('Controller Error State (C-01)'),
+        ListenableBuilder(
+          listenable: _controller,
+          builder: (context, _) => _ControllerErrorCard(
+            hasError: _controller.hasError,
+            error: _controller.error,
+          ),
+        ),
+        const SizedBox(height: 16),
         // DRM Session status
         if (_drmSession != null) ...[
           const SectionHeader('DRM Session'),
@@ -365,6 +386,81 @@ class _ConfigPreview extends StatelessWidget {
   }
 }
 
+/// C-01 demo card: shows [MediaController.hasError] / [MediaController.error]
+/// directly, proving a DRM session failure (which previously left
+/// `PlaybackState.state` unchanged — see MediaPlayer._handleDrmSessionUpdate)
+/// now reaches this facade the same way any other playback error does.
+class _ControllerErrorCard extends StatelessWidget {
+  final bool hasError;
+  final MediaPlayerException? error;
+
+  const _ControllerErrorCard({required this.hasError, required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    if (!hasError || error == null) {
+      return Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.green.shade900.withValues(alpha: 0.2),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.green.shade700),
+        ),
+        child: Text(
+          'controller.hasError == false — no error observed yet.',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: Colors.green.shade200),
+        ),
+      );
+    }
+
+    final e = error!;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.red.shade900.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.red.shade700),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'controller.hasError == true (${e.runtimeType})',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.red.shade200,
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            e.message,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: Colors.red.shade100),
+          ),
+          if (e is DrmException) ...[
+            const SizedBox(height: 4),
+            Text(
+              'isLicenseError: ${e.isLicenseError}, '
+              'isCertificateError: ${e.isCertificateError}',
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Colors.red.shade100, fontSize: 11),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 class _DrmSessionCard extends StatelessWidget {
   final DrmSession session;
   const _DrmSessionCard({required this.session});
@@ -410,7 +506,10 @@ class _DrmApiNote extends StatelessWidget {
         'API: DrmConfig.widevine() / DrmConfig.fairplay(certificateUrl: required) '
         '/ DrmConfig.ezdrm() / EzdrmConfig.widevine() / EzdrmConfig.fairplay()\n'
         'Attach to MediaItem(drmConfig: ...). '
-        'Monitor via player.drmSessionStream (DrmSession state).',
+        'Monitor session detail via player.drmSessionStream (DrmSession state); '
+        'monitor failure via controller.hasError / controller.error / '
+        'controller.errorStream (C-01) — no need to reach into '
+        'controller.player for that.',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     );

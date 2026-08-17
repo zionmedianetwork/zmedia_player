@@ -2478,23 +2478,41 @@ class MediaPlayer {
         _drmSessionController.add(session);
       }
 
-      // H-01: bridge a DRM session error into the typed exception hierarchy
-      // too, so DRM/license failures are reachable via [errorStream] and
-      // not only as an untyped [DrmSessionState.error] on [drmSessionStream].
-      // [DrmSession] carries no structured error classification (only a
-      // free-text [DrmSession.errorMessage]), so isLicenseError/
-      // isCertificateError are best-effort text matches, same pattern as
-      // the platform-code substring checks below in [load]'s catch block.
-      if (session.state == DrmSessionState.error &&
-          !_errorController.isClosed) {
+      // H-01/C-01: bridge a DRM session error into the typed exception
+      // hierarchy too, so DRM/license failures are reachable via
+      // [errorStream] and not only as an untyped [DrmSessionState.error] on
+      // [drmSessionStream]. [DrmSession] carries no structured error
+      // classification (only a free-text [DrmSession.errorMessage]), so
+      // isLicenseError/isCertificateError are best-effort text matches, same
+      // pattern as the platform-code substring checks below in [load]'s
+      // catch block.
+      if (session.state == DrmSessionState.error) {
         final message = session.errorMessage ?? 'DRM session error';
-        final lowerMessage = message.toLowerCase();
-        _errorController.add(DrmException(
-          message,
-          isLicenseError: lowerMessage.contains('license'),
-          isCertificateError: lowerMessage.contains('certificate') ||
-              lowerMessage.contains('provisioning'),
+
+        // C-01: unlike a synchronous `load()` failure or a native `onError`
+        // callback (see [_handleError]), a DRM session error previously only
+        // ever emitted on [_errorController] and never called [_updateState]
+        // — so [PlaybackState.state] stayed wherever it was (typically
+        // `buffering`) and never became [PlayerState.error]. That made a DRM
+        // failure invisible to [MediaController.hasError] and to anything
+        // driven by [stateStream]/[PlaybackState] rather than [errorStream]
+        // directly. Mirror [_handleError]'s behaviour here so a DRM failure
+        // is reachable through both surfaces, exactly like every other
+        // playback error category.
+        _updateState(_currentState.copyWith(
+          state: PlayerState.error,
+          errorMessage: message,
         ));
+
+        if (!_errorController.isClosed) {
+          final lowerMessage = message.toLowerCase();
+          _errorController.add(DrmException(
+            message,
+            isLicenseError: lowerMessage.contains('license'),
+            isCertificateError: lowerMessage.contains('certificate') ||
+                lowerMessage.contains('provisioning'),
+          ));
+        }
       }
     } catch (e) {
       debugPrint('Error processing DRM session update: $e');
