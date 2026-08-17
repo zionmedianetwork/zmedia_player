@@ -3,14 +3,15 @@ import 'package:zmedia_player/zmedia_player.dart';
 
 import '../data/sample_media.dart';
 
-/// Manual regression harness for [MediaFeed] — Stage 7b of Phase 7. Sits
-/// alongside `feed_page.dart` (which exercises [MediaListPlayer], the
-/// host-owned-controller widget) rather than replacing it: this page proves
-/// the opposite ownership model actually works end to end. [MediaFeed] never
-/// hands this page a [MediaController] — only [MediaFeedItemState] snapshots
-/// and action callbacks — and the [MediaPlayerPool] it scrolls through is
-/// bounded to [_maxPoolSize] controllers no matter how many of the
-/// [_kItemCount] items have been scrolled past.
+/// Manual regression harness for [MediaFeed] — Stage 7b (pool) and Stage 7c
+/// (prewarm window) of Phase 7. Sits alongside `feed_page.dart` (which
+/// exercises [MediaListPlayer], the host-owned-controller widget) rather than
+/// replacing it: this page proves the opposite ownership model actually
+/// works end to end. [MediaFeed] never hands this page a [MediaController] —
+/// only [MediaFeedItemState] snapshots and action callbacks — and the
+/// [MediaPlayerPool] it scrolls through is bounded to [_maxPoolSize]
+/// controllers no matter how many of the [_kItemCount] items have been
+/// scrolled past.
 ///
 /// ### What to look for while scrolling
 ///
@@ -21,10 +22,26 @@ import '../data/sample_media.dart';
 /// where every item ever scrolled past kept its own decoder session paused,
 /// never released.
 ///
-/// The segmented control lets you change `maxSize` at runtime; because
-/// [MediaPlayerPool.maxSize] is fixed for a pool's lifetime, changing it
-/// disposes the old pool (releasing every controller it held) and swaps in a
-/// fresh one, remounting [MediaFeed] with a new [Key] so it starts clean.
+/// The `maxPoolSize` segmented control lets you change the pool's capacity at
+/// runtime; because [MediaPlayerPool.maxSize] is fixed for a pool's lifetime,
+/// changing it disposes the old pool (releasing every controller it held)
+/// and swaps in a fresh one, remounting [MediaFeed] with a new [Key] so it
+/// starts clean.
+///
+/// The `prewarm window` segmented control changes
+/// [MediaFeedConfig.prewarmWindow] live, with no pool rebuild needed (the
+/// underlying [MediaConfig]-level guarantee — a prewarmed neighbour is
+/// loaded, never played — does not depend on the pool's identity). Each
+/// item's badge distinguishes three states: **active** (the visible item,
+/// green), **prewarmed** (loaded ahead of need by the window, amber, never
+/// playing) and **no slot** (not yet loaded, grey) — this is exactly the gap
+/// Stage 7c closes: before it, a neighbouring item had no slot at all until
+/// it became visible itself, and item #13+ in this feed would render black
+/// on the first scroll to it (see Stage 7b's device notes). Raise the window
+/// above what `maxPoolSize` comfortably holds (`1 + 2 * window` slots) to see
+/// the graceful degradation described in [MediaFeedConfig.prewarmWindow]'s
+/// doc comment: the active item (pinned) is never evicted, and any prewarm
+/// request that cannot fit is simply skipped and logged.
 ///
 /// Every pool-visible transition (slot acquired, item became active) is
 /// logged with the `[FEED-POOL]` prefix, mirroring `feed_page.dart`'s
@@ -54,6 +71,9 @@ const List<MediaItem> _kSampleItems = [
 class _MediaFeedPoolPageState extends State<MediaFeedPoolPage> {
   late MediaPlayerPool _pool;
   int _maxPoolSize = MediaPlayerPool.defaultMaxSize;
+
+  /// Stage 7c: mirrors [MediaFeedConfig.prewarmWindow]'s own default (1).
+  int _prewarmWindow = 1;
 
   /// Bumped every time [_pool] is replaced, folded into [MediaFeed]'s key so
   /// changing the pool size forces a clean remount instead of MediaFeed
@@ -124,10 +144,22 @@ class _MediaFeedPoolPageState extends State<MediaFeedPoolPage> {
     _log('CONFIG maxPoolSize=$value (pool rebuilt, feed remounted)');
   }
 
+  void _changePrewarmWindow(int value) {
+    if (value == _prewarmWindow) return;
+    setState(() {
+      _prewarmWindow = value;
+    });
+    _log(
+      'CONFIG prewarmWindow=$value (wants ${1 + 2 * value} live slots for '
+      'zero-contention prewarm; maxPoolSize is $_maxPoolSize)',
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Feed (MediaFeed pool, Stage 7b)')),
+      appBar:
+          AppBar(title: const Text('Feed (MediaFeed pool + prewarm, 7b/7c)')),
       body: SafeArea(
         child: Column(
           children: [
@@ -135,6 +167,8 @@ class _MediaFeedPoolPageState extends State<MediaFeedPoolPage> {
               pool: _pool,
               maxPoolSize: _maxPoolSize,
               onMaxPoolSizeChanged: _changePoolSize,
+              prewarmWindow: _prewarmWindow,
+              onPrewarmWindowChanged: _changePrewarmWindow,
             ),
             Expanded(
               child: MediaFeed(
@@ -142,10 +176,11 @@ class _MediaFeedPoolPageState extends State<MediaFeedPoolPage> {
                 itemCount: _kItemCount,
                 itemAt: _itemAt,
                 pool: _pool,
-                config: const MediaFeedConfig(
+                config: MediaFeedConfig(
                   autoPlay: true,
                   autoPause: true,
                   pauseOthersOnPlay: true,
+                  prewarmWindow: _prewarmWindow,
                 ),
                 itemBuilder: _buildItem,
               ),
@@ -176,8 +211,17 @@ class _MediaFeedPoolPageState extends State<MediaFeedPoolPage> {
               top: 8,
               right: 8,
               child: _Badge(
-                text: state.isActive ? 'pool slot' : 'no slot',
-                color: state.isActive ? Colors.green : Colors.black54,
+                // Three states, per Stage 7c: an item is either the visible
+                // "active" one (playing or ready to), "prewarmed" (a pool
+                // slot was loaded ahead of need but this item was never
+                // played -- see MediaFeedItemState.isPrewarmed), or holds no
+                // slot at all yet.
+                text: state.isPrewarmed
+                    ? 'prewarmed'
+                    : (state.isActive ? 'active' : 'no slot'),
+                color: state.isPrewarmed
+                    ? Colors.amber.shade700
+                    : (state.isActive ? Colors.green : Colors.black54),
               ),
             ),
             Positioned(
@@ -201,7 +245,9 @@ class _MediaFeedPoolPageState extends State<MediaFeedPoolPage> {
                     Expanded(
                       child: Text(
                         '${state.item.title}\n'
-                        'active=${state.isActive} playing=${state.isPlaying} '
+                        'active=${state.isActive} '
+                        'prewarmed=${state.isPrewarmed} '
+                        'playing=${state.isPlaying} '
                         'buffering=${state.isBuffering}',
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: Colors.white),
@@ -256,11 +302,15 @@ class _PoolHeader extends StatelessWidget {
   final MediaPlayerPool pool;
   final int maxPoolSize;
   final ValueChanged<int> onMaxPoolSizeChanged;
+  final int prewarmWindow;
+  final ValueChanged<int> onPrewarmWindowChanged;
 
   const _PoolHeader({
     required this.pool,
     required this.maxPoolSize,
     required this.onMaxPoolSizeChanged,
+    required this.prewarmWindow,
+    required this.onPrewarmWindowChanged,
   });
 
   @override
@@ -311,6 +361,38 @@ class _PoolHeader extends StatelessWidget {
                     onMaxPoolSizeChanged(selected.first),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Text('prewarm window (±):', style: theme.textTheme.bodySmall),
+              const SizedBox(width: 8),
+              SegmentedButton<int>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(value: 0, label: Text('0 (off)')),
+                  ButtonSegment(value: 1, label: Text('1')),
+                  ButtonSegment(value: 2, label: Text('2')),
+                ],
+                selected: {prewarmWindow},
+                onSelectionChanged: (selected) =>
+                    onPrewarmWindowChanged(selected.first),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'window $prewarmWindow wants ${1 + 2 * prewarmWindow} live slots '
+            '(current + $prewarmWindow ahead + $prewarmWindow behind); '
+            'maxPoolSize is $maxPoolSize'
+            '${maxPoolSize < 1 + 2 * prewarmWindow ? ' -- undersized: some '
+                'prewarm requests will be skipped, active item is still '
+                'protected' : ''}.',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: maxPoolSize < 1 + 2 * prewarmWindow
+                  ? theme.colorScheme.error
+                  : null,
+            ),
           ),
         ],
       ),

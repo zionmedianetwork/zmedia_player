@@ -107,6 +107,11 @@ void main() {
                   autoPlay: false,
                   autoPause: false,
                   pauseOthersOnPlay: false,
+                  // This test is specifically about F-02's single-active-slot
+                  // behaviour, not Stage 7c's prewarm window -- isolate it
+                  // from the (now non-zero-by-default) prewarmWindow so its
+                  // liveCount/isActive assertions below stay exact.
+                  prewarmWindow: 0,
                 ),
                 itemBuilder: (context, state) {
                   states[state.index] = state;
@@ -285,6 +290,10 @@ void main() {
                   autoPlay: false,
                   autoPause: false,
                   pauseOthersOnPlay: false,
+                  // Ownership, not prewarm, is under test here -- isolate
+                  // from the (now non-zero-by-default) prewarmWindow so
+                  // liveCount stays exactly 1.
+                  prewarmWindow: 0,
                 ),
                 itemBuilder: (context, state) => SizedBox(
                   key: ValueKey('feed-item-${state.index}'),
@@ -437,6 +446,353 @@ void main() {
         reason: 'autoPlay must call play() once the delay elapses for a '
             'still-visible item',
       );
+
+      await _teardown(tester, pool: pool);
+      calls.clear();
+      _resetHandler();
+    });
+  });
+
+  group('MediaFeedItemState.isPrewarmed', () {
+    MediaFeedItemState buildState(
+        {required bool isActive, required bool isVisible}) {
+      return MediaFeedItemState(
+        index: 0,
+        item: _item(0),
+        isActive: isActive,
+        isVisible: isVisible,
+        playback: const PlaybackState(state: PlayerState.idle),
+        videoSurface: const SizedBox.shrink(),
+      );
+    }
+
+    test('true for a slot that is active but not the visible item', () {
+      expect(
+        buildState(isActive: true, isVisible: false).isPrewarmed,
+        isTrue,
+      );
+    });
+
+    test('false once the item is the visible/active one', () {
+      expect(
+        buildState(isActive: true, isVisible: true).isPrewarmed,
+        isFalse,
+      );
+    });
+
+    test('false when there is no live slot at all', () {
+      expect(
+        buildState(isActive: false, isVisible: false).isPrewarmed,
+        isFalse,
+      );
+    });
+  });
+
+  group('Stage 7c / F-03: prewarm window', () {
+    testWidgets(
+        'the default window (1) prewarms the item ahead and behind the '
+        'visible one, and never calls play() on either neighbour',
+        (tester) async {
+      final calls = _installCapture();
+      // maxSize:3 = current + 1-ahead + 1-behind, matching the default
+      // prewarmWindow of 1 (see MediaFeedConfig.prewarmWindow's dartdoc).
+      final pool = MediaPlayerPool(maxSize: 3);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: MediaFeed(
+                itemCount: 5,
+                itemAt: _item,
+                pool: pool,
+                scrollController: ScrollController(initialScrollOffset: 800),
+                config: const MediaFeedConfig(
+                  autoPlay: true,
+                  autoPlayDelay: Duration.zero,
+                  pauseOthersOnPlay: false,
+                ),
+                itemBuilder: (context, state) => SizedBox(
+                  key: ValueKey('feed-item-${state.index}'),
+                  height: 400,
+                  child: state.videoSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(
+        pool.isActive('feed-item-1'),
+        isTrue,
+        reason: 'the item behind the visible one must be prewarmed',
+      );
+      expect(
+        pool.isActive('feed-item-2'),
+        isTrue,
+        reason: 'the visible item itself must be active',
+      );
+      expect(
+        pool.isActive('feed-item-3'),
+        isTrue,
+        reason: 'the item ahead of the visible one must be prewarmed',
+      );
+      expect(pool.liveCount, 3);
+
+      final activePlayerId = pool.controllerFor('feed-item-2')!.playerId;
+      final playCalls = calls.where((c) => c.method == 'play').toList();
+      expect(
+        playCalls,
+        hasLength(1),
+        reason: 'exactly one play() must have been issued -- for the '
+            'visible item only',
+      );
+      expect(_playerIdOf(playCalls.single), activePlayerId);
+
+      await _teardown(tester, pool: pool);
+      calls.clear();
+      _resetHandler();
+    });
+
+    testWidgets(
+        'prewarmWindow: 0 restores exactly the pre-Stage-7c behaviour -- '
+        'neighbours never acquire a slot until they become visible '
+        'themselves', (tester) async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 3);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: MediaFeed(
+                itemCount: 5,
+                itemAt: _item,
+                pool: pool,
+                scrollController: ScrollController(initialScrollOffset: 800),
+                config: const MediaFeedConfig(
+                  autoPlay: false,
+                  pauseOthersOnPlay: false,
+                  prewarmWindow: 0,
+                ),
+                itemBuilder: (context, state) => SizedBox(
+                  key: ValueKey('feed-item-${state.index}'),
+                  height: 400,
+                  child: state.videoSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(pool.isActive('feed-item-2'), isTrue);
+      expect(
+        pool.isActive('feed-item-1'),
+        isFalse,
+        reason: 'prewarmWindow: 0 must disable prewarming entirely',
+      );
+      expect(pool.isActive('feed-item-3'), isFalse);
+      expect(pool.liveCount, 1);
+
+      await _teardown(tester, pool: pool);
+      calls.clear();
+      _resetHandler();
+    });
+
+    testWidgets(
+        'the active item is pinned and is never evicted by its own prewarm '
+        'requests, even when the pool is too small to hold every '
+        'neighbour', (tester) async {
+      final calls = _installCapture();
+      // Deliberately tight: only room for one live slot, far below what a
+      // window of 1 (which wants 3) would need. The active item must win
+      // every time regardless.
+      final pool = MediaPlayerPool(maxSize: 1);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: MediaFeed(
+                itemCount: 5,
+                itemAt: _item,
+                pool: pool,
+                scrollController: ScrollController(initialScrollOffset: 800),
+                config: const MediaFeedConfig(
+                  autoPlay: true,
+                  autoPlayDelay: Duration.zero,
+                  pauseOthersOnPlay: false,
+                ),
+                itemBuilder: (context, state) => SizedBox(
+                  key: ValueKey('feed-item-${state.index}'),
+                  height: 400,
+                  child: state.videoSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(
+        pool.isActive('feed-item-2'),
+        isTrue,
+        reason: 'the active item must never be evicted by its own prewarm '
+            'requests for its neighbours',
+      );
+      expect(pool.liveCount, 1);
+      expect(pool.isActive('feed-item-1'), isFalse);
+      expect(pool.isActive('feed-item-3'), isFalse);
+
+      final activePlayerId = pool.controllerFor('feed-item-2')!.playerId;
+      final loadCallsForActive = calls
+          .where((c) => c.method == 'load' && _playerIdOf(c) == activePlayerId)
+          .toList();
+      expect(
+        loadCallsForActive,
+        hasLength(1),
+        reason: 'the active item\'s own slot must have been loaded exactly '
+            'once -- if a prewarm request had evicted and reclaimed it, '
+            'this would be reloaded again',
+      );
+
+      await _teardown(tester, pool: pool);
+      calls.clear();
+      _resetHandler();
+    });
+
+    testWidgets('prewarm never goes out of bounds at the edges of the feed',
+        (tester) async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 3);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: MediaFeed(
+                itemCount: 3,
+                itemAt: _item,
+                pool: pool,
+                config: const MediaFeedConfig(
+                  autoPlay: false,
+                  pauseOthersOnPlay: false,
+                ),
+                itemBuilder: (context, state) => SizedBox(
+                  key: ValueKey('feed-item-${state.index}'),
+                  height: 400,
+                  child: state.videoSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      expect(pool.isActive('feed-item-0'), isTrue);
+      expect(
+        pool.isActive('feed-item-1'),
+        isTrue,
+        reason: 'the only neighbour of item 0 (ahead) must be prewarmed; '
+            'there is no "behind" neighbour and requesting index -1 must '
+            'not crash',
+      );
+      expect(pool.liveCount, 2);
+
+      await _teardown(tester, pool: pool);
+      calls.clear();
+      _resetHandler();
+    });
+
+    testWidgets(
+        'a prewarmed neighbour\'s autoPlay is forced false at the native '
+        'layer even when the host\'s per-item MediaConfig requests '
+        'autoPlay: true', (tester) async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 3);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              height: 400,
+              child: MediaFeed(
+                itemCount: 5,
+                itemAt: _item,
+                pool: pool,
+                scrollController: ScrollController(initialScrollOffset: 800),
+                mediaConfigAt: (index, item) =>
+                    const MediaConfig(autoPlay: true),
+                config: const MediaFeedConfig(
+                  // Off, so the only source of an `initialize`
+                  // `autoPlay: true` argument is the per-item MediaConfig
+                  // above, isolating what this test checks.
+                  autoPlay: false,
+                  pauseOthersOnPlay: false,
+                ),
+                itemBuilder: (context, state) => SizedBox(
+                  key: ValueKey('feed-item-${state.index}'),
+                  height: 400,
+                  child: state.videoSurface,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      for (var i = 0; i < 6; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+
+      final activeId = pool.controllerFor('feed-item-2')!.playerId;
+      final prewarmAheadId = pool.controllerFor('feed-item-3')!.playerId;
+      final prewarmBehindId = pool.controllerFor('feed-item-1')!.playerId;
+
+      bool? autoPlayArgFor(String playerId) {
+        final initCall = calls.firstWhere(
+          (c) => c.method == 'initialize' && _playerIdOf(c) == playerId,
+        );
+        final config = (initCall.arguments as Map)['config'] as Map?;
+        return config?['autoPlay'] as bool?;
+      }
+
+      expect(
+        autoPlayArgFor(activeId),
+        isTrue,
+        reason: 'the active item\'s own per-item config is untouched by '
+            'prewarming',
+      );
+      expect(
+        autoPlayArgFor(prewarmAheadId),
+        isFalse,
+        reason: 'a prewarmed neighbour must never be initialized with '
+            'autoPlay: true, regardless of what the host\'s per-item '
+            'MediaConfig requests -- it must only ever load, never play',
+      );
+      expect(autoPlayArgFor(prewarmBehindId), isFalse);
 
       await _teardown(tester, pool: pool);
       calls.clear();

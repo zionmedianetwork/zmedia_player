@@ -399,4 +399,158 @@ void main() {
       _resetHandler();
     });
   });
+
+  group('Stage 7c / F-03: pin()/unpin() protect a slot from eviction', () {
+    test(
+        'pin() excludes the pinned key from eviction even though it is the '
+        'least-recently-used entry, choosing the next unpinned key instead',
+        () async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 2);
+
+      await pool.acquire('a', _item('a'));
+      await pool.acquire('b', _item('b'));
+      // 'a' is the LRU entry (acquired first) and would ordinarily be
+      // evicted next.
+      pool.pin('a');
+      calls.clear();
+
+      await pool.acquire('c', _item('c'));
+
+      expect(
+        pool.isActive('a'),
+        isTrue,
+        reason: 'a pinned key must never be chosen as an eviction victim, '
+            'however long it has sat unused in LRU order',
+      );
+      expect(
+        pool.isActive('b'),
+        isFalse,
+        reason: 'the next-least-recently-used UNPINNED key must be evicted '
+            'in the pinned key\'s place',
+      );
+      expect(pool.isActive('c'), isTrue);
+      expect(pool.liveCount, 2);
+
+      await pool.releaseAll();
+      _resetHandler();
+    });
+
+    test(
+        'acquire throws (never evicts a pinned slot) when every live slot '
+        'is pinned and the pool is at capacity', () async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 1);
+
+      final controllerA = await pool.acquire('a', _item('a'));
+      pool.pin('a');
+      calls.clear();
+
+      await expectLater(
+        () => pool.acquire('b', _item('b')),
+        throwsA(isA<StateError>()),
+        reason: 'F-03: this is the guarantee the prewarm window relies on — '
+            'a currently-active (pinned) item must never be sacrificed to '
+            'make room for anything else, including a neighbour being '
+            'prewarmed. The pool refuses the new acquire outright rather '
+            'than evicting the pinned slot.',
+      );
+
+      expect(
+        pool.isActive('a'),
+        isTrue,
+        reason: 'the pinned slot must be completely untouched by the '
+            'failed acquire attempt',
+      );
+      expect(identical(pool.controllerFor('a'), controllerA), isTrue);
+      expect(pool.liveCount, 1);
+      expect(
+        calls.any((c) => c.method == 'load'),
+        isFalse,
+        reason: 'a refused acquire must not have issued any native load '
+            'for the key that was refused',
+      );
+
+      await pool.releaseAll();
+      _resetHandler();
+    });
+
+    test('unpin() re-allows eviction of a previously pinned key', () async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 1);
+
+      await pool.acquire('a', _item('a'));
+      pool.pin('a');
+      await expectLater(
+        () => pool.acquire('b', _item('b')),
+        throwsA(isA<StateError>()),
+      );
+
+      pool.unpin('a');
+      calls.clear();
+      final controllerB = await pool.acquire('b', _item('b'));
+
+      expect(pool.isActive('a'), isFalse);
+      expect(pool.isActive('b'), isTrue);
+      expect(identical(pool.controllerFor('b'), controllerB), isTrue);
+
+      await pool.releaseAll();
+      _resetHandler();
+    });
+
+    test('isPinned reflects pin()/unpin() state', () async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 1);
+
+      expect(pool.isPinned('a'), isFalse);
+      await pool.acquire('a', _item('a'));
+      pool.pin('a');
+      expect(pool.isPinned('a'), isTrue);
+      pool.unpin('a');
+      expect(pool.isPinned('a'), isFalse);
+
+      await pool.releaseAll();
+      calls.clear();
+      _resetHandler();
+    });
+
+    test('release() of a pinned key clears its pin bookkeeping too', () async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 1);
+
+      await pool.acquire('a', _item('a'));
+      pool.pin('a');
+      await pool.release('a');
+
+      expect(pool.isPinned('a'), isFalse);
+
+      // A fresh acquire under the same key must succeed and must not be
+      // treated as still-pinned-and-untouchable.
+      calls.clear();
+      await pool.acquire('a', _item('a'));
+      expect(pool.isActive('a'), isTrue);
+      expect(pool.isPinned('a'), isFalse);
+
+      await pool.releaseAll();
+      _resetHandler();
+    });
+
+    test('releaseAll() and dispose() clear all pin bookkeeping', () async {
+      final calls = _installCapture();
+      final pool = MediaPlayerPool(maxSize: 2);
+
+      await pool.acquire('a', _item('a'));
+      pool.pin('a');
+      await pool.releaseAll();
+      expect(pool.isPinned('a'), isFalse);
+
+      await pool.acquire('a', _item('a'));
+      pool.pin('a');
+      pool.dispose();
+      expect(pool.isPinned('a'), isFalse);
+
+      calls.clear();
+      _resetHandler();
+    });
+  });
 }

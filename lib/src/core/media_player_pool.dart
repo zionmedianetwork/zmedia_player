@@ -78,10 +78,11 @@ class _PoolSlot {
 /// ### What [acquire] does NOT do (out of scope for this pool)
 ///
 /// This pool only bounds and reassigns concurrent decoder-holding slots. It
-/// does not decide *when* an item should become active (that is
-/// `MediaFeed`'s job, driven by visibility), does not prewarm neighboring
-/// items ahead of need, and does not apply any live-stream-specific
-/// stop/release policy. Those are later, separate pieces of work.
+/// does not decide *when* an item should become active or prewarmed (that
+/// is `MediaFeed`'s job, driven by visibility — see [pin] for the primitive
+/// `MediaFeed` uses to protect the active item while it does so), and it
+/// does not apply any live-stream-specific stop/release policy. The latter
+/// is later, separate work.
 class MediaPlayerPool extends ChangeNotifier {
   /// A conservative, single-digit default chosen to sit well below the
   /// measured mid-range Android decoder ceiling (15 concurrently-rendering
@@ -121,8 +122,12 @@ class MediaPlayerPool extends ChangeNotifier {
   final Map<String, _PoolSlot> _slotsByKey = <String, _PoolSlot>{};
 
   /// Least-recently-used order of live keys, oldest first. The head is the
-  /// next slot [acquire] will reassign once the pool is at capacity.
+  /// next unpinned slot [acquire] will reassign once the pool is at
+  /// capacity — see [pin].
   final List<String> _lru = <String>[];
+
+  /// Keys currently protected from LRU eviction — see [pin].
+  final Set<String> _pinnedKeys = <String>{};
 
   /// Serializes [acquire]/[release]/[releaseAll] against each other so two
   /// calls racing (e.g. two feed items crossing the visibility threshold in
@@ -179,6 +184,41 @@ class MediaPlayerPool extends ChangeNotifier {
       _touchLru(key);
     }
   }
+
+  /// Marks [key] as protected from the LRU eviction [acquire] performs once
+  /// the pool is at capacity, without affecting LRU order and without
+  /// requiring [key] to currently hold a live slot — pinning takes effect
+  /// immediately once a slot for [key] exists, and is otherwise inert.
+  ///
+  /// Exists for [MediaFeed]'s prewarm window (Stage 7c / F-03): the item the
+  /// user is actually looking at must never be sacrificed to make room for
+  /// a neighbour being prepared ahead of need — that would trade a visible
+  /// stall for an invisible optimisation, which is strictly worse than not
+  /// prewarming at all. `MediaFeed` pins the currently-visible item's key
+  /// for exactly as long as it is visible and [unpin]s it the moment it
+  /// stops being so, so a prewarm [acquire] for a neighbour can never
+  /// select a pinned key as its eviction victim — see [acquire]'s "at
+  /// capacity" branch.
+  ///
+  /// Pinning is *not* extra capacity — a pool whose every live slot is
+  /// pinned simply cannot [acquire] a new key at all (see [acquire], which
+  /// throws a [StateError] in that case rather than evicting a pinned
+  /// slot). Callers that pin should keep the pinned set well below
+  /// [maxSize], or expect [acquire] for anything else to fail while it does
+  /// not.
+  void pin(String key) {
+    _pinnedKeys.add(key);
+  }
+
+  /// Reverses [pin]: [key] becomes an ordinary eviction candidate again, as
+  /// if it had never been pinned. Safe to call for a key that was never
+  /// pinned, or that holds no live slot (both are no-ops).
+  void unpin(String key) {
+    _pinnedKeys.remove(key);
+  }
+
+  /// Whether [key] is currently pinned — see [pin].
+  bool isPinned(String key) => _pinnedKeys.contains(key);
 
   /// Returns a [MediaController] that is loaded with [item] and assigned to
   /// [key], creating or reassigning a pool slot as needed:
@@ -248,12 +288,26 @@ class MediaPlayerPool extends ChangeNotifier {
       return _createFreshSlot(key, item, config);
     }
 
-    // At capacity: reassign the least-recently-used slot. The old key's
-    // mapping is dropped BEFORE the swap completes so a concurrent acquire
-    // for the old key (racing in through the mutex queue) sees it as
-    // absent and creates/evicts fresh, rather than observing a slot that is
-    // simultaneously mid-reassignment to someone else.
-    final victimKey = _lru.removeAt(0);
+    // At capacity: reassign the least-recently-used UNPINNED slot — pinned
+    // keys (see [pin]) are never chosen as an eviction victim, however long
+    // they have sat unused. If every live slot is pinned there is no victim
+    // to pick, so acquiring a new key is refused outright rather than
+    // evicting a slot [pin] promised would not be evicted.
+    final victimIndex = _lru.indexWhere((k) => !_pinnedKeys.contains(k));
+    if (victimIndex == -1) {
+      throw StateError(
+        'MediaPlayerPool: cannot acquire a slot for "$key" — all $maxSize '
+        'live slot(s) are pinned (see MediaPlayerPool.pin). Increase '
+        'maxSize, or unpin a key, before requesting more concurrent slots '
+        'than the pool can hold unpinned.',
+      );
+    }
+    // The old key's mapping is dropped BEFORE the swap completes so a
+    // concurrent acquire for the old key (racing in through the mutex
+    // queue) sees it as absent and creates/evicts fresh, rather than
+    // observing a slot that is simultaneously mid-reassignment to someone
+    // else.
+    final victimKey = _lru.removeAt(victimIndex);
     final victim = _slotsByKey.remove(victimKey);
     // Should be unreachable (every key in `_lru` has a matching slot), but
     // fall back to the ordinary create path rather than throwing if the two
@@ -333,6 +387,7 @@ class MediaPlayerPool extends ChangeNotifier {
       final slot = _slotsByKey.remove(key);
       if (slot == null) return;
       _lru.remove(key);
+      _pinnedKeys.remove(key);
       slot.controller.dispose();
       _notify();
     });
@@ -348,6 +403,7 @@ class MediaPlayerPool extends ChangeNotifier {
       }
       _slotsByKey.clear();
       _lru.clear();
+      _pinnedKeys.clear();
       _notify();
     });
   }
@@ -412,6 +468,7 @@ class MediaPlayerPool extends ChangeNotifier {
     }
     _slotsByKey.clear();
     _lru.clear();
+    _pinnedKeys.clear();
     super.dispose();
   }
 }

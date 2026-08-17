@@ -105,6 +105,15 @@ class MediaFeedItemState {
     this.seekTo,
   });
 
+  /// Whether this index holds a live pool slot but is *not* currently
+  /// visible — i.e. it was prepared ahead of need by
+  /// [MediaFeedConfig.prewarmWindow] (`load()`, never `play()`) rather than
+  /// because the user is actually looking at it. Convenience for hosts that
+  /// want to render prewarmed neighbours differently from the active item
+  /// (e.g. a subtle "ready" badge) — see [MediaFeedConfig.prewarmWindow]
+  /// for the full design.
+  bool get isPrewarmed => isActive && !isVisible;
+
   /// Convenience accessors mirroring [MediaController]'s own getters, so an
   /// item builder rarely needs to reach into [playback] directly.
   bool get isPlaying => playback.state == PlayerState.playing;
@@ -155,6 +164,49 @@ class MediaFeedConfig {
   /// stopped on. Mirrors [MediaListPlayerConfig]'s own smoothing delay.
   final Duration autoPlayDelay;
 
+  /// Number of neighbouring items, on each side, to prepare ahead of need
+  /// the moment an index becomes the visible/active item: acquire a pool
+  /// slot and call [MediaController.load] for it — never
+  /// [MediaController.play] — so scrolling one step in either direction
+  /// resumes an already-loaded, already-buffered player instead of paying a
+  /// cold `load()`. This is Stage 7c / F-03; on-device measurement found it
+  /// collapses time-to-first-frame by 100-700x on Android and 3-5x on iOS,
+  /// and removes a ~2s worst-case HLS cold-start tail on both platforms —
+  /// see [MediaPlayerPool]'s doc comment and the Phase 7 architecture plan
+  /// for the numbers.
+  ///
+  /// Default `1` prepares exactly one item ahead and one item behind,
+  /// symmetrically: [MediaFeed] does not track scroll direction (that is
+  /// later, separate work), so it cannot yet prefer one side over the
+  /// other. `0` disables prewarming entirely and restores exactly the
+  /// pre-Stage-7c behaviour, where a neighbouring item only acquires a pool
+  /// slot once it crosses [visibilityThreshold] itself.
+  ///
+  /// ### Interaction with the pool's `maxSize`
+  ///
+  /// A prewarm window of `w` wants up to `1 + 2*w` live slots at once
+  /// (current, plus `w` on each side) to prewarm every neighbour in the
+  /// window without any contention. The default window (`1`) wants exactly
+  /// 3 — which is [MediaPlayerPool.defaultMaxSize]. The two defaults were
+  /// chosen together and need no adjustment out of the box.
+  ///
+  /// Raising [prewarmWindow] above `1` without also raising
+  /// [MediaFeed.maxPoolSize] (or the `maxSize` of a pool supplied via
+  /// [MediaFeed.pool]) is not an error — the pool degrades gracefully
+  /// rather than misbehaving. The currently-visible item's slot is always
+  /// protected (see [MediaPlayerPool.pin], which [MediaFeed] uses
+  /// internally for exactly this) so it is never evicted to make room for
+  /// a neighbour being prewarmed. Any prewarm request that cannot be
+  /// satisfied without evicting a pinned slot is skipped (logged, not
+  /// thrown), and that neighbour simply falls back to loading on demand
+  /// when it becomes visible — no worse than prewarming being off for that
+  /// one neighbour. Callers who want every neighbour in a wider window
+  /// genuinely prewarmed should size their pool to `1 + 2 * prewarmWindow`
+  /// or more; the measured Android decoder ceiling of 15
+  /// (concurrently-*rendering* players, on one mid-range device) is an
+  /// upper bound this should stay well under, not a target to reach for.
+  final int prewarmWindow;
+
   const MediaFeedConfig({
     this.visibilityThreshold = 0.6,
     this.autoPlay = true,
@@ -162,7 +214,11 @@ class MediaFeedConfig {
     this.muteWhenNotVisible = false,
     this.pauseOthersOnPlay = true,
     this.autoPlayDelay = const Duration(milliseconds: 300),
-  });
+    this.prewarmWindow = 1,
+  }) : assert(
+          prewarmWindow >= 0,
+          'MediaFeedConfig.prewarmWindow must not be negative',
+        );
 }
 
 /// A scrolling media feed that owns a small, package-managed
@@ -203,6 +259,20 @@ class MediaFeedConfig {
 /// only the most-recently-created video surface for it will actually show
 /// video (see `FullscreenMediaPlayer`'s single-native-view contract, which
 /// this inherits unchanged).
+///
+/// ### Prewarming neighbouring items (Stage 7c / F-03)
+///
+/// When [MediaFeedConfig.prewarmWindow] is non-zero (default `1`), the
+/// moment an index becomes the visible/active item [MediaFeed] also
+/// requests a pool slot for up to that many items on each side of it —
+/// `load()`, never `play()` — through the exact same [MediaPlayerPool]
+/// path the active item itself uses, so every load-time guarantee (B-11
+/// input validation, the fail-closed DRM setup, B-12 `secureSurface`)
+/// applies unmodified. See [MediaFeedConfig.prewarmWindow] for the full
+/// design, including how it interacts with the pool's `maxSize`. The
+/// currently-visible item's own slot is pinned (see [MediaPlayerPool.pin])
+/// for exactly as long as it remains visible, so a prewarm request for a
+/// neighbour can never evict it to make room for itself.
 class MediaFeed extends StatefulWidget {
   /// Number of items in the feed.
   final int itemCount;
@@ -219,7 +289,8 @@ class MediaFeed extends StatefulWidget {
   /// Hard cap on concurrently live (decoder-holding) controllers, passed to
   /// the internally-created [MediaPlayerPool]. Ignored if [pool] is
   /// supplied directly. See [MediaPlayerPool.defaultMaxSize] for the
-  /// reasoning behind the default.
+  /// reasoning behind the default, and [MediaFeedConfig.prewarmWindow] for
+  /// how this interacts with a non-default prewarm window.
   final int maxPoolSize;
 
   /// Optional pre-built pool, for advanced use (sharing a pool across more
@@ -329,7 +400,22 @@ class _MediaFeedState extends State<MediaFeed> {
 
     if (isVisible == wasVisible) return;
     if (isVisible) {
+      if (widget.config.prewarmWindow > 0) {
+        // Pinned synchronously, BEFORE either this item's own acquire or
+        // any prewarm acquire below is even enqueued on the pool's mutex
+        // (both `acquire` calls only reach their first `await` after
+        // enqueueing — see MediaPlayerPool._runExclusive). Pinning here
+        // closes a race where a concurrently-requested prewarm neighbour
+        // could otherwise be processed by the pool before this item's own
+        // acquire finishes registering its slot, i.e. before `_activate`
+        // itself would get a chance to pin it.
+        final item = widget.itemAt(index);
+        _pool.pin(_keyFor(index, item));
+      }
       unawaited(_activate(index));
+      if (widget.config.prewarmWindow > 0) {
+        unawaited(_prewarmAround(index));
+      }
     } else {
       _deactivate(index);
     }
@@ -344,6 +430,12 @@ class _MediaFeedState extends State<MediaFeed> {
     try {
       controller = await _pool.acquire(key, item, config: config);
     } catch (e) {
+      if (widget.config.prewarmWindow > 0) {
+        // The slot never came to exist under this key, so nothing should
+        // continue protecting it — undoes the pin set in
+        // `_handleVisibility` before this call.
+        _pool.unpin(key);
+      }
       debugPrint(
         'MediaFeed: failed to acquire a pool slot for index $index '
         '(key=$key): $e',
@@ -374,12 +466,77 @@ class _MediaFeedState extends State<MediaFeed> {
   void _deactivate(int index) {
     final item = widget.itemAt(index);
     final key = _keyFor(index, item);
+
+    // Always attempted, even if prewarming is off for the *current* build —
+    // a cheap no-op if `key` was never pinned. This is the only place a pin
+    // left over from an earlier build (e.g. `prewarmWindow` dropped to `0`
+    // at runtime after this item was pinned while active) gets cleaned up,
+    // so it cannot linger and make a key permanently non-evictable.
+    _pool.unpin(key);
+
     final controller = _pool.controllerFor(key);
     if (controller != null &&
         !controller.isDisposed &&
         widget.config.autoPause &&
         controller.isPlaying) {
       controller.pause();
+    }
+  }
+
+  /// Requests a pool slot (`load()`, never `play()`) for up to
+  /// [MediaFeedConfig.prewarmWindow] items on each side of [index] — see
+  /// [MediaFeedConfig.prewarmWindow] for the full design. Symmetric because
+  /// [MediaFeed] does not track scroll direction.
+  Future<void> _prewarmAround(int index) async {
+    final window = widget.config.prewarmWindow;
+    if (window <= 0) return;
+    for (var offset = 1; offset <= window; offset++) {
+      final ahead = index + offset;
+      final behind = index - offset;
+      if (ahead < widget.itemCount) {
+        unawaited(_prewarmIndex(ahead));
+      }
+      if (behind >= 0) {
+        unawaited(_prewarmIndex(behind));
+      }
+    }
+  }
+
+  /// Prepares [index] without starting its playback: acquires a pool slot
+  /// through the exact same [MediaPlayerPool.acquire] path [_activate] uses
+  /// — which calls [MediaController.load], never `.play()` — so every
+  /// load-time guarantee (B-11 input validation, the fail-closed DRM setup,
+  /// B-12 `secureSurface`) applies exactly as it would for the active item.
+  ///
+  /// Never throws: a prewarm that cannot be satisfied (rejected input, pool
+  /// capacity exhausted by pinned slots, disposal mid-flight) is logged and
+  /// skipped — that neighbour simply falls back to loading on demand once
+  /// it actually becomes visible, no worse than prewarming being off for
+  /// it.
+  Future<void> _prewarmIndex(int index) async {
+    if (_disposed) return;
+    final item = widget.itemAt(index);
+    final key = _keyFor(index, item);
+
+    // Belt-and-suspenders alongside "never call controller.play() below":
+    // force the config this prewarm load uses to autoPlay: false regardless
+    // of what the host's own per-item MediaConfig requests, in case native
+    // ever auto-starts playback from an `initialize`/`load` pair with
+    // `autoPlay: true` on a freshly-created slot. `null` is left as `null`
+    // (rather than synthesizing a MediaConfig()) so a same-item re-acquire
+    // still keeps whatever config the slot already has — see
+    // MediaPlayerPool.acquire's doc comment on what `config: null` means.
+    var config = widget.mediaConfigAt?.call(index, item);
+    if (config != null && config.autoPlay) {
+      config = config.copyWith(autoPlay: false);
+    }
+
+    try {
+      await _pool.acquire(key, item, config: config);
+    } catch (e) {
+      debugPrint(
+        'MediaFeed: prewarm skipped for index $index (key=$key): $e',
+      );
     }
   }
 
