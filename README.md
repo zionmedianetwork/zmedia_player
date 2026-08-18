@@ -28,15 +28,19 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
 
 **Core playback**
 - Play / pause / stop / seek with volume, mute, and variable speed (0.25x–4.0x)
-- Cross-platform: Android (ExoPlayer) and iOS (AVPlayer)
+- Cross-platform: Android (AndroidX Media3/ExoPlayer) and iOS (AVPlayer)
 - Custom HTTP headers for authenticated requests
 - `BoxFit` video scaling (contain, cover, fill, …), applied to the native layer at runtime
 - Playlist management with sequential/shuffle modes and `MediaRepeatMode` (none/single/all)
 - Broadcast-stream state model with typed exceptions and error recovery
 
 **Streaming & subtitles**
-- HLS/DASH adaptive streaming with automatic quality switching
-- Live streaming with DVR (time-shifting), configurable low-latency targets, live-edge seeking
+- HLS adaptive streaming (Android + iOS) and DASH (Android only — AVPlayer has no DASH
+  support), quality switching via each native player's own defaults
+- Live HLS/DASH playback (`MediaItem.isLive`); DVR/seeking availability and latency are
+  governed entirely by the native player's defaults for the manifest — `HlsConfig`/
+  `DashConfig`'s DVR/latency/prefetch fields are not yet wired to native code (see the
+  [Live Streaming guide](docs/api-reference/live-streaming.md))
 - Subtitles: SRT, WebVTT, ASS/SSA, and embedded tracks with customizable styling
 - Manual and automatic quality/resolution selection; multiple audio tracks
 - Progressive download/caching; real-time bandwidth estimation
@@ -159,16 +163,13 @@ final controller = MediaController.create(
 
 ### HLS/DASH Adaptive Streaming
 
+Adaptive bitrate switching for an HLS master playlist is the native player's own default
+behavior (ExoPlayer/AVPlayer) — no `HlsConfig` is required to enable it. `HlsConfig` and
+`DashConfig` are constructible but **not currently wired to native code**; see the
+[Live Streaming guide](docs/api-reference/live-streaming.md) for details.
+
 ```dart
-final controller = MediaController.create(
-  config: const MediaConfig(
-    hlsConfig: HlsConfig(
-      enableAdaptiveBitrate: true,
-      bitrateStrategy: BitrateSelectionStrategy.auto,
-      enableSegmentPrefetch: true,
-    ),
-  ),
-);
+final controller = MediaController.create();
 
 await controller.load(const MediaItem(
   id: 'hls', title: 'HLS Stream', url: 'https://example.com/playlist.m3u8',
@@ -193,22 +194,23 @@ await controller.disableSubtitles();
 await controller.setAudioTrack(controller.audioTracks.first);
 ```
 
-### Live Streaming (HLS/DASH with DVR)
+### Live Streaming (HLS on Android + iOS; DASH on Android only)
 
 ```dart
-final live = MediaController.create(
-  config: const MediaConfig(
-    hlsConfig: HlsConfig(
-      enableLiveStream: true,
-      enableDvr: true,                        // time-shifting / seeking
-      liveLatency: Duration(seconds: 3),      // low-latency target
-      enableAdaptiveBitrate: true,
-    ),
-  ),
-);
-await live.load(const MediaItem(id: 'live', title: 'Live Event', url: 'https://example.com/live.m3u8'));
+final live = MediaController.create();
+await live.load(const MediaItem(
+  id: 'live',
+  title: 'Live Event',
+  url: 'https://example.com/live.m3u8',
+  isLive: true, // metadata only
+));
 await live.play();
 ```
+
+DVR/seeking availability, latency, and adaptive bitrate for live streams are governed by
+each native player's own defaults for the manifest — see the
+[Live Streaming guide](docs/api-reference/live-streaming.md) for what is and is not
+currently configurable.
 
 ### Media Notifications
 
@@ -296,7 +298,7 @@ For EZDRM, token-based DRM, offline licenses, and troubleshooting, see the
 - [Models](docs/api-reference/models.md) — `MediaItem`, `Playlist`, `MediaConfig`, DRM, and other types
 - [Events & Streams](docs/api-reference/events.md) — every stream and callback
 - [Advanced Features](docs/api-reference/advanced-features.md) — PiP, casting, notifications, caching
-- [Live Streaming](docs/api-reference/live-streaming.md) — HLS/DASH live with DVR
+- [Live Streaming](docs/api-reference/live-streaming.md) — HLS (Android + iOS) and DASH (Android only) live playback
 - [DRM Configuration](docs/api-reference/drm.md) — Widevine, FairPlay, EZDRM
 - [AirPlay & Chromecast](docs/api-reference/airplay.md) — casting guide
 
@@ -469,7 +471,7 @@ lib/
     services/          # Notification, Cast, Streaming, Cache, Subtitle, Buffering, ...
     widgets/           # MediaPlayerWidget, controls, menus, components, overlays
     security/          # CertificatePinning, SecureStorage, InputValidation
-android/               # Kotlin (ExoPlayer) — per-feature handlers
+android/               # Kotlin (AndroidX Media3/ExoPlayer) — per-feature handlers
 ios/                   # Swift (AVPlayer) — per-feature handlers (SPM + CocoaPods)
 example/               # demo application
 ```
@@ -508,7 +510,6 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 - **Verified on-device — Note 9P (Android 11):** Chromecast discovery + load (main-thread
   safe), fullscreen enter/exit via true Hybrid Composition (no surface-release crash), and
   inline controls layout (no overflow).
-- **Version:** 0.2.2
 
 > Not yet validated as production-ready end-to-end. Verify DRM, casting, and security features
 > on real Android and iOS devices before relying on them in production.

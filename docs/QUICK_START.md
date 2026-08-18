@@ -26,7 +26,7 @@ You'll find:
 
 You'll find:
 - Architecture overview
-- Android native code (ExoPlayer)
+- Android native code (AndroidX Media3)
 - iOS native code (AVPlayer)
 - Testing strategies
 - Security guidelines
@@ -172,8 +172,8 @@ await controller.load(drmItem);
 ## Documentation Status
 
 **Status:** Complete and up-to-date
-**Last Updated:** June 22, 2026
-**Version:** 0.2.2
+
+See the [root README](../README.md) for the current released version.
 
 ### Coverage
 - All features documented
@@ -187,7 +187,7 @@ await controller.load(drmItem);
 - **iOS:** minimum iOS 13.0; the plugin supports both Swift Package Manager
   (`ios/zmedia_player/Package.swift`) and CocoaPods. Enable SPM once with
   `flutter config --enable-swift-package-manager`.
-- **Android:** minimum SDK 21.
+- **Android:** minimum SDK 23, compile SDK 35.
 
 ---
 

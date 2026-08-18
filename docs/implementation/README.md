@@ -8,7 +8,7 @@ Technical documentation covering architecture, native implementations, and devel
 
 ### Architecture & native implementation
 System design, component interactions, and the per-feature native handler layout
-(ExoPlayer/Widevine/Chromecast on Android, AVPlayer/FairPlay/AirPlay on iOS) are
+(AndroidX Media3/ExoPlayer/Widevine/Chromecast on Android, AVPlayer/FairPlay/AirPlay on iOS) are
 covered in the **Architecture Highlights** section below and in the root
 [`CLAUDE.md`](../../CLAUDE.md) architecture overview.
 
@@ -39,7 +39,7 @@ Platform Channel
 ### Native Layer (Android)
 ```
 ZMediaPlayerPlugin
-  ├── MediaPlayerManager (ExoPlayer)
+  ├── MediaPlayerManager (AndroidX Media3 ExoPlayer)
   ├── DrmHandler (Widevine)
   ├── NotificationHandler (MediaSession)
   ├── PipHandler (PictureInPictureParams)
@@ -97,10 +97,11 @@ ZMediaPlayerPlugin
 - **Platform Channels:** MethodChannel for bidirectional communication
 
 ### Android
-- **ExoPlayer:** 2.x (Media playback)
+- **AndroidX Media3:** 1.11.0 (ExoPlayer, `media3-exoplayer-hls`/`-dash`, `media3-datasource-okhttp`)
 - **Kotlin:** Modern Android development
 - **MediaSession:** System media controls
 - **Google Cast SDK:** Chromecast support
+- **Min/compile SDK:** minSdk 23, compileSdk 35
 
 ### iOS
 - **Minimum iOS:** 13.0 (Swift concurrency; Flutter 3.44 dropped iOS 12)
@@ -152,7 +153,7 @@ ZMediaPlayerPlugin
 
 ## Testing Strategy
 
-### Unit Tests (Dart — 588 passing; run `flutter test` for the live count)
+### Unit Tests (Dart — 840 passing; run `flutter test` for the live count)
 - Model validation
 - Serialization/deserialization
 - Configuration handling
@@ -205,5 +206,4 @@ flutter run
 
 ---
 
-**Version:** 0.2.2
-**Last Updated:** June 22, 2026
+**Last Updated:** August 17, 2026

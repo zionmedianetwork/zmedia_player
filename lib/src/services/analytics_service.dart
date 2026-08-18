@@ -14,7 +14,10 @@ import '../core/media_config.dart';
 /// Abstract analytics service interface
 ///
 /// Implement this interface to integrate with your analytics platform.
-/// The service will be called automatically by MediaPlayer for tracking.
+/// **`MediaPlayer` does not call this automatically** — it has no call sites for
+/// [AnalyticsService] today. The host app owns an instance and must invoke its
+/// `track*` methods itself (e.g. from the relevant `MediaPlayer`/`MediaController`
+/// stream listeners).
 abstract class AnalyticsService {
   /// Tracks when playback starts
   void trackPlaybackStart(

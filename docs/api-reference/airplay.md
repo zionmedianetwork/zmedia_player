@@ -32,24 +32,26 @@ Apple **intentionally restricts** programmatic access to AirPlay device lists fo
 
 ### Current Behavior
 
-When `startCastDiscovery()` is called on iOS:
+`startCastDiscovery()` / `controller.player.castDevicesStream` on iOS do **not** return a
+placeholder device to tap. `AirPlayHandler.getAvailableDevices()` (native) can only ever return
+the *currently connected* AirPlay device (if any) — an empty list otherwise, exactly reflecting
+Apple's restriction that apps cannot enumerate or trigger the picker programmatically:
 
-1. **Returns a placeholder device:**
-   ```dart
-   {
-     "id": "airplay_system",
-     "name": "AirPlay & Bluetooth",
-     "type": "airplay",
-     "isConnected": false,
-     "requiresUserInteraction": true,
-     "description": "Tap to select AirPlay or Bluetooth device"
-   }
-   ```
+```dart
+// Only present once AirPlay is actually connected — never a "tap to select" placeholder
+{
+  "id": "<route uid>",
+  "name": "<route port name>",
+  "type": "airplay",
+  "model": "",
+  "manufacturer": "Apple",
+  "isConnected": true
+}
+```
 
-2. **When user taps this device:**
-   - Shows an informative dialog
-   - Explains how AirPlay works on iOS
-   - Provides step-by-step setup instructions
+The device-list stream is not the way to let a user *initiate* an AirPlay connection on iOS —
+use the native `AirPlayButton` for that (see below); the cast-device stream is only useful here
+for reflecting an *already-connected* device's info back into your own UI.
 
 ### How Users Cast to MacBook (iOS)
 
@@ -78,19 +80,11 @@ Tap the AirPlay button → Select MacBook from system picker
 private func getAvailableDevices() -> [[String: Any]] {
     var devices: [[String: Any]] = []
 
-    // If AirPlay is active, return current device
+    // iOS cannot enumerate AirPlay devices programmatically — they're discovered
+    // and shown by the system's AVRoutePickerView (the native AirPlayButton).
+    // Only report the currently connected device, if any.
     if let currentDevice = getCurrentDevice() {
         devices.append(currentDevice)
-    } else {
-        // Always show placeholder indicating system picker is required
-        devices.append([
-            "id": "airplay_system",
-            "name": "AirPlay & Bluetooth",
-            "type": "airplay",
-            "isConnected": false,
-            "requiresUserInteraction": true,
-            "description": "Tap to select AirPlay or Bluetooth device"
-        ])
     }
 
     return devices
@@ -133,54 +127,37 @@ The following are configured in `AirPlayHandler.swift` to enable AirPlay:
 </array>
 ```
 
-## Alternative: Native AVRoutePickerView
+## Native AVRoutePickerView: already implemented
 
-For a better iOS experience, you could add a native `AVRoutePickerView` widget:
-
-### Concept Implementation
+Unlike the placeholder-device flow above, this package **ships** a real `AVRoutePickerView`
+platform view — `AirPlayButton` (`lib/src/widgets/airplay_button.dart`). It renders the native
+route picker directly (no informative-dialog detour) and is the recommended way to expose
+AirPlay to users on iOS:
 
 ```dart
-// Platform view for native AirPlay button
-class AirPlayButton extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    if (!Platform.isIOS) return SizedBox.shrink();
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:zmedia_player/zmedia_player.dart';
 
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: UiKitView(
-        viewType: 'airplay_route_picker',
-        creationParams: {},
-        creationParamsCodec: StandardMessageCodec(),
-      ),
-    );
-  }
-}
+if (Platform.isIOS)
+  AirPlayButton(
+    size: 32.0,
+    tintColor: Colors.white,
+    activeTintColor: Colors.blue,      // shown while AirPlay is connected
+    prioritizesVideoDevices: true,
+  ),
 ```
 
-### Native Implementation
+On Android this widget renders as `SizedBox.shrink()` (nothing) — it is iOS-only, matching
+AirPlay's own platform scope. `MediaControls`/`MaterialMediaControls` already include an
+`AirPlayButton` in their cast slot on iOS; see
+[Advanced Features → Casting](advanced-features.md#casting-chromecast--airplay).
 
-```swift
-class AVRoutePickerViewFactory: NSObject, FlutterPlatformViewFactory {
-    func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
-        return AVRoutePickerViewController(frame: frame)
-    }
-}
+### Native implementation
 
-class AVRoutePickerViewController: NSObject, FlutterPlatformView {
-    private let routePicker: AVRoutePickerView
-
-    init(frame: CGRect) {
-        routePicker = AVRoutePickerView(frame: frame)
-        routePicker.tintColor = .systemBlue
-    }
-
-    func view() -> UIView {
-        return routePicker
-    }
-}
-```
+The platform view is backed by `zmedia_player/airplay_button` (registered by
+`AirPlayButtonFactory` in the iOS native plugin), which wraps `AVRoutePickerView` directly —
+no custom device list, matching Apple's model described above.
 
 ## Best Practices
 
@@ -212,7 +189,9 @@ class AVRoutePickerViewController: NSObject, FlutterPlatformView {
 
 ### "Want custom AirPlay button"
 
-**Solution:** Implement `AVRoutePickerView` as a platform view (see Alternative section above).
+**Solution:** Use the `AirPlayButton` widget this package already ships (see
+[Native AVRoutePickerView: already implemented](#native-avroutepickerview-already-implemented)
+above) — no need to build a platform view yourself.
 
 ## Summary
 

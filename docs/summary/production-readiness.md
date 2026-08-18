@@ -20,7 +20,6 @@
 ## Executive Summary
 
 **Date:** October 19, 2025
-**Version:** Phase 4 Complete
 **Status (as of v0.1.0):** **READY FOR PRODUCTION** — *see superseding note above*
 
 ZMedia Player has successfully completed Phase 4 (DRM & Polish) and is now production-ready with comprehensive testing, security measures, and documentation.
@@ -180,12 +179,18 @@ All operations significantly exceed performance targets:
 
 ### Android
 
+> As of v0.1.0 (Oct 2025); current values (post-Media3 migration) are **minSdk 23**,
+> **compileSdk 35**, AndroidX Media3 **1.11.0** — see `AGENTS.md`.
+
 **Minimum SDK:** 21 (Android 5.0)
 **Target SDK:** 34 (Android 14)
-**DRM Support:** Widevine L1/L3, PlayReady, ClearKey
+**DRM Support:** Widevine L1/L3, ClearKey — **not** PlayReady. `DrmScheme.playready` exists in the
+Dart model, but Android gates on `isPlayReadySupported()`, which fails (`UnsupportedSchemeException`)
+on essentially every device without a system CDM, and iOS has no PlayReady path at all. This was
+true in v0.1.0 too — it is not a regression, but it was never validated for this report.
 
 **Features:**
-- ExoPlayer integration
+- ExoPlayer integration (now AndroidX Media3)
 - Native DRM handler
 - Hardware acceleration
 - Background playback
@@ -194,8 +199,10 @@ All operations significantly exceed performance targets:
 
 ### iOS
 
+> As of v0.1.0 (Oct 2025); current minimum is **iOS 13.0+** — see `AGENTS.md`. iOS has no
+> separate "target version" concept the way Android has a target SDK.
+
 **Minimum Version:** iOS 10.0
-**Target Version:** iOS 17.0
 **DRM Support:** FairPlay Streaming
 
 **Features:**
@@ -227,8 +234,10 @@ flutter analyze
 - **Total Lines:** ~15,000+ (including tests)
 - **Test Coverage:** 100% (DRM models)
 - **Packages:** 0 security vulnerabilities
-- **Dart Version:** 3.2.0+
-- **Flutter Version:** 3.16.0+
+- **Dart Version:** as declared in v0.1.0's `pubspec.yaml`, not independently verified for this
+  report. Current: SDK `>=3.0.0 <4.0.0`, developed/verified on Dart 3.12 — see `AGENTS.md`.
+- **Flutter Version:** as declared in v0.1.0's `pubspec.yaml`, not independently verified for this
+  report. Current: SDK `>=3.19.0`, developed/verified on Flutter 3.44.3 — see `AGENTS.md`.
 
 ---
 
@@ -461,8 +470,7 @@ flutter analyze
 
 **Approved By:** Development Team
 **Date:** October 19, 2025
-**Version:** Phase 4 Complete
-**Status:** PRODUCTION READY
+**Status (as of v0.1.0):** PRODUCTION READY — *superseded, see the note at the top of this document*
 
 ---
 

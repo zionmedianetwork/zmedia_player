@@ -8,13 +8,13 @@ For the architecture narrative and contributor workflow, see [`CLAUDE.md`](CLAUD
 
 ## What this package is (in 5 lines)
 
-- A Flutter **media player package** for video + audio on **Android (ExoPlayer)** and **iOS (AVPlayer)**.
+- A Flutter **media player package** for video + audio on **Android (AndroidX Media3/ExoPlayer)** and **iOS (AVPlayer)**.
 - Public API is a **single barrel**: everything in [`lib/zmedia_player.dart`](lib/zmedia_player.dart) is public; anything else is internal.
 - Two entry points: **`MediaController`** (reactive `ChangeNotifier` facade — use this for UI) and **`MediaPlayer`** (lower-level, stream-first, singleton per `playerId`).
 - Dart talks to native over a single `MethodChannel` named `zmedia_player`, routed per `playerId`.
 - Advanced features: HLS/DASH adaptive streaming, DRM (Widevine/FairPlay/EZDRM), subtitles, PiP, casting (Chromecast/AirPlay), lock-screen notifications, certificate pinning.
 
-**Versions:** package `0.2.2` · Flutter SDK `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**) · iOS **13.0+** · Android **minSdk 23**. iOS builds with **Swift Package Manager or CocoaPods**.
+**Versions:** Flutter SDK `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**) · iOS **13.0+** · Android **minSdk 23**, **compileSdk 35**, AndroidX Media3 **1.11.0**. iOS builds with **Swift Package Manager or CocoaPods**.
 
 ---
 
@@ -55,10 +55,12 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 |---|---|
 | `MediaController` | Reactive `ChangeNotifier` facade over `MediaPlayer`; use for UI. `create()` factory. |
 | `MediaPlayer` | Lower-level engine; singleton per `playerId`; exposes all streams. |
-| `MediaConfig` | Player configuration (autoPlay, boxFit, DRM, streaming, `respectSafeArea`, `immersiveLandscape`, …). |
+| `MediaConfig` | Player configuration (autoPlay, boxFit, DRM, streaming, `respectSafeArea`, `immersiveLandscape`, `secureSurface`, …). |
 | `CacheConfig`, `BufferConfig` | Cache + buffering sub-configs used by `MediaConfig`. |
 | `CrashReporter` | Optional crash-reporting hook (`MediaPlayer.enableCrashReporting`). |
 | `MediaPlayerException` (sealed) + subclasses | Typed errors: `MediaLoadException`, `NetworkException`, `DrmException`, `PlaybackException`, `InvalidStateException`, `PlayerDisposedException`, `ConfigurationException`, `PlatformOperationException`, `OperationBusyException`. |
+| `MediaPlayerPool` | Bounded pool of live `MediaController`/decoder sessions; underlies `MediaFeed`'s prewarm/activate/release lifecycle for scroll feeds. |
+| `LocalMediaUtils` | Builds a `file://` URL from a filesystem path for local/cached-file playback (`fileUri`). |
 
 ### Models (`lib/src/models/`)
 | Export | Purpose |
@@ -69,7 +71,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `SubtitleTrack` / `SubtitleFormat` / `SubtitleConfig` / `SubtitleAlignment` | Subtitle track, format (`srt,webvtt,ass,ssa,ttml`), styling, alignment. |
 | `QualityTrack` / `AudioTrack` | Selectable video-quality / audio-track descriptors. |
 | `StreamingConfig` / `BitrateSelectionStrategy` / `HlsConfig` / `DashConfig` | Adaptive-streaming config + HLS/DASH (live, DVR, latency, prefetch). |
-| `DrmConfig` / `DrmScheme` / `EzdrmConfig` / `DrmSession` | DRM config + factories (`.widevine`, `.fairplay`, `.ezdrm`, `.token`); session state. |
+| `DrmConfig` / `DrmScheme` / `EzdrmConfig` / `DrmSession` | DRM config + factories (`.widevine`, `.fairplay`, `.ezdrm`, `.token`); session state. `DrmConfig.minWidevineSecurityLevel` sets the floor for Android Widevine only (no effect on iOS FairPlay). |
 | `BufferingConfig` / `BufferHealth` / `BufferStatus` / `BufferStatistics` | Adaptive buffering config + health/stats. |
 | `NetworkStatus` / `NetworkQuality` / `ConnectionType` / `NetworkChangeEvent` | Network monitoring model. |
 | `QoEMetrics` / `PerformanceMetrics` / `EngagementMetrics` / `PlaybackEndReason` / `BufferEventType` | Analytics/QoE models. |
@@ -83,7 +85,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `NotificationService` | Lock-screen/Control Center media controls. `initialize(playerId, mediaPlayer:)` then `show()`/`dismiss()`; `actionStream`. |
 | `CastService` | Cast device discovery + connection. |
 | `StreamingService` | Bandwidth estimation + quality recommendation. |
-| `CacheService` | Progressive download + cache management. |
+| `CacheService` | Downloads a media file to disk (`downloadAndCache`/`cacheMedia`/`preloadMedia`) and plays it back from there via `getCachedFileUri` — including fully offline for non-DRM content. Not a full download-manager (no background-transfer queue) and **not** offline DRM — no license can be persisted for offline playback on either platform. |
 | `SubtitleService` | Parse SRT/WebVTT/ASS/SSA into tracks. |
 | `BufferingService` | Buffer-health monitoring (`bufferHealthStream`). |
 | `NetworkResilienceService` | Network status + reconnection/retry. |
@@ -101,6 +103,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `QualityBadge`, `TimeDisplay`, `ControlButton`, `SeekBar`, `VolumeSlider`, `LiveBadge`, `BufferHealthBadge` | Reusable control components. |
 | `BufferingIndicator`, `NetworkQualityIndicator`, `ErrorOverlay`, `FeedbackOverlay`, `VolumeChangeOverlay`, `SeekFeedbackOverlay`, `PlaybackFeedbackOverlay`, `ToastNotification` | Status/feedback overlays. |
 | `MediaListPlayer` | Visibility-aware player for `ListView` (auto play/pause). |
+| `MediaFeed` | Scroll feed of players (TikTok/Reels-style) backed by `MediaPlayerPool`: bounded concurrent decoder sessions, a configurable prewarm window for upcoming items, activation debounce during fast flings, releasing players once they leave the live window, and an optional `autoPlayPolicy` (e.g. `conservativeAutoPlayPolicy`) to withhold autoplay on metered/poor connections. |
 | `AirPlayButton` | Native iOS AirPlay route picker (iOS only). |
 
 ### Security (`lib/src/security/`)
@@ -116,6 +119,9 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 
 All are broadcast streams on `MediaPlayer` (reach via `controller.player`). `MediaController`
 also re-emits via `ChangeNotifier`, so for UI you can just `AnimatedBuilder(animation: controller)`.
+`MediaController` additionally exposes `errorStream` (re-emits `MediaPlayer.errorStream`) and
+`error` (the most recently observed typed error, cleared once state moves on) directly, so a UI
+doesn't have to reach through `controller.player` just for error state.
 
 | Stream | Emits |
 |---|---|
@@ -239,7 +245,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 588 Dart tests (core, models, services, widgets, memory, performance)
+test/                             # 840 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -255,7 +261,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **588**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **840**, keep green) before proposing changes.
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
 
@@ -266,7 +272,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (588 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (840 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone.

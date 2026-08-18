@@ -9,7 +9,7 @@ and `zmedia_player`. This is the canonical comparison doc (the former
 `zmedia_player` is at **effective feature parity** with `better_player` for everything a
 production media app needs — and goes beyond it in a few areas (ASS/SSA subtitles, real-time
 bandwidth estimation, a dedicated quality-tracks stream). The differences are architectural:
-`zmedia_player` integrates **directly** with ExoPlayer (Android) and AVPlayer (iOS) rather than
+`zmedia_player` integrates **directly** with AndroidX Media3/ExoPlayer (Android) and AVPlayer (iOS) rather than
 layering on top of `video_player`/Chewie, and exposes a **stream-based, type-safe** API instead
 of a single callback bus.
 
@@ -24,10 +24,10 @@ of a single callback bus.
 
 | | Better Player | ZMedia Player |
 |---|---|---|
-| Base | Chewie + `video_player` | Direct ExoPlayer / AVPlayer integration |
+| Base | Chewie + `video_player` | Direct AndroidX Media3/ExoPlayer / AVPlayer integration |
 | API style | Callback event bus (`addEventsListener`) | Per-event broadcast streams + `ChangeNotifier` |
 | License | Apache-2.0 | MIT |
-| Status | Maintained | Active (v0.2.2) |
+| Status | Maintained | Active |
 
 ---
 
@@ -71,7 +71,7 @@ Legend: ✅ implemented · ➖ not built in (do in app code) · 🟦 platform-sp
 | Picture-in-Picture | ✅ | ✅ | Both platforms; auto-enter-on-background, custom actions |
 | Media notifications (lock screen) | ✅ | ✅ | Both platforms; action stream; artwork auto-generated from a video frame when absent |
 | ListView integration (auto play/pause) | ✅ | ✅ | `MediaListPlayer` (visibility-aware) |
-| Caching / offline (LRU, download progress) | ✅ | ✅ | `CacheService` (Dart) |
+| Disk cache + download-to-play (LRU, progress) | ✅ | ✅ | `CacheService` (Dart); non-DRM only — no offline DRM license on either platform |
 | Thumbnail / preview generation | ✅ | ➖ | Not built in |
 | **Casting** | | | |
 | Chromecast | ➖ | 🟦 ✅ Android | `CastHandler` + `CastOptionsProvider` (Google Play Services) |
@@ -79,7 +79,8 @@ Legend: ✅ implemented · ➖ not built in (do in app code) · 🟦 platform-sp
 | **DRM** | | | |
 | Widevine (Android) | ✅ | ✅ | `DrmHandler` |
 | FairPlay (iOS) | ✅ | ✅ | `DrmHandler` |
-| PlayReady / ClearKey / token-based / EZDRM | partial | ✅ | `DrmScheme` enum; token + EZDRM factories |
+| ClearKey / token-based / EZDRM | partial | ✅ | `DrmScheme` enum; token + EZDRM factories |
+| PlayReady | ➖ | 🟦 not functional | `DrmScheme.playready` exists, but Android gates on `isPlayReadySupported()` (fails without a system CDM on most devices) and iOS has no PlayReady path at all |
 | Certificate pinning on license requests | ➖ | ⭐ ✅ | SHA-256/SPKI pins, native |
 | **Events & state** | | | |
 | State / position / duration / volume / speed streams | callback | ✅ streams | Typed broadcast streams |
@@ -88,7 +89,7 @@ Legend: ✅ implemented · ➖ not built in (do in app code) · 🟦 platform-sp
 | Buffer health + network-quality streams | ➖ | ⭐ ✅ | `BufferingService` / `NetworkResilienceService` |
 | QoE / analytics metrics | ➖ | ⭐ ✅ | `AnalyticsService` (`QoEMetrics`) |
 | **Platform** | | | |
-| Android (ExoPlayer) / iOS (AVPlayer) | ✅ | ✅ | Direct integration both sides |
+| Android (AndroidX Media3/ExoPlayer) / iOS (AVPlayer) | ✅ | ✅ | Direct integration both sides |
 | Secure storage (Keychain / Keystore) | ➖ | ⭐ ✅ | DRM tokens / credentials |
 
 ---
@@ -142,7 +143,7 @@ BetterPlayer (widget)                 MediaPlayerWidget
   → BetterPlayerController              → MediaController (facade)
   → VideoPlayerController (pkg)         → MediaPlayer (core)
   → platform channels                  → platform channels (direct)
-  → ExoPlayer / AVPlayer               → ExoPlayer / AVPlayer
+  → ExoPlayer / AVPlayer               → AndroidX Media3/ExoPlayer / AVPlayer
 ```
 
 Better Player reuses `video_player` (less native code, but an extra abstraction and a
@@ -185,4 +186,4 @@ full feature inventory.
 
 ---
 
-**Last updated:** June 29, 2026 · **Package version:** 0.2.2
+**Last updated:** August 17, 2026

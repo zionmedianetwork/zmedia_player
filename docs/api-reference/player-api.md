@@ -65,6 +65,12 @@ Creates the controller and its underlying `MediaPlayer`, and calls `initialize()
 
 `Future<void> updateConfig(MediaConfig config)`, `String formatDuration(Duration)`, `void dispose()`.
 
+### Security
+
+| Method | Description |
+|---|---|
+| `Future<void> setSecureSurface(bool enabled)` | Android: hard-blocks capture (`FLAG_SECURE`). iOS: detection only (`UIScreen.isCaptured`) |
+
 ### Getters
 
 State: `state`, `isPlaying`, `isPaused`, `isBuffering`, `hasError`, `isReady`, `isInitialized`.
@@ -75,7 +81,9 @@ Content: `currentItem`, `currentPlaylist`, `hasNext`, `hasPrevious`.
 Tracks: `qualityTracks`, `selectedQualityTrack`, `subtitleTracks`, `selectedSubtitleTrack`,
 `audioTracks`, `selectedAudioTrack`.
 PiP/Cast: `pipStatus`, `isPipAvailable`, `isInPipMode`, `castStatus`, `isCastAvailable`, `isCasting`.
-Other: `controlsVisible`, `isOperationInProgress`, `playerId`, `player` (the `MediaPlayer`).
+Errors: `error` (most recently observed `MediaPlayerException`, or `null`), `errorStream`.
+Other: `controlsVisible`, `isOperationInProgress`, `playerId`, `player` (the `MediaPlayer`),
+`screenCaptureStream` (see [Advanced Features](advanced-features.md#screen-capture-protection)).
 
 `MediaController` extends `ChangeNotifier`, so `AnimatedBuilder(animation: controller)` rebuilds on any change.
 
@@ -102,14 +110,18 @@ Playback: `initialize`, `load`, `setPlaylist`, `play`, `pause`, `stop`, `seekTo`
 `setSubtitleTrack`, `setAudioTrack`. Playlist: `skipToNext`, `skipToPrevious`, `skipToIndex`.
 PiP: `checkPipAvailability`, `enterPictureInPicture`, `exitPictureInPicture`. Cast:
 `startCastDiscovery`, `stopCastDiscovery`, `connectToCastDevice`, `loadMediaOnCastDevice`,
-`disconnectFromCastDevice`. Config/lifecycle: `updateConfig`, `dispose`.
+`disconnectFromCastDevice`. Security: `setSecureSurface`. Config/lifecycle: `updateConfig`,
+`dispose`.
 
 ### Streams
 
 `stateStream`, `positionStream`, `durationStream`, `volumeStream`, `speedStream`,
 `subtitleTracksStream`, `qualityTracksStream`, `audioTracksStream`, `bandwidthStream` (bps),
 `bufferHealthStream`, `pipStatusStream`, `castStatusStream`, `castDevicesStream`,
-`drmSessionStream`, `notificationActionStream`. See [Events & Streams](events.md).
+`drmSessionStream`, `errorStream` (typed `MediaPlayerException`s), `screenCaptureStream`,
+`notificationActionEventStream` (carries `NotificationActionEvent`, including scrub-bar
+position; prefer this over the deprecated `Stream<String> notificationActionStream`). See
+[Events & Streams](events.md).
 
 ### Getters
 
@@ -124,4 +136,12 @@ All player errors are subclasses of the sealed `MediaPlayerException`:
 `MediaLoadException`, `NetworkException`, `DrmException`, `PlaybackException`,
 `InvalidStateException`, `PlayerDisposedException`, `ConfigurationException`,
 `PlatformOperationException`, `OperationBusyException`. Errors also surface via
-`PlaybackState.state == PlayerState.error` with `errorMessage`.
+`PlaybackState.state == PlayerState.error` with `errorMessage`, and as typed exceptions on
+`errorStream`/`error` (above).
+
+## Feeds and pooled playback
+
+For a scrolling feed that must bound how many native decoder sessions stay alive at once, see
+`MediaFeed` and `MediaPlayerPool` in [Advanced Features](advanced-features.md#media-feed) —
+they own a small pool of `MediaController`s internally rather than taking one per row from the
+host, which is what `MediaListPlayer` does.
