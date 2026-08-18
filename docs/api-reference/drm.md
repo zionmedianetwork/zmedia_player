@@ -108,6 +108,16 @@ final drmConfig = DrmConfig.widevine(
 );
 ```
 
+`headers` and `customData` are not the same scope. `headers` applies to every DRM-related HTTP
+request (Android: every request through the shared `HttpDataSource.Factory`, including
+provisioning; iOS: both the FairPlay certificate fetch and the license `POST`). `customData` is
+narrower — it is applied only to the license/key request itself: Android via
+`HttpMediaDrmCallback.setKeyRequestProperty`, iOS as headers on the license `POST` only (not the
+certificate `GET`). Values are converted for the wire: `String` passes through unchanged,
+`bool`/`int`/`double` use their own string representation, nested `Map`/`List` values are
+JSON-encoded, and `null`/unsupported values are skipped rather than sent as the literal string
+`"null"`.
+
 ---
 
 ## DRM Session Monitoring

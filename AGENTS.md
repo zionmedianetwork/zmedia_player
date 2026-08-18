@@ -70,14 +70,14 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `Playlist` / `PlaybackMode` / `MediaRepeatMode` | Item collection + shuffle order / `sequential`\|`shuffle` / `none`\|`single`\|`all`. **Note: the enum is `MediaRepeatMode`, not `RepeatMode`.** |
 | `SubtitleTrack` / `SubtitleFormat` / `SubtitleConfig` / `SubtitleAlignment` | Subtitle track, format (`srt,webvtt,ass,ssa,ttml`), styling, alignment. |
 | `QualityTrack` / `AudioTrack` | Selectable video-quality / audio-track descriptors. |
-| `StreamingConfig` / `BitrateSelectionStrategy` / `HlsConfig` / `DashConfig` | Adaptive-streaming config + HLS/DASH (live, DVR, latency, prefetch). |
+| `StreamingConfig` / `BitrateSelectionStrategy` / `HlsConfig` / `DashConfig` | Adaptive-streaming config; `HlsConfig`/`DashConfig` wire `enableDvr` (seek gating + live duration reporting), `liveLatency`, and inherited `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` to native (see [live-streaming.md](docs/api-reference/live-streaming.md) for the per-field, per-platform table). `enableLiveStream` is deprecated — use `MediaItem.isLive`. |
 | `DrmConfig` / `DrmScheme` / `EzdrmConfig` / `DrmSession` | DRM config + factories (`.widevine`, `.fairplay`, `.ezdrm`, `.token`); session state. `DrmConfig.minWidevineSecurityLevel` sets the floor for Android Widevine only (no effect on iOS FairPlay). |
 | `BufferingConfig` / `BufferHealth` / `BufferStatus` / `BufferStatistics` | Adaptive buffering config + health/stats. |
 | `NetworkStatus` / `NetworkQuality` / `ConnectionType` / `NetworkChangeEvent` | Network monitoring model. |
 | `QoEMetrics` / `PerformanceMetrics` / `EngagementMetrics` / `PlaybackEndReason` / `BufferEventType` | Analytics/QoE models. |
-| `NotificationConfig` / `NotificationAction` / `NotificationPriority` | Lock-screen / Control Center notification config. |
-| `PipConfig` / `PipAction` / `PipState` / `PipStatus` | Picture-in-Picture config + state. |
-| `CastDevice` / `CastDeviceType` / `CastState` / `CastStatus` / `CastConfig` | Casting (Chromecast/AirPlay/DLNA) model. |
+| `NotificationConfig` / `NotificationAction` / `NotificationPriority` | Lock-screen / Control Center notification config. `priority`, `dismissible`, and `customActions` are wired **Android only** — no faithful `MPRemoteCommandCenter` equivalent exists on iOS. |
+| `PipConfig` / `PipAction` / `PipState` / `PipStatus` / `PipActionEvent` | Picture-in-Picture config + state. `PipConfig.actions`/`showPlaybackControls` are wired **Android only** for custom actions (`showPlaybackControls` partially affects iOS via `requiresLinearPlayback`, iOS 14+); tapping a custom action delivers a `PipActionEvent` on `MediaPlayer.pipActionStream`. |
+| `CastDevice` / `CastDeviceType` / `CastState` / `CastStatus` / `CastConfig` | Casting (Chromecast/AirPlay) model — no DLNA support exists in this package. |
 
 ### Services (`lib/src/services/`)
 | Export | Purpose |
@@ -133,6 +133,7 @@ doesn't have to reach through `controller.player` just for error state.
 | `bufferHealthStream` | `BufferHealth` |
 | `drmSessionStream` | `DrmSession` |
 | `pipStatusStream` / `castStatusStream` / `castDevicesStream` | `PipStatus` / `CastStatus` / `List<CastDevice>` |
+| `pipActionStream` | `PipActionEvent` (custom `PipConfig.actions` tap — Android only) |
 | `notificationActionStream` | `String` (action id) |
 | `errorStream` | `MediaPlayerException` (typed — see error categories below) |
 | `pauseReasonStream` | `PlayerPauseReason` (distinguishes an audio-focus-loss pause from a user pause) |
@@ -142,7 +143,7 @@ Native→Dart events (handled in `MediaPlayer._handleMethodCall`, dispatched by 
 `onPlaybackStateChanged`, `onPositionChanged`, `onDurationChanged`, `onVolumeChanged`,
 `onSpeedChanged`, `onQualityTracksChanged`, `onSubtitleTracksChanged`, `onAudioTracksChanged`,
 `onBandwidthUpdate`, `onBufferHealthUpdate`, `onDrmSessionUpdate`, `onNotificationAction`,
-`onPipStatusChanged`, `onCastStatusChanged`, `onCastDevicesChanged`,
+`onPipStatusChanged`, `onPipAction`, `onCastStatusChanged`, `onCastDevicesChanged`,
 `onNetworkStatusChanged`, `onPlatformViewError`, `onError`.
 
 **Error categories.** `onError` carries a `category` in its details, drawn from a vocabulary both
@@ -158,6 +159,16 @@ same technique guards the `connectionType` vocabulary in
 `ProtocolMismatchException` rather than a raw `MissingPluginException`. If you add a MethodChannel
 method that older native builds will not have, consider whether the version needs incrementing —
 purely additive native→Dart events do not, since an old native build simply never sends them.
+
+**`load` payload.** `MediaPlayer.load()` sends `{playerId, mediaItem, config}` — `config` is the
+current `MediaConfig` snapshot (serialized the same way `initialize`/`updateConfig` already do),
+carried on **every** `load()` call so a rebuilt config (e.g. flipping `hlsConfig.enableDvr`) takes
+effect on reload without a separate `updateConfig()` call. Native replaces its stored config
+wholesale from this before any config-dependent work runs, but deliberately does not re-run
+`applyConfig()`/volume-speed-mute reapplication from this path (that would undo an in-progress
+runtime `setMuted()` call — see `MediaPlayerManager.kt`'s/`.swift`'s `loadMediaItem` doc). Known
+gap: `setPlaylist`/`skipToIndex` still call native `loadMediaItem` without a config snapshot, so
+per-item streaming config can be stale for playlist-driven items.
 
 ---
 
@@ -212,7 +223,20 @@ const MediaConfig(
 if (await controller.checkPipAvailability()) await controller.enterPictureInPicture();
 await controller.startCastDiscovery();
 await controller.connectAndLoadMedia(device);
+controller.player.pipActionStream.listen((e) { /* PipConfig.actions tap, Android only */ });
 ```
+
+### Live streaming (DVR seek gating)
+```dart
+final controller = MediaController.create(
+  config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+);
+await controller.load(MediaItem(id: 'live', title: 'Live', url: 'https://cdn/live.m3u8', isLive: true));
+controller.player.isSeekable; // false for a live item unless enableDvr matched its URL at load()
+await controller.seekTo(pos); // throws InvalidStateException on live + !isSeekable
+```
+Without `enableDvr: true`, a live item reports `isSeekable == false` and no duration; `seekTo`
+throws rather than silently doing nothing. See [live-streaming.md](docs/api-reference/live-streaming.md).
 
 ---
 
@@ -245,7 +269,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 840 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 871 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -261,7 +285,8 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **840**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **871**, keep green) before proposing changes.
+- **API/data-contract/feature changes require documentation in the same change** — root `README.md`, this file, every affected file under `docs/`, and `CHANGELOG.md`. See `CLAUDE.md`'s Development Workflow for the full rule and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
 
@@ -272,7 +297,10 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (840 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (871 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
-and lock-screen notifications have been verified on a physical iPhone.
+and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating
+and DVR-window duration reporting (`enableDvr`) have been verified on a physical Android device
+(Note 9P) against a live HLS stream; the equivalent iOS wiring has not yet been verified on a
+physical device.

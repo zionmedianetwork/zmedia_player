@@ -19,7 +19,7 @@ on top.
 >
 > | Field | Wired? | Android | iOS |
 > |---|---|---|---|
-> | `enableDvr` | **Yes — Dart-side only** | Gates `MediaPlayer.isSeekable`/`seekTo` for the loaded live item (see [Seeking and live-edge detection](#seeking-and-live-edge-detection)). Does not change what ExoPlayer/AVPlayer themselves do with the live window. | Same |
+> | `enableDvr` | **Yes** | Dart-side gate: `MediaPlayer.isSeekable`/`seekTo` reject seeking on a live item unless set (see [Seeking and live-edge detection](#seeking-and-live-edge-detection)). Native-side: once set, the current `Timeline.Window.durationMs` (the DVR window length) is reported as `PlaybackState.duration`, re-derived on every `onTimelineChanged` since a live window grows over time. Does not change what ExoPlayer itself does with the live window otherwise. | Same Dart-side gate; native derives the same window-length duration from `AVPlayerItem.seekableTimeRanges` (re-checked on every position tick, since `AVPlayerItem.duration` is indefinite for a live item and never fires the usual duration KVO) |
 > | `liveLatency` | **Yes** | `MediaItem.LiveConfiguration.setTargetOffsetMs` | `AVPlayerItem.configuredTimeOffsetFromLive` (iOS 14+ only — no effect on iOS 13) |
 > | `enableAdaptiveBitrate` | **Yes (Android only)** | `DefaultTrackSelector` — `false` forces a single fixed track instead of ABR | Not honored — AVPlayer has no API to disable ABR |
 > | `maxBitrate` | **Yes** | `DefaultTrackSelector.setMaxVideoBitrate` | `AVPlayerItem.preferredPeakBitRate` |
@@ -32,6 +32,15 @@ on top.
 > implementation and were removed rather than shipped as silent no-ops — use `MediaItem.httpHeaders`
 > for headers (see [below](#custom-headers-for-authenticated-live-manifests)) and
 > `AdaptiveCacheConfig` for segment caching instead.
+>
+> **Reloading with a changed config now actually takes effect.** `MediaPlayer.load()` carries
+> the current `MediaConfig` snapshot (including `hlsConfig`/`dashConfig`) with every call, not
+> only at `initialize()`/`updateConfig()` time — so toggling `enableDvr`/`liveLatency`/the
+> bitrate bounds and calling `load()` again on the same or a new `MediaItem` is honored
+> immediately. **Known limitation:** `setPlaylist`/`skipToIndex` still route through a
+> single-argument native `loadMediaItem` call that does not carry a config snapshot, so
+> per-item streaming config can be stale for playlist-driven items until the next explicit
+> `load()` or `updateConfig()` call.
 
 `StreamingService` (`lib/src/services/streaming_service.dart`) is a related but separate,
 **Dart-only** helper for bandwidth-based quality-track *recommendation* math (moving-average
@@ -63,6 +72,7 @@ actually requires.
 | DASH live playback | Yes (Media3) | **No** — AVPlayer/AVFoundation has no MPEG-DASH support at all, regardless of configuration |
 | Seeking within the live window | Whatever the manifest itself allows (its sliding window / `EXT-X-PLAYLIST-TYPE`) | Same |
 | `enableDvr` (this package's own seek gate) | `MediaPlayer.isSeekable`/`seekTo` reject seeking on a live item unless `enableDvr: true` | Same |
+| DVR window duration (`controller.duration` for a live item) | Reported once `enableDvr: true` — the live window's current known length, re-derived as it grows; `0`/unknown when DVR is off | Same, derived from `seekableTimeRanges` |
 | `liveLatency` target | Wired — `MediaItem.LiveConfiguration` | Wired on iOS 14+ — `configuredTimeOffsetFromLive` |
 | `maxBitrate` cap | Wired — `DefaultTrackSelector` | Wired — `preferredPeakBitRate` |
 | `enableAdaptiveBitrate: false` / `minBitrate` | Wired — `DefaultTrackSelector` | Not honored — no faithful AVPlayer API |
@@ -141,6 +151,18 @@ the config that matched its URL at `load()` time (see `dvrEnabled`). This is pur
 Dart-side gate — how *far* you can actually seek, once allowed through, still depends entirely
 on the manifest's own live window (its sliding window / `EXT-X-PLAYLIST-TYPE` for HLS, its DASH
 `timeShiftBufferDepth`); this package does not extend or shrink that window itself.
+
+With `enableDvr: true`, `controller.duration` for a live item is the DVR window's current
+known length (not the total time the stream has been broadcasting, which is unbounded) —
+expect it to grow over time as more of the window becomes available, and treat `0`/unknown as
+"nothing known about the window yet" rather than "the stream just started." Without
+`enableDvr: true`, duration stays unreported (`0`) for a live item, matching `isSeekable ==
+false`. `controller.position` is always reported relative to the *start* of that window on both
+platforms (Android's `ExoPlayer.getCurrentPosition()` is window-relative already; iOS
+translates `AVPlayerItem.currentTime()`, which is on an absolute timeline, into the same
+window-relative unit), so `position` and `duration` share the same zero point and the examples
+below (`controller.duration` for "jump to live edge", `duration - position` for "how far behind
+live") work identically on both platforms.
 
 ```dart
 // Seek back 30 seconds, if the manifest's live window covers it
@@ -241,7 +263,12 @@ class _LiveStreamPageState extends State<LiveStreamPage> {
   @override
   void initState() {
     super.initState();
-    _controller = MediaController.create();
+    // enableDvr: true is required for seekTo/_jumpToLive below to work at
+    // all — without it, isSeekable is false for a live item and seekTo
+    // throws InvalidStateException.
+    _controller = MediaController.create(
+      config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+    );
     _loadLiveStream();
     _listenToPosition();
   }
@@ -325,6 +352,17 @@ remaining seek availability is a property of the manifest itself (its live windo
 - You are seeking within that window — seeking earlier than the window start will fail or
   clamp, depending on the native player
 
+### `controller.duration` / notification scrubber stays at 0 for a live stream
+
+Expected when `enableDvr` is not set — duration is only reported for a live item once DVR is
+enabled on the matching streaming config (see the table above and
+[Seeking and live-edge detection](#seeking-and-live-edge-detection)); it deliberately does not
+report the unbounded, unknowable "time since the stream started broadcasting". If `enableDvr`
+is already `true` and duration is still `0`, confirm the config actually reached native for
+*this* load — `load()` carries the current config snapshot on every call, but
+`setPlaylist`/`skipToIndex` do not yet (see the known limitation above), so a playlist-driven
+live item can still see a stale, DVR-disabled config.
+
 ### High latency behind live edge / frequent buffering
 
 Set `liveLatency` on the matching streaming config to give the native player a target offset
@@ -363,4 +401,9 @@ coordinate it.
 
 ---
 
-**Status:** Active development — feature-complete, native layers need on-device verification
+**Status:** Active development — `enableDvr` seek gating and DVR window duration reporting have
+been verified on an Android device (Samsung Note 9P) against a live HLS stream with a real
+601-second DVR window (`dumpsys media_session` showed `actions=311` with a 600960ms duration
+when DVR was enabled, `actions=55` with `0` duration when it was not). The equivalent iOS
+wiring (`seekableTimeRanges`-derived duration, position/seek translation,
+`configuredTimeOffsetFromLive`) is implemented but not yet verified on a physical iOS device.

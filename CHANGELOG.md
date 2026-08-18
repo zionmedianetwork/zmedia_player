@@ -61,8 +61,85 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `NotificationPriority.high`). Source-breaking only for callers that relied on the
   removed non-`null` default's static type; passing an explicit
   `NotificationPriority` value is unaffected.
+- Removed `HlsConfig.enableSegmentPrefetch`, `HlsConfig.maxPrefetchSegments`,
+  `DashConfig.enableSegmentPrefetch`, `DashConfig.maxPrefetchSegments`,
+  `DashConfig.enableMpdCaching`, and `DashConfig.mpdCacheExpiration`. An audit of all
+  209 fields across 18 config classes found `HlsConfig`/`DashConfig` had been entirely
+  inert since the commit that introduced them — the models were added but
+  `media_player.dart` was never touched, so `MediaPlayer.load()` never sent either
+  config over the platform channel at all, and no Android
+  `HlsMediaSource.Factory`/`DashMediaSource.Factory` construction path or iOS
+  `AVPlayerItem` construction path read these six fields specifically, even after the
+  rest of `HlsConfig`/`DashConfig` was wired up in this same release (see Added,
+  below). HLS/DASH played anyway because native infers the media source type from the
+  URL and ExoPlayer/AVPlayer buffer/adapt bitrate by default, so every value a
+  consumer set happened to coincide with native's own behavior.
+  `AdaptiveCacheConfig` (Android-only, transparent HLS/DASH segment cache — a
+  read-through cache of what has already played) is the working equivalent for
+  segment/MPD caching; there is no prefetch-count knob because ExoPlayer's own
+  `LoadControl` already governs how far ahead of the playhead it buffers.
+- Removed `StreamingConfig.streamingHeaders`. Never read by native, on either
+  platform — `MediaItem.httpHeaders` is, and remains, the only header path that
+  reaches native's `load()` call for manifest/segment requests. `HlsConfig` and
+  `DashConfig` inherit from `StreamingConfig`, so this removal applies to both.
+
+### Deprecated
+- `HlsConfig.enableLiveStream` and `DashConfig.enableLiveStream` are now
+  `@Deprecated`. Both duplicated `MediaItem.isLive`, which is already the canonical,
+  fully-wired live flag driving `MediaPlayer.isLive`, `MediaPlayer.isSeekable`, and
+  every other live-aware code path in this package — the config-level flags
+  themselves were never read by native. They remain constructible and are not
+  removed: `MediaPlayer.load()` now ORs whichever one applies (by URL match) into the
+  effective `isLive` determination alongside `MediaItem.isLive`, so an app that
+  already set the deprecated flag does not have its media silently stop being
+  treated as live during the deprecation period. New code should set
+  `MediaItem.isLive` instead.
 
 ### Fixed
+- Live media never derived a duration, so a stream with `enableDvr: true` (see
+  Added, below) reported `isSeekable: true` but no duration to seek within — the
+  lock-screen/notification scrubber advertised `ACTION_SEEK_TO` with nothing to
+  scrub over. Android's `notifyDurationChanged` read `exoPlayer.duration`, which is
+  `C.TIME_UNSET` for a live stream, so the pre-existing `duration > 0` guard meant
+  `onDurationChanged` simply never fired for live media. Android now reads the
+  current `Timeline.Window` and reports `window.durationMs` when the item is live,
+  DVR is enabled, and the window is seekable — re-polling on `onTimelineChanged`
+  since a live window's known length grows over time. iOS derives the same from
+  `AVPlayerItem.seekableTimeRanges`, since `AVPlayerItem.duration` is indefinite for
+  a live item and never fires the usual duration KVO. iOS additionally needed
+  position translation: `currentTime()` is on the item's absolute timeline while
+  `seekableTimeRanges` is a sliding window, so a window-length duration measured
+  against an absolute position would have produced a nonsense progress fraction.
+  Reported position (and the position `seekTo` accepts) are now window-relative on
+  iOS to match, with `seekTo` applying the inverse translation clamped to the
+  currently known seekable range; ExoPlayer already reports window-relative
+  positions, so Android needed no equivalent change. Verified on a Samsung Note 9P
+  against a live HLS stream with a real 601-second DVR window: `dumpsys
+  media_session` showed `actions=311` with a `600960`ms duration (matching the
+  601.0s window measured from the HLS playlist) when DVR was enabled, `actions=55`
+  with `0` duration when it was not, and the scrubber rendered and seeked correctly
+  within the window; VOD was unaffected, reporting its real duration as before.
+- `MediaPlayer.load()` left native holding a stale config on reload. `_configToMap`
+  was only ever invoked from `initialize()` and `updateConfig()` — `load()` sent
+  only `{playerId, mediaItem}` — so a host that rebuilt its `MediaConfig` (e.g.
+  flipping `hlsConfig.enableDvr`) and called `load()` again, without an intervening
+  explicit `updateConfig()` call, left native holding whatever config was current at
+  `initialize()` time. This silently disabled `enableDvr`, `liveLatency`,
+  `maxBitrate`, `minBitrate`, and `enableAdaptiveBitrate` for any runtime
+  reconfiguration — exactly the pattern the new `_applyStreamingConfigForLoad`
+  method (which recomputes `MediaPlayer.dvrEnabled`/`isLive` from the config on
+  every `load()`, see Added, below) assumes works. `load()` now carries the current
+  config snapshot with every call, on both platforms, applied before any
+  config-dependent work runs (track-selection constraints, live latency,
+  `adaptiveCacheConfig`, `autoPlay`); native deliberately does not re-run its own
+  `applyConfig()`/volume-speed-mute reapplication from this path, since that would
+  silently undo an in-progress runtime `setMuted()` call the config snapshot has no
+  way to know about. Last write wins between `load()` and `updateConfig()` — they
+  cannot diverge, since both are serialized from the same single
+  `MediaPlayer._config` field. Known follow-up: `setPlaylist`/`skipToIndex` still
+  call the single-argument native `loadMediaItem`, so per-item streaming config
+  remains stale for playlist-driven items until an explicit `load()` or
+  `updateConfig()` call.
 - Toggling live-stream DVR (`HlsConfig.enableDvr`/`DashConfig.enableDvr`) while the
   same media item keeps playing no longer leaves the lock-screen / notification
   scrubber permanently stuck at whichever seekability it had when the notification
@@ -205,6 +282,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   should verify the new semantics suit them.
 
 ### Added
+- `MediaConfig.hlsConfig`/`.dashConfig` now actually reach native code. The same 209-field
+  audit that found the removed prefetch/MPD-caching fields (see BREAKING, above) found the
+  rest of `HlsConfig`/`DashConfig` reached nothing either — both were entirely inert since the
+  commit that introduced them (added the models but never touched `media_player.dart`).
+  `MediaPlayer.load()` now serializes whichever config applies to the loaded
+  `MediaItem.url` (a URL containing `.m3u8` selects `hlsConfig`, one containing `.mpd` selects
+  `dashConfig` — the same inference native itself uses for source type) and sends it over the
+  platform channel. Fields actually read by native, per platform:
+  - `enableDvr` — Dart-side only; gates `MediaPlayer.isSeekable`/`seekTo` (see below) and
+    whether a live item's duration is reported at all (see Fixed, above).
+  - `liveLatency` — Android: `MediaItem.LiveConfiguration.setTargetOffsetMs`. iOS:
+    `AVPlayerItem.configuredTimeOffsetFromLive` (iOS 14+ only; silently has no effect on
+    iOS 13).
+  - `enableAdaptiveBitrate`/`maxBitrate`/`minBitrate` (inherited from `StreamingConfig`) —
+    Android: `DefaultTrackSelector.Parameters` (`forceHighestSupportedBitrate` when ABR is
+    disabled, `setMaxVideoBitrate`, `setMinVideoBitrate`). iOS: `AVPlayerItem
+    .preferredPeakBitRate` for `maxBitrate` only — there is no faithful iOS equivalent for
+    `minBitrate` or for forcing a single non-adaptive HLS variant, so both are documented as
+    Android-only rather than approximated with a partial/misleading implementation.
+
+  `bitrateStrategy`, `enableAutoQualitySwitch`, `qualitySwitchThreshold`, and
+  `enableBandwidthEstimation` still cross the channel as part of the serialized config but are
+  not read by either platform — see `StreamingConfig`'s dartdoc and the
+  [Live Streaming guide](docs/api-reference/live-streaming.md) for the full field-by-field
+  table.
+- Live streams without DVR are no longer seekable. `MediaPlayer.seekTo` now throws
+  `InvalidStateException` (`currentState: 'live-no-dvr'`) at a single choke point rather than
+  forwarding a seek native would not honour — every path that can trigger a seek, including a
+  lock-screen/Control Center "seekTo" notification action a host app forwards to `seekTo`, is
+  caught by this same guard. Two new getters expose the underlying state:
+  `MediaPlayer.dvrEnabled` (derived from whichever `HlsConfig`/`DashConfig` matched the loaded
+  item's URL at `load()` time) and `MediaPlayer.isSeekable` (`false` only when `isLive &&
+  !dvrEnabled`). Withheld natively too: Android's media session omits `ACTION_SEEK_TO` and iOS
+  disables `changePlaybackPositionCommand`/`skipForwardCommand`/`skipBackwardCommand`. Verified
+  on device via `dumpsys media_session`: VOD reports `actions=311` (`SEEK_TO` present), a live
+  stream without DVR reports `actions=55` (absent), and toggling `enableDvr` and reloading
+  restores `311` without the notification needing to be re-shown.
+- `NotificationConfig.priority`, `.dismissible`, and `.customActions` now reach native
+  (**Android only** — see each field's dartdoc for why there is no faithful iOS equivalent):
+  `priority` drives both the `NotificationChannel` importance (set once, at
+  `NotificationService.initialize()` time — Android does not allow an existing channel's
+  importance to change later) and `NotificationCompat.setPriority` on every posted
+  notification; `dismissible: true` posts the notification as non-ongoing
+  (`setOngoing(false)`) with a delete intent so it can actually be swiped away (`false`, the
+  default, matches the pre-existing ongoing behavior); `customActions` are rendered as
+  additional `NotificationCompat.Action` buttons beyond the built-in
+  play/pause/next/previous/stop/seek set, each dispatching its `NotificationAction.id` back
+  through `NotificationService.actionEventStream` when tapped.
+- `PipConfig.actions` and `.showPlaybackControls` now reach native (`actions` is
+  **Android only** — AVKit exposes no API for custom PiP action buttons on iOS). Each
+  `PipAction` is rendered as an `android.app.RemoteAction` via
+  `PictureInPictureParams.Builder.setActions()`, capped at 3 visible actions regardless of
+  platform API level (the system itself allows 3 on API 26-31, 5 on 32+); `showPlaybackControls:
+  false` suppresses them entirely. Tapping an action is now delivered end to end: the existing
+  native `onPipAction` broadcast — previously emitted with no Dart-side handler at all, the
+  same defect class as the already-fixed `onDrmError` event — is parsed into a new
+  `PipActionEvent` model and delivered on a new `MediaPlayer.pipActionStream`.
+  `showPlaybackControls` is additionally honoured, partially, on iOS via
+  `AVPictureInPictureController.requiresLinearPlayback` (iOS 14+, set to
+  `!showPlaybackControls`), which hides the skip-forward/skip-back buttons and scrubbing bar
+  from the system PiP overlay but cannot hide the mandatory system Play/Pause control.
+- `DrmConfig.customData` now reaches native as license (key)-request-scoped HTTP properties,
+  distinct from `DrmConfig.headers` (which applies to every DRM-related HTTP request on both
+  platforms, including provisioning/the FairPlay certificate fetch). Android: each entry is set
+  via `HttpMediaDrmCallback.setKeyRequestProperty`. iOS: each entry is set as a header on the
+  license `POST` request built in `DrmHandler.requestLicense` only — not on the certificate
+  `GET`. Values are converted for the wire: `String` passes through unchanged, `bool`/`int`/
+  `double` use their own unambiguous string representation, nested `Map`/`List` values are
+  JSON-encoded, and `null`/unsupported values are skipped (logged as a warning natively) rather
+  than sent as the literal string `"null"`.
 - `FullscreenMediaPlayer` orientation control (non-breaking; defaults preserve the prior
   landscape-locked behavior):
   - `preferredOrientations` — orientations applied while fullscreen is active

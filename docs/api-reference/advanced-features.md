@@ -66,6 +66,15 @@ await notifications.dismiss(controller.playerId);
   action (including `"seekTo"`) but is `@Deprecated` because it cannot carry
   `position` — dragging the scrub bar is unactionable through it. Prefer
   `actionEventStream` in new code.
+- `NotificationConfig.priority`, `.dismissible`, and `.customActions` are **Android only**
+  (`MPRemoteCommandCenter` on iOS has no equivalent concept for any of the three — no priority/
+  importance, no user-dismissible surface an app controls, and only a fixed set of semantic
+  commands rather than arbitrary app-supplied actions). `priority` defaults to `null` ("no
+  explicit priority requested"), which native resolves to `IMPORTANCE_LOW`/`PRIORITY_LOW`; set
+  it explicitly (e.g. `NotificationPriority.high`) for a louder/heads-up notification.
+  `customActions` render as additional buttons beyond the built-in
+  play/pause/next/previous/stop/seek set and dispatch their `NotificationAction.id` back through
+  `actionEventStream`, same as any other action.
 
 ## Picture-in-Picture
 
@@ -80,6 +89,19 @@ controller.pipStatusStream.listen((s) => print('PiP active: ${s.isActive}'));
 - iOS: physical device (`AVPictureInPictureController`).
 - Android: API 26+. Relay `onPictureInPictureModeChanged` from your Activity to the plugin.
 - `checkPipAvailability()` returns false on unsupported devices.
+- `PipConfig.actions` (**Android only**) renders each `PipAction` as an
+  `android.app.RemoteAction` in the system PiP window, capped at 3 visible actions; tapping one
+  delivers a `PipActionEvent` on `controller.player.pipActionStream`. AVKit exposes no API for
+  custom PiP action buttons, so this has no iOS equivalent. `PipConfig.showPlaybackControls`
+  gates whether `actions` renders at all on Android; on iOS it only partially maps to
+  `AVPictureInPictureController.requiresLinearPlayback` (iOS 14+) — it hides skip-forward/
+  skip-back and the scrub bar, but the system Play/Pause control can never be hidden.
+
+```dart
+controller.player.pipActionStream.listen((event) {
+  // event.actionId matches a PipAction.id declared in PipConfig.actions (Android only)
+});
+```
 
 ## Casting (Chromecast / AirPlay)
 
@@ -94,6 +116,12 @@ await controller.disconnectFromCastDevice();
 
 For an iOS-native AirPlay route picker, use the `AirPlayButton` widget (iOS only). Chromecast
 needs Google Play Services and a device on the same Wi-Fi; AirPlay needs an AirPlay target.
+
+`MediaConfig.castConfig` (a `CastConfig`) actually reaches native: `enabled`/`enableChromecast`
+gate Chromecast setup on Android, `enabled`/`enableAirPlay` gate `AVPlayer
+.allowsExternalPlayback` on iOS, `chromecastAppId` overrides the receiver app ID on Android
+(falls back to Google's Default Media Receiver `CC1AD845` when unset), and `discoveryTimeout`
+bounds Android Chromecast discovery. There is no DLNA support in this package.
 
 ## List playback
 

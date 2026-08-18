@@ -52,7 +52,9 @@ platform is called out explicitly.
 - DASH (**Android only** — `DashMediaSource.kt`).
 - Adaptive bitrate / bandwidth estimation (`StreamingService` + native `NetworkMonitor`).
 - Quality and audio-track selection.
-- Live + DVR: `enableDvr`, `liveLatency`, segment prefetch.
+- Live + DVR: `enableDvr` (seek gating + DVR-window duration reporting), `liveLatency`
+  (target offset from live edge; iOS 14+ only), `maxBitrate`/`minBitrate`/
+  `enableAdaptiveBitrate` (track-selection bounds; iOS honors only `maxBitrate`).
 
 ### Subtitles
 - SRT / WebVTT / ASS / SSA parsing and styling (`SubtitleService`, Dart-side).
@@ -62,7 +64,11 @@ platform is called out explicitly.
 - Native certificate pinning (SHA-256 / SPKI) on license requests.
 
 ### Picture-in-Picture
-- Both platforms: auto-enter-on-background, custom actions, aspect ratio.
+- Both platforms: auto-enter-on-background, aspect ratio.
+- Custom actions (**Android only** — `PipConfig.actions` renders `RemoteAction`s; taps deliver
+  `PipActionEvent` on `MediaPlayer.pipActionStream`. No AVKit API exists for custom PiP action
+  buttons on iOS). `showPlaybackControls` gates them on Android and partially maps to iOS
+  `requiresLinearPlayback` (iOS 14+).
 
 ### Casting
 - Chromecast (**Android only** — `CastHandler` + `CastOptionsProvider`).

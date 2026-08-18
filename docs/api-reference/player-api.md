@@ -19,7 +19,7 @@ Creates the controller and its underlying `MediaPlayer`, and calls `initialize()
 | `Future<void> setPlaylist(Playlist playlist, {int? startIndex})` | Load a playlist |
 | `Future<void> play()` / `pause()` / `stop()` | Playback control |
 | `Future<void> togglePlayPause()` | Toggle play/pause |
-| `Future<void> seekTo(Duration position)` | Seek to a position |
+| `Future<void> seekTo(Duration position)` | Seek to a position. Throws `InvalidStateException` for a live item that is not seekable (`isLive && !dvrEnabled` — see [Live Streaming](live-streaming.md)) |
 | `Future<void> seekForward([Duration duration])` / `seekBackward([Duration duration])` | Relative seek (default 10s) |
 | `Future<void> setVolume(double volume)` | 0.0–1.0 |
 | `Future<void> increaseVolume([double amount])` / `decreaseVolume([double amount])` | Step volume |
@@ -117,7 +117,8 @@ PiP: `checkPipAvailability`, `enterPictureInPicture`, `exitPictureInPicture`. Ca
 
 `stateStream`, `positionStream`, `durationStream`, `volumeStream`, `speedStream`,
 `subtitleTracksStream`, `qualityTracksStream`, `audioTracksStream`, `bandwidthStream` (bps),
-`bufferHealthStream`, `pipStatusStream`, `castStatusStream`, `castDevicesStream`,
+`bufferHealthStream`, `pipStatusStream`, `pipActionStream` (carries `PipActionEvent` — a tap on
+a custom `PipConfig.actions` entry, Android only), `castStatusStream`, `castDevicesStream`,
 `drmSessionStream`, `errorStream` (typed `MediaPlayerException`s), `screenCaptureStream`,
 `notificationActionEventStream` (carries `NotificationActionEvent`, including scrub-bar
 position; prefer this over the deprecated `Stream<String> notificationActionStream`). See
@@ -126,7 +127,9 @@ position; prefer this over the deprecated `Stream<String> notificationActionStre
 ### Getters
 
 `playerId`, `config`, `currentItem`, `currentPlaylist`, `currentState`, `isPlaying`,
-`isInitialized`, `isDisposed`, `isLive`, `currentBandwidth`, `networkQuality`,
+`isInitialized`, `isDisposed`, `isLive`, `dvrEnabled` (whether DVR is enabled for the current
+live item, derived from whichever `HlsConfig`/`DashConfig` matched its URL at `load()` time),
+`isSeekable` (`false` only when `isLive && !dvrEnabled`), `currentBandwidth`, `networkQuality`,
 `bufferStatistics`, `lastBufferHealth`, the track lists/selections, and the PiP/cast status
 getters mirrored on the controller.
 

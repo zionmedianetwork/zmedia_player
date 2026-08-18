@@ -11,6 +11,43 @@ Applies to any task touching `lib/`, `test/`, `example/`, widgets, controllers, 
 
 Narrow exceptions where you may act directly without the agent: pure documentation edits (e.g. this file, `docs/`, `README.md`), git/branch/release operations, and answering questions that require no code changes.
 
+## Required Documentation Updates
+
+Documentation drift — docs describing a capability that does not exist, or omitting one that
+does — is this project's recurring defect (see the audit that produced this branch's changes:
+28 config fields across `HlsConfig`/`DashConfig`/etc. were declared, exported, and documented,
+but reached nothing). This is not optional cleanup; it is part of finishing the change.
+
+**Whenever a change involves an API change, a data-contract change, or a feature addition or
+removal, ALL of the following MUST be updated in the same change:**
+
+- the root `README.md`
+- `AGENTS.md`
+- every affected file under `docs/`
+- `CHANGELOG.md` (under `[Unreleased]`, in the appropriate Keep-a-Changelog category —
+  `BREAKING`/`Deprecated`/`Fixed`/`Changed`/`Added`)
+
+The three trigger categories, concretely:
+- **API change** — a public class/method/field in `lib/zmedia_player.dart`'s export surface is
+  added, removed, renamed, or its behavior changes (e.g. a getter that used to always succeed
+  now throws).
+- **Data-contract change** — the shape of a `MethodChannel` payload changes in either direction
+  (a new/removed/renamed key in a `load`/`initialize`/`updateConfig`/event-callback map, a new
+  native→Dart event). **This is the easiest to miss**: `flutter analyze` cannot see it (it is a
+  `Map<String, dynamic>` on both sides of the channel), and the test suite cannot catch it
+  either, since every test mocks the channel rather than exercising the real native
+  implementation — a payload key that native silently ignores, or a Dart field that never gets
+  serialized, produces zero analyzer errors and zero failing tests. Documentation is the only
+  place this class of defect is ever recorded, which is exactly how `HlsConfig`/`DashConfig`
+  went unwired for as long as they did.
+- **Feature addition or removal** — a config field starts (or stops) reaching a real native API,
+  a field is deleted because nothing ever read it, or a field is deprecated in favor of another.
+
+When in doubt about whether a change qualifies, treat it as qualifying. Verify every doc claim
+you write against the code you just changed — do not describe a capability you have not
+confirmed by reading the native implementation, and do not leave a stale claim (e.g. "not yet
+wired", a removed field, an inert default) after the underlying code has moved on.
+
 ## Project Overview
 
 ZMedia Player is a comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms. It provides enterprise-grade capabilities including DRM support, adaptive streaming (HLS/DASH), Picture-in-Picture, casting (Chromecast/AirPlay), and live streaming.
@@ -339,10 +376,17 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - Token-based auth: Custom headers with JWT support
 
 ### Live Streaming DVR
-- `enableDvr: true` allows seeking in live streams
-- `liveLatency` configures target latency (default: 3s)
-- Live edge detection via isLive flag
-- Segment prefetching for smooth playback
+- `enableDvr: true` on the matching `HlsConfig`/`DashConfig` allows seeking in live streams
+  (`MediaPlayer.isSeekable`/`seekTo`) and enables reporting of a DVR-window duration to seek
+  within; without it, `seekTo` throws `InvalidStateException`
+- `liveLatency` (a `Duration?`, no default — unset means native's own default live-edge
+  behavior applies) configures the target offset from the live edge:
+  `MediaItem.LiveConfiguration.setTargetOffsetMs` on Android,
+  `AVPlayerItem.configuredTimeOffsetFromLive` on iOS (14+ only)
+- `MediaItem.isLive` is the canonical live flag; `HlsConfig`/`DashConfig.enableLiveStream` is
+  deprecated in its favor
+- `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track selection (Android via
+  `DefaultTrackSelector`; iOS honors only `maxBitrate` via `preferredPeakBitRate`)
 
 ### Picture-in-Picture
 - Android: Uses `enterPictureInPictureMode()` API
@@ -366,6 +410,8 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 6. **Subtitle styling uses ARGB color format** - e.g., 0xFFFFFFFF for white, 0x80000000 for semi-transparent black
 7. **Multiple instances are supported** - Use unique playerIds for concurrent players (e.g., ListView)
 8. **MethodChannel calls are async** - Always await native operations to prevent race conditions
+9. **`seekTo` throws on a non-seekable live stream** - `MediaPlayer.seekTo` throws `InvalidStateException` when `isLive && !dvrEnabled`; check `MediaPlayer.isSeekable` first, or set `enableDvr: true` on the matching `HlsConfig`/`DashConfig`
+10. **`load()` carries the current config, `setPlaylist`/`skipToIndex` do not (yet)** - Reloading with a changed `MediaConfig` (e.g. flipping `hlsConfig.enableDvr`) via `load()` takes effect immediately; `setPlaylist`/`skipToIndex` still call native `loadMediaItem` without a config snapshot, so per-item streaming config can be stale for playlist-driven items until an explicit `load()` or `updateConfig()` call
 
 ## UI/UX Design Specifications
 
@@ -642,8 +688,12 @@ The control overlay consists of three main zones:
 3. Write/update tests in `test/`
 4. Run `flutter test` to verify
 5. Test in example app: `cd example && flutter run`
-6. Update relevant documentation in `docs/` if adding features
-7. Ensure no breaking changes to public API
+6. If this change is an API change, a data-contract change, or a feature addition/removal,
+   update `README.md`, `AGENTS.md`, every affected file under `docs/`, and `CHANGELOG.md` —
+   see [Required Documentation Updates](#required-documentation-updates) above; this is
+   mandatory, not conditional on "if adding features"
+7. Ensure no breaking changes to public API (or, if the change is intentionally breaking,
+   document it under `CHANGELOG.md`'s `BREAKING` section per step 6)
 
 ## Branching Strategy
 

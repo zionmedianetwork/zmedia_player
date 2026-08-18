@@ -18,9 +18,8 @@ class PipConfig {
   /// a drawable resource name in the host app's own resources, falling back
   /// to a stock icon when absent/unresolved. Tapping an action broadcasts to
   /// a native receiver which invokes `onPipAction` on the platform channel
-  /// with `{"playerId": ..., "actionId": ...}` — note that as of this wave
-  /// there is not yet a corresponding Dart-side stream/listener for that
-  /// event; wiring one up in `MediaPlayer` is a follow-up. The system caps
+  /// with `{"playerId": ..., "actionId": ...}`, which `MediaPlayer` surfaces
+  /// as a [PipActionEvent] on `MediaPlayer.pipActionStream`. The system caps
   /// the number of visible PiP actions (3 on API 26-31, 5 on 32+); this
   /// package defensively truncates to the first 3 regardless of platform
   /// version.
