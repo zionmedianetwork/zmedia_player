@@ -5,18 +5,9 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.5] - 2026-07-01
-
-
-### Other Changes
-
-- Merge pull request #63 from zionmedianetwork/fix/native-surface-leak-grey-systemui (@Adolphe Cher-Aime) (e7f6257)
-- Merge pull request #62 from zionmedianetwork/fix/release-version-from-tag (@Adolphe Cher-Aime) (a025aa5)
-- ci(release): derive current version from latest tag, not main pubspec (@Adolphe Cher-Aime) (cad9954)
-
-**Full Changelog**: https://github.com/zionmedianetwork/zmedia_player/compare/v0.2.4...v0.2.5
-
 ## [Unreleased]
+
+## [0.3.0] - 2026-08-18
 
 ### BREAKING
 - Removed `DrmConfig.allowOffline`, `DrmConfig.offlineLicenseDuration`, and
@@ -359,6 +350,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `rotationLocked` — a `ValueListenable<bool>` that live-pins the device to portrait
     when true and re-applies `preferredOrientations` when false.
   - `exitOrientations` — orientations restored when the route pops (default: all four).
+
+## [0.2.5] - 2026-07-01
+
+
+### Other Changes
+
+- Merge pull request #63 from zionmedianetwork/fix/native-surface-leak-grey-systemui (@Adolphe Cher-Aime) (e7f6257)
+- Merge pull request #62 from zionmedianetwork/fix/release-version-from-tag (@Adolphe Cher-Aime) (a025aa5)
+- ci(release): derive current version from latest tag, not main pubspec (@Adolphe Cher-Aime) (cad9954)
+
+**Full Changelog**: https://github.com/zionmedianetwork/zmedia_player/compare/v0.2.4...v0.2.5
 
 ## [0.2.2] - 2026-06-25
 
