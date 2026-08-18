@@ -105,6 +105,11 @@ class PipHandler: NSObject {
                     zlog("PipHandler: Re-applied autoEnterOnBackground=\(autoEnter) on unchanged-layer path")
                 }
 
+                // Re-apply showPlaybackControls for the same reason.
+                if #available(iOS 14.0, *), let controller = pipController {
+                    applyShowPlaybackControls(to: controller)
+                }
+
                 // Still notify available status
                 notifyPipStatusChanged(
                     state: "available",
@@ -144,6 +149,9 @@ class PipHandler: NSObject {
             // Configure PiP controller
             if #available(iOS 14.2, *) {
                 pipController?.canStartPictureInPictureAutomaticallyFromInline = config?["autoEnterOnBackground"] as? Bool ?? false
+            }
+            if #available(iOS 14.0, *), let controller = pipController {
+                applyShowPlaybackControls(to: controller)
             }
 
             // Notify that PiP is available
@@ -187,6 +195,32 @@ class PipHandler: NSObject {
         } catch {
             zlog("PipHandler: Failed to configure audio session category: \(error.localizedDescription)")
         }
+    }
+
+    /// Applies `PipConfig.showPlaybackControls` (Wave C, gate item
+    /// "PipConfig.actions and PipConfig.showPlaybackControls are ignored
+    /// natively") to a live [AVPictureInPictureController].
+    ///
+    /// **This is a partial, best-effort mapping, not a faithful one-to-one
+    /// equivalent of the Android behaviour.** `AVPictureInPictureController`'s
+    /// on-screen controls are entirely system-owned: there is no public API to
+    /// hide/replace them, and Play/Pause specifically can never be hidden by
+    /// an app. The one lever iOS exposes that overlaps with "playback
+    /// controls" is `requiresLinearPlayback` (iOS 14+, normally used for live
+    /// content): setting it `true` removes the skip-forward/skip-back buttons
+    /// and the scrubbing bar from the system PiP overlay, leaving only
+    /// Play/Pause. We set `requiresLinearPlayback = !showPlaybackControls`, so
+    /// `showPlaybackControls: false` hides scrub/skip but Play/Pause always
+    /// remains — unlike Android, where `showPlaybackControls: false` can
+    /// suppress the custom PiP actions entirely (see `PipHandler.kt`).
+    /// [PipConfig.actions] itself has no iOS equivalent at all: AVKit exposes
+    /// no API for adding custom action buttons to the system PiP window, so
+    /// `actions` is intentionally left unread on this platform.
+    @available(iOS 14.0, *)
+    private func applyShowPlaybackControls(to controller: AVPictureInPictureController) {
+        let showPlaybackControls = (config?["showPlaybackControls"] as? Bool) ?? true
+        controller.requiresLinearPlayback = !showPlaybackControls
+        zlog("PipHandler: Applied showPlaybackControls=\(showPlaybackControls) via requiresLinearPlayback=\(!showPlaybackControls)")
     }
 
     // MARK: - PiP Availability
@@ -557,6 +591,10 @@ extension PipHandler {
             let autoStart = config["autoEnterOnBackground"] as? Bool ?? false
             pipController?.canStartPictureInPictureAutomaticallyFromInline = autoStart
             zlog("PipHandler: Updated auto-start configuration: \(autoStart)")
+        }
+
+        if #available(iOS 14.0, *), let controller = pipController {
+            applyShowPlaybackControls(to: controller)
         }
     }
 

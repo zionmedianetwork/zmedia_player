@@ -16,8 +16,9 @@ Core `MediaPlayer` and `MediaController` API reference with all methods and prop
 All available events, streams, and callback handlers.
 
 ### [Live Streaming](live-streaming.md)
-Playing live HLS (Android + iOS) and DASH (Android only) manifests — what's native-player-default
-behavior today vs. what `HlsConfig`/`DashConfig` fields are not yet wired to.
+Playing live HLS (Android + iOS) and DASH (Android only) manifests — native-player-default
+behavior plus which `HlsConfig`/`DashConfig` fields (DVR seek gating, live latency target,
+bitrate bounds) are wired to native, and which are not.
 
 ### [DRM Configuration](drm.md)
 Digital Rights Management setup for Widevine, FairPlay, and EZDRM.

@@ -222,6 +222,15 @@ class CastStatus {
 }
 
 /// Configuration for cast/screencast
+///
+/// This config is forwarded verbatim to the native `initializeCast` channel
+/// call (see [MediaPlayer]'s internal `_ensureCastInitialized`), where
+/// [CastHandler] (Android) and [AirPlayHandler] (iOS) each read the fields
+/// relevant to their platform. Fields with no honest native implementation
+/// have been deliberately removed rather than left as silent no-ops — see
+/// the removal of `enableDlna` (no DLNA support anywhere in this package)
+/// and `autoConnect` (would require persisting a last-used-device identifier
+/// and reacting to discovery results; no such mechanism exists yet).
 class CastConfig {
   /// Whether casting is enabled
   final bool enabled;
@@ -232,16 +241,12 @@ class CastConfig {
   /// Enable AirPlay
   final bool enableAirPlay;
 
-  /// Enable DLNA
-  final bool enableDlna;
-
-  /// Chromecast receiver app ID
+  /// Chromecast receiver app ID. Falls back to Google's Default Media
+  /// Receiver (`CC1AD845`) on Android when unset. Meaningless for AirPlay.
   final String? chromecastAppId;
 
-  /// Whether to auto-connect to last used device
-  final bool autoConnect;
-
-  /// Discovery timeout in seconds
+  /// Discovery timeout in seconds. Honoured on Android's Chromecast
+  /// discovery path.
   final int discoveryTimeout;
 
   /// Whether to show cast button in controls
@@ -251,9 +256,7 @@ class CastConfig {
     this.enabled = true,
     this.enableChromecast = true,
     this.enableAirPlay = true,
-    this.enableDlna = false,
     this.chromecastAppId,
-    this.autoConnect = false,
     this.discoveryTimeout = 10,
     this.showCastButton = true,
   });
@@ -262,9 +265,7 @@ class CastConfig {
     bool? enabled,
     bool? enableChromecast,
     bool? enableAirPlay,
-    bool? enableDlna,
     String? chromecastAppId,
-    bool? autoConnect,
     int? discoveryTimeout,
     bool? showCastButton,
   }) {
@@ -272,9 +273,7 @@ class CastConfig {
       enabled: enabled ?? this.enabled,
       enableChromecast: enableChromecast ?? this.enableChromecast,
       enableAirPlay: enableAirPlay ?? this.enableAirPlay,
-      enableDlna: enableDlna ?? this.enableDlna,
       chromecastAppId: chromecastAppId ?? this.chromecastAppId,
-      autoConnect: autoConnect ?? this.autoConnect,
       discoveryTimeout: discoveryTimeout ?? this.discoveryTimeout,
       showCastButton: showCastButton ?? this.showCastButton,
     );
@@ -285,9 +284,7 @@ class CastConfig {
       'enabled': enabled,
       'enableChromecast': enableChromecast,
       'enableAirPlay': enableAirPlay,
-      'enableDlna': enableDlna,
       'chromecastAppId': chromecastAppId,
-      'autoConnect': autoConnect,
       'discoveryTimeout': discoveryTimeout,
       'showCastButton': showCastButton,
     };

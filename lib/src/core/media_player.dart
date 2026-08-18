@@ -8,6 +8,7 @@ import '../models/playlist.dart';
 import '../models/subtitle_track.dart';
 import '../models/streaming_config.dart';
 import '../models/pip_config.dart';
+import '../models/pip_action_event.dart';
 import '../models/cast_device.dart';
 import '../models/drm_config.dart';
 import '../models/buffering_config.dart';
@@ -150,6 +151,8 @@ class MediaPlayer {
       StreamController<List<AudioTrack>>.broadcast();
   final StreamController<PipStatus> _pipStatusController =
       StreamController<PipStatus>.broadcast();
+  final StreamController<PipActionEvent> _pipActionController =
+      StreamController<PipActionEvent>.broadcast();
   final StreamController<CastStatus> _castStatusController =
       StreamController<CastStatus>.broadcast();
   final StreamController<List<CastDevice>> _castDevicesController =
@@ -194,6 +197,20 @@ class MediaPlayer {
 
   /// Whether current media is live
   bool _isLive = false;
+
+  /// Whether DVR is enabled for the current live media, allowing seeking on
+  /// an otherwise non-seekable live stream.
+  ///
+  /// Recomputed on every [load] from whichever streaming config applies to
+  /// the loaded [MediaItem.url] — `HlsConfig.enableDvr` for a `.m3u8` URL
+  /// (via [MediaConfig.hlsConfig]), `DashConfig.enableDvr` for a `.mpd` URL
+  /// (via [MediaConfig.dashConfig]), or `false` when neither applies (no
+  /// streaming config configured, or a progressive URL). See
+  /// [_applyStreamingConfigForLoad]. Every consumer of this field
+  /// ([isSeekable], [seekTo], and the notification/lock-screen surface via
+  /// [NotificationService]) reads it unchanged from before this wiring
+  /// landed.
+  bool _dvrEnabled = false;
 
   /// Current PiP status
   PipStatus _pipStatus = const PipStatus(
@@ -718,6 +735,14 @@ class MediaPlayer {
     return _pipStatusController.stream;
   }
 
+  /// Stream of [PipActionEvent]s — one per tap on a custom PiP action
+  /// declared via `PipConfig.actions` (Android only; see [PipActionEvent]'s
+  /// dartdoc). Delivered from the native `onPipAction` method-channel call.
+  Stream<PipActionEvent> get pipActionStream {
+    _throwIfDisposed();
+    return _pipActionController.stream;
+  }
+
   /// Stream of cast status updates
   Stream<CastStatus> get castStatusStream {
     _throwIfDisposed();
@@ -776,6 +801,25 @@ class MediaPlayer {
   bool get isLive {
     _throwIfDisposed();
     return _isLive;
+  }
+
+  /// Whether DVR is enabled for the current live media. See [_dvrEnabled]
+  /// for how this is derived from the active `HlsConfig`/`DashConfig` on
+  /// every [load].
+  bool get dvrEnabled {
+    _throwIfDisposed();
+    return _dvrEnabled;
+  }
+
+  /// Whether the current media can be seeked.
+  ///
+  /// `false` only for a live stream without DVR enabled ([isLive] `&&`
+  /// `!`[dvrEnabled]) — every other case (VOD, or live with DVR) is
+  /// seekable. [seekTo] throws [InvalidStateException] rather than
+  /// attempting a seek when this is `false`.
+  bool get isSeekable {
+    _throwIfDisposed();
+    return !(_isLive && !_dvrEnabled);
   }
 
   /// Current PiP status
@@ -1040,8 +1084,10 @@ class MediaPlayer {
 
       _currentItem = item;
 
-      // Initialize isLive flag from the media item
-      _isLive = item.isLive;
+      // Derives _isLive/_dvrEnabled from item.isLive plus whichever streaming
+      // config (HlsConfig/DashConfig) applies to item.url — see the method
+      // doc.
+      _applyStreamingConfigForLoad(item);
 
       // Clear previous track data immediately to prevent stale UI
       _subtitleTracks = [];
@@ -1364,6 +1410,21 @@ class MediaPlayer {
         'Seek position cannot be negative',
         parameter: 'position',
         value: position,
+      );
+    }
+
+    // Live streams without DVR are not seekable — reject rather than
+    // silently forwarding a seek native will not honour (see [isSeekable]).
+    // This is the single choke point every seek path funnels through,
+    // including a lock-screen/Control Center "seekTo" notification action:
+    // NotificationService never calls seekTo itself (see its class dartdoc),
+    // so a host app forwarding that action here is caught by this guard the
+    // same as a direct call.
+    if (_isLive && !_dvrEnabled) {
+      throw const InvalidStateException(
+        'Cannot seek: current media is a live stream without DVR enabled',
+        currentState: 'live-no-dvr',
+        requiredState: 'seekable',
       );
     }
 
@@ -2056,6 +2117,7 @@ class MediaPlayer {
       _bandwidthController,
       _bufferHealthController,
       _pipStatusController,
+      _pipActionController,
       _castStatusController,
       _castDevicesController,
       _drmSessionController,
@@ -2115,6 +2177,7 @@ class MediaPlayer {
       'bandwidthController',
       'bufferHealthController',
       'pipStatusController',
+      'pipActionController',
       'castStatusController',
       'castDevicesController',
       'drmSessionController',
@@ -2128,6 +2191,43 @@ class MediaPlayer {
   }
 
   // Private helper methods
+
+  /// Derives [_isLive] and [_dvrEnabled] for a freshly-[load]ed [item].
+  ///
+  /// The applicable streaming config is inferred from [item.url] the same
+  /// way native infers the media source type: a URL containing `.m3u8`
+  /// selects [MediaConfig.hlsConfig], one containing `.mpd` selects
+  /// [MediaConfig.dashConfig]; anything else (progressive playback) has no
+  /// applicable streaming config at all.
+  ///
+  ///  - [_dvrEnabled] becomes that config's `enableDvr` (`false` when no
+  ///    config applies), gating [isSeekable]/[seekTo] for this item.
+  ///  - [_isLive] becomes `item.isLive` OR'd with that config's deprecated
+  ///    `enableLiveStream` — see `HlsConfig.enableLiveStream`'s dartdoc for
+  ///    why this is an OR rather than a replacement: `MediaItem.isLive` is
+  ///    the canonical field, but an app that already set the deprecated flag
+  ///    must not have media silently stop being treated as live during the
+  ///    deprecation period.
+  void _applyStreamingConfigForLoad(MediaItem item) {
+    final url = item.url;
+    var dvrEnabled = false;
+    var configEnablesLive = false;
+
+    if (url.contains('.m3u8')) {
+      final hls = _config.hlsConfig;
+      dvrEnabled = hls?.enableDvr ?? false;
+      // ignore: deprecated_member_use_from_same_package
+      configEnablesLive = hls?.enableLiveStream ?? false;
+    } else if (url.contains('.mpd')) {
+      final dash = _config.dashConfig;
+      dvrEnabled = dash?.enableDvr ?? false;
+      // ignore: deprecated_member_use_from_same_package
+      configEnablesLive = dash?.enableLiveStream ?? false;
+    }
+
+    _dvrEnabled = dvrEnabled;
+    _isLive = item.isLive || configEnablesLive;
+  }
 
   /// Validate playlist operation
   void _validatePlaylistOperation() {
@@ -2239,6 +2339,9 @@ class MediaPlayer {
           break;
         case 'onPipStatusChanged':
           _handlePipStatusChanged(arguments!);
+          break;
+        case 'onPipAction':
+          _handlePipAction(arguments!);
           break;
         case 'onCastStatusChanged':
           _handleCastStatusChanged(arguments!);
@@ -2666,6 +2769,24 @@ class MediaPlayer {
     }
   }
 
+  /// Handle Picture-in-Picture custom action taps from platform (Android
+  /// only — see [PipActionEvent]).
+  void _handlePipAction(Map<dynamic, dynamic> arguments) {
+    if (_isDisposed) return;
+
+    try {
+      final event = PipActionEvent.fromMap(arguments);
+
+      if (!_pipActionController.isClosed) {
+        _pipActionController.add(event);
+      }
+
+      debugPrint('PiP action received: ${event.actionId}');
+    } catch (e) {
+      debugPrint('Error processing PiP action: $e');
+    }
+  }
+
   /// Update current state and notify listeners
   void _updateState(PlaybackState newState) {
     if (_isDisposed) return;
@@ -2703,7 +2824,7 @@ class MediaPlayer {
     try {
       await _invokeMethod('initializeCast', {
         'playerId': playerId,
-        'config': const CastConfig().toMap(),
+        'config': (_config.castConfig ?? const CastConfig()).toMap(),
       });
       _castInitialized = true;
     } on PlatformException catch (e) {
@@ -2735,6 +2856,14 @@ class MediaPlayer {
       // and the DRM fail-safe. iOS never reads this key.
       if (config.adaptiveCacheConfig != null)
         'adaptiveCacheConfig': config.adaptiveCacheConfig!.toMap(),
+      // Both cross the channel unconditionally when set; native picks
+      // whichever one applies to the media item currently being loaded by
+      // inspecting its URL (`.m3u8` -> hlsConfig, `.mpd` -> dashConfig — the
+      // same inference `MediaPlayer._applyStreamingConfigForLoad` uses on
+      // the Dart side). See StreamingConfig/HlsConfig/DashConfig's dartdocs
+      // for exactly which fields each platform actually reads.
+      if (config.hlsConfig != null) 'hlsConfig': config.hlsConfig!.toMap(),
+      if (config.dashConfig != null) 'dashConfig': config.dashConfig!.toMap(),
     };
   }
 

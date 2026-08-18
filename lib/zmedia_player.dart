@@ -30,6 +30,7 @@ export 'src/models/analytics_metrics.dart';
 // Phase 3 Models
 export 'src/models/notification_config.dart';
 export 'src/models/pip_config.dart';
+export 'src/models/pip_action_event.dart';
 export 'src/models/cast_device.dart';
 
 // Services (Phase 1 - P0)

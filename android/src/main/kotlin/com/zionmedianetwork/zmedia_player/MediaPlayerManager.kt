@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.DataSource
@@ -478,6 +479,13 @@ class MediaPlayerInstance(
 
         val uri = Uri.parse(url)
 
+        // Wave D: HlsConfig/DashConfig wiring. Whichever config applies to
+        // this URL (HlsConfig for .m3u8, DashConfig for .mpd — same
+        // inference as the format detection a few lines below) drives the
+        // ExoPlayer track-selector's bitrate constraints regardless of
+        // media-source type.
+        applyStreamingTrackSelectionConstraints(activeStreamingConfig(uri))
+
         // Determine which DataSource.Factory to use (custom headers or default).
         val activeDataSourceFactory: androidx.media3.datasource.DataSource.Factory =
             if (httpHeaders != null && httpHeaders.isNotEmpty()) {
@@ -558,19 +566,19 @@ class MediaPlayerInstance(
                         androidx.media3.exoplayer.hls.HlsMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
+                            .createMediaSource(buildMediaItem(uri))
 
                     uri.toString().contains(".mpd") ->
                         androidx.media3.exoplayer.dash.DashMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
+                            .createMediaSource(buildMediaItem(uri))
 
                     else ->
                         androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
+                            .createMediaSource(buildMediaItem(uri))
                 }
 
                 drmHandler = handler
@@ -946,19 +954,99 @@ class MediaPlayerInstance(
         return s.contains(".m3u8") || s.contains(".mpd")
     }
 
+    /**
+     * Wave D: returns the top-level (per-player) HlsConfig/DashConfig map that
+     * applies to [uri] — HlsConfig for `.m3u8`, DashConfig for `.mpd`, `null`
+     * for anything else (progressive playback has no streaming config). Both
+     * are serialized unconditionally by MediaPlayer._configToMap on the Dart
+     * side (see streaming_config.dart's toMap()); this mirrors that same URL
+     * -> config inference on the native side.
+     */
+    private fun activeStreamingConfig(uri: Uri): Map<String, Any>? {
+        val topConfig = config ?: return null
+        return when {
+            uri.toString().contains(".m3u8") -> {
+                @Suppress("UNCHECKED_CAST")
+                topConfig["hlsConfig"] as? Map<String, Any>
+            }
+            uri.toString().contains(".mpd") -> {
+                @Suppress("UNCHECKED_CAST")
+                topConfig["dashConfig"] as? Map<String, Any>
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Wave D: builds the Media3 [MediaItem] for [uri], applying
+     * `HlsConfig.liveLatency`/`DashConfig.liveLatency` (whichever applies —
+     * see [activeStreamingConfig]) as a [MediaItem.LiveConfiguration] target
+     * offset when present. Used in place of a bare `MediaItem.fromUri(uri)`
+     * everywhere a media source is built (both the DRM and non-DRM paths in
+     * [loadMediaItem]) so the live-latency target applies regardless of
+     * whether the item is DRM-protected.
+     */
+    private fun buildMediaItem(uri: Uri): MediaItem {
+        val streamingConfig = activeStreamingConfig(uri)
+        val liveLatencyMs = (streamingConfig?.get("liveLatencyMs") as? Number)?.toLong()
+
+        val builder = MediaItem.Builder().setUri(uri)
+        if (liveLatencyMs != null) {
+            builder.setLiveConfiguration(
+                MediaItem.LiveConfiguration.Builder()
+                    .setTargetOffsetMs(liveLatencyMs)
+                    .build()
+            )
+        }
+        return builder.build()
+    }
+
+    /**
+     * Wave D: applies `StreamingConfig.enableAdaptiveBitrate`/`maxBitrate`/
+     * `minBitrate` (from whichever of HlsConfig/DashConfig [streamingConfig]
+     * is) to the player's [DefaultTrackSelector]. When adaptive bitrate is
+     * disabled, `forceHighestSupportedBitrate` locks selection onto a single
+     * fixed video track (the highest bitrate within the configured bounds)
+     * instead of letting ExoPlayer adapt between renditions — there is no
+     * dedicated Media3 API to "disable ABR" directly, so this is the standard
+     * technique for it. No-op when the player's track selector is not a
+     * [DefaultTrackSelector] (should not happen — ExoPlayer.Builder creates
+     * one by default and this instance never overrides it).
+     */
+    private fun applyStreamingTrackSelectionConstraints(streamingConfig: Map<String, Any>?) {
+        val trackSelector = exoPlayer?.trackSelector as? DefaultTrackSelector ?: return
+
+        val enableAdaptiveBitrate = streamingConfig?.get("enableAdaptiveBitrate") as? Boolean ?: true
+        val maxBitrate = (streamingConfig?.get("maxBitrate") as? Number)?.toInt()
+        val minBitrate = (streamingConfig?.get("minBitrate") as? Number)?.toInt()
+
+        val parameters = trackSelector.buildUponParameters()
+            .setMaxVideoBitrate(maxBitrate ?: Int.MAX_VALUE)
+            .setMinVideoBitrate(minBitrate ?: 0)
+            .setForceHighestSupportedBitrate(!enableAdaptiveBitrate)
+            .build()
+
+        trackSelector.setParameters(parameters)
+        android.util.Log.d(
+            "MediaPlayerInstance",
+            "applyStreamingTrackSelectionConstraints: enableAdaptiveBitrate=$enableAdaptiveBitrate " +
+                "maxBitrate=$maxBitrate minBitrate=$minBitrate"
+        )
+    }
+
     private fun createMediaSource(uri: Uri, dataSourceFactory: DataSource.Factory = this.dataSourceFactory): MediaSource {
         return when {
             uri.toString().contains(".m3u8") -> {
                 HlsMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(uri))
+                    .createMediaSource(buildMediaItem(uri))
             }
             uri.toString().contains(".mpd") -> {
                 DashMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(uri))
+                    .createMediaSource(buildMediaItem(uri))
             }
             else -> {
                 ProgressiveMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(uri))
+                    .createMediaSource(buildMediaItem(uri))
             }
         }
     }

@@ -362,7 +362,7 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 2. **Dispose controllers in State.dispose()** - Prevents memory leaks and native resource cleanup
 3. **DRM requires HTTPS** - License and media URLs must use secure connections
 4. **PiP availability is platform/device dependent** - Always check `checkPipAvailability()` first
-5. **Live streams need specific configuration** - Set `enableLiveStream: true` in HlsConfig/DashConfig
+5. **Live streams need `MediaItem.isLive: true`** - that's the canonical flag (`HlsConfig`/`DashConfig.enableLiveStream` is deprecated and native never reads it). To allow seeking on a live stream, also set `enableDvr: true` on the matching `HlsConfig`/`DashConfig`
 6. **Subtitle styling uses ARGB color format** - e.g., 0xFFFFFFFF for white, 0x80000000 for semi-transparent black
 7. **Multiple instances are supported** - Use unique playerIds for concurrent players (e.g., ListView)
 8. **MethodChannel calls are async** - Always await native operations to prevent race conditions

@@ -170,6 +170,16 @@ class NotificationHandler(
         private val activeSessions = mutableMapOf<String, MediaSessionCompat>()
 
         internal fun sessionFor(playerId: String): MediaSessionCompat? = activeSessions[playerId]
+
+        // Registry of live NotificationHandler instances keyed by playerId, used by
+        // NotificationDismissReceiver and NotificationCustomActionReceiver below --
+        // same rationale as activeSessions (both are manifest-registered
+        // BroadcastReceivers the OS instantiates fresh per broadcast). Held as a
+        // WeakReference so a handler that failed to dispose() cleanly for any reason
+        // cannot be kept alive by this registry.
+        private val liveHandlers = mutableMapOf<String, WeakReference<NotificationHandler>>()
+
+        internal fun handlerFor(playerId: String): NotificationHandler? = liveHandlers[playerId]?.get()
     }
 
     /**
@@ -206,6 +216,24 @@ class NotificationHandler(
     private var showSeekBackward: Boolean = false
     private var seekInterval: Int = 10
 
+    // NotificationConfig.priority (see notification_config.dart): resolved once in
+    // initialize() into both the Android-version-appropriate representations, since
+    // channel importance (API 26+, fixed at channel-creation time) and
+    // NotificationCompat's legacy priority int (pre-26, and still read by some OEM
+    // skins/Wear/Auto surfaces even on 26+) are two different value spaces.
+    private var channelImportance: Int = NotificationManager.IMPORTANCE_LOW
+    private var compatPriority: Int = NotificationCompat.PRIORITY_LOW
+
+    // NotificationConfig.dismissible (see notification_config.dart): true posts the
+    // notification as non-ongoing with a delete intent instead of the historical
+    // always-ongoing-while-playing behavior. See buildNotification()/buildDeleteIntent().
+    private var dismissible: Boolean = false
+
+    // NotificationConfig.customActions (see notification_config.dart): rendered as
+    // real additional NotificationCompat.Action buttons in buildNotification(),
+    // dispatched back to Flutter by id via NotificationCustomActionReceiver.
+    private var customActions: List<Map<String, Any?>> = emptyList()
+
     // Resolved small-icon drawable resource id (see resolveSmallIcon()). Defaults to
     // 0 (unresolved) until initialize() runs; buildNotification() re-resolves
     // defensively if it is still 0.
@@ -229,6 +257,31 @@ class NotificationHandler(
     private var position: Long = 0
     private var duration: Long = 0
 
+    // Wired from the "mediaItem" map's "isLive"/"dvrEnabled" keys in
+    // showNotification(), and re-synced from the "state" map's own
+    // "isLive"/"dvrEnabled" keys on every updateState() call (see that
+    // method) -- both are read from MediaPlayer.isLive/MediaPlayer.dvrEnabled
+    // on the Dart side (see NotificationService.show()/updateState() in
+    // notification_service.dart). dvrEnabled in particular can change while
+    // the same media item keeps playing (e.g. the host app reconfigures
+    // HlsConfig.enableDvr and reloads), so updateState() -- not just
+    // showNotification() -- must be able to update these. Both default to
+    // false, matching every non-live item.
+    private var isLive: Boolean = false
+    private var dvrEnabled: Boolean = false
+
+    /**
+     * `false` only for a live stream without DVR enabled -- mirrors
+     * `MediaPlayer.isSeekable` in media_player.dart exactly. Gates
+     * [PlaybackStateCompat.ACTION_SEEK_TO] (see [updateMediaSessionPlaybackState]),
+     * [MediaMetadataCompat.METADATA_KEY_DURATION] (see [updateMediaSessionMetadata]),
+     * and the [MediaSessionCompat.Callback.onSeekTo] callback below -- a live stream
+     * with no DVR must not offer, or honor, scrubbing from the lock screen /
+     * notification.
+     */
+    private val isSeekable: Boolean
+        get() = !(isLive && !dvrEnabled)
+
     /**
      * Initialize the notification handler
      */
@@ -247,15 +300,36 @@ class NotificationHandler(
         seekInterval = (config["seekInterval"] as? Number)?.toInt() ?: seekInterval
         smallIconResId = resolveSmallIcon(config["smallIcon"] as? String)
 
+        // NotificationConfig.priority: resolved once here into both value spaces --
+        // see the channelImportance/compatPriority doc above.
+        val priorityName = config["priority"] as? String
+        channelImportance = resolveChannelImportance(priorityName)
+        compatPriority = resolveCompatPriority(priorityName)
+
+        // NotificationConfig.dismissible: see the dismissible field doc above and
+        // buildNotification()/buildDeleteIntent() for how it's applied.
+        dismissible = config["dismissible"] as? Boolean ?: dismissible
+
+        // NotificationConfig.customActions: a List<Map> from NotificationAction.toMap()
+        // (id/title/icon). Cast defensively -- this crosses a MethodChannel boundary.
+        @Suppress("UNCHECKED_CAST")
+        customActions = (config["customActions"] as? List<*>)
+            ?.mapNotNull { it as? Map<String, Any?> }
+            ?: emptyList()
+
         // Initialize notification manager
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // Create notification channel for Android O and above
+        // Create notification channel for Android O and above. Importance can only be
+        // set at creation time -- the OS ignores changes to an already-created
+        // channel's importance -- so a changed priority only takes effect for a
+        // channel the user hasn't already seen (a new channelId, a fresh install, or
+        // the user manually reset notification settings for this app).
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 channelId,
                 channelName,
-                NotificationManager.IMPORTANCE_LOW
+                channelImportance
             ).apply {
                 description = config["channelDescription"] as? String ?: "Media playback notifications"
                 setShowBadge(false)
@@ -295,6 +369,17 @@ class NotificationHandler(
 
                 override fun onSeekTo(pos: Long) {
                     android.util.Log.d(TAG, "MediaSession: onSeekTo $pos")
+                    if (!isSeekable) {
+                        // Belt-and-braces: ACTION_SEEK_TO is already omitted from
+                        // PlaybackStateCompat while !isSeekable (see
+                        // updateMediaSessionPlaybackState), which should prevent the OS
+                        // from ever routing here for a live-without-DVR stream. Still
+                        // reject explicitly rather than forwarding to Flutter, in case
+                        // some surface (e.g. a stale controller) calls it anyway --
+                        // mirrors MediaPlayer.seekTo's own guard in media_player.dart.
+                        android.util.Log.d(TAG, "MediaSession: onSeekTo ignored -- not seekable (live without DVR)")
+                        return
+                    }
                     // Forward the requested absolute position (milliseconds, per the
                     // MediaSessionCompat.Callback.onSeekTo contract) to Flutter so it
                     // can drive the actual seek -- mirrors iOS's
@@ -315,6 +400,11 @@ class NotificationHandler(
         // Publish this instance's session so NotificationActionReceiver can route
         // notification-button taps back to it (see activeSessions above).
         mediaSession?.let { activeSessions[playerId] = it }
+
+        // Publish this instance so NotificationDismissReceiver/
+        // NotificationCustomActionReceiver can route back to it (see liveHandlers
+        // above).
+        liveHandlers[playerId] = WeakReference(this)
 
         // Ownership: last initialize() call always wins (mirrors the iOS
         // NotificationHandler.Ownership policy — see NotificationOwnership doc
@@ -353,10 +443,24 @@ class NotificationHandler(
         currentArtworkUrl = newArtworkUrl
         currentMediaUrl = newMediaUrl
 
+        // Read isLive/dvrEnabled before touching duration below -- isSeekable
+        // (derived from both) decides whether the incoming duration is honored at
+        // all. Sent by NotificationService.show() (see notification_service.dart);
+        // both default to false, i.e. non-live, if absent (an older cached Dart
+        // build that predates this wiring).
+        isLive = mediaItem["isLive"] as? Boolean ?: false
+        dvrEnabled = mediaItem["dvrEnabled"] as? Boolean ?: false
+
         // Update playback state
         isPlaying = state["isPlaying"] as? Boolean ?: false
         position = (state["position"] as? Number)?.toLong() ?: 0
-        duration = (state["duration"] as? Number)?.toLong() ?: 0
+        // A live-without-DVR item must never publish a scrubbable duration -- see
+        // isSeekable doc. This is a genuine media-item change (showNotification, not
+        // updateState), so -- unlike updateState()'s anti-regression guard below --
+        // resetting duration to 0 here is exactly the intended behavior, not a
+        // regression: a live-without-DVR item is never expected to have a meaningful
+        // total duration.
+        duration = if (isSeekable) (state["duration"] as? Number)?.toLong() ?: 0 else 0
 
         // Update media session metadata
         updateMediaSessionMetadata()
@@ -391,6 +495,20 @@ class NotificationHandler(
         isPlaying = state["isPlaying"] as? Boolean ?: false
         position = (state["position"] as? Number)?.toLong() ?: 0
 
+        // Re-sync isLive/dvrEnabled from this call too -- see the field doc
+        // above for why this can legitimately change without a new
+        // showNotification() call (a DVR toggle on the same media item).
+        // Only overwrite when the key is actually present, so an older
+        // cached Dart build that predates this wiring (and never sends these
+        // keys to updateNotificationState) cannot silently reset a
+        // live-without-DVR item back to "seekable", or vice versa.
+        if (state.containsKey("isLive")) {
+            isLive = state["isLive"] as? Boolean ?: isLive
+        }
+        if (state.containsKey("dvrEnabled")) {
+            dvrEnabled = state["dvrEnabled"] as? Boolean ?: dvrEnabled
+        }
+
         // Never let an already-known-good duration regress to 0/absent here.
         // updateState() never changes which media item is showing (see the
         // doc above), so a previously established duration is always still
@@ -404,10 +522,17 @@ class NotificationHandler(
         // has already run. (showNotification() itself is deliberately NOT
         // guarded this way: a genuine media-item change there *should* reset
         // duration to whatever the new item's is, including 0/unknown, until
-        // it becomes known.)
-        val incomingDuration = (state["duration"] as? Number)?.toLong() ?: 0
-        if (incomingDuration > 0) {
-            duration = incomingDuration
+        // it becomes known.) isSeekable is excepted from that guard: a
+        // live-without-DVR item must never publish a scrubbable duration (see
+        // isSeekable doc), so duration is forced back to 0 on every call while it
+        // holds, same as showNotification() above.
+        if (!isSeekable) {
+            duration = 0
+        } else {
+            val incomingDuration = (state["duration"] as? Number)?.toLong() ?: 0
+            if (incomingDuration > 0) {
+                duration = incomingDuration
+            }
         }
 
         // Keep METADATA_KEY_DURATION in sync here too, not just
@@ -441,6 +566,21 @@ class NotificationHandler(
 
         this.position = position
         updateMediaSessionPlaybackState()
+    }
+
+    /**
+     * Called via [buildDeleteIntent]'s [PendingIntent] (routed through
+     * [NotificationDismissReceiver]) when the user swipes away a `dismissible`
+     * notification. Only syncs local [isShowing] state so a later
+     * [showNotification]/[updateState] call correctly reposts rather than treating
+     * the notification as still visible; deliberately does not touch
+     * [mediaSession] activation or forward anything to Flutter -- swiping away the
+     * notification does not necessarily mean the user wants playback (or hardware
+     * media-button routing) to stop, only that the visible notification is gone.
+     */
+    internal fun onNotificationDismissedByUser() {
+        android.util.Log.d(TAG, "Notification dismissed by user swipe (dismissible=true)")
+        isShowing = false
     }
 
     /**
@@ -542,11 +682,12 @@ class NotificationHandler(
             }
         }
 
-        // Always remove this instance's own registry entry, on every dispose
+        // Always remove this instance's own registry entries, on every dispose
         // path, regardless of the ownership outcome above — a static registry
-        // holding MediaSessionCompat objects would otherwise leak if this
-        // were ever skipped.
+        // holding MediaSessionCompat/NotificationHandler references would
+        // otherwise leak if this were ever skipped.
         activeSessions.remove(playerId)
+        liveHandlers.remove(playerId)
         mediaSession?.release()
         mediaSession = null
         notificationManager = null
@@ -579,9 +720,30 @@ class NotificationHandler(
             .setContentText(currentArtist)
             .setSmallIcon(smallIconResId)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(isPlaying)
+            .setPriority(compatPriority)
+            // This notification is rebuilt and re-`notify()`'d on every
+            // showNotification()/updateState() call -- i.e. on every playback
+            // state change and, effectively, on every position tick, since
+            // updateState() is driven by MediaPlayer.stateStream. Without
+            // onlyAlertOnce, each repost is a distinct alert to the OS; at
+            // typical position-update frequency Android's "noisy
+            // notification" throttling (NotificationManagerService) detects
+            // this as spam and force-mutes the whole channel/app
+            // ("Muting recently noisy ..." in logcat), silently killing the
+            // notification altogether. true makes only the *first* post of a
+            // given ongoing notification alert (sound/vibrate/heads-up);
+            // every subsequent update-in-place is silent, which is exactly
+            // what a continuously-refreshing media notification needs.
+            .setOnlyAlertOnce(true)
+            // NotificationConfig.dismissible (see field doc): true makes the
+            // notification swipeable at any playback state instead of the
+            // historical always-ongoing-while-playing behavior.
+            .setOngoing(!dismissible)
             .setShowWhen(false)
+
+        if (dismissible) {
+            builder.setDeleteIntent(buildDeleteIntent())
+        }
 
         // Add artwork if available
         currentArtworkBitmap?.let {
@@ -634,6 +796,20 @@ class NotificationHandler(
             // Stop intentionally not prioritized into the (max 3) compact view
             // slots; previous/play-pause/next take priority there, matching the
             // original (0, 1, 2) intent for the default flag configuration.
+        }
+
+        // NotificationConfig.customActions (see field doc): app-defined buttons in
+        // addition to the built-in transport controls above. Like "stop", not
+        // prioritized into the (max 3) compact-view slots -- those are reserved for
+        // the primary transport controls.
+        for (customAction in customActions) {
+            val id = customAction["id"] as? String ?: continue
+            val title = customAction["title"] as? String ?: id
+            val icon = resolveActionIcon(customAction["icon"] as? String)
+            builder.addAction(
+                NotificationCompat.Action.Builder(icon, title, buildCustomActionPendingIntent(id)).build()
+            )
+            nextActionIndex++
         }
 
         // MediaStyle.setShowActionsInCompactView supports at most 3 indices.
@@ -746,6 +922,120 @@ class NotificationHandler(
         )
     }
 
+    /**
+     * Builds the [PendingIntent] handed to [NotificationCompat.Builder.setDeleteIntent]
+     * for a `dismissible` notification (see the `dismissible` field doc). Broadcasts to
+     * [NotificationDismissReceiver], which routes to this instance via
+     * [handlerFor]/[onNotificationDismissedByUser] so [isShowing] stays in sync with
+     * what's actually on screen.
+     */
+    private fun buildDeleteIntent(): PendingIntent {
+        val intent = Intent(context, NotificationDismissReceiver::class.java).apply {
+            putExtra(NotificationDismissReceiver.EXTRA_PLAYER_ID, playerId)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            31 * playerId.hashCode() + 1,
+            intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+        )
+    }
+
+    /**
+     * Builds the [PendingIntent] for a single [NotificationConfig.customActions] entry
+     * (see the `customActions` field doc). Broadcasts to
+     * [NotificationCustomActionReceiver], which routes to this instance's
+     * [dispatchCustomAction] so the tap reaches Flutter the same way every other
+     * notification action does (via `onNotificationAction` / [NotificationActionEvent]).
+     */
+    private fun buildCustomActionPendingIntent(actionId: String): PendingIntent {
+        val intent = Intent(context, NotificationCustomActionReceiver::class.java).apply {
+            putExtra(NotificationCustomActionReceiver.EXTRA_PLAYER_ID, playerId)
+            putExtra(NotificationCustomActionReceiver.EXTRA_ACTION_ID, actionId)
+        }
+        return PendingIntent.getBroadcast(
+            context,
+            // Distinct request code per (playerId, action id) so concurrent instances'
+            // and different custom actions' PendingIntents don't collide -- mirrors
+            // buildMediaButtonPendingIntent's rationale above.
+            31 * playerId.hashCode() + actionId.hashCode(),
+            intent,
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+        )
+    }
+
+    /**
+     * Resolves a [NotificationAction.icon] resource name the same way
+     * [resolveSmallIcon] resolves [NotificationConfig.smallIcon]. Falls back to the
+     * same last-resort glyph [resolveSmallIcon] uses (`android.R.drawable.ic_media_play`,
+     * guaranteed to resolve on every API level) rather than the host app's own icon --
+     * an unresolved custom-action icon should look like a generic system glyph, not
+     * silently reuse the app's launcher icon for an arbitrary button.
+     */
+    private fun resolveActionIcon(configuredName: String?): Int {
+        if (!configuredName.isNullOrBlank()) {
+            val resId = context.resources.getIdentifier(configuredName, "drawable", context.packageName)
+            if (resId != 0) {
+                return resId
+            }
+            android.util.Log.w(
+                TAG,
+                "NotificationAction.icon '$configuredName' was not found in the host app's " +
+                    "drawable resources; falling back to a generic icon. Ensure a drawable with " +
+                    "that name exists in the host app's res/drawable."
+            )
+        }
+        return android.R.drawable.ic_media_play
+    }
+
+    /**
+     * Maps [NotificationConfig.priority]'s wire value (a [NotificationPriority] enum
+     * name, e.g. `"high"`, or `null`/absent if the host app never set it) onto a
+     * [NotificationChannel] importance. Only meaningful at channel-creation time
+     * (API 26+) -- see the call site's comment for why a changed priority may not
+     * retroactively apply. Unrecognized/absent values (including `null`, which is
+     * `NotificationConfig.priority`'s default -- see its dartdoc in
+     * notification_config.dart) fall back to `IMPORTANCE_LOW`, matching this
+     * handler's original hardcoded behavior so a host app that never sets `priority`
+     * sees no change. A host app that explicitly opts into
+     * [NotificationPriority.high] (or another non-default value) gets that value
+     * honored, which is the actual point of wiring this field up.
+     */
+    private fun resolveChannelImportance(priority: String?): Int = when (priority) {
+        "min" -> NotificationManager.IMPORTANCE_MIN
+        "low" -> NotificationManager.IMPORTANCE_LOW
+        "defaultPriority" -> NotificationManager.IMPORTANCE_DEFAULT
+        "high" -> NotificationManager.IMPORTANCE_HIGH
+        // Android has no channel importance above IMPORTANCE_HIGH (the deprecated
+        // IMPORTANCE_MAX constant is documented as behaving identically to HIGH).
+        "max" -> NotificationManager.IMPORTANCE_HIGH
+        else -> NotificationManager.IMPORTANCE_LOW
+    }
+
+    /** Same mapping as [resolveChannelImportance], but onto [NotificationCompat]'s
+     * legacy `PRIORITY_*` ints -- read by [NotificationCompat.Builder.setPriority] on
+     * every posted notification (pre-26 devices, and still consulted by some OEM
+     * skins/Wear/Auto surfaces even on 26+, unlike channel importance which is
+     * API-26-only). Unlike channel importance, PRIORITY_MAX is a distinct, real value
+     * here, so `"max"` maps to it rather than being folded into `"high"`.
+     */
+    private fun resolveCompatPriority(priority: String?): Int = when (priority) {
+        "min" -> NotificationCompat.PRIORITY_MIN
+        "low" -> NotificationCompat.PRIORITY_LOW
+        "defaultPriority" -> NotificationCompat.PRIORITY_DEFAULT
+        "high" -> NotificationCompat.PRIORITY_HIGH
+        "max" -> NotificationCompat.PRIORITY_MAX
+        else -> NotificationCompat.PRIORITY_LOW
+    }
+
     private fun updateMediaSessionMetadata() {
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
@@ -792,20 +1082,26 @@ class NotificationHandler(
     }
 
     private fun updateMediaSessionPlaybackState() {
+        // ACTION_SEEK_TO is omitted while !isSeekable (live stream, no DVR) -- its
+        // absence is what tells the system (and Bluetooth/Android
+        // Auto/Wear/lock-screen surfaces reading PlaybackStateCompat) not to offer
+        // scrubbing at all, on top of onSeekTo's own belt-and-braces rejection above.
+        var actions = PlaybackStateCompat.ACTION_PLAY or
+            PlaybackStateCompat.ACTION_PAUSE or
+            PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
+            PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackStateCompat.ACTION_STOP
+        if (isSeekable) {
+            actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
+        }
+
         val state = PlaybackStateCompat.Builder()
             .setState(
                 if (isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
                 position,
                 1.0f
             )
-            .setActions(
-                PlaybackStateCompat.ACTION_PLAY or
-                PlaybackStateCompat.ACTION_PAUSE or
-                PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
-                PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
-                PlaybackStateCompat.ACTION_STOP or
-                PlaybackStateCompat.ACTION_SEEK_TO
-            )
+            .setActions(actions)
             .build()
 
         mediaSession?.setPlaybackState(state)
@@ -969,6 +1265,16 @@ class NotificationHandler(
             methodChannel.invokeMethod("onNotificationAction", arguments)
         }
     }
+
+    /**
+     * Entry point for [NotificationCustomActionReceiver]: forwards a tapped
+     * [NotificationConfig.customActions] entry's id to Flutter via the same
+     * `onNotificationAction` path as every built-in action (never carries a
+     * position -- only "seekTo" ever does).
+     */
+    internal fun dispatchCustomAction(actionId: String) {
+        sendActionToFlutter(actionId)
+    }
 }
 
 /**
@@ -1005,5 +1311,54 @@ class NotificationActionReceiver : android.content.BroadcastReceiver() {
 
     companion object {
         const val EXTRA_PLAYER_ID = "playerId"
+    }
+}
+
+/**
+ * Manifest-registered receiver (see `android/src/main/AndroidManifest.xml`) for
+ * [NotificationCompat.Builder.setDeleteIntent], fired when the user swipes away a
+ * `dismissible` notification (see [NotificationConfig.dismissible]'s field doc). Routes
+ * to the correct player's [NotificationHandler.onNotificationDismissedByUser] via
+ * [NotificationHandler.handlerFor], by the same per-broadcast-instantiation
+ * constraint documented on [NotificationActionReceiver].
+ *
+ * `exported="false"`: only ever triggered via a [PendingIntent] this module builds for
+ * itself (see [NotificationHandler.buildDeleteIntent]).
+ */
+class NotificationDismissReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val playerId = intent.getStringExtra(EXTRA_PLAYER_ID) ?: return
+        NotificationHandler.handlerFor(playerId)?.onNotificationDismissedByUser()
+    }
+
+    companion object {
+        const val EXTRA_PLAYER_ID = "playerId"
+    }
+}
+
+/**
+ * Manifest-registered receiver (see `android/src/main/AndroidManifest.xml`) that
+ * routes taps on [NotificationConfig.customActions] buttons back to the correct
+ * player's [NotificationHandler.dispatchCustomAction], by the same
+ * per-broadcast-instantiation constraint documented on [NotificationActionReceiver].
+ * Unlike [NotificationActionReceiver] (which decodes a synthetic media-button
+ * [android.view.KeyEvent] for the fixed transport-control set), custom actions carry
+ * no such key code -- there is no `PlaybackStateCompat.ACTION_*`/key-code mapping for
+ * an app-defined action id -- so this receiver instead carries the action id directly
+ * as a string extra (see [NotificationHandler.buildCustomActionPendingIntent]).
+ *
+ * `exported="false"`: only ever triggered via a [PendingIntent] this module builds for
+ * itself.
+ */
+class NotificationCustomActionReceiver : android.content.BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val playerId = intent.getStringExtra(EXTRA_PLAYER_ID) ?: return
+        val actionId = intent.getStringExtra(EXTRA_ACTION_ID) ?: return
+        NotificationHandler.handlerFor(playerId)?.dispatchCustomAction(actionId)
+    }
+
+    companion object {
+        const val EXTRA_PLAYER_ID = "playerId"
+        const val EXTRA_ACTION_ID = "actionId"
     }
 }

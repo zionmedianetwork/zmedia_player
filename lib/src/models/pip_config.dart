@@ -9,10 +9,42 @@ class PipConfig {
   /// Whether to automatically enter PiP when app goes to background
   final bool autoEnterOnBackground;
 
-  /// Custom actions to show in PiP mode
+  /// Custom actions to show in PiP mode.
+  ///
+  /// **Android only.** Each [PipAction] is rendered as an
+  /// `android.app.RemoteAction` via `PictureInPictureParams.Builder
+  /// .setActions()` (see `PipHandler.buildRemoteActions` /
+  /// `PipHandler.buildActionPendingIntent`). [PipAction.icon] is resolved as
+  /// a drawable resource name in the host app's own resources, falling back
+  /// to a stock icon when absent/unresolved. Tapping an action broadcasts to
+  /// a native receiver which invokes `onPipAction` on the platform channel
+  /// with `{"playerId": ..., "actionId": ...}` — note that as of this wave
+  /// there is not yet a corresponding Dart-side stream/listener for that
+  /// event; wiring one up in `MediaPlayer` is a follow-up. The system caps
+  /// the number of visible PiP actions (3 on API 26-31, 5 on 32+); this
+  /// package defensively truncates to the first 3 regardless of platform
+  /// version.
+  ///
+  /// **iOS: not honoured at all.** `AVPictureInPictureController`'s overlay
+  /// is entirely system-owned and AVKit exposes no API for adding custom
+  /// action buttons to it, so there is no faithful way to implement this
+  /// field on iOS. `actions` is read only by the Android native layer.
   final List<PipAction> actions;
 
-  /// Whether to show playback controls in PiP
+  /// Whether to show playback controls in PiP.
+  ///
+  /// **Android:** gates whether [actions] is applied at all. When `false`,
+  /// no actions are added to `PictureInPictureParams` (the PiP window shows
+  /// no custom action buttons); when `true` (the default), the configured
+  /// [actions] list, if any, is rendered.
+  ///
+  /// **iOS: honoured only partially**, via
+  /// `AVPictureInPictureController.requiresLinearPlayback` (iOS 14+, set to
+  /// `!showPlaybackControls`). This hides the skip-forward/skip-back buttons
+  /// and the scrubbing bar from the system PiP overlay when `false` — but
+  /// Play/Pause is a mandatory system control on iOS and can never be
+  /// hidden, unlike Android where `false` can suppress every custom action.
+  /// See `PipHandler.applyShowPlaybackControls` (iOS) for the full caveat.
   final bool showPlaybackControls;
 
   const PipConfig({

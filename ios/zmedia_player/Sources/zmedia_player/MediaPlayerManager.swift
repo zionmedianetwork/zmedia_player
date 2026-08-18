@@ -636,6 +636,25 @@ class MediaPlayerInstance: NSObject {
         )
     }
 
+    /// Wave D: returns the top-level (per-player) HlsConfig/DashConfig map
+    /// that applies to `urlString` — HlsConfig for `.m3u8`, DashConfig for
+    /// `.mpd`, `nil` for anything else (progressive playback has no
+    /// streaming config, and DASH itself has no iOS playback path at all).
+    /// Both are serialized unconditionally by MediaPlayer._configToMap on
+    /// the Dart side (see streaming_config.dart's toMap()); this mirrors
+    /// that same URL -> config inference on the Android side
+    /// (MediaPlayerManager.kt's activeStreamingConfig).
+    private func activeStreamingConfig(for urlString: String) -> [String: Any]? {
+        guard let config = config else { return nil }
+        if urlString.contains(".m3u8") {
+            return config["hlsConfig"] as? [String: Any]
+        }
+        if urlString.contains(".mpd") {
+            return config["dashConfig"] as? [String: Any]
+        }
+        return nil
+    }
+
     func loadMediaItem(mediaItem: [String: Any]) {
         guard let urlString = mediaItem["url"] as? String,
               let url = URL(string: urlString) else {
@@ -765,6 +784,36 @@ class MediaPlayerInstance: NSObject {
         }
 
         let playerItem = AVPlayerItem(asset: asset)
+
+        // Wave D: HlsConfig/DashConfig wiring. Whichever config applies to
+        // this URL (HlsConfig for .m3u8, DashConfig for .mpd) drives
+        // liveLatency and maxBitrate below — see activeStreamingConfig(for:).
+        let streamingConfig = activeStreamingConfig(for: urlString)
+
+        // liveLatency -> configuredTimeOffsetFromLive. iOS 14+ only; on
+        // earlier iOS this API does not exist, so liveLatency silently has
+        // no effect there (the package's minimum is iOS 13 — see
+        // HlsConfig.liveLatency's dartdoc).
+        if let liveLatencyMs = (streamingConfig?["liveLatencyMs"] as? NSNumber)?.doubleValue {
+            if #available(iOS 14.0, *) {
+                playerItem.automaticallyPreservesTimeOffsetFromLive = false
+                playerItem.configuredTimeOffsetFromLive = CMTime(
+                    seconds: liveLatencyMs / 1000.0,
+                    preferredTimescale: CMTimeScale(NSEC_PER_SEC)
+                )
+            }
+        }
+
+        // maxBitrate -> preferredPeakBitRate (bits/sec). There is no
+        // faithful minBitrate, nor a way to force a single non-adaptive
+        // track (enableAdaptiveBitrate: false), on AVPlayer — see
+        // StreamingConfig's dartdoc for the full platform-parity notes. A
+        // later explicit setQualityTrack()/enableAutoQuality() call
+        // overrides this the same way it already overrides any other
+        // preferredPeakBitRate value.
+        if let maxBitrate = (streamingConfig?["maxBitrate"] as? NSNumber)?.doubleValue {
+            playerItem.preferredPeakBitRate = maxBitrate
+        }
 
         // Apply buffer configuration if available.
         //

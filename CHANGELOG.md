@@ -36,8 +36,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CastDeviceType.unknown` for anything else — so both variants were unreachable dead
   code. The corresponding unreachable `case CastDeviceType.dlna:` icon branch in
   `MediaControls` was also removed.
+- Removed `CastConfig.enableDlna` (no DLNA support exists anywhere in this package) and
+  `CastConfig.autoConnect` (auto-connecting to the last-used cast device would require
+  persisting a device identifier and reacting to discovery results; no such mechanism
+  exists in this package, and building a bespoke storage subsystem just for this field
+  was out of scope). Both were already dead: neither was read by native code prior to
+  this release. `CastConfig.enabled`, `enableChromecast`, `enableAirPlay`,
+  `chromecastAppId`, `discoveryTimeout`, and `showCastButton` are unaffected.
+- Removed `MediaConfig.notificationConfig`. Nothing ever read it — media playback
+  notifications are configured exclusively through `NotificationService`'s own
+  `NotificationConfig`, which is unaffected by this change.
+- `NotificationConfig.priority` now defaults to `null` ("no explicit priority
+  requested") instead of `NotificationPriority.high`. Native (`NotificationHandler`
+  on Android) already resolves a missing/unrecognized priority to `IMPORTANCE_LOW`/
+  `PRIORITY_LOW`, so this restores the pre-existing default behaviour every
+  integrator who never set `priority` was already getting, and avoids a silent
+  regression the `.high` default caused: this notification re-posts on every
+  playback state/position tick, so a non-`low` default made every existing
+  integrator's notification newly re-alert (sound/heads-up) on every tick purely
+  from upgrading, with no code change on their part — and on Android specifically,
+  triggered `NotificationManagerService`'s "noisy notification" throttling, which
+  force-muted the notification altogether after a burst of ticks. An app that wants
+  a louder/heads-up notification should now set `priority` explicitly (e.g.
+  `NotificationPriority.high`). Source-breaking only for callers that relied on the
+  removed non-`null` default's static type; passing an explicit
+  `NotificationPriority` value is unaffected.
 
 ### Fixed
+- Toggling live-stream DVR (`HlsConfig.enableDvr`/`DashConfig.enableDvr`) while the
+  same media item keeps playing no longer leaves the lock-screen / notification
+  scrubber permanently stuck at whichever seekability it had when the notification
+  was first shown. `NotificationService.updateState()` (called on every
+  `MediaPlayer.stateStream` event, not just once from `show()`) now re-sends the
+  current `isLive`/`dvrEnabled` on every call, and `NotificationHandler` on both
+  Android and iOS re-derives `isSeekable` and re-applies gating (Android:
+  `ACTION_SEEK_TO` + `METADATA_KEY_DURATION`; iOS:
+  `changePlaybackPositionCommand`/`skipForwardCommand`/`skipBackwardCommand` +
+  `MPMediaItemPropertyPlaybackDuration`) from it. Previously only `show()` sent these
+  fields, which — unlike title/artist — do not only change when the media item
+  itself changes, so a DVR toggle on an already-playing live item (`updateConfig` +
+  reload) went unnoticed by native indefinitely.
+- Android media notifications no longer get silently muted by the OS
+  ("`Muting recently noisy ...`" in logcat) after a burst of playback state/position
+  updates. `NotificationHandler`'s `NotificationCompat.Builder` now sets
+  `setOnlyAlertOnce(true)`: this notification is rebuilt and re-posted on every
+  state/position tick, and without `onlyAlertOnce` each repost counted as a distinct
+  alert to `NotificationManagerService`, which throttles and force-mutes a channel
+  that alerts too frequently.
+- `CastConfig` now actually reaches and does something on native code, on both
+  platforms — previously it was silently dropped at three independent points, any one
+  of which alone was sufficient to make it inert:
+  - `MediaPlayer._ensureCastInitialized()` sent a freshly-constructed
+    `const CastConfig()` default to the `initializeCast` channel call instead of the
+    caller's `MediaConfig.castConfig`, discarding every field the caller set. It now
+    sends `MediaConfig.castConfig` (falling back to a default only when unset).
+  - Android's `CastHandler.initialize()` stored the config but never read it, and
+    unconditionally used a hardcoded `"CC1AD845"` receiver app ID. It now honours
+    `enabled`/`enableChromecast` (skipping native Cast setup when either is false),
+    `chromecastAppId` (falling back to `"CC1AD845"`, Google's Default Media Receiver,
+    when unset), and `discoveryTimeout` (auto-stops device discovery after the
+    configured number of seconds).
+  - iOS's `AirPlayHandler.initialize(config:player:)` stored the config but never read
+    a single field from it. It now honours `enabled`/`enableAirPlay`, explicitly
+    disabling `AVPlayer.allowsExternalPlayback` when either is false (previously,
+    "disabling" AirPlay via config had zero effect since `AVPlayer` defaults that flag
+    to `true`). `chromecastAppId` is Chromecast-only and is correctly never read here.
 - Dragging the lock-screen / Control Center notification progress bar ("seekTo") now
   actually seeks the player, on both platforms (M-02). Previously:
   - Android: `NotificationHandler`'s `MediaSessionCompat.Callback.onSeekTo` was a

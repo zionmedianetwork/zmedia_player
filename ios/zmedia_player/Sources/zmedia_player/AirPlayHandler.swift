@@ -19,6 +19,11 @@ class AirPlayHandler: NSObject {
     // Configuration
     private var config: [String: Any]?
 
+    // Resolved from CastConfig.enabled && CastConfig.enableAirPlay in
+    // initialize(). CastConfig.chromecastAppId is Chromecast-only and is
+    // deliberately never read here.
+    private var airPlayEnabled: Bool = true
+
     init(playerId: String, channel: FlutterMethodChannel) {
         self.playerId = playerId
         self.channel = channel
@@ -38,11 +43,25 @@ class AirPlayHandler: NSObject {
 
         self.config = config
 
+        let enabled = (config["enabled"] as? Bool) ?? true
+        let enableAirPlay = (config["enableAirPlay"] as? Bool) ?? true
+        airPlayEnabled = enabled && enableAirPlay
+
         // Invalidate any existing block-based observation before switching players.
         externalPlaybackObservation?.invalidate()
         externalPlaybackObservation = nil
 
         self.player = player
+
+        guard airPlayEnabled else {
+            zlog("AirPlayHandler: AirPlay disabled via CastConfig (enabled=\(enabled), enableAirPlay=\(enableAirPlay)) - skipping AirPlay wiring")
+            // Explicitly turn external playback off rather than leaving
+            // AVPlayer's own default (which is `true`) in place — otherwise
+            // "disabled" would be a no-op and AirPlay would keep working.
+            player?.allowsExternalPlayback = false
+            notifyCastStatusChanged(state: "disconnected", device: nil, isCasting: false, isAvailable: false)
+            return
+        }
 
         // Enable external playback on the player
         if let player = player {
@@ -319,6 +338,12 @@ class AirPlayHandler: NSObject {
     func startDiscovery() {
         zlog("AirPlayHandler: Starting device discovery")
 
+        guard airPlayEnabled else {
+            zlog("AirPlayHandler: AirPlay disabled via CastConfig - ignoring startDiscovery")
+            notifyCastStatusChanged(state: "disconnected", device: nil, isCasting: false, isAvailable: false)
+            return
+        }
+
         notifyCastStatusChanged(
             state: "discovering",
             device: nil,
@@ -343,6 +368,11 @@ class AirPlayHandler: NSObject {
 
     func connect(deviceId: String) -> Bool {
         zlog("AirPlayHandler: Connecting to device: \(deviceId)")
+
+        guard airPlayEnabled else {
+            zlog("AirPlayHandler: AirPlay disabled via CastConfig - ignoring connect")
+            return false
+        }
 
         // On iOS, AirPlay connection is managed through AVRoutePickerView
         // We can't programmatically connect to a specific device

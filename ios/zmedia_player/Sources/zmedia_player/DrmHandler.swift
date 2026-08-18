@@ -380,6 +380,21 @@ class DrmHandler: NSObject {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
+        // DrmConfig.customData (Wave C, gate item "DrmConfig.customData is
+        // serialised and ignored"): applied as additional headers on the
+        // licence POST only -- NOT on the certificate GET in
+        // loadCertificate(from:) -- matching Android's
+        // HttpMediaDrmCallback.setKeyRequestProperty(), which is also scoped
+        // to key/licence requests only. See
+        // DrmHandler.stringifyCustomDataValue(_:) for the value conversion
+        // rules.
+        if let customData = drmConfig?["customData"] as? [String: Any] {
+            for (key, rawValue) in customData {
+                guard let stringValue = DrmHandler.stringifyCustomDataValue(rawValue) else { continue }
+                request.setValue(stringValue, forHTTPHeaderField: key)
+            }
+        }
+
         // Content-Type for FairPlay SPC
         request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
 
@@ -409,6 +424,60 @@ class DrmHandler: NSObject {
         }
 
         task.resume()
+    }
+
+    // MARK: - customData value conversion
+
+    /// Converts a single `DrmConfig.customData` entry value (decoded from the
+    /// Dart-side `Map<String, dynamic>` by the Flutter standard codec) into a
+    /// header-safe `String`. Returns `nil` (and logs) for `nil`/unsupported
+    /// types rather than sending the literal string `"nil"`/`"<null>"`.
+    ///
+    ///  - `String` values pass through unchanged.
+    ///  - `NSNumber` values (how the standard codec bridges Dart `bool`,
+    ///    `int`, and `double`) are disambiguated via `CFGetTypeID` — a
+    ///    Bool-backed `NSNumber` reports `CFBooleanGetTypeID()`, which is a
+    ///    reliable way to detect a genuine Dart `bool` and avoid the
+    ///    well-known Swift/NSNumber bridging trap where `as? Bool` also
+    ///    matches non-boolean numeric values. Renders `"true"`/`"false"` for
+    ///    booleans, `NSNumber.stringValue` otherwise (e.g. `"42"`, `"3.14"`).
+    ///  - `Dictionary`/`Array` values are serialized as JSON via
+    ///    `JSONSerialization` (NOT Swift's default `String(describing:)`,
+    ///    which produces Swift's debug representation, not valid JSON) so
+    ///    structured data survives the header round-trip as parseable JSON.
+    ///  - `NSNull` (Dart `null` nested inside a `Map`/`List`) and any other
+    ///    unrecognized type are skipped.
+    private static func stringifyCustomDataValue(_ value: Any) -> String? {
+        switch value {
+        case let stringValue as String:
+            return stringValue
+        case let numberValue as NSNumber:
+            if CFGetTypeID(numberValue) == CFBooleanGetTypeID() {
+                return numberValue.boolValue ? "true" : "false"
+            }
+            return numberValue.stringValue
+        case is NSNull:
+            return nil
+        case let dictValue as [String: Any]:
+            return jsonString(from: dictValue)
+        case let arrayValue as [Any]:
+            return jsonString(from: arrayValue)
+        default:
+            zlog("DrmHandler: Skipping DrmConfig.customData value of unsupported type: \(type(of: value))")
+            return nil
+        }
+    }
+
+    /// JSON-encodes a nested `customData` `Dictionary`/`Array` value. Returns
+    /// `nil` (and logs) if the object is not representable as JSON.
+    private static func jsonString(from object: Any) -> String? {
+        guard JSONSerialization.isValidJSONObject(object),
+              let data = try? JSONSerialization.data(withJSONObject: object),
+              let string = String(data: data, encoding: .utf8) else {
+            zlog("DrmHandler: Failed to JSON-encode a DrmConfig.customData value")
+            return nil
+        }
+        return string
     }
 
     // MARK: - Pin matching helpers

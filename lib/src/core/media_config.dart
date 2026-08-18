@@ -2,11 +2,16 @@ import 'package:flutter/material.dart';
 import '../models/drm_config.dart';
 import '../models/subtitle_track.dart';
 import '../models/streaming_config.dart';
-import '../models/notification_config.dart';
 import '../models/pip_config.dart';
 import '../models/cast_device.dart';
 
 /// Configuration class for the media player
+///
+/// Note: media playback notifications are **not** configured here. Use
+/// [NotificationService] with its own `NotificationConfig` — that path
+/// drives the real native notification channel methods. (A prior
+/// `MediaConfig.notificationConfig` field was removed because nothing ever
+/// read it.)
 class MediaConfig {
   /// Whether to start playing automatically when media is loaded
   final bool autoPlay;
@@ -37,9 +42,6 @@ class MediaConfig {
 
   /// Cache configuration
   final CacheConfig? cacheConfig;
-
-  /// Notification configuration
-  final NotificationConfig? notificationConfig;
 
   /// Picture-in-Picture configuration
   final PipConfig? pipConfig;
@@ -108,7 +110,6 @@ class MediaConfig {
     this.drmConfig,
     this.subtitleConfig,
     this.cacheConfig,
-    this.notificationConfig,
     this.pipConfig,
     this.castConfig,
     this.showControls = true,
@@ -137,7 +138,6 @@ class MediaConfig {
     DrmConfig? drmConfig,
     SubtitleConfig? subtitleConfig,
     CacheConfig? cacheConfig,
-    NotificationConfig? notificationConfig,
     PipConfig? pipConfig,
     CastConfig? castConfig,
     bool? showControls,
@@ -164,7 +164,6 @@ class MediaConfig {
       drmConfig: drmConfig ?? this.drmConfig,
       subtitleConfig: subtitleConfig ?? this.subtitleConfig,
       cacheConfig: cacheConfig ?? this.cacheConfig,
-      notificationConfig: notificationConfig ?? this.notificationConfig,
       pipConfig: pipConfig ?? this.pipConfig,
       castConfig: castConfig ?? this.castConfig,
       showControls: showControls ?? this.showControls,

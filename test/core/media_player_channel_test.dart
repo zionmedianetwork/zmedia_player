@@ -89,8 +89,7 @@ void main() {
         final initCall = calls.firstWhere((c) => c.method == 'initialize');
         final config = initCall.arguments['config'] as Map;
         expect(config.containsKey('adaptiveCacheConfig'), isFalse,
-            reason:
-                'no adaptiveCacheConfig on MediaConfig must mean no key at '
+            reason: 'no adaptiveCacheConfig on MediaConfig must mean no key at '
                 'all is sent, not a null/disabled placeholder — keeps '
                 'default behaviour byte-for-byte identical to before this '
                 'feature existed');
@@ -139,6 +138,100 @@ void main() {
         final config = initCall.arguments['config'] as Map;
         final cacheConfig = config['adaptiveCacheConfig'] as Map;
         expect(cacheConfig['enabled'], false);
+
+        player.dispose();
+      });
+    });
+
+    // Wave D: HlsConfig/DashConfig were entirely inert (never sent over the
+    // platform channel at all) prior to this wiring — pin down that they now
+    // actually cross the wire, mirroring the adaptiveCacheConfig contract
+    // tests above.
+    group('hlsConfig/dashConfig — outgoing contract', () {
+      test('omits "hlsConfig"/"dashConfig" keys when not configured', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(playerId: 'ch-init-streaming-absent');
+        await player.initialize();
+
+        final initCall = calls.firstWhere((c) => c.method == 'initialize');
+        final config = initCall.arguments['config'] as Map;
+        expect(config.containsKey('hlsConfig'), isFalse);
+        expect(config.containsKey('dashConfig'), isFalse);
+
+        player.dispose();
+      });
+
+      test('sends "hlsConfig" with its fields when configured', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(
+          playerId: 'ch-init-hls-config',
+          config: const MediaConfig(
+            hlsConfig: HlsConfig(
+              enableDvr: true,
+              liveLatency: Duration(seconds: 4),
+              enableAdaptiveBitrate: false,
+              maxBitrate: 3000000,
+              minBitrate: 500000,
+            ),
+          ),
+        );
+        await player.initialize();
+
+        final initCall = calls.firstWhere((c) => c.method == 'initialize');
+        final config = initCall.arguments['config'] as Map;
+        expect(config.containsKey('hlsConfig'), isTrue);
+        expect(config.containsKey('dashConfig'), isFalse);
+
+        final hls = config['hlsConfig'] as Map;
+        expect(hls['enableDvr'], isTrue);
+        expect(hls['liveLatencyMs'], 4000);
+        expect(hls['enableAdaptiveBitrate'], isFalse);
+        expect(hls['maxBitrate'], 3000000);
+        expect(hls['minBitrate'], 500000);
+
+        player.dispose();
+      });
+
+      test('sends "dashConfig" with its fields when configured', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(
+          playerId: 'ch-init-dash-config',
+          config: const MediaConfig(
+            dashConfig: DashConfig(
+              enableDvr: true,
+              liveLatency: Duration(seconds: 6),
+            ),
+          ),
+        );
+        await player.initialize();
+
+        final initCall = calls.firstWhere((c) => c.method == 'initialize');
+        final config = initCall.arguments['config'] as Map;
+        expect(config.containsKey('dashConfig'), isTrue);
+        expect(config.containsKey('hlsConfig'), isFalse);
+
+        final dash = config['dashConfig'] as Map;
+        expect(dash['enableDvr'], isTrue);
+        expect(dash['liveLatencyMs'], 6000);
+
+        player.dispose();
+      });
+
+      test('both hlsConfig and dashConfig can be sent together', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(
+          playerId: 'ch-init-both-streaming-configs',
+          config: const MediaConfig(
+            hlsConfig: HlsConfig(enableDvr: true),
+            dashConfig: DashConfig(enableDvr: false),
+          ),
+        );
+        await player.initialize();
+
+        final initCall = calls.firstWhere((c) => c.method == 'initialize');
+        final config = initCall.arguments['config'] as Map;
+        expect((config['hlsConfig'] as Map)['enableDvr'], isTrue);
+        expect((config['dashConfig'] as Map)['enableDvr'], isFalse);
 
         player.dispose();
       });
@@ -707,6 +800,64 @@ void main() {
   });
 
   // -------------------------------------------------------------------------
+  // Wave B: _ensureCastInitialized previously sent a freshly-constructed
+  // `const CastConfig()` default instead of the user's
+  // `MediaConfig.castConfig`, silently discarding every field the caller
+  // set (chromecastAppId, enableChromecast, enableAirPlay, etc). Pin down
+  // that the user's config — not a default — now reaches the channel.
+  group('cast — user castConfig reaches initializeCast (not a default)', () {
+    test('sends the configured castConfig, including chromecastAppId',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(
+        playerId: 'cast-user-config-1',
+        config: const MediaConfig(
+          castConfig: CastConfig(
+            enabled: true,
+            enableChromecast: true,
+            enableAirPlay: false,
+            showCastButton: false,
+            discoveryTimeout: 42,
+            chromecastAppId: 'DISTINCTIVE-APP-ID-1234',
+          ),
+        ),
+      );
+      await player.initialize();
+      calls.clear();
+
+      await player.startCastDiscovery();
+
+      final initCall = calls.firstWhere((c) => c.method == 'initializeCast');
+      final config = initCall.arguments['config'] as Map;
+      expect(config['chromecastAppId'], 'DISTINCTIVE-APP-ID-1234',
+          reason: 'The configured chromecastAppId must reach native code, '
+              'not be dropped in favor of a default CastConfig()');
+      expect(config['enableAirPlay'], false);
+      expect(config['showCastButton'], false);
+      expect(config['discoveryTimeout'], 42);
+
+      player.dispose();
+    });
+
+    test('sends a default CastConfig when none is configured', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'cast-user-config-2');
+      await player.initialize();
+      calls.clear();
+
+      await player.startCastDiscovery();
+
+      final initCall = calls.firstWhere((c) => c.method == 'initializeCast');
+      final config = initCall.arguments['config'] as Map;
+      expect(config['chromecastAppId'], isNull);
+      expect(config['enabled'], true);
+      expect(config['enableChromecast'], true);
+      expect(config['enableAirPlay'], true);
+
+      player.dispose();
+    });
+  });
+
   group('cast — lazy initializeCast before cast operations', () {
     test(
         'startCastDiscovery sends "initializeCast" before "startCastDiscovery"',

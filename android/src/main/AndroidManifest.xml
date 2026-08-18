@@ -34,5 +34,39 @@
         <receiver
             android:name="com.zionmedianetwork.zmedia_player.NotificationActionReceiver"
             android:exported="false" />
+
+        <!--
+          Fired via NotificationCompat.Builder#setDeleteIntent when the user swipes
+          away a `dismissible` notification (NotificationConfig.dismissible). See
+          NotificationHandler.buildDeleteIntent / NotificationDismissReceiver.
+          Same exported/no-intent-filter rationale as NotificationActionReceiver
+          above: only ever triggered via a PendingIntent this module builds for
+          itself.
+        -->
+        <receiver
+            android:name="com.zionmedianetwork.zmedia_player.NotificationDismissReceiver"
+            android:exported="false" />
+
+        <!--
+          Routes taps on NotificationConfig.customActions buttons back to the
+          tapped player. See NotificationHandler.buildCustomActionPendingIntent /
+          NotificationCustomActionReceiver. Same exported/no-intent-filter
+          rationale as NotificationActionReceiver above.
+        -->
+        <receiver
+            android:name="com.zionmedianetwork.zmedia_player.NotificationCustomActionReceiver"
+            android:exported="false" />
+
+        <!--
+          Routes taps on custom Picture-in-Picture actions (PipConfig.actions)
+          back to the tapped player's PipHandler so the buttons actually work
+          (see PipHandler.buildActionPendingIntent / PipActionReceiver).
+          Same exported/no-intent-filter rationale as NotificationActionReceiver
+          above: only ever triggered via a PendingIntent this module builds for
+          itself.
+        -->
+        <receiver
+            android:name="com.zionmedianetwork.zmedia_player.PipActionReceiver"
+            android:exported="false" />
     </application>
 </manifest>
