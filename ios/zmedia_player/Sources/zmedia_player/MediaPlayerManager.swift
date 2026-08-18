@@ -222,7 +222,7 @@ class MediaPlayerManager {
         players[playerId] = playerInstance
     }
 
-    func loadMediaItem(playerId: String, mediaItem: [String: Any]) throws {
+    func loadMediaItem(playerId: String, mediaItem: [String: Any], config: [String: Any]? = nil) throws {
         markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
             operation: "loadMediaItem",
@@ -232,7 +232,7 @@ class MediaPlayerManager {
             guard let playerInstance = players[playerId] else {
                 throw MediaPlayerError.playerNotFound
             }
-            playerInstance.loadMediaItem(mediaItem: mediaItem)
+            playerInstance.loadMediaItem(mediaItem: mediaItem, newConfig: config)
         }
     }
 
@@ -566,7 +566,32 @@ class MediaPlayerInstance: NSObject {
             forInterval: CMTime(seconds: 0.5, preferredTimescale: CMTimeScale(NSEC_PER_SEC)),
             queue: .main
         ) { [weak self] time in
-            self?.notifyPositionChanged(position: Int64(time.seconds * 1000))
+            guard let self = self else { return }
+
+            // Wave E (DVR window duration): re-check the live DVR window's
+            // length on every tick -- AVFoundation has no KVO notification
+            // for `seekableTimeRanges` changing, so polling here (already
+            // running every 0.5s for position) is how a growing/sliding
+            // window's duration stays current. See checkLiveDvrWindowDuration.
+            self.checkLiveDvrWindowDuration()
+
+            if let window = self.currentLiveDvrWindow {
+                // `time` is on the AVPlayerItem's own absolute timeline, the
+                // same one `seekableTimeRanges` is expressed on -- NOT reset
+                // to 0 at the window start, unlike ExoPlayer's
+                // window-relative getCurrentPosition() on Android (see
+                // MediaPlayerManager.kt's notifyDurationChanged doc). Translate
+                // to window-relative here so `PlaybackState.position` and
+                // `PlaybackState.duration` share the same zero point on both
+                // platforms -- seekTo(position:) below applies the inverse
+                // translation, so this pairing is self-consistent even though
+                // it changes the "position" unit specifically for a live+DVR
+                // item.
+                let relativeSeconds = max(0, CMTimeGetSeconds(time) - CMTimeGetSeconds(window.start))
+                self.notifyPositionChanged(position: Int64(relativeSeconds * 1000))
+            } else {
+                self.notifyPositionChanged(position: Int64(time.seconds * 1000))
+            }
         }
 
         // Status observer
@@ -636,7 +661,109 @@ class MediaPlayerInstance: NSObject {
         )
     }
 
-    func loadMediaItem(mediaItem: [String: Any]) {
+    /// Wave D: returns the top-level (per-player) HlsConfig/DashConfig map
+    /// that applies to `urlString` — HlsConfig for `.m3u8`, DashConfig for
+    /// `.mpd`, `nil` for anything else (progressive playback has no
+    /// streaming config, and DASH itself has no iOS playback path at all).
+    /// Both are serialized unconditionally by MediaPlayer._configToMap on
+    /// the Dart side (see streaming_config.dart's toMap()); this mirrors
+    /// that same URL -> config inference on the Android side
+    /// (MediaPlayerManager.kt's activeStreamingConfig).
+    private func activeStreamingConfig(for urlString: String) -> [String: Any]? {
+        guard let config = config else { return nil }
+        if urlString.contains(".m3u8") {
+            return config["hlsConfig"] as? [String: Any]
+        }
+        if urlString.contains(".mpd") {
+            return config["dashConfig"] as? [String: Any]
+        }
+        return nil
+    }
+
+    /// Wave E (DVR window duration): whether DVR is enabled for the item
+    /// currently loaded (`currentMediaItem`'s `url`), i.e.
+    /// `HlsConfig.enableDvr`/`DashConfig.enableDvr` — whichever config
+    /// applies, via `activeStreamingConfig(for:)`. Mirrors
+    /// `MediaPlayerManager.kt`'s `currentDvrEnabled()` on Android exactly —
+    /// see that method's doc.
+    private var currentDvrEnabled: Bool {
+        guard let urlString = currentMediaItem?["url"] as? String else { return false }
+        let streamingConfig = activeStreamingConfig(for: urlString)
+        return streamingConfig?["enableDvr"] as? Bool ?? false
+    }
+
+    /// The current `AVPlayerItem`'s live DVR seekable range, or `nil` when
+    /// the loaded item isn't live, DVR isn't enabled for it, or nothing
+    /// about the window is known yet (e.g. the playlist has only just
+    /// loaded).
+    ///
+    /// `seekableTimeRanges` is AVFoundation's own notion of the currently
+    /// known seekable span of a live item — the DVR window, buffer start to
+    /// live edge — mirroring `MediaPlayerManager.kt`'s use of
+    /// `Timeline.Window.durationUs` on Android for the same reason (see
+    /// `notifyDurationChanged`'s Android counterpart for the full
+    /// rationale, including why this is gated on DVR being enabled even
+    /// though `seekableTimeRanges` itself is independent of that app
+    /// config). Deliberately re-read on every access rather than cached: it
+    /// can grow (or slide) across the lifetime of a live item as more of
+    /// the window becomes available or older segments expire.
+    ///
+    /// `AVPlayerItem.duration` is `kCMTimeIndefinite` for a live item —
+    /// that's why `itemDurationObserver`'s KVO never fires for one (see
+    /// `loadMediaItem`) — `seekableTimeRanges` is the correct source for a
+    /// live item's *known* span instead.
+    private var currentLiveDvrWindow: CMTimeRange? {
+        guard currentMediaItem?["isLive"] as? Bool ?? false, currentDvrEnabled else { return nil }
+        guard let item = avPlayer?.currentItem,
+              let range = item.seekableTimeRanges.last?.timeRangeValue,
+              range.duration.isValid, !range.duration.isIndefinite,
+              CMTimeGetSeconds(range.duration) > 0 else { return nil }
+        return range
+    }
+
+    /// Reports the current live DVR window's length (see
+    /// `currentLiveDvrWindow`) through the same `onDurationChanged` event
+    /// `notifyDurationChanged` already uses for VOD, so
+    /// `PlaybackState.duration` becomes the DVR window length instead of
+    /// staying unknown for the lifetime of a live item — the bug this
+    /// method exists to fix. A no-op when `currentLiveDvrWindow` is `nil`
+    /// (not live, DVR not enabled, or nothing known yet) — the existing
+    /// "duration stays unknown" behavior for that case, unchanged.
+    ///
+    /// Called on every periodic time-observer tick (`setupObservers`) as
+    /// well as both `readyToPlay` transitions, since AVFoundation has no
+    /// KVO notification for `seekableTimeRanges` changing, unlike
+    /// `.duration`.
+    private func checkLiveDvrWindowDuration() {
+        guard let window = currentLiveDvrWindow else { return }
+        let durationMs = Int64(CMTimeGetSeconds(window.duration) * 1000)
+        notifyDurationChanged(duration: durationMs)
+    }
+
+    /// Config staleness fix: `newConfig`, when present, is the current
+    /// top-level (per-player) config snapshot from `MediaPlayer.load()` on
+    /// the Dart side -- the same wire shape `initialize`/`updateConfig`
+    /// already send (see `updateConfig(config:)`). Replaces `config`
+    /// wholesale *before* any of the config-dependent work below runs
+    /// (`activeStreamingConfig(for:)` for the `liveLatency`/`maxBitrate`
+    /// wiring and the `autoPlay` read at the bottom of this method), so all
+    /// of them see the item currently being loaded's actual config rather
+    /// than whatever was current at `initializePlayer`/the last explicit
+    /// `updateConfig(config:)` call. Mirrors
+    /// `MediaPlayerManager.kt`'s `loadMediaItem` exactly, including NOT
+    /// calling `applyConfig()` here -- see that method's doc for why
+    /// (in short: `applyConfig()`'s `startMuted` write would silently undo
+    /// a runtime `setMuted()` call, since `config`'s `startMuted` key is
+    /// never kept in sync with it, unlike `volume`/`speed`/`boxFit`).
+    /// `nil` when called from `skipToIndex`/`setPlaylist` (no config change
+    /// on a playlist advance -- unchanged pre-existing behavior) or from an
+    /// older cached Dart build that predates this wiring; either way
+    /// `config` (whatever it already was) is left untouched.
+    func loadMediaItem(mediaItem: [String: Any], newConfig: [String: Any]? = nil) {
+        if let newConfig = newConfig {
+            config = newConfig
+        }
+
         guard let urlString = mediaItem["url"] as? String,
               let url = URL(string: urlString) else {
             notifyError(error: "Invalid media URL")
@@ -766,6 +893,36 @@ class MediaPlayerInstance: NSObject {
 
         let playerItem = AVPlayerItem(asset: asset)
 
+        // Wave D: HlsConfig/DashConfig wiring. Whichever config applies to
+        // this URL (HlsConfig for .m3u8, DashConfig for .mpd) drives
+        // liveLatency and maxBitrate below — see activeStreamingConfig(for:).
+        let streamingConfig = activeStreamingConfig(for: urlString)
+
+        // liveLatency -> configuredTimeOffsetFromLive. iOS 14+ only; on
+        // earlier iOS this API does not exist, so liveLatency silently has
+        // no effect there (the package's minimum is iOS 13 — see
+        // HlsConfig.liveLatency's dartdoc).
+        if let liveLatencyMs = (streamingConfig?["liveLatencyMs"] as? NSNumber)?.doubleValue {
+            if #available(iOS 14.0, *) {
+                playerItem.automaticallyPreservesTimeOffsetFromLive = false
+                playerItem.configuredTimeOffsetFromLive = CMTime(
+                    seconds: liveLatencyMs / 1000.0,
+                    preferredTimescale: CMTimeScale(NSEC_PER_SEC)
+                )
+            }
+        }
+
+        // maxBitrate -> preferredPeakBitRate (bits/sec). There is no
+        // faithful minBitrate, nor a way to force a single non-adaptive
+        // track (enableAdaptiveBitrate: false), on AVPlayer — see
+        // StreamingConfig's dartdoc for the full platform-parity notes. A
+        // later explicit setQualityTrack()/enableAutoQuality() call
+        // overrides this the same way it already overrides any other
+        // preferredPeakBitRate value.
+        if let maxBitrate = (streamingConfig?["maxBitrate"] as? NSNumber)?.doubleValue {
+            playerItem.preferredPeakBitRate = maxBitrate
+        }
+
         // Apply buffer configuration if available.
         //
         // Only `targetBufferMs` maps onto a real AVFoundation knob
@@ -887,6 +1044,27 @@ class MediaPlayerInstance: NSObject {
     }
 
     func seekTo(position: Int64) {
+        // Wave E (DVR window duration): for a live item with DVR enabled,
+        // `position` (from Dart) is window-relative -- see the periodic
+        // time-observer doc in setupObservers() for why. Translate back to
+        // the AVPlayerItem's own absolute timeline before seeking, and clamp
+        // to the currently known window so a stale/out-of-range position
+        // (e.g. captured just before the window slid forward) cannot seek
+        // outside the available range. Every other case (VOD, or live
+        // without DVR -- which MediaPlayer.seekTo already rejects before
+        // this is ever reached, see media_player.dart's isSeekable guard)
+        // is unaffected: `position` is already the correct absolute time.
+        if let window = currentLiveDvrWindow {
+            let requestedSeconds = CMTimeGetSeconds(window.start) + Double(position) / 1000.0
+            let clampedSeconds = min(
+                max(requestedSeconds, CMTimeGetSeconds(window.start)),
+                CMTimeGetSeconds(window.end)
+            )
+            let time = CMTime(seconds: clampedSeconds, preferredTimescale: 1000)
+            avPlayer?.seek(to: time)
+            return
+        }
+
         let time = CMTime(value: position, timescale: 1000) // position in milliseconds
         avPlayer?.seek(to: time)
     }
@@ -1061,6 +1239,17 @@ class MediaPlayerInstance: NSObject {
         loadMediaItem(mediaItem: playlist[index])
     }
 
+    /// Config staleness fix: shares one source of truth with the `newConfig`
+    /// parameter `loadMediaItem(mediaItem:newConfig:)` now also accepts (see
+    /// that method's doc) -- both simply overwrite `config` wholesale.
+    /// There is nothing to reconcile between "the config sent with the last
+    /// `load()`" and "the config sent via the last explicit
+    /// `updateConfig()` call": whichever happened most recently is what
+    /// `config` holds, exactly mirroring the Dart-side `MediaPlayer._config`
+    /// field both wire payloads are serialized from. Unlike
+    /// `loadMediaItem`, this DOES call `applyConfig()` -- an explicit
+    /// `updateConfig()` call is exactly the "intentional config change,
+    /// apply it now" case `loadMediaItem`'s doc says it deliberately avoids.
     func updateConfig(config: [String: Any]) {
         self.config = config
         applyConfig()
@@ -1244,6 +1433,7 @@ class MediaPlayerInstance: NSObject {
             zlog("MediaPlayerInstance: Player status changed to readyToPlay")
             notifyStateChanged(state: "ready", isBuffering: false)
             notifyDurationChanged()
+            checkLiveDvrWindowDuration()
 
             // Re-bind only the topmost live view when ready (others stay
             // unbound to avoid multiple layers on one AVPlayer → grey).
@@ -1436,6 +1626,7 @@ class MediaPlayerInstance: NSObject {
                 notifyStateChanged(state: "ready", isBuffering: false)
             }
             notifyDurationChanged()
+            checkLiveDvrWindowDuration()
 
             // Extract and notify all tracks immediately
             extractAndNotifyQualityTracks()

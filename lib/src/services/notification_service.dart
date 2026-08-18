@@ -38,6 +38,7 @@ class NotificationService {
 
   bool _isShowing = false;
   MediaItem? _currentMedia;
+  MediaPlayer? _mediaPlayer;
   StreamSubscription<NotificationActionEvent>? _notificationActionSubscription;
   StreamSubscription<PlaybackState>? _stateSubscription;
   bool _actionStreamListenedTo = false;
@@ -126,6 +127,11 @@ class NotificationService {
         'config': _config.toMap(),
       });
 
+      // Kept so show() can read the live isSeekable/dvrEnabled state at the
+      // moment it builds the 'mediaItem' payload (see show() below) — those
+      // aren't parameters of show() itself.
+      _mediaPlayer = mediaPlayer;
+
       // Subscribe to notification actions from MediaPlayer if provided. The
       // typed event stream is the source of truth (it carries `position` for
       // "seekTo"); the deprecated string stream is derived from it so both
@@ -199,6 +205,20 @@ class NotificationService {
           'artworkUrl': mediaItem.artworkUrl,
           'url': mediaItem.url,
           'duration': mediaItem.duration?.inMilliseconds,
+          // Lets native gate seeking (ACTION_SEEK_TO / METADATA_KEY_DURATION
+          // on Android, changePlaybackPositionCommand / skipForward/Backward
+          // / MPMediaItemPropertyPlaybackDuration on iOS) so the lock-screen/
+          // notification surface never offers scrubbing on a live stream
+          // that isn't actually seekable. `dvrEnabled` is read from the
+          // MediaPlayer this service was initialized with (see
+          // MediaPlayer.dvrEnabled), not from mediaItem itself, since DVR is
+          // a playback-session concept rather than a static item property;
+          // it is `false` when no MediaPlayer was supplied to [initialize].
+          // Both are re-sent on every [updateState] call too (see below) —
+          // this initial value is only what native has until the first state
+          // update arrives.
+          'isLive': _mediaPlayer?.isLive ?? mediaItem.isLive,
+          'dvrEnabled': _mediaPlayer?.dvrEnabled ?? false,
         },
         'state': {
           'state': state.state.name,
@@ -217,6 +237,19 @@ class NotificationService {
   }
 
   /// Update notification with new state
+  ///
+  /// Also re-sends the current `isLive`/`dvrEnabled` seekability inputs on
+  /// every call, not just from [show]. Native caches these values (to gate
+  /// lock-screen/Control Center scrubbing — see the `'isLive'`/`'dvrEnabled'`
+  /// comment in [show]), but unlike title/artist — which only change when the
+  /// media *item* changes — `dvrEnabled` can change while the *same* item
+  /// keeps playing (e.g. the host app calls `MediaPlayer.updateConfig` with a
+  /// different `HlsConfig.enableDvr` and reloads). [show] alone is not
+  /// re-invoked in that case, so without repeating these here native would
+  /// keep gating on a stale value forever — see `NotificationHandler.kt`'s
+  /// `updateState`/`NotificationHandler.swift`'s `updateState` on the
+  /// receiving end, which re-derive `isSeekable` and re-apply gating from
+  /// whatever is sent on *this* call.
   Future<void> updateState({
     required PlaybackState state,
     required String playerId,
@@ -239,6 +272,8 @@ class NotificationService {
           'position': state.position.inMilliseconds,
           'duration': effectiveDuration.inMilliseconds,
           'isPlaying': state.state == PlayerState.playing,
+          'isLive': _mediaPlayer?.isLive ?? _currentMedia?.isLive ?? false,
+          'dvrEnabled': _mediaPlayer?.dvrEnabled ?? false,
         },
       });
     } catch (e) {
@@ -286,6 +321,7 @@ class NotificationService {
     _notificationActionSubscription = null;
     _stateSubscription?.cancel();
     _stateSubscription = null;
+    _mediaPlayer = null;
     _actionController.close();
     _actionEventController.close();
   }

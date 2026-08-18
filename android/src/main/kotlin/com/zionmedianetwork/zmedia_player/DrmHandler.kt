@@ -16,6 +16,8 @@ import androidx.media3.common.util.Util
 import io.flutter.plugin.common.MethodChannel
 import okhttp3.CertificatePinner
 import okhttp3.OkHttpClient
+import org.json.JSONArray
+import org.json.JSONObject
 import java.util.UUID
 
 /**
@@ -107,6 +109,13 @@ class DrmHandler(
 
             // Create DRM callback
             val drmCallback = HttpMediaDrmCallback(licenseUrl, dataSourceFactory)
+
+            // DrmConfig.customData (Wave C, gate item "DrmConfig.customData is
+            // serialised and ignored"): applied as additional key-request HTTP
+            // properties, scoped to license requests only. See
+            // applyCustomDataKeyRequestProperties() doc for exactly how each
+            // value type is converted.
+            applyCustomDataKeyRequestProperties(drmCallback, drmConfig)
 
             // Create DRM session manager
             val drmSessionManager = DefaultDrmSessionManager.Builder()
@@ -207,6 +216,68 @@ class DrmHandler(
             requestHeaders["Authorization"] = "Bearer $token"
         }
         return requestHeaders
+    }
+
+    /**
+     * Applies [DrmConfig.customData] (a `Map<String, dynamic>` on the Dart side,
+     * `lib/src/models/drm_config.dart`) as additional HTTP header key/value pairs
+     * on outgoing DRM key-request (licence) requests only, via
+     * [HttpMediaDrmCallback.setKeyRequestProperty].
+     *
+     * This is deliberately distinct from `drmConfig["headers"]` (see
+     * [buildRequestHeaders]): those headers are set as *default* request
+     * properties on the whole [HttpDataSource.Factory], so they apply to every
+     * request made through it (provisioning included). `setKeyRequestProperty`
+     * only affects the key/licence request `HttpMediaDrmCallback` issues, which
+     * matches `customData`'s dartdoc ("custom license request data").
+     *
+     * Value conversion — `customData` values are `dynamic` on the Dart side, so
+     * not everything is naturally a header-safe `String`:
+     *  - [String] values are passed through unchanged.
+     *  - [Boolean]/[Int]/[Long]/[Double]/[Float] use their own well-defined
+     *    `toString()` (e.g. `"true"`, `"42"`, `"3.14"`) — unambiguous scalar
+     *    representations.
+     *  - [Map]/[List] values are serialized as JSON via `org.json` (NOT Kotlin's
+     *    `Map`/`List.toString()`, which produces a non-parseable, undocumented
+     *    `"{key=value}"` representation) so a license server expecting
+     *    structured data in a header receives valid JSON.
+     *  - `null` values and any other type are skipped (with a warning log)
+     *    rather than silently sent as the literal string `"null"`.
+     */
+    private fun applyCustomDataKeyRequestProperties(
+        drmCallback: HttpMediaDrmCallback,
+        drmConfig: Map<String, Any>
+    ) {
+        val customData = drmConfig["customData"] as? Map<*, *> ?: return
+        for ((rawKey, rawValue) in customData) {
+            val key = rawKey as? String ?: continue
+            val value = stringifyCustomDataValue(key, rawValue) ?: continue
+            drmCallback.setKeyRequestProperty(key, value)
+        }
+    }
+
+    /**
+     * Converts a single [DrmConfig.customData] entry value to a header-safe
+     * string. See [applyCustomDataKeyRequestProperties] for the conversion
+     * rules. Returns null (and logs a warning) for `null`/unsupported types so
+     * the caller can skip setting that header entirely.
+     */
+    private fun stringifyCustomDataValue(key: String, value: Any?): String? {
+        return when (value) {
+            null -> null
+            is String -> value
+            is Boolean, is Int, is Long, is Double, is Float -> value.toString()
+            is Map<*, *> -> JSONObject(value).toString()
+            is List<*> -> JSONArray(value).toString()
+            else -> {
+                Log.w(
+                    TAG,
+                    "Skipping DrmConfig.customData['$key']: unsupported value type " +
+                        value::class.java.simpleName
+                )
+                null
+            }
+        }
     }
 
     /**

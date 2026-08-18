@@ -508,14 +508,12 @@ void main() {
         (c) => c.method == 'updateNotificationState',
         orElse: () => fail('No updateNotificationState call found'),
       );
-      final stateArg =
-          updateCall.arguments['state'] as Map<dynamic, dynamic>;
+      final stateArg = updateCall.arguments['state'] as Map<dynamic, dynamic>;
 
       expect(
         stateArg['duration'],
         const Duration(seconds: 10).inMilliseconds,
-        reason:
-            'updateState must also fall back to the declared MediaItem '
+        reason: 'updateState must also fall back to the declared MediaItem '
             'duration when the live PlaybackState duration is unknown, not '
             'just show().',
       );
@@ -819,6 +817,536 @@ void main() {
         1,
         reason: 'The no-listener warning must only be logged once, not on '
             'every show() call',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
+
+  // =========================================================================
+  group(
+      'NotificationService — show() carries isLive/dvrEnabled so native can '
+      'gate seeking (Wave A: live-stream seek gating)', () {
+    const liveItem = MediaItem(
+      id: 'notif-live-item',
+      title: 'Live Stream',
+      url: 'https://example.com/live.m3u8',
+      isLive: true,
+    );
+
+    // -----------------------------------------------------------------------
+    test(
+        'show() sends isLive: true and dvrEnabled: false for a live item '
+        'with no MediaPlayer supplied to initialize()', () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-live-no-mp');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      // No mediaPlayer passed to initialize() — dvrEnabled must default to
+      // false rather than throw or omit the key.
+      await service.initialize('notif-live-no-mp');
+
+      await service.show(
+        mediaItem: liveItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-live-no-mp',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      expect(mediaItemArg['isLive'], isTrue);
+      expect(mediaItemArg['dvrEnabled'], isFalse);
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test(
+        'show() sends dvrEnabled: false for a live item when the supplied '
+        'MediaPlayer has DVR disabled (the default)', () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-live-no-dvr');
+      await player.initialize();
+      await player.load(liveItem);
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-live-no-dvr', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: liveItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-live-no-dvr',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      expect(mediaItemArg['isLive'], isTrue);
+      expect(mediaItemArg['dvrEnabled'], isFalse);
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test(
+        'show() sends dvrEnabled: true for a live item when the supplied '
+        "MediaPlayer's dvrEnabled is true", () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(
+        playerId: 'notif-live-dvr',
+        config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+      );
+      await player.initialize();
+      await player.load(liveItem);
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-live-dvr', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: liveItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-live-dvr',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      expect(mediaItemArg['isLive'], isTrue);
+      expect(mediaItemArg['dvrEnabled'], isTrue);
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test('show() sends isLive: false for ordinary VOD media', () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-vod-isLive');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-vod-isLive', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-vod-isLive',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      expect(mediaItemArg['isLive'], isFalse);
+      expect(mediaItemArg['dvrEnabled'], isFalse);
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
+
+  // =========================================================================
+  group(
+      'NotificationService — updateState() re-syncs isLive/dvrEnabled '
+      '(regression: dvrEnabled going stale on the native side when toggled '
+      'while the same item plays — see notification_service.dart updateState doc)',
+      () {
+    const liveItem = MediaItem(
+      id: 'notif-live-toggle-item',
+      title: 'Live Stream (toggle)',
+      url: 'https://example.com/live-toggle.m3u8',
+      isLive: true,
+    );
+
+    /// Returns the `'state'` map of the most recent `updateNotificationState`
+    /// call, failing the test if there wasn't one.
+    Map<dynamic, dynamic> latestUpdateStateArg(List<MethodCall> calls) {
+      final updateCalls =
+          calls.where((c) => c.method == 'updateNotificationState').toList();
+      expect(updateCalls, isNotEmpty,
+          reason: 'Expected at least one updateNotificationState call');
+      return updateCalls.last.arguments['state'] as Map<dynamic, dynamic>;
+    }
+
+    // -----------------------------------------------------------------------
+    test(
+        'every updateNotificationState call carries isLive/dvrEnabled, not '
+        'just the initial showNotification call', () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(
+        playerId: 'notif-updatestate-carries-dvr',
+        config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+      );
+      await player.initialize();
+      await player.load(liveItem);
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-updatestate-carries-dvr',
+          mediaPlayer: player);
+      await service.show(
+        mediaItem: liveItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-updatestate-carries-dvr',
+      );
+
+      calls.clear();
+
+      await service.updateState(
+        state: const PlaybackState(
+          state: PlayerState.playing,
+          position: Duration(seconds: 5),
+        ),
+        playerId: 'notif-updatestate-carries-dvr',
+      );
+
+      final stateArg = latestUpdateStateArg(calls);
+      expect(stateArg['isLive'], isTrue);
+      expect(stateArg['dvrEnabled'], isTrue);
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test(
+        'toggling DVR on the same live item while it keeps playing '
+        'propagates dvrEnabled to native in BOTH directions (off->on and '
+        'on->off)', () async {
+      final calls = _installCapture();
+      const playerId = 'notif-dvr-toggle-both-directions';
+
+      final player = MediaPlayer(
+        playerId: playerId,
+        config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: false)),
+      );
+      await player.initialize();
+      await player.load(liveItem);
+      expect(player.dvrEnabled, isFalse);
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize(playerId, mediaPlayer: player);
+      await service.show(
+        mediaItem: liveItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: playerId,
+      );
+
+      // Sanity: showNotification reflects the initial (DVR off) state.
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      expect(
+        (showCall.arguments['mediaItem'] as Map)['dvrEnabled'],
+        isFalse,
+      );
+
+      calls.clear();
+
+      // --- Direction 1: DVR off -> on -------------------------------------
+      // Mirrors how a host app actually flips this: MediaPlayer.updateConfig
+      // with a new HlsConfig, then reload the (unchanged) MediaItem — see
+      // MediaPlayer._applyStreamingConfigForLoad, which only re-derives
+      // dvrEnabled on load().
+      await player.updateConfig(
+        player.config.copyWith(hlsConfig: const HlsConfig(enableDvr: true)),
+      );
+      await player.load(liveItem);
+      // stateStream is a broadcast StreamController delivering
+      // asynchronously; give its listener (NotificationService.updateState)
+      // a microtask turn to run before inspecting captured channel calls.
+      await Future<void>.delayed(Duration.zero);
+      expect(player.dvrEnabled, isTrue);
+
+      var stateArg = latestUpdateStateArg(calls);
+      expect(
+        stateArg['dvrEnabled'],
+        isTrue,
+        reason: 'Toggling DVR on and reloading the same item must '
+            'propagate dvrEnabled: true to native via '
+            'updateNotificationState, not just showNotification',
+      );
+      expect(stateArg['isLive'], isTrue);
+
+      calls.clear();
+
+      // --- Direction 2: DVR on -> off --------------------------------------
+      await player.updateConfig(
+        player.config.copyWith(hlsConfig: const HlsConfig(enableDvr: false)),
+      );
+      await player.load(liveItem);
+      await Future<void>.delayed(Duration.zero);
+      expect(player.dvrEnabled, isFalse);
+
+      stateArg = latestUpdateStateArg(calls);
+      expect(
+        stateArg['dvrEnabled'],
+        isFalse,
+        reason: 'Toggling DVR back off and reloading the same item must '
+            'propagate dvrEnabled: false to native via '
+            'updateNotificationState',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
+
+  // =========================================================================
+  group(
+      'NotificationService — live DVR window duration (Wave E: '
+      'HlsConfig.enableDvr granted seek permission with no seekable range — '
+      'see MediaPlayerManager.kt/.swift notifyDurationChanged)', () {
+    const liveItem = MediaItem(
+      id: 'notif-live-dvr-duration-item',
+      title: 'Live Stream (DVR window)',
+      url: 'https://example.com/live-dvr-duration.m3u8',
+      isLive: true,
+      // A live item has no statically-declared duration — matches every
+      // real live MediaItem. _effectiveDuration's declared-duration
+      // fallback (see notification_service.dart) must NOT paper over a
+      // missing live duration here; only a real onDurationChanged tick
+      // (simulating the native DVR-window fix) may supply one.
+    );
+
+    // -----------------------------------------------------------------------
+    test(
+        'a native-reported DVR window duration (onDurationChanged) flows '
+        'through show() as the notification duration, alongside isLive: '
+        'true and dvrEnabled: true', () async {
+      final calls = _installCapture();
+      const playerId = 'notif-live-dvr-duration-show';
+      final player = MediaPlayer(
+        playerId: playerId,
+        config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+      );
+      await player.initialize();
+      await player.load(liveItem);
+      expect(player.dvrEnabled, isTrue);
+      expect(player.isSeekable, isTrue);
+
+      // Simulates the fixed native layer (MediaPlayerManager.kt's
+      // Timeline.Window-derived duration / MediaPlayerManager.swift's
+      // seekableTimeRanges-derived duration) reporting the DVR window's
+      // length — NOT the stream's total unbounded elapsed live duration —
+      // once ExoPlayer/AVPlayer has resolved it.
+      final durFuture = player.durationStream.first;
+      await _injectEvent('onDurationChanged', {
+        'playerId': playerId,
+        'duration': 3600000, // 1-hour DVR window
+        'isLive': true,
+      });
+      await durFuture.timeout(const Duration(seconds: 2));
+      expect(player.currentState.duration, const Duration(hours: 1));
+
+      calls.clear();
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize(playerId, mediaPlayer: player);
+
+      await service.show(
+        mediaItem: liveItem,
+        state: PlaybackState(
+          state: PlayerState.playing,
+          duration: player.currentState.duration,
+        ),
+        playerId: playerId,
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+      final stateArg = showCall.arguments['state'] as Map<dynamic, dynamic>;
+
+      expect(mediaItemArg['isLive'], isTrue);
+      expect(mediaItemArg['dvrEnabled'], isTrue,
+          reason: 'Native derives isSeekable from isLive && dvrEnabled — '
+              'both must accompany the duration so it is actually trusted '
+              '(NotificationHandler.isSeekable) rather than just present');
+      expect(
+        stateArg['duration'],
+        const Duration(hours: 1).inMilliseconds,
+        reason: 'The DVR window length must reach native as the '
+            "notification's duration so METADATA_KEY_DURATION / "
+            'MPMediaItemPropertyPlaybackDuration has a real value to pair '
+            'with the seek permission isSeekable already grants — a '
+            'scrubber range, not just permission to scrub',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test(
+        'a growing DVR window duration (repeated onDurationChanged ticks) '
+        'reaches updateState on every tick, not just the first', () async {
+      final calls = _installCapture();
+      const playerId = 'notif-live-dvr-duration-growing';
+      final player = MediaPlayer(
+        playerId: playerId,
+        config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+      );
+      await player.initialize();
+      await player.load(liveItem);
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize(playerId, mediaPlayer: player);
+      await service.show(
+        mediaItem: liveItem,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: playerId,
+      );
+
+      calls.clear();
+
+      // Early in playback the DVR window is still filling up — e.g. only
+      // 30s of a target 1-hour window is available yet.
+      var durFuture = player.durationStream.first;
+      await _injectEvent('onDurationChanged', {
+        'playerId': playerId,
+        'duration': 30000,
+        'isLive': true,
+      });
+      await durFuture.timeout(const Duration(seconds: 2));
+      await service.updateState(
+        state: PlaybackState(
+          state: PlayerState.playing,
+          duration: player.currentState.duration,
+        ),
+        playerId: playerId,
+      );
+
+      var updateCall = calls.lastWhere(
+        (c) => c.method == 'updateNotificationState',
+        orElse: () => fail('No updateNotificationState call found'),
+      );
+      expect(
+        (updateCall.arguments['state'] as Map)['duration'],
+        30000,
+      );
+
+      calls.clear();
+
+      // The window has grown as more segments became available.
+      durFuture = player.durationStream.first;
+      await _injectEvent('onDurationChanged', {
+        'playerId': playerId,
+        'duration': 3600000,
+        'isLive': true,
+      });
+      await durFuture.timeout(const Duration(seconds: 2));
+      await service.updateState(
+        state: PlaybackState(
+          state: PlayerState.playing,
+          duration: player.currentState.duration,
+        ),
+        playerId: playerId,
+      );
+
+      updateCall = calls.lastWhere(
+        (c) => c.method == 'updateNotificationState',
+        orElse: () => fail('No updateNotificationState call found'),
+      );
+      expect(
+        (updateCall.arguments['state'] as Map)['duration'],
+        3600000,
+        reason: 'A later, larger DVR window duration must reach native on '
+            'its own updateState tick — matching '
+            "NotificationHandler.kt's/.swift's guard that only rejects a "
+            'later value regressing TO zero/unknown, not one that grows',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test(
+        'live stream without DVR never gets a duration from onDurationChanged '
+        '(matches native withholding it), and dvrEnabled: false always '
+        'accompanies whatever duration IS present so native still gates it',
+        () async {
+      final calls = _installCapture();
+      const playerId = 'notif-live-no-dvr-duration';
+      final player = MediaPlayer(playerId: playerId); // no HlsConfig: DVR off
+      await player.initialize();
+      await player.load(liveItem);
+      expect(player.dvrEnabled, isFalse);
+      expect(player.isSeekable, isFalse);
+
+      // The fixed native layer never emits onDurationChanged for a live
+      // item without DVR (see MediaPlayerManager.kt's notifyDurationChanged
+      // doc: the `isLive && window.isSeekable && ... && currentDvrEnabled()`
+      // branch is false, and the non-live branch does not apply either, so
+      // durationMs stays 0 and the channel call is skipped entirely) — so
+      // PlaybackState.duration legitimately stays Duration.zero here.
+      expect(player.currentState.duration, Duration.zero);
+
+      calls.clear();
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize(playerId, mediaPlayer: player);
+
+      await service.show(
+        mediaItem: liveItem,
+        state: PlaybackState(
+          state: PlayerState.playing,
+          duration: player.currentState.duration,
+        ),
+        playerId: playerId,
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+      final stateArg = showCall.arguments['state'] as Map<dynamic, dynamic>;
+
+      expect(
+        stateArg['duration'],
+        0,
+        reason: 'A live item without a statically-declared duration and '
+            'without a real live duration tick must never have a duration '
+            'invented for it by _effectiveDuration\'s declared-duration '
+            'fallback',
+      );
+      expect(mediaItemArg['isLive'], isTrue);
+      expect(
+        mediaItemArg['dvrEnabled'],
+        isFalse,
+        reason: 'dvrEnabled: false must accompany the (zero) duration so '
+            "NotificationHandler.isSeekable stays false and the "
+            'notification never grows a scrubber even if some future '
+            'caller starts sending a non-zero duration for this case',
       );
 
       service.dispose();

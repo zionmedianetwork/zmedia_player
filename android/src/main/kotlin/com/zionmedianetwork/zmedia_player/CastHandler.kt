@@ -23,8 +23,14 @@ class CastHandler(
     companion object {
         private const val TAG = "CastHandler"
         private const val CAST_NAMESPACE = "urn:x-cast:com.google.cast.media"
-        // Must match the receiver app ID in CastOptionsProvider
-        private const val RECEIVER_APP_ID = "CC1AD845"
+        // Google's Default Media Receiver. Used as the fallback when
+        // CastConfig.chromecastAppId is unset - see initialize(). Note this
+        // only affects the MediaRouteSelector category used for device
+        // discovery below; it cannot affect the app-level receiver ID
+        // registered via CastOptionsProvider, which is instantiated by the
+        // OS by reflection from the manifest before any Dart config exists.
+        private const val DEFAULT_RECEIVER_APP_ID = "CC1AD845"
+        private const val DEFAULT_DISCOVERY_TIMEOUT_SECONDS = 10
     }
 
     // Owned scope: cancelled in dispose() to stop all coroutines launched by this handler.
@@ -35,10 +41,15 @@ class CastHandler(
     private var remoteMediaClient: RemoteMediaClient? = null
     private var config: Map<String, Any>? = null
 
+    // Resolved from CastConfig.chromecastAppId in initialize(), falling back
+    // to DEFAULT_RECEIVER_APP_ID when unset.
+    private var receiverAppId: String = DEFAULT_RECEIVER_APP_ID
+
     // MediaRouter for device discovery
     private var mediaRouter: MediaRouter? = null
     private var mediaRouteSelector: MediaRouteSelector? = null
     private var isDiscovering = false
+    private var discoveryTimeoutJob: Job? = null
 
     private val sessionManagerListener = object : SessionManagerListener<CastSession> {
         override fun onSessionStarting(session: CastSession) {
@@ -120,6 +131,27 @@ class CastHandler(
 
         this.config = config
 
+        // CastConfig.enabled / CastConfig.enableChromecast: skip native Cast
+        // initialization entirely when either is false. Every other method on
+        // this handler already null-checks castContext/sessionManager/
+        // mediaRouter, so leaving them unset makes the handler an inert no-op
+        // rather than requiring guards to be threaded through every call site.
+        val enabled = config["enabled"] as? Boolean ?: true
+        val enableChromecast = config["enableChromecast"] as? Boolean ?: true
+        if (!enabled || !enableChromecast) {
+            android.util.Log.d(
+                TAG,
+                "Chromecast disabled via CastConfig (enabled=$enabled, enableChromecast=$enableChromecast) - skipping native Cast initialization"
+            )
+            notifyCastStatusChanged("disconnected", null, false)
+            return
+        }
+
+        receiverAppId = (config["chromecastAppId"] as? String)
+            ?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_RECEIVER_APP_ID
+        android.util.Log.d(TAG, "Using Chromecast receiver app ID: $receiverAppId")
+
         try {
             // Get Cast context
             castContext = CastContext.getSharedInstance(context)
@@ -128,7 +160,7 @@ class CastHandler(
             // Initialize MediaRouter for device discovery
             mediaRouter = MediaRouter.getInstance(context)
             mediaRouteSelector = MediaRouteSelector.Builder()
-                .addControlCategory(CastMediaControlIntent.categoryForCast(RECEIVER_APP_ID))
+                .addControlCategory(CastMediaControlIntent.categoryForCast(receiverAppId))
                 .build()
 
             // Register session listener
@@ -155,7 +187,7 @@ class CastHandler(
      */
     fun startDiscovery() {
         android.util.Log.d(TAG, "Starting cast device discovery")
-        android.util.Log.d(TAG, "Using receiver app ID: $RECEIVER_APP_ID")
+        android.util.Log.d(TAG, "Using receiver app ID: $receiverAppId")
 
         isDiscovering = true
         notifyCastStatusChanged("discovering", null, false)
@@ -177,6 +209,27 @@ class CastHandler(
             // Immediately notify with currently available devices
             notifyDevicesChanged()
 
+            // CastConfig.discoveryTimeout: auto-stop discovery after the
+            // configured number of seconds so a caller that starts discovery
+            // and never explicitly stops it doesn't leave the MediaRouter
+            // callback (and the discovery UI state) running indefinitely. A
+            // timeout of 0 or less disables the auto-stop.
+            discoveryTimeoutJob?.cancel()
+            val timeoutSeconds = (config?.get("discoveryTimeout") as? Number)?.toInt()
+                ?: DEFAULT_DISCOVERY_TIMEOUT_SECONDS
+            if (timeoutSeconds > 0) {
+                discoveryTimeoutJob = scope.launch {
+                    delay(timeoutSeconds * 1000L)
+                    if (isDiscovering) {
+                        android.util.Log.d(
+                            TAG,
+                            "Cast discovery timeout (${timeoutSeconds}s) reached - stopping discovery"
+                        )
+                        stopDiscovery()
+                    }
+                }
+            }
+
             android.util.Log.d(TAG, "Cast device discovery started successfully")
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to start discovery: ${e.message}", e)
@@ -191,6 +244,8 @@ class CastHandler(
         android.util.Log.d(TAG, "Stopping cast device discovery")
 
         isDiscovering = false
+        discoveryTimeoutJob?.cancel()
+        discoveryTimeoutJob = null
 
         try {
             // Unregister MediaRouter callback
@@ -397,6 +452,7 @@ class CastHandler(
         castContext = null
         mediaRouter = null
         mediaRouteSelector = null
+        discoveryTimeoutJob = null
     }
 
     // Private helper methods

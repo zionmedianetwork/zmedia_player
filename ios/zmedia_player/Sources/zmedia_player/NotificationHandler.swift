@@ -68,6 +68,44 @@ class NotificationHandler: NSObject {
     private var duration: Double = 0.0
     private var playbackRate: Float = 1.0
 
+    // Wired from the "mediaItem" map's "isLive"/"dvrEnabled" keys in
+    // showNotification(), and re-synced from the "state" map's own
+    // "isLive"/"dvrEnabled" keys on every updateState() call (see that
+    // method) -- both are read from MediaPlayer.isLive/MediaPlayer.dvrEnabled
+    // on the Dart side (see NotificationService.show()/updateState() in
+    // notification_service.dart). dvrEnabled in particular can change while
+    // the same media item keeps playing (e.g. the host app reconfigures
+    // HlsConfig.enableDvr and reloads), so updateState() -- not just
+    // showNotification() -- must be able to update these. Both default to
+    // false, matching every non-live item.
+    private var isLive: Bool = false
+    private var dvrEnabled: Bool = false
+
+    /// `false` only for a live stream without DVR enabled -- mirrors
+    /// `MediaPlayer.isSeekable` in media_player.dart exactly. Gates
+    /// `changePlaybackPositionCommand`/`skipForwardCommand`/`skipBackwardCommand`
+    /// (see `applyCommandAvailability`) and `MPMediaItemPropertyPlaybackDuration`
+    /// (see `updateNowPlayingInfo`) -- a live stream with no DVR must not offer, or
+    /// honor, scrubbing from Control Center / the lock screen.
+    private var isSeekable: Bool { !(isLive && !dvrEnabled) }
+
+    // MARK: - NotificationConfig fields with no faithful iOS equivalent
+    //
+    // `priority`, `dismissible`, and `customActions` (see their dartdoc in
+    // notification_config.dart) are deliberately never read here:
+    //
+    // - `priority`: MPRemoteCommandCenter/MPNowPlayingInfoCenter have no concept of
+    //   notification priority/importance to map this onto.
+    // - `dismissible`: Now Playing info (Control Center / lock screen) has no
+    //   user-dismissible surface an app can control -- there is nothing to map a
+    //   "swipe to dismiss" flag onto.
+    // - `customActions`: MPRemoteCommandCenter only exposes a fixed set of semantic
+    //   commands (play, pause, skip, like/dislike, bookmark, rating, ...), not
+    //   arbitrary app-supplied actions with a caller-chosen id/title/icon.
+    //
+    // This package has spent multiple phases removing fake cross-platform symmetry;
+    // these three stay Android-only rather than being approximated.
+
     private var remoteCommandCenter: MPRemoteCommandCenter { Ownership.shared.remoteCommandCenter }
     private var nowPlayingInfoCenter: MPNowPlayingInfoCenter { Ownership.shared.nowPlayingInfoCenter }
 
@@ -322,6 +360,15 @@ class NotificationHandler: NSObject {
         // (in milliseconds, matching this package's convention elsewhere)
         // attached to the event.
         let changePositionTarget = remoteCommandCenter.changePlaybackPositionCommand.addTarget { event in
+            // Belt-and-braces: the command is already disabled while !isSeekable
+            // (live stream, no DVR -- see applyCommandAvailability), which should
+            // prevent the OS from ever invoking this target in that state. Still
+            // reject explicitly rather than forwarding to Flutter, in case some
+            // surface calls it anyway -- mirrors MediaPlayer.seekTo's own guard in
+            // media_player.dart and Android's onSeekTo rejection.
+            guard let owner = Ownership.shared.currentOwner(), owner.isSeekable else {
+                return .commandFailed
+            }
             guard let positionEvent = event as? MPChangePlaybackPositionCommandEvent else {
                 return .commandFailed
             }
@@ -350,13 +397,16 @@ class NotificationHandler: NSObject {
         remoteCommandCenter.previousTrackCommand.isEnabled = showPrevious
         remoteCommandCenter.stopCommand.isEnabled = showStop
 
-        remoteCommandCenter.skipForwardCommand.isEnabled = true
+        // Disabled for a live stream without DVR (isSeekable == false): skipping
+        // forward/backward and dragging the scrub bar are both seek operations, and
+        // a non-DVR live stream is not seekable -- see isSeekable doc.
+        remoteCommandCenter.skipForwardCommand.isEnabled = isSeekable
         remoteCommandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: seekInterval)]
 
-        remoteCommandCenter.skipBackwardCommand.isEnabled = true
+        remoteCommandCenter.skipBackwardCommand.isEnabled = isSeekable
         remoteCommandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: seekInterval)]
 
-        remoteCommandCenter.changePlaybackPositionCommand.isEnabled = true
+        remoteCommandCenter.changePlaybackPositionCommand.isEnabled = isSeekable
     }
 
     // MARK: - Show/Update Notification
@@ -380,6 +430,12 @@ class NotificationHandler: NSObject {
         currentAlbum = mediaItem["album"] as? String
         currentArtworkUrl = newArtworkUrl
         currentMediaUrl = newMediaUrl
+
+        // Sent by NotificationService.show() (see notification_service.dart); both
+        // default to false, i.e. non-live, if absent (an older cached Dart build
+        // that predates this wiring).
+        isLive = mediaItem["isLive"] as? Bool ?? false
+        dvrEnabled = mediaItem["dvrEnabled"] as? Bool ?? false
 
         // Update playback state
         isPlaying = state["isPlaying"] as? Bool ?? false
@@ -413,8 +469,15 @@ class NotificationHandler: NSObject {
 
         // This instance's local state is always kept up to date (above) so it
         // can republish correctly if it later becomes the owner, but only the
-        // current owner is allowed to write to the shared Now Playing center.
+        // current owner is allowed to write to the shared Now Playing center /
+        // shared remote command center.
         if isOwner {
+            // isLive/dvrEnabled (and therefore isSeekable) are only known once a
+            // mediaItem has been shown -- applyCommandAvailability() must be
+            // re-run here (beyond its initialize()/ownership-handoff call sites)
+            // so a live-without-DVR item's scrub/skip commands actually get
+            // disabled once that item is known, not just at the next handoff.
+            applyCommandAvailability()
             updateNowPlayingInfo()
         }
 
@@ -440,9 +503,30 @@ class NotificationHandler: NSObject {
             duration = Double(durationMs) / 1000.0
         }
 
+        // Re-sync isLive/dvrEnabled from this call too -- see the field doc
+        // above for why this can legitimately change without a new
+        // showNotification() call (a DVR toggle on the same media item).
+        // Only overwrite when the key is actually present, so an older
+        // cached Dart build that predates this wiring (and never sends these
+        // keys to updateNotificationState) cannot silently reset a
+        // live-without-DVR item back to "seekable", or vice versa.
+        if let newIsLive = state["isLive"] as? Bool {
+            isLive = newIsLive
+        }
+        if let newDvrEnabled = state["dvrEnabled"] as? Bool {
+            dvrEnabled = newDvrEnabled
+        }
+
         playbackRate = isPlaying ? 1.0 : 0.0
 
         if isOwner {
+            // isSeekable may have just changed above -- command availability
+            // (changePlaybackPositionCommand/skipForwardCommand/
+            // skipBackwardCommand) must be re-applied here too, not just Now
+            // Playing info, or a DVR toggle would update the
+            // duration/scrubber metadata but leave the commands themselves
+            // stuck enabled/disabled at their previous state.
+            applyCommandAvailability()
             updateNowPlayingInfo()
         }
     }
@@ -483,8 +567,13 @@ class NotificationHandler: NSObject {
             nowPlayingInfo[MPMediaItemPropertyArtwork] = artwork
         }
 
-        // Playback information
-        nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+        // Playback information. MPMediaItemPropertyPlaybackDuration is omitted for a
+        // live stream without DVR (isSeekable == false) so Control Center / the lock
+        // screen renders no scrubber for it -- a duration is what makes the system
+        // draw one at all. Elapsed time is always included regardless.
+        if isSeekable {
+            nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+        }
         nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = position
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate
 

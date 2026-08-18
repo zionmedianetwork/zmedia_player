@@ -113,7 +113,33 @@ class DrmConfig {
   /// Content ID (for FairPlay)
   final String? contentId;
 
-  /// Custom license request data
+  /// Custom license (key) request data, applied as additional HTTP headers
+  /// on the license request only — distinct from [headers], which applies to
+  /// every DRM-related HTTP request (Android: every request made through the
+  /// shared `HttpDataSource.Factory`, including provisioning; iOS: both the
+  /// FairPlay certificate fetch and the license POST).
+  ///
+  /// Native wiring:
+  ///  - **Android:** each entry is set via
+  ///    `HttpMediaDrmCallback.setKeyRequestProperty(key, value)`, which
+  ///    Media3/ExoPlayer applies to key/license requests specifically (see
+  ///    `DrmHandler.applyCustomDataKeyRequestProperties`).
+  ///  - **iOS:** each entry is set as an HTTP header on the license `POST`
+  ///    request built in `DrmHandler.requestLicense` — **not** on the
+  ///    certificate `GET` in `DrmHandler.loadCertificate(from:)`.
+  ///
+  /// Value conversion (values are `dynamic`, so not everything is naturally
+  /// a header-safe `String`):
+  ///  - [String] values pass through unchanged.
+  ///  - [bool]/[int]/[double] values use their own unambiguous string
+  ///    representation (e.g. `"true"`, `"42"`, `"3.14"`).
+  ///  - Nested [Map]/[List] values are JSON-encoded (via `org.json` on
+  ///    Android, `JSONSerialization` on iOS) — **not** converted with a
+  ///    platform's default/debug string representation, which would produce
+  ///    a non-parseable value on the wire.
+  ///  - `null` entries and any other unsupported value type are skipped
+  ///    (logged as a warning natively) rather than sent as the literal
+  ///    string `"null"`.
   final Map<String, dynamic>? customData;
 
   /// EZDRM configuration

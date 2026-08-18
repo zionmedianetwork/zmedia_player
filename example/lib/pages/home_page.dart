@@ -21,6 +21,7 @@ import 'feed_page.dart';
 import 'media_feed_pool_page.dart';
 import 'secure_output_page.dart';
 import 'measurement/measurement_hub_page.dart';
+import 'wired_config_verification_page.dart';
 
 /// Home page displaying a scrollable gallery of ZMedia Player feature demos.
 ///
@@ -286,6 +287,19 @@ class HomePage extends StatelessWidget {
                   icon: Icons.dynamic_feed_outlined,
                   page: const MediaFeedPoolPage(),
                   iconColor: Colors.brown,
+                ),
+                const SizedBox(height: 16),
+                _SectionLabel('Config Surface Wiring'),
+                _feature(
+                  context,
+                  title: 'Wired Config Verification',
+                  description:
+                      'Live seek gating (HlsConfig.enableDvr), liveLatency, '
+                      'NotificationConfig.customActions/priority/dismissible, '
+                      'and PipConfig.actions -- all on one on-device harness.',
+                  icon: Icons.rule_folder_outlined,
+                  page: const WiredConfigVerificationPage(),
+                  iconColor: Colors.blueGrey,
                 ),
               ]),
             ),

@@ -67,12 +67,13 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 
 ### Live Streaming
 - **Live Edge Detection** - Automatic positioning at live
-- **DVR/Time-Shifting** - Seek within live streams
-- **Latency Configuration** - Configurable live latency
-- **Segment Prefetching** - Smooth live playback
+- **DVR/Time-Shifting** - `HlsConfig`/`DashConfig.enableDvr` gates seeking on a live stream and
+  enables reporting of a DVR-window duration to seek within
+- **Latency Configuration** - `liveLatency` sets a target offset from the live edge (Android;
+  iOS 14+ only)
 - **Adaptive Segment Caching** - Transparent, read-through HLS/DASH segment cache during playback (**Android only**; caches what has been played for replay, not an offline download)
 
-**Total:** 21 features
+**Total:** 20 features
 
 ---
 
@@ -170,13 +171,16 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 ### PiP Features
 - **PiP Mode** - Floating video window
 - **Custom Aspect Ratio** - Set window dimensions
-- **Playback Controls** - Control in PiP mode
+- **Playback Controls** - Control in PiP mode (`PipConfig.showPlaybackControls`; Android gates
+  custom actions entirely, iOS partially hides skip/scrub via `requiresLinearPlayback`, iOS 14+)
+- **Custom Actions (Android)** - `PipConfig.actions` renders as `RemoteAction` buttons in the
+  system PiP window; taps deliver a `PipActionEvent` on `MediaPlayer.pipActionStream`
 - **Auto-Enter** - Activate on background
 - **Manual Control** - Programmatic PiP toggle
 - **State Tracking** - Monitor PiP status
 - **Platform Support** - Android & iOS
 
-**Total:** 7 features
+**Total:** 8 features
 
 ---
 
@@ -197,9 +201,14 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 ### General Casting
 - **Cast Status Monitoring** - Track connection state
 - **Device List** - Available devices
-- **Auto-Connect** - Remember last device
+- **Configurable Discovery** - `CastConfig.discoveryTimeout` bounds Android Chromecast
+  discovery; `CastConfig.chromecastAppId` overrides the receiver app ID
 
 **Total:** 11 features
+
+Note: `CastConfig.autoConnect` (remembering/reconnecting to the last-used device) was removed —
+this package has no persistence mechanism for a last-used device identifier, so it was never
+implemented and would have been a silent no-op.
 
 ---
 
@@ -346,13 +355,13 @@ Comprehensive feature set across playback, streaming, subtitles, DRM, casting, P
 ### By Category
 - Core Playback: 10
 - Configuration: 15
-- Streaming: 21
+- Streaming: 20
 - Subtitles: 9
 - Audio: 6
 - Playlists: 11
 - DRM: 10
 - Notifications: 11
-- Picture-in-Picture: 7
+- Picture-in-Picture: 8
 - Casting: 11
 - ListView & Feed: 10
 - Cache: 7

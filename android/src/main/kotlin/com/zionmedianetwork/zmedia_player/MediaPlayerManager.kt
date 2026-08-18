@@ -11,6 +11,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.dash.DashMediaSource
 import androidx.media3.exoplayer.upstream.DefaultBandwidthMeter
+import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.DataSource
@@ -117,11 +118,11 @@ class MediaPlayerManager(
         }
     }
 
-    fun loadMediaItem(playerId: String, mediaItem: Map<String, Any>) {
+    fun loadMediaItem(playerId: String, mediaItem: Map<String, Any>, config: Map<String, Any>? = null) {
         markActivity(playerId)
         mainHandler.post {
             crashHandler.wrapOperation("loadMediaItem", playerId, mapOf("url" to (mediaItem["url"] ?: "unknown"))) {
-                players[playerId]?.loadMediaItem(mediaItem)
+                players[playerId]?.loadMediaItem(mediaItem, config)
             }
         }
     }
@@ -414,6 +415,17 @@ class MediaPlayerInstance(
             notifyDurationChanged()
         }
 
+        override fun onTimelineChanged(timeline: Timeline, reason: Int) {
+            // Wave E (DVR window duration): a live window's durationUs can
+            // grow (or, once known, change) independently of a
+            // playbackState/mediaMetadata transition -- e.g. as more
+            // segments become available in the DVR window. Re-derive and
+            // report it here too so a long-idle-in-STATE_READY live stream
+            // doesn't get stuck reporting the window length it had at the
+            // moment playback became ready. See notifyDurationChanged's doc.
+            notifyDurationChanged()
+        }
+
         override fun onTracksChanged(tracks: Tracks) {
             android.util.Log.d("MediaPlayerInstance", "Tracks changed")
             extractAndNotifyQualityTracks()
@@ -459,7 +471,47 @@ class MediaPlayerInstance(
         startBandwidthMonitoring()
     }
 
-    fun loadMediaItem(mediaItem: Map<String, Any>) {
+    /**
+     * Config staleness fix: [newConfig], when present, is the current
+     * top-level (per-player) config snapshot from `MediaPlayer.load()` on
+     * the Dart side -- the same wire shape `initialize`/`updateConfig`
+     * already send (see [updateConfig]). Replaces [config] wholesale
+     * *before* any of the config-dependent work below runs
+     * ([activeStreamingConfig] for [applyStreamingTrackSelectionConstraints]
+     * and [buildMediaItem]'s liveLatency, the `adaptiveCacheConfig` read,
+     * and the `autoPlay` read at the bottom of this method), so all of them
+     * see the item currently being loaded's actual config rather than
+     * whatever was current at `initialize()`/the last explicit
+     * `updateConfig()` call.
+     *
+     * Deliberately does NOT call [applyConfig] (unlike [updateConfig], which
+     * does) -- `applyConfig`'s volume/speed/looping/`startMuted` writes are
+     * meant for an explicit, intentional config change, not an implicit
+     * side effect of every single item load. In particular, re-applying
+     * `startMuted` here would silently undo a runtime `setMuted()` call:
+     * `config`'s `startMuted` key is never updated when
+     * [MediaPlayerManager.setMuted] runs (only [isMuted] is), unlike
+     * `volume`/`speed`/`boxFit`, which the *Dart* `_config` field this map
+     * is serialized from IS kept in sync with by `setVolume`/`setSpeed`/
+     * `setBoxFit` (see those methods in media_player.dart) -- so
+     * reapplying only the config-derived reads below, and leaving
+     * `applyConfig`'s runtime-state-affecting writes untouched here, is
+     * what keeps a user's in-progress mute state (or any other
+     * `applyConfig`-driven state this config snapshot doesn't authoritatively
+     * own) intact across a reload.
+     *
+     * [newConfig] is `null` when called from [skipToIndex] (playlist
+     * advance never carries a config -- matches the pre-existing,
+     * unchanged `setPlaylist`/`skipToIndex` behavior) or from an older
+     * cached Dart build that predates this wiring; either way [config]
+     * (whatever it already was) is left untouched, exactly as before this
+     * fix.
+     */
+    fun loadMediaItem(mediaItem: Map<String, Any>, newConfig: Map<String, Any>? = null) {
+        if (newConfig != null) {
+            config = newConfig
+        }
+
         val url = mediaItem["url"] as? String ?: return
         val httpHeaders = mediaItem["httpHeaders"] as? Map<String, String>
 
@@ -477,6 +529,13 @@ class MediaPlayerInstance(
         notifySubtitleTracksChanged(emptyList())
 
         val uri = Uri.parse(url)
+
+        // Wave D: HlsConfig/DashConfig wiring. Whichever config applies to
+        // this URL (HlsConfig for .m3u8, DashConfig for .mpd — same
+        // inference as the format detection a few lines below) drives the
+        // ExoPlayer track-selector's bitrate constraints regardless of
+        // media-source type.
+        applyStreamingTrackSelectionConstraints(activeStreamingConfig(uri))
 
         // Determine which DataSource.Factory to use (custom headers or default).
         val activeDataSourceFactory: androidx.media3.datasource.DataSource.Factory =
@@ -558,19 +617,19 @@ class MediaPlayerInstance(
                         androidx.media3.exoplayer.hls.HlsMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
+                            .createMediaSource(buildMediaItem(uri))
 
                     uri.toString().contains(".mpd") ->
                         androidx.media3.exoplayer.dash.DashMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
+                            .createMediaSource(buildMediaItem(uri))
 
                     else ->
                         androidx.media3.exoplayer.source.ProgressiveMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
-                            .createMediaSource(androidx.media3.common.MediaItem.fromUri(uri))
+                            .createMediaSource(buildMediaItem(uri))
                 }
 
                 drmHandler = handler
@@ -858,6 +917,20 @@ class MediaPlayerInstance(
         }
     }
 
+    /**
+     * Config staleness fix: shares one source of truth with the `config`
+     * parameter [loadMediaItem] now also accepts (see that method's doc) --
+     * both simply overwrite [config] wholesale. There is nothing to
+     * reconcile between "the config sent with the last `load()`" and "the
+     * config sent via the last explicit `updateConfig()` call": whichever
+     * happened most recently is what [config] holds, exactly mirroring the
+     * Dart-side `MediaPlayer._config` field both wire payloads are
+     * serialized from (a call to either one, on the Dart side, is what
+     * updates `_config` in the first place). Unlike [loadMediaItem],
+     * this DOES call [applyConfig] -- an explicit `updateConfig()` call is
+     * exactly the "intentional config change, apply it now" case that
+     * method's doc says [loadMediaItem] deliberately avoids.
+     */
     fun updateConfig(newConfig: Map<String, Any>) {
         config = newConfig
         applyConfig(newConfig)
@@ -946,19 +1019,120 @@ class MediaPlayerInstance(
         return s.contains(".m3u8") || s.contains(".mpd")
     }
 
+    /**
+     * Wave D: returns the top-level (per-player) HlsConfig/DashConfig map that
+     * applies to [uri] — HlsConfig for `.m3u8`, DashConfig for `.mpd`, `null`
+     * for anything else (progressive playback has no streaming config). Both
+     * are serialized unconditionally by MediaPlayer._configToMap on the Dart
+     * side (see streaming_config.dart's toMap()); this mirrors that same URL
+     * -> config inference on the native side.
+     */
+    private fun activeStreamingConfig(uri: Uri): Map<String, Any>? {
+        val topConfig = config ?: return null
+        return when {
+            uri.toString().contains(".m3u8") -> {
+                @Suppress("UNCHECKED_CAST")
+                topConfig["hlsConfig"] as? Map<String, Any>
+            }
+            uri.toString().contains(".mpd") -> {
+                @Suppress("UNCHECKED_CAST")
+                topConfig["dashConfig"] as? Map<String, Any>
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Wave E (DVR window duration): whether DVR is enabled for the item
+     * currently loaded ([currentMediaItem]'s `url`), i.e.
+     * `HlsConfig.enableDvr`/`DashConfig.enableDvr` — whichever config
+     * applies, via [activeStreamingConfig]. `false` (and therefore "not
+     * seekable") for anything without a loaded item or without a matching
+     * streaming config, matching every other DVR-gated default in this file
+     * and in `NotificationHandler.kt`'s `isSeekable`.
+     *
+     * Used by [notifyDurationChanged] to decide whether a live window's
+     * duration may be reported at all — see that method's doc for why this
+     * must be re-derived from the same config both [applyStreamingTrackSelectionConstraints]
+     * and `NotificationHandler.isSeekable` already read, rather than
+     * invented as a new source of truth.
+     */
+    private fun currentDvrEnabled(): Boolean {
+        val url = currentMediaItem?.get("url") as? String ?: return false
+        val streamingConfig = activeStreamingConfig(Uri.parse(url))
+        return streamingConfig?.get("enableDvr") as? Boolean ?: false
+    }
+
+    /**
+     * Wave D: builds the Media3 [MediaItem] for [uri], applying
+     * `HlsConfig.liveLatency`/`DashConfig.liveLatency` (whichever applies —
+     * see [activeStreamingConfig]) as a [MediaItem.LiveConfiguration] target
+     * offset when present. Used in place of a bare `MediaItem.fromUri(uri)`
+     * everywhere a media source is built (both the DRM and non-DRM paths in
+     * [loadMediaItem]) so the live-latency target applies regardless of
+     * whether the item is DRM-protected.
+     */
+    private fun buildMediaItem(uri: Uri): MediaItem {
+        val streamingConfig = activeStreamingConfig(uri)
+        val liveLatencyMs = (streamingConfig?.get("liveLatencyMs") as? Number)?.toLong()
+
+        val builder = MediaItem.Builder().setUri(uri)
+        if (liveLatencyMs != null) {
+            builder.setLiveConfiguration(
+                MediaItem.LiveConfiguration.Builder()
+                    .setTargetOffsetMs(liveLatencyMs)
+                    .build()
+            )
+        }
+        return builder.build()
+    }
+
+    /**
+     * Wave D: applies `StreamingConfig.enableAdaptiveBitrate`/`maxBitrate`/
+     * `minBitrate` (from whichever of HlsConfig/DashConfig [streamingConfig]
+     * is) to the player's [DefaultTrackSelector]. When adaptive bitrate is
+     * disabled, `forceHighestSupportedBitrate` locks selection onto a single
+     * fixed video track (the highest bitrate within the configured bounds)
+     * instead of letting ExoPlayer adapt between renditions — there is no
+     * dedicated Media3 API to "disable ABR" directly, so this is the standard
+     * technique for it. No-op when the player's track selector is not a
+     * [DefaultTrackSelector] (should not happen — ExoPlayer.Builder creates
+     * one by default and this instance never overrides it).
+     */
+    private fun applyStreamingTrackSelectionConstraints(streamingConfig: Map<String, Any>?) {
+        val trackSelector = exoPlayer?.trackSelector as? DefaultTrackSelector ?: return
+
+        val enableAdaptiveBitrate = streamingConfig?.get("enableAdaptiveBitrate") as? Boolean ?: true
+        val maxBitrate = (streamingConfig?.get("maxBitrate") as? Number)?.toInt()
+        val minBitrate = (streamingConfig?.get("minBitrate") as? Number)?.toInt()
+
+        val parameters = trackSelector.buildUponParameters()
+            .setMaxVideoBitrate(maxBitrate ?: Int.MAX_VALUE)
+            .setMinVideoBitrate(minBitrate ?: 0)
+            .setForceHighestSupportedBitrate(!enableAdaptiveBitrate)
+            .build()
+
+        trackSelector.setParameters(parameters)
+        android.util.Log.d(
+            "MediaPlayerInstance",
+            "applyStreamingTrackSelectionConstraints: enableAdaptiveBitrate=$enableAdaptiveBitrate " +
+                "maxBitrate=$maxBitrate minBitrate=$minBitrate"
+        )
+    }
+
     private fun createMediaSource(uri: Uri, dataSourceFactory: DataSource.Factory = this.dataSourceFactory): MediaSource {
         return when {
             uri.toString().contains(".m3u8") -> {
                 HlsMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(uri))
+                    .createMediaSource(buildMediaItem(uri))
             }
             uri.toString().contains(".mpd") -> {
                 DashMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(uri))
+                    .createMediaSource(buildMediaItem(uri))
             }
             else -> {
                 ProgressiveMediaSource.Factory(dataSourceFactory)
-                    .createMediaSource(MediaItem.fromUri(uri))
+                    .createMediaSource(buildMediaItem(uri))
             }
         }
     }
@@ -1153,14 +1327,86 @@ class MediaPlayerInstance(
         }
     }
 
+    /**
+     * Wave E (DVR window duration): for VOD, `player.duration` (the total
+     * media duration) is reported unchanged from before this change. For a
+     * live item, `player.duration`/the current [Timeline.Window]'s
+     * `durationUs` is ExoPlayer's own notion of the *currently known
+     * seekable span* — buffer start to live edge — not the total elapsed
+     * time the stream has been broadcasting, which is unbounded/unknowable
+     * for a genuine live source and would be misleading to report as
+     * "duration". That span is exactly the DVR window: reporting it here is
+     * what lets `PlaybackState.duration` (and, downstream,
+     * `NotificationHandler`'s `METADATA_KEY_DURATION`) carry a real
+     * scrubber range instead of staying unknown for the lifetime of a live
+     * item — the bug this method exists to fix.
+     *
+     * Deliberately gated on [currentDvrEnabled] even though the window's
+     * `durationUs` is a native ExoPlayer property independent of that app
+     * config flag: reporting *any* duration for a live-without-DVR item
+     * would hand `NotificationHandler` (and any other consumer of
+     * `PlaybackState.duration`) a scrubbable range while
+     * `MediaPlayer.isSeekable`/`ACTION_SEEK_TO` still (correctly) withhold
+     * seek permission — precisely the half-wired "permission without a
+     * range, or a range without permission" defect class this fix removes.
+     * `NotificationHandler.isSeekable` independently re-derives and
+     * enforces the same gate from `isLive`/`dvrEnabled` before trusting
+     * whatever is sent here, so this is belt-and-braces, not the only
+     * guard — but there is no reason to *originate* a value that must then
+     * be suppressed downstream.
+     *
+     * `durationUs` can be `C.TIME_UNSET` (nothing known yet, e.g. the
+     * playlist has only just loaded) or can legitimately grow across
+     * repeated calls as more of the DVR window becomes available. This
+     * method makes no attempt to predict or estimate a not-yet-known
+     * value — it simply reports whatever is currently known, and is
+     * invoked again on every `onTimelineChanged` (see `playerListener`
+     * below) as well as the existing `onPlaybackStateChanged`/
+     * `onMediaMetadataChanged` triggers, so a live window's duration is
+     * kept current as it grows. `NotificationHandler`'s anti-regression
+     * guard (see its `updateState` doc) means a later, larger value is
+     * always accepted; a transient unknown (0) is not.
+     *
+     * Position remains window-relative already — `player.currentPosition`
+     * (see `notifyPositionChanged`/`startPositionUpdates`) is documented by
+     * ExoPlayer as the position within the *current window*, i.e. the same
+     * offset-from-window-start basis as `durationUs` — so no separate
+     * position translation is needed for a DVR window: position and
+     * duration already share the same zero point.
+     *
+     * The `isLive` value in the reported event now comes from
+     * [Timeline.Window.isLive] (ExoPlayer's own manifest-derived
+     * detection) rather than the Dart-supplied [MediaItem.isLive] flag this
+     * method previously echoed back unchanged. The two should agree for any
+     * correctly configured live item; where they don't (e.g. a live URL
+     * loaded without `MediaItem.isLive: true`), the native value is the
+     * more trustworthy source for a *duration* event specifically, since
+     * it's what actually decided whether `durationUs` means "total media
+     * duration" or "current DVR window length" a few lines above.
+     */
     private fun notifyDurationChanged() {
         try {
-            val duration = exoPlayer?.duration ?: 0L
-            if (duration > 0) {
-                val isLive = currentMediaItem?.get("isLive") as? Boolean ?: false
+            val player = exoPlayer ?: return
+            val timeline = player.currentTimeline
+            if (timeline.isEmpty) return
+
+            val window = Timeline.Window()
+            timeline.getWindow(player.currentMediaItemIndex, window)
+            val isLive = window.isLive()
+
+            val durationMs: Long = when {
+                !isLive ->
+                    if (player.duration != C.TIME_UNSET) player.duration else 0L
+                isLive && window.isSeekable && window.durationUs != C.TIME_UNSET &&
+                    currentDvrEnabled() ->
+                    window.durationMs
+                else -> 0L
+            }
+
+            if (durationMs > 0) {
                 val arguments = mapOf(
                     "playerId" to playerId,
-                    "duration" to duration.toInt(),
+                    "duration" to durationMs.toInt(),
                     "isLive" to isLive
                 )
                 methodChannel.invokeMethod("onDurationChanged", arguments)

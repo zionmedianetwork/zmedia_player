@@ -47,6 +47,33 @@ void main() {
       expect(updated.showNext, false);
       expect(updated.showPlayPause, true); // Unchanged
     });
+
+    // -------------------------------------------------------------------
+    // Regression: NotificationConfig.priority must default to `null`
+    // ("no explicit priority requested"), not NotificationPriority.high.
+    // A media notification re-posts on every playback state/position tick;
+    // defaulting to a non-`low` value would make every existing
+    // integrator's notification newly re-alert on every tick purely from a
+    // package upgrade, with no code change on their part -- see the
+    // field's dartdoc.
+    // -------------------------------------------------------------------
+    test('priority defaults to null (no explicit priority requested)', () {
+      const config = NotificationConfig();
+
+      expect(config.priority, isNull);
+      // toMap() must forward that null through as-is (not resolve it to
+      // some default string) -- native's own resolveChannelImportance/
+      // resolveCompatPriority already fall back to LOW for a
+      // missing/unrecognized value.
+      expect(config.toMap()['priority'], isNull);
+    });
+
+    test('an explicitly-set priority is honored by toMap()', () {
+      const config = NotificationConfig(priority: NotificationPriority.high);
+
+      expect(config.priority, NotificationPriority.high);
+      expect(config.toMap()['priority'], 'high');
+    });
   });
 
   group('PipConfig', () {
@@ -206,7 +233,9 @@ void main() {
       expect(config.enabled, true);
       expect(config.enableChromecast, true);
       expect(config.enableAirPlay, true);
-      expect(config.autoConnect, false);
+      expect(config.discoveryTimeout, 10);
+      expect(config.showCastButton, true);
+      expect(config.chromecastAppId, isNull);
     });
 
     test('creates with custom values', () {
@@ -214,14 +243,12 @@ void main() {
         enabled: true,
         enableChromecast: true,
         enableAirPlay: false,
-        autoConnect: true,
         chromecastAppId: 'custom-app-id',
       );
 
       expect(config.enabled, true);
       expect(config.enableChromecast, true);
       expect(config.enableAirPlay, false);
-      expect(config.autoConnect, true);
       expect(config.chromecastAppId, 'custom-app-id');
     });
   });

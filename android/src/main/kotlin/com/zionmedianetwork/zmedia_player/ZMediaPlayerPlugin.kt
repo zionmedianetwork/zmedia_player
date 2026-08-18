@@ -252,9 +252,16 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
         try {
             val playerId = call.argument<String>("playerId")
             val mediaItem = call.argument<Map<String, Any>>("mediaItem")
+            // Config staleness fix: MediaPlayer.load() on the Dart side now
+            // sends the current MediaConfig snapshot alongside every load,
+            // not just 'initialize'/'updateConfig' -- see that method's doc.
+            // Optional/nullable so an older cached Dart build (that only
+            // sends playerId + mediaItem) still loads correctly with
+            // whatever config this instance already holds.
+            val config = call.argument<Map<String, Any>>("config")
 
             if (playerId != null && mediaItem != null) {
-                playerManager.loadMediaItem(playerId, mediaItem)
+                playerManager.loadMediaItem(playerId, mediaItem, config)
                 result.success(null)
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID and media item are required", null)

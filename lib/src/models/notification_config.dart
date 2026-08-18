@@ -36,16 +36,53 @@ class NotificationConfig {
   /// Whether to show notification when paused
   final bool showWhenPaused;
 
-  /// Custom actions to add to notification
+  /// Custom actions to add to notification.
+  ///
+  /// **Android only.** Rendered as real additional `NotificationCompat.Action`
+  /// buttons (beyond the built-in play/pause/next/previous/stop/seek ones),
+  /// each dispatching its [NotificationAction.id] back through
+  /// [NotificationService.actionEventStream] when tapped. No effect on iOS:
+  /// `MPRemoteCommandCenter` only exposes a fixed set of semantic commands
+  /// (play, pause, skip, like/dislike, bookmark, rating, ...), not arbitrary
+  /// app-supplied actions with a caller-chosen id/title/icon, so there is no
+  /// faithful way to honour this on iOS. It is intentionally left unread
+  /// there rather than approximated.
   final List<NotificationAction> customActions;
 
-  /// Priority for the notification (Android)
-  final NotificationPriority priority;
+  /// Priority for the notification.
+  ///
+  /// **Android only.** Drives both the `NotificationChannel` importance
+  /// (created once, at [NotificationService.initialize] time — Android does
+  /// not let an existing channel's importance be changed later) and
+  /// `NotificationCompat.setPriority` on every posted notification. No
+  /// effect on iOS: `MPRemoteCommandCenter`/`MPNowPlayingInfoCenter` have no
+  /// concept of notification priority/importance to map this onto.
+  ///
+  /// Defaults to `null`, meaning "no explicit priority requested" — native
+  /// then falls back to `IMPORTANCE_LOW`/`PRIORITY_LOW`, matching this
+  /// package's behaviour before `priority` was wired up to native at all.
+  /// This mirrors [MediaFeedConfig.autoPlayPolicy]'s `null`-preserves-prior-
+  /// behaviour convention: a media notification re-posts on every playback
+  /// state/position tick, so defaulting this to a non-`low` value would make
+  /// *every* existing integrator's notification newly re-alert (sound/
+  /// heads-up) on every tick the moment they upgraded, with no code change
+  /// on their part — a silent regression this package explicitly avoids.
+  /// Set this explicitly (e.g. [NotificationPriority.high]) to opt into a
+  /// louder/heads-up notification.
+  final NotificationPriority? priority;
 
   /// Small icon resource name (Android)
   final String? smallIcon;
 
-  /// Whether notification is dismissible
+  /// Whether the notification can be dismissed (swiped away) by the user.
+  ///
+  /// **Android only.** `true` posts the notification as non-ongoing
+  /// (`setOngoing(false)`) with a delete intent, so it can actually be
+  /// swiped away and native cleanly notices when that happens; `false`
+  /// (the default) posts it as ongoing, matching the historical default
+  /// behaviour. No effect on iOS: Now Playing info (Control Center / lock
+  /// screen) has no user-dismissible surface an app can control — there is
+  /// nothing for this flag to map onto there.
   final bool dismissible;
 
   const NotificationConfig({
@@ -62,7 +99,7 @@ class NotificationConfig {
     this.seekInterval = 10,
     this.showWhenPaused = true,
     this.customActions = const [],
-    this.priority = NotificationPriority.high,
+    this.priority,
     this.smallIcon,
     this.dismissible = false,
   });
@@ -120,7 +157,12 @@ class NotificationConfig {
       'seekInterval': seekInterval,
       'showWhenPaused': showWhenPaused,
       'customActions': customActions.map((a) => a.toMap()).toList(),
-      'priority': priority.name,
+      // null (unset) is sent through as-is rather than resolved to a
+      // default here -- native's own resolveChannelImportance/
+      // resolveCompatPriority (Android) already fall back to LOW for a
+      // missing/unrecognized value, which is exactly the "no explicit
+      // priority requested" behaviour this field's null default documents.
+      'priority': priority?.name,
       'smallIcon': smallIcon,
       'dismissible': dismissible,
     };

@@ -37,10 +37,13 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
 **Streaming & subtitles**
 - HLS adaptive streaming (Android + iOS) and DASH (Android only — AVPlayer has no DASH
   support), quality switching via each native player's own defaults
-- Live HLS/DASH playback (`MediaItem.isLive`); DVR/seeking availability and latency are
-  governed entirely by the native player's defaults for the manifest — `HlsConfig`/
-  `DashConfig`'s DVR/latency/prefetch fields are not yet wired to native code (see the
-  [Live Streaming guide](docs/api-reference/live-streaming.md))
+- Live HLS/DASH playback (`MediaItem.isLive`); `HlsConfig`/`DashConfig.enableDvr` gates seeking
+  (and reports a DVR-window duration) on a live stream, `liveLatency` sets a target offset from
+  the live edge (iOS 14+), and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track
+  selection — beyond that, remaining seek range and buffering behavior are still governed by the
+  native player's own defaults for the manifest (see the
+  [Live Streaming guide](docs/api-reference/live-streaming.md) for the full field-by-field wiring
+  table and platform caveats)
 - Subtitles: SRT, WebVTT, ASS/SSA, and embedded tracks with customizable styling
 - Manual and automatic quality/resolution selection; multiple audio tracks
 - Progressive download/caching; real-time bandwidth estimation
@@ -164,15 +167,30 @@ final controller = MediaController.create(
 ### HLS/DASH Adaptive Streaming
 
 Adaptive bitrate switching for an HLS master playlist is the native player's own default
-behavior (ExoPlayer/AVPlayer) — no `HlsConfig` is required to enable it. `HlsConfig` and
-`DashConfig` are constructible but **not currently wired to native code**; see the
-[Live Streaming guide](docs/api-reference/live-streaming.md) for details.
+behavior (ExoPlayer/AVPlayer) — no `HlsConfig` is required to enable it. `HlsConfig`/`DashConfig`
+are read by native for a specific subset of fields: `enableDvr` (seek gating + live-window
+duration reporting), `liveLatency` (target offset from the live edge, iOS 14+), and
+`maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` (track-selection bounds — iOS honors only
+`maxBitrate`). See the [Live Streaming guide](docs/api-reference/live-streaming.md) for the full
+field-by-field wiring table.
 
 ```dart
 final controller = MediaController.create();
 
 await controller.load(const MediaItem(
   id: 'hls', title: 'HLS Stream', url: 'https://example.com/playlist.m3u8',
+));
+```
+
+For a live stream, DVR seeking must be opted into explicitly — without it, `seekTo` throws:
+
+```dart
+final controller = MediaController.create(
+  config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+);
+
+await controller.load(const MediaItem(
+  id: 'live', title: 'Live Stream', url: 'https://example.com/live.m3u8', isLive: true,
 ));
 ```
 

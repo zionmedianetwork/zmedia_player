@@ -54,7 +54,6 @@ const MediaConfig({
   DrmConfig? drmConfig,
   SubtitleConfig? subtitleConfig,
   CacheConfig? cacheConfig,
-  NotificationConfig? notificationConfig,
   PipConfig? pipConfig,
   CastConfig? castConfig,
   bool showControls = true,
@@ -62,8 +61,8 @@ const MediaConfig({
   bool allowBackgroundPlayback = false,
   bool useHardwareAcceleration = true,
   BufferConfig? bufferConfig,
-  HlsConfig? hlsConfig,          // not currently wired to native code — see the Streaming section below
-  DashConfig? dashConfig,        // not currently wired to native code — see the Streaming section below
+  HlsConfig? hlsConfig,          // partially wired to native code — see the Streaming section below
+  DashConfig? dashConfig,        // partially wired to native code — see the Streaming section below
   AdaptiveCacheConfig? adaptiveCacheConfig, // Android-only transparent HLS/DASH segment cache
   bool enableSubtitles = true,
   bool respectSafeArea = false,     // inset video below status bar / notch
@@ -161,17 +160,32 @@ a DRM session is created.
 enum BitrateSelectionStrategy { auto, lowest, highest, medium }
 
 // StreamingConfig — adaptive bitrate + quality-switch thresholds.
-// HlsConfig / DashConfig — extend it with: enableLiveStream, enableDvr, liveLatency,
-//   enableAdaptiveBitrate, enableSegmentPrefetch (HLS) / enableMpdCaching (DASH).
+// HlsConfig / DashConfig — extend it with: enableDvr, liveLatency, plus the
+//   deprecated enableLiveStream (use MediaItem.isLive instead).
 // QualityTrack — id, bitrate, resolution, codec.
 // AudioTrack — id, language, codec, channels.
 ```
 
-`HlsConfig`/`DashConfig` are constructible and accepted by `MediaConfig`, but their fields
-above are **not currently wired to native code** — `MediaPlayer.load()` never sends them to
-the platform channel, so setting them has no effect on playback today. See the
-[Live Streaming guide](live-streaming.md) for what actually governs live/adaptive behavior in
-the meantime. DASH is Android-only; AVPlayer on iOS has no DASH support.
+`HlsConfig`/`DashConfig` are serialized to the platform channel and read by native for a
+specific subset of fields — `enableDvr` (Dart-side seek gate for
+`MediaPlayer.isSeekable`/`seekTo`; also gates whether native reports a duration for the live
+item at all — see below), `liveLatency` (`MediaItem.LiveConfiguration` on Android, `AVPlayerItem
+.configuredTimeOffsetFromLive` on iOS 14+), and the inherited `enableAdaptiveBitrate`/
+`maxBitrate`/`minBitrate` (`DefaultTrackSelector` on Android; iOS honors only `maxBitrate` via
+`preferredPeakBitRate` — no faithful `minBitrate`/force-non-adaptive equivalent exists on
+AVPlayer). `bitrateStrategy`, `enableAutoQualitySwitch`, `qualitySwitchThreshold`, and
+`enableBandwidthEstimation` still cross the channel but are not read by either platform. See
+the [Live Streaming guide](live-streaming.md) for the full field-by-field wiring table. DASH is
+Android-only; AVPlayer on iOS has no DASH support.
+
+With `enableDvr: true`, native also derives and reports a duration for a live item — the
+current DVR window length (`Timeline.Window.durationMs` on Android, `AVPlayerItem
+.seekableTimeRanges` on iOS), re-derived as the window grows, rather than the unbounded total
+broadcast time. `MediaPlayer.dvrEnabled`/`.isSeekable` expose the Dart-side gate directly. The
+config snapshot that decides all of this is carried on every `MediaPlayer.load()` call, not
+only at `initialize()`/`updateConfig()` time — except `setPlaylist`/`skipToIndex`, which still
+call a single-argument native `loadMediaItem` and can leave per-item streaming config stale
+(see the [Live Streaming guide](live-streaming.md#what-actually-works-today)).
 
 ## Subtitles
 
@@ -190,9 +204,21 @@ const SubtitleConfig({
 - **Buffering:** `BufferingConfig`, `BufferHealth`, `BufferStatus` (healthy/warning/critical/underrun), `BufferStatistics`.
 - **Network:** `NetworkStatus`, `NetworkQuality`, `ConnectionType`, `NetworkChangeEvent`.
 - **Analytics:** `QoEMetrics`, `PerformanceMetrics`, `EngagementMetrics`, `PlaybackEndReason`, `BufferEventType`.
-- **Notifications:** `NotificationConfig`, `NotificationAction`, `NotificationPriority`.
-- **PiP:** `PipConfig`, `PipAction`, `PipState`, `PipStatus`.
-- **Cast:** `CastDevice`, `CastDeviceType`, `CastState`, `CastStatus`, `CastConfig`.
+- **Notifications:** `NotificationConfig`, `NotificationAction`, `NotificationPriority` — pass a
+  `NotificationConfig` to `NotificationService` directly (not `MediaConfig`) to drive media
+  playback notifications; there is no `MediaConfig.notificationConfig`.
+- **PiP:** `PipConfig`, `PipAction`, `PipState`, `PipStatus`, `PipActionEvent` (delivered via
+  `MediaPlayer.pipActionStream` when a custom `PipConfig.actions` entry is tapped —
+  Android-only).
+- **Cast:** `CastDevice`, `CastDeviceType`, `CastState`, `CastStatus`, `CastConfig`. The
+  `CastConfig` passed via `MediaConfig.castConfig` now actually reaches native code:
+  `enabled`/`enableChromecast` gate Chromecast init on Android, `enabled`/`enableAirPlay` gate
+  AirPlay init on iOS, `chromecastAppId` overrides the receiver app ID on Android (falls back to
+  Google's Default Media Receiver `CC1AD845` when unset), and `discoveryTimeout` bounds Android
+  Chromecast discovery. `enableDlna` and `autoConnect` were removed: this package has no DLNA
+  support, and auto-connecting to the last-used device would require a persistence mechanism
+  this package doesn't have — both were dead config before removal, and leaving them in would
+  have kept implying behaviour that didn't exist.
 - **Cache/buffer sub-configs:** `CacheConfig`, `BufferConfig`, `AdaptiveCacheConfig`
   (Android-only, opt-in, off by default transparent HLS/DASH segment cache — a read-through
   cache of what has already played, not a download-ahead/offline mechanism; DRM-protected
