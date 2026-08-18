@@ -28,8 +28,13 @@ import '../widgets/player_scaffold.dart';
 ///    that is exposed).
 /// 3. **[NotificationConfig.customActions] / .priority / .dismissible**
 ///    (Android only — see those fields' dartdocs for why iOS cannot honour
-///    them). Two distinct custom actions are configured; tapping one in the
-///    system notification is routed back via
+///    them). The notification is posted automatically the first time
+///    playback starts (see [_maybeAutoShowNotification]) — it used to only
+///    appear after an explicit "Show Notification" tap, which made device
+///    testing confusing (a missing notification looked identical to a
+///    broken one). "Show / Update now" / "Dismiss" remain as manual
+///    overrides. Two distinct custom actions are configured; tapping one in
+///    the system notification is routed back via
 ///    [NotificationService.actionEventStream] and logged on screen.
 /// 4. **[PipConfig.actions]** (Android only — see that field's dartdoc for
 ///    why AVKit has no equivalent). Tapping a custom PiP action button is
@@ -126,7 +131,26 @@ class _WiredConfigVerificationPageState
   }
 
   void _onControllerChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    _maybeAutoShowNotification();
+  }
+
+  /// Posts the notification the first time playback actually starts,
+  /// instead of requiring the user to find and tap "Show Notification"
+  /// first. On a device, a notification that never appears looks
+  /// identical to a broken one, and this page exists specifically to make
+  /// wired behaviour visible without a hidden manual step -- see the class
+  /// dartdoc. "Show Notification" / "Dismiss Notification" remain below as
+  /// manual overrides (e.g. to re-show after a manual dismiss, or to force
+  /// an update while paused).
+  bool _autoShowInFlight = false;
+  void _maybeAutoShowNotification() {
+    if (_notifShowing || _autoShowInFlight) return;
+    if (_notificationService == null) return;
+    if (_controller.state.state != PlayerState.playing) return;
+    _autoShowInFlight = true;
+    _showNotification().whenComplete(() => _autoShowInFlight = false);
   }
 
   Future<void> _initAndLoad() async {
@@ -154,6 +178,12 @@ class _WiredConfigVerificationPageState
       _pipAvailable = await _controller.checkPipAvailability();
 
       await _rebuildNotificationService();
+      // Covers the case where autoPlay already reached PlayerState.playing
+      // before _notificationService existed to catch the transition via
+      // _onControllerChanged -- without this, a fast/cached load could
+      // start playing and settle before there was ever a listener able to
+      // notice.
+      _maybeAutoShowNotification();
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
     } finally {
@@ -488,6 +518,13 @@ class _WiredConfigVerificationPageState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        InfoRow(
+          label: 'Posted',
+          value: _notifShowing
+              ? 'Yes (auto-posted once playback starts)'
+              : 'No -- will post automatically once playback starts',
+        ),
+        const SizedBox(height: 8),
         Text('Priority', style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 4),
         SegmentedButton<NotificationPriority?>(
@@ -524,7 +561,7 @@ class _WiredConfigVerificationPageState
           children: [
             FilledButton.icon(
               icon: const Icon(Icons.notifications_active),
-              label: const Text('Show / Update'),
+              label: const Text('Show / Update now'),
               onPressed: _showNotification,
             ),
             OutlinedButton.icon(

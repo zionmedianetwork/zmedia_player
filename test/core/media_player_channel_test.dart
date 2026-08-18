@@ -268,6 +268,94 @@ void main() {
       player.dispose();
     });
 
+    // Config staleness fix: previously 'load' only ever carried
+    // 'playerId'/'mediaItem' -- the current MediaConfig (including
+    // HlsConfig/DashConfig's enableDvr/liveLatency/bitrate constraints) only
+    // ever reached native via 'initialize' or an explicit 'updateConfig'
+    // call, so a host that built a fresh MediaConfig and called load() again
+    // (rather than updateConfig()) left native's copy of the config
+    // permanently stale. See MediaPlayer.load()'s doc for the 'config' key.
+    group('load carries the current config snapshot (config staleness fix)',
+        () {
+      test('sends "config" alongside "mediaItem" on every load', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(
+          playerId: 'ch-load-config-present',
+          config: const MediaConfig(
+            hlsConfig: HlsConfig(enableDvr: true, liveLatency: Duration(seconds: 4)),
+          ),
+        );
+        await player.initialize();
+        calls.clear();
+
+        const item = MediaItem(
+          id: 'live-item',
+          title: 'Live Stream',
+          url: 'https://cdn.example.com/live.m3u8',
+          isLive: true,
+        );
+        await player.load(item);
+
+        final loadCall = calls.firstWhere((c) => c.method == 'load');
+        expect(loadCall.arguments.containsKey('config'), isTrue,
+            reason: 'native must receive the config that applies to THIS '
+                'load, not rely on a stale copy from initialize()/the last '
+                'updateConfig() call');
+        final config = loadCall.arguments['config'] as Map;
+        expect(config.containsKey('hlsConfig'), isTrue);
+        final hls = config['hlsConfig'] as Map;
+        expect(hls['enableDvr'], isTrue);
+        expect(hls['liveLatencyMs'], 4000);
+
+        player.dispose();
+      });
+
+      test(
+          'toggling HlsConfig.enableDvr via updateConfig() then reloading '
+          'changes what the next "load" call sends', () async {
+        final calls = _installCapture();
+        final player = MediaPlayer(
+          playerId: 'ch-load-config-toggle-dvr',
+          config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: false)),
+        );
+        await player.initialize();
+
+        const item = MediaItem(
+          id: 'live-item-toggle',
+          title: 'Live Stream',
+          url: 'https://cdn.example.com/live-toggle.m3u8',
+          isLive: true,
+        );
+
+        calls.clear();
+        await player.load(item);
+        final firstLoad = calls.firstWhere((c) => c.method == 'load');
+        final firstHls =
+            (firstLoad.arguments['config'] as Map)['hlsConfig'] as Map;
+        expect(firstHls['enableDvr'], isFalse,
+            reason: 'DVR off must reach native on the first load');
+
+        // Host toggles DVR on and reloads -- exactly the
+        // "build a new MediaConfig, call load() again" pattern that used to
+        // leave native's config permanently stale (see class-level doc
+        // above).
+        await player.updateConfig(
+          const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+        );
+
+        calls.clear();
+        await player.load(item);
+        final secondLoad = calls.firstWhere((c) => c.method == 'load');
+        final secondHls =
+            (secondLoad.arguments['config'] as Map)['hlsConfig'] as Map;
+        expect(secondHls['enableDvr'], isTrue,
+            reason: 'DVR on must reach native on the very next load() call '
+                'after updateConfig(), with no stale copy left behind');
+
+        player.dispose();
+      });
+    });
+
     test('load serializes drmConfig when present', () async {
       final calls = _installCapture();
       final player = MediaPlayer(playerId: 'ch-load-drm');

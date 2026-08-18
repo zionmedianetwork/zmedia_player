@@ -1119,6 +1119,32 @@ class MediaPlayer {
       await _invokeMethod('load', {
         'playerId': playerId,
         'mediaItem': item.toMap(),
+        // Fixes the "config only reaches native at initialize()/
+        // updateConfig() time" bug: `_config` (HlsConfig/DashConfig -- the
+        // `enableDvr`/`liveLatency`/bitrate constraints, plus every other
+        // top-level MediaConfig field) is inherently per-item, since
+        // whether it even applies is decided by `item.url` (`.m3u8` vs
+        // `.mpd` -- the same inference [_applyStreamingConfigForLoad] just
+        // used above, and [_configToMap]'s own doc). Sending the full,
+        // current config snapshot on every load() means native's copy can
+        // never disagree with what Dart just computed for THIS item, even
+        // when a host builds a fresh MediaConfig and calls load() again
+        // without an intervening updateConfig() call -- previously the only
+        // two call sites that ever sent 'config' to native were
+        // 'initialize' and 'updateConfig', so a host that only ever calls
+        // load() again (exactly what changing hlsConfig.enableDvr and
+        // reloading looks like) left native's copy permanently stale. See
+        // MediaPlayerManager.kt's/.swift's loadMediaItem for how this is
+        // applied (config field replaced, but NOT re-run through
+        // applyConfig() -- reapplying volume/speed/mute on every load would
+        // undo runtime setVolume()/setSpeed()/setMuted() calls the config
+        // snapshot doesn't know about for mute, see those methods' docs).
+        // 'config' sent here and via 'updateConfig' share one source of
+        // truth (this same `_config` field) so there is nothing to
+        // reconcile between them -- whichever of load()/updateConfig() ran
+        // most recently is what native holds, exactly mirroring this
+        // instance's own `_config` field.
+        'config': _configToMap(_config),
       });
 
       _updateState(_currentState.copyWith(state: PlayerState.buffering));

@@ -280,8 +280,16 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             return
         }
 
+        // Config staleness fix: MediaPlayer.load() on the Dart side now sends
+        // the current MediaConfig snapshot alongside every load, not just
+        // 'initialize'/'updateConfig' -- see that method's doc (mirrors
+        // ZMediaPlayerPlugin.kt's handleLoad exactly). Optional so an older
+        // cached Dart build (playerId + mediaItem only) still loads
+        // correctly with whatever config this instance already holds.
+        let config = args["config"] as? [String: Any]
+
         do {
-            try playerManager.loadMediaItem(playerId: playerId, mediaItem: mediaItem)
+            try playerManager.loadMediaItem(playerId: playerId, mediaItem: mediaItem, config: config)
             result(nil)
         } catch {
             result(FlutterError(code: "LOAD_ERROR", message: error.localizedDescription, details: nil))

@@ -104,7 +104,7 @@ void main() {
       expect(find.text('8s'), findsOneWidget);
 
       // Section 3: notifications.
-      expect(find.text('Show / Update'), findsOneWidget);
+      expect(find.text('Show / Update now'), findsOneWidget);
       expect(find.text('Dismiss'), findsOneWidget);
       expect(find.byKey(const Key('dismissible_toggle')), findsOneWidget);
 
