@@ -144,23 +144,40 @@ jobs:
               echo "   proceeding anyway and bumping at least a patch (always-bump policy)."
             fi
 
-            COMMITS=$(git log ${{ steps.latest_tag.outputs.tag }}..HEAD --pretty=format:"%s")
+            RANGE="${{ steps.latest_tag.outputs.tag }}..HEAD"
+            SUBJECTS=$(git log "$RANGE" --pretty=format:"%s")
+            BODIES=$(git log "$RANGE" --pretty=format:"%B")
           else
             echo "Analyzing all commits (first release)"
-            COMMITS=$(git log --pretty=format:"%s")
+            SUBJECTS=$(git log --pretty=format:"%s")
+            BODIES=$(git log --pretty=format:"%B")
           fi
 
-          # Detect version bump type
+          # Detect version bump type.
+          #
+          # Conventional Commits marks a breaking change in either of two ways, and a
+          # release must treat both as major:
+          #   1. a "!" before the colon in the subject -- feat!:, chore(android)!:
+          #   2. a "BREAKING CHANGE:" (or "BREAKING-CHANGE:") footer in the body
+          #
+          # This previously searched commit SUBJECTS ONLY, for the literal string
+          # "BREAKING CHANGE:", and so detected neither in practice: the "!" marker was
+          # never checked at all, and a footer by definition never appears in a subject.
+          # Both breaking commits in the v0.3.0 range (feat!: and chore(android)!:) were
+          # therefore mis-detected as "minor" -- silently, since the only symptom is a
+          # version number that looks plausible. Hence BODIES as well as SUBJECTS below.
+          #
+          # The footer match is deliberately case-sensitive: the spec requires uppercase,
+          # and matching loosely would let prose such as "this is a breaking change:" in a
+          # commit body force a major release.
           BUMP_TYPE="patch"
 
-          # Check for breaking changes
-          if echo "$COMMITS" | grep -qi "BREAKING CHANGE:"; then
+          if echo "$SUBJECTS" | grep -qE '^[a-zA-Z]+(\([^)]*\))?!:' \
+             || echo "$BODIES" | grep -qE '^BREAKING[ -]CHANGE:'; then
             BUMP_TYPE="major"
-          # Check for features
-          elif echo "$COMMITS" | grep -qi "^feat"; then
+          elif echo "$SUBJECTS" | grep -qiE '^feat(\([^)]*\))?:'; then
             BUMP_TYPE="minor"
-          # Check for fixes/perf/refactor
-          elif echo "$COMMITS" | grep -qiE "^(fix|perf|refactor)"; then
+          elif echo "$SUBJECTS" | grep -qiE '^(fix|perf|refactor)(\([^)]*\))?:'; then
             BUMP_TYPE="patch"
           fi
 
