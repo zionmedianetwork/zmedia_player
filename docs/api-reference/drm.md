@@ -4,23 +4,32 @@
 
 ZMedia Player provides comprehensive DRM support for protected content playback on both iOS and Android platforms.
 
-**Current Status:** Online DRM is wired on both platforms — Widevine via ExoPlayer's
+**Current Status:** Online DRM is wired on both platforms — Widevine via Media3's
 `DefaultDrmSessionManager` (Android) and FairPlay via `AVContentKeySession` (iOS). The Dart API
 and native wiring are complete; **end-to-end decryption still warrants on-device verification**
 with your own protected stream + license server (there are no native automated tests yet).
-**Offline DRM:** Planned for a future release (see [Roadmap](#offline-drm-roadmap)).
+**Offline DRM:** not implemented on either platform — see [Offline DRM](#offline-drm) below.
 
 ---
 
 ## Supported DRM Systems
 
 ### Android
-- **Widevine** (Google) - Level 1, Level 3
-- **PlayReady** (Microsoft)
+- **Widevine** (Google) — Level 1 (hardware-backed) and Level 3 (software), gated by
+  `DrmConfig.minWidevineSecurityLevel` if you opt in
+- **PlayReady** (Microsoft) — the `DrmScheme.playready` enum value exists and native code
+  attempts to use it, but it only works on the rare Android device that ships a system
+  PlayReady CDM. `DrmHandler.isPlayReadySupported()` gates every use of it and fails the
+  session with `"PlayReady DRM is not supported on this device"` otherwise — this has been
+  verified failing (`UnsupportedSchemeException`) on a real device. Do not rely on PlayReady
+  working on a typical Android phone.
 - **ClearKey** (for testing)
 
 ### iOS
-- **FairPlay** (Apple)
+- **FairPlay** (Apple) — the *only* DRM scheme iOS's native `DrmHandler` accepts. Any other
+  `DrmScheme` (including `playready` and `widevine`) is rejected outright with
+  `"Only FairPlay DRM is supported on iOS"` before it ever reaches DRM setup — **there is no
+  PlayReady path on iOS at all**, not even a partial one.
 - **FairPlay Streaming (FPS)**
 
 ### Cross-Platform
@@ -28,7 +37,7 @@ with your own protected stream + license server (there are no native automated t
 
 ---
 
-## Online DRM (Current - v0.1.x)
+## Online DRM
 
 ### Basic Usage
 
@@ -172,9 +181,24 @@ try {
 // Widevine L1 (hardware-backed, highest security)
 final drmConfig = DrmConfig.widevine(
   licenseUrl: 'https://license.example.com/widevine',
-  // ExoPlayer automatically uses highest available security level
+  // Media3 automatically uses the highest security level the device offers
 );
 ```
+
+To instead *require* a minimum security level and fail closed rather than silently falling
+back to unprotected/lower-security playback, set `minWidevineSecurityLevel` (Android/Widevine
+only — see `WidevineSecurityLevel` in [Models](models.md#drm)):
+
+```dart
+final drmConfig = DrmConfig.widevine(
+  licenseUrl: 'https://license.example.com/widevine',
+  minWidevineSecurityLevel: WidevineSecurityLevel.l1, // hardware-backed only
+);
+```
+
+Native `DrmHandler.validateDrmConfig()` checks the device's actual `MediaDrm` security level
+before creating a DRM session, and refuses to create one — failing the load — if the device's
+level is below the requested minimum, or if it cannot be determined at all (fail-closed).
 
 **Requirements:**
 - Device must support Widevine
@@ -236,96 +260,72 @@ const testCert = 'https://fps.example.com/cert.cer';
 
 ---
 
-## Offline DRM Roadmap
+## Offline DRM
 
-### Current Status: Not Available
+Offline DRM — downloading DRM-protected content and playing it back later without a network
+connection and without re-acquiring a license each time — is **not implemented on either
+platform**. Concretely, this package has none of:
 
-Offline DRM (download and offline playback of DRM-protected content) is **not currently supported** in v0.1.x.
+- Persistent Widevine licenses (Android's `OfflineLicenseHelper` is not used anywhere in this
+  codebase)
+- FairPlay persistable content keys (iOS's persistable `AVContentKeyResponse` path is not used)
+- A download manager, download queue, or any storage-quota/expiration handling for downloaded
+  DRM content
 
-### Planned for v0.2.0 (Q1 2026)
+`DrmSession`/`DrmLicense` model a `renewalUrl` field and a `renewing` state, but nothing in
+this package drives automatic license renewal either — see the note on `DrmConfig.renewalUrl`
+in [Best Practices](#best-practices) below. Every DRM session in this package is online-only:
+a license is acquired for the current playback session and is not persisted.
 
-**Estimated Timeline:** 4-6 weeks development
-**Target Release:** January-February 2026
+### Workarounds
 
-#### Planned Features
+If you need offline playback of DRM-protected content today, consider:
 
-1. **Download Management**
-   ```dart
-   // Future API (not yet available)
-   final downloadId = await controller.downloadDrmContent(
-     mediaItem: mediaItem,
-     quality: DownloadQuality.high,
-   );
-   ```
+#### Option 1: Server-side download
+Download content to your backend, serve it from your own CDN with your own authentication,
+and skip package-level DRM entirely for that copy.
 
-2. **License Persistence**
-   - Store licenses locally for offline playback
-   - Automatic license renewal when online
-   - Expiration tracking
+#### Option 2: Non-DRM content for local/offline playback
+For content you can legitimately serve without DRM once downloaded, this package does support
+local file playback via a `file://` URL — see [Local file playback](models.md#mediaitem) and
+`LocalMediaUtils.fileUri`. A DRM-configured item cannot use this path: DRM requires an HTTPS
+media URL, so a `file://` `MediaItem` with a `drmConfig` is rejected by validation.
 
-3. **Storage Management**
-   - Manage downloaded content
-   - Storage quota limits
-   - Cleanup expired licenses
-
-4. **Platform Support**
-   - Android: `OfflineLicenseHelper` (ExoPlayer)
-   - iOS: `AVAssetDownloadTask` (AVFoundation)
-
-### Workarounds (Current)
-
-If you need offline DRM functionality now, consider these alternatives:
-
-#### Option 1: Server-Side Download
-- Download content to your backend
-- Serve via your own CDN with authentication
-- Users stream from your servers
-
-#### Option 2: Use Non-DRM for Offline
 ```dart
-// For offline content, use non-DRM videos
+final MediaItem item;
 if (isOfflineMode) {
-  mediaItem = MediaItem(
-    url: localFilePath,
-    // No DRM config
+  item = MediaItem(
+    id: mediaId,
+    title: title,
+    url: LocalMediaUtils.fileUri(localFilePath), // no drmConfig
   );
 } else {
-  mediaItem = MediaItem(
+  item = MediaItem(
+    id: mediaId,
+    title: title,
     url: streamUrl,
     drmConfig: drmConfig, // DRM for streaming only
   );
 }
 ```
 
-#### Option 3: Temporary Licenses
-- Use short-lived online licenses
-- Re-acquire license when playing offline (requires brief connectivity)
-
-### Tracking
-
-Follow offline DRM progress:
-- **GitHub Issue:** [#TODO: Create issue]
-- **Milestone:** v0.2.0
-- **Labels:** `enhancement`, `drm`, `offline`
-
-### Request Early Access
-
-If offline DRM is critical for your use case:
-1. Comment on the GitHub issue
-2. Describe your use case
-3. Vote for priority
-4. Consider sponsoring development
+#### Option 3: Short-lived online licenses
+Re-acquire a license each time playback starts, accepting that this requires connectivity at
+that moment even if the media bytes themselves are cached (see
+[Advanced Features](advanced-features.md#caching--offline) for what *is* cacheable —
+progressive, non-DRM media only).
 
 ---
 
 ## Best Practices
 
-### 1. License Caching
-```dart
-// Licenses are automatically cached in memory
-// Clear cache on app restart or user logout
-await controller.clearDrmCache();
-```
+### 1. Licenses are session-scoped, not cached by this package
+
+There is no `clearDrmCache()` method and no license-caching layer in this package — each DRM
+session is acquired for the current playback session via the native player's own DRM session
+manager (`DefaultDrmSessionManager` on Android, `AVContentKeySession` on iOS) and is not
+persisted or reused across app restarts. If you need to force a fresh license, `stop()` and
+`load()` the item again; there is nothing else to clear.
 
 ### 2. Error Recovery
 ```dart
@@ -416,6 +416,8 @@ class DrmConfig {
   final String? contentId;
   final Map<String, dynamic>? customData;
   final EzdrmConfig? ezdrmConfig;
+  final CertificatePinningConfig? certificatePinning;
+  final WidevineSecurityLevel? minWidevineSecurityLevel; // Android/Widevine only
 }
 ```
 
@@ -427,7 +429,8 @@ enum DrmScheme {
   widevine,   // Google Widevine (Android)
   fairplay,   // Apple FairPlay (iOS)
   ezdrm,      // EZDRM service
-  playready,  // Microsoft PlayReady
+  playready,  // Microsoft PlayReady (Android only, and only on the rare device with a system
+              // PlayReady CDM; no iOS path at all — see Supported DRM Systems above)
   clearkey,   // Testing only
 }
 ```
@@ -475,19 +478,23 @@ BetterPlayerDataSource(
 
 // ZMedia Player
 MediaItem(
+  id: 'video-1',
+  title: 'Video',
   url: videoUrl,
-  drmConfig: DrmConfig.widevine(...),
+  drmConfig: DrmConfig.widevine(licenseUrl: licenseUrl),
 );
 ```
 
 #### From video_player
 ```dart
 // video_player (no DRM support)
-VideoPlayerController.network(videoUrl);
+VideoPlayerController.networkUrl(Uri.parse(videoUrl));
 
 // ZMedia Player
-final controller = MediaController(MediaPlayer());
+final controller = MediaController.create();
 await controller.load(MediaItem(
+  id: 'video-1',
+  title: 'Video',
   url: videoUrl,
   drmConfig: drmConfig,
 ));
@@ -495,45 +502,34 @@ await controller.load(MediaItem(
 
 ---
 
-## Performance Considerations
+## Security
 
-### License Acquisition Time
-- Typical: 100-500ms
-- Show loading indicator during acquisition
-- Cache licenses when possible
+**Implemented:**
+- License and certificate requests enforce HTTPS (`InputValidator` rejects anything else
+  before a DRM-protected `MediaItem` reaches native code)
+- Optional certificate pinning for the DRM license server (`DrmConfig.certificatePinning`)
+- No DRM key material is persisted to disk by this package — see [Offline DRM](#offline-drm)
+- Opt-in fail-closed minimum Widevine security level (`DrmConfig.minWidevineSecurityLevel`,
+  Android only)
 
-### Memory Usage
-- DRM sessions: ~1-2MB per active session
-- Automatic cleanup after playback ends
-
-### Battery Impact
-- Hardware DRM (Widevine L1, FairPlay): Minimal impact
-- Software DRM: Slightly higher CPU usage
-
----
-
-## Security Audit
-
-**Best Practices Implemented:**
-- Secure key exchange via HTTPS
-- Certificate pinning support
-- No keys stored in plain text
-- Automatic license rotation
-- Secure memory handling
+**Not implemented — do not assume these exist:**
+- Automatic license renewal/rotation. `DrmSessionState.renewing` and `DrmLicense.renewalUrl`
+  are modeled but nothing in this package drives renewal; re-acquire a license the same way
+  you acquired it the first time (`stop()` + `load()`).
+- License caching/clearing (see [Best Practices](#best-practices) above).
 
 **Recommendations:**
-- Use hardware-backed DRM when available (Widevine L1)
-- Implement certificate pinning for production
-- Rotate licenses regularly
-- Monitor for unusual license requests
+- Use hardware-backed DRM when available (Widevine L1) — set `minWidevineSecurityLevel` if you
+  need to enforce it rather than just prefer it
+- Implement certificate pinning for production license servers
+- Monitor for unusual license request patterns on your own license server
 
 ---
 
 ## Additional Resources
 
 ### Documentation
-- [DRM Guide](../implementation/security.md)
-- [Security Best Practices](../implementation/security.md)
+- [Security](../implementation/security.md)
 - [Testing Guide](../implementation/testing.md)
 
 ### External Links
@@ -542,31 +538,10 @@ await controller.load(MediaItem(
 - [EZDRM Service](https://www.ezdrm.com/)
 
 ### Support
-- [GitHub Issues](https://github.com/your-repo/issues)
-- [Stack Overflow](https://stackoverflow.com/questions/tagged/zmedia-player)
-- [Discord Community](https://discord.gg/your-server)
+- [GitHub Issues](https://github.com/zionmedianetwork/zmedia_player/issues)
+- [GitHub Discussions](https://github.com/zionmedianetwork/zmedia_player/discussions)
 
 ---
 
-## Changelog
-
-### v0.1.0 (Current)
-- Widevine support (Android)
-- FairPlay support (iOS)
-- EZDRM integration
-- Custom headers and authentication
-- License renewal
-- DRM session monitoring
-- Comprehensive error handling
-
-### v0.2.0 (Planned - Q1 2026)
-- Offline DRM support
-- Download management
-- License persistence
-- Storage management
-
----
-
-**Note:** This documentation reflects the current state of DRM support. Offline DRM features are planned for v0.2.0. See the [Roadmap](#offline-drm-roadmap) section for details.
-
-*Last Updated: October 21, 2025*
+**Note:** This documentation reflects the current state of DRM support. Offline DRM is not
+implemented — see [Offline DRM](#offline-drm) above.

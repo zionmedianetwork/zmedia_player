@@ -112,6 +112,55 @@ ListView.builder(
 
 Use distinct `playerId`s for concurrent players; native events route by `playerId`.
 
+`MediaListPlayer` wraps one host-supplied `MediaController` per row — the host creates and
+disposes every controller, so a long scroll can accumulate as many live native decoder
+sessions as rows have ever been visible. For feeds where that needs to be bounded, use
+`MediaFeed` instead (below).
+
+## Media Feed
+
+`MediaFeed` owns a small, package-managed `MediaPlayerPool` internally instead of taking a
+host-owned `MediaController` per item. It owns `itemCount` media *descriptors*, not
+controllers, and reassigns a bounded pool of controllers across items as they scroll into and
+out of view — the host never sees or disposes a `MediaController` directly.
+
+```dart
+MediaFeed(
+  itemCount: items.length,
+  itemAt: (index) => items[index],
+  itemBuilder: (context, state) {
+    if (!state.isActive) {
+      return const ColoredBox(color: Colors.black12); // placeholder — no pool slot yet
+    }
+    return state.videoSurface; // MediaPlayerWidget-backed surface for this slot
+  },
+  config: const MediaFeedConfig(
+    visibilityThreshold: 0.6,
+    autoPlay: true,
+    autoPause: true,       // VOD: pause off-screen and keep the slot; live: release the slot
+    pauseOthersOnPlay: true,
+    prewarmWindow: 1,      // load() (never play()) this many neighbours on each side
+    activationDebounce: Duration(milliseconds: 500),
+  ),
+  maxPoolSize: MediaPlayerPool.defaultMaxSize, // 3 — a conservative, profiled default
+);
+```
+
+- `MediaFeedItemState` (passed to `itemBuilder`) exposes `isActive`, `isVisible`, and action
+  callbacks (`play`, `pause`, …) that are `null` when the index does not currently hold a pool
+  slot — there is nothing to act on yet.
+- `MediaFeedConfig.autoPlayPolicy` (a `MediaFeedAutoPlayPolicy`) can refuse autoplay based on
+  `NetworkStatus` — `null` (default) autoplays regardless of network, matching prior behavior;
+  pass the ready-made `conservativeAutoPlayPolicy` to refuse on a metered or poor/offline
+  connection.
+- Pool slots are keyed by `MediaItem.id` by default; supply `keyAt` if the same id can appear
+  at two simultaneously-active indices.
+- `MediaListPlayer` is unaffected by `MediaFeed`'s existence and remains the right choice for a
+  single host-owned controller inside a scrollable — `MediaFeed` is additive, for the case
+  where the package should own the whole feed's controller lifetime.
+- `MediaPlayerPool` can also be used directly (advanced use — sharing one pool across more than
+  one `MediaFeed`, or a fake controller factory in tests) and is a `ChangeNotifier`.
+
 ## Caching / offline
 
 Only progressive (single-file) media can be cached — HLS/DASH manifests are not
@@ -204,6 +253,55 @@ controller.player.bufferHealthStream.listen((h) => print(h.status));
 
 `BufferingService` and `NetworkResilienceService` expose buffer-health and network-status
 streams for custom indicators. `AnalyticsService` collects QoE metrics (`QoEMetrics`).
+
+## Errors
+
+`MediaController.errorStream` (and `MediaController.error`, the most recently observed value)
+surface typed playback errors through the facade without reaching into `controller.player`:
+
+```dart
+controller.errorStream.listen((error) {
+  if (error is DrmException) {
+    showError('DRM error: ${error.message}');
+  } else {
+    showError(error.message);
+  }
+});
+
+// Or read the last error without subscribing:
+if (controller.error != null) {
+  showError(controller.error!.message);
+}
+```
+
+This mirrors `MediaPlayer.errorStream`; `MediaController` clears its cached `error` once the
+condition that caused it is no longer current.
+
+## Screen capture protection
+
+`MediaConfig.secureSurface` (default `false`) is deliberately asymmetric across platforms:
+
+```dart
+final controller = MediaController.create(
+  config: const MediaConfig(secureSurface: true),
+);
+
+// Toggle after construction:
+await controller.setSecureSurface(false);
+
+// iOS only ever emits here — Android's block leaves nothing to detect.
+controller.screenCaptureStream.listen((status) {
+  if (status.isCaptured) showCaptureWarningOverlay();
+});
+```
+
+- **Android:** `enabled: true` adds `FLAG_SECURE` to the host window — a hard OS-level block.
+  Screenshots and screen recordings of that window fail outright, and `screenCaptureStream`
+  never emits there (there is nothing to report).
+- **iOS:** there is no equivalent OS-level block available to a third-party app.
+  `enabled: true` instead starts observing `UIScreen.isCaptured` and reports changes via
+  `screenCaptureStream` — detection only. The host app is responsible for reacting to a `true`
+  value (e.g. pausing, or showing a warning overlay) for as long as it stays `true`.
 
 ## Custom controls
 

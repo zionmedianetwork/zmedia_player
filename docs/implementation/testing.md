@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **588 tests passing** in the Dart layer (run `flutter test` for
+> **Current status:** **840 tests passing** in the Dart layer (run `flutter test` for
 > the live count). Native Kotlin/Swift code still has **no automated tests** — those
 > paths require on-device verification.
 
@@ -12,14 +12,16 @@ This guide covers testing strategies, test execution, and quality assurance for 
 
 ```
 test/
-├── models/              # Unit tests for data models
-│   ├── drm_config_test.dart
-│   └── media_item_test.dart
-├── performance/         # Performance & benchmark tests
-│   └── drm_performance_test.dart
-├── test_utils/          # Test utilities and mocks
-│   └── mocks.dart
-└── widgets/             # Widget tests (to be added)
+├── core/                 # MediaPlayer, MediaController, MediaConfig, exceptions
+├── models/               # Unit tests for data models (DrmConfig, MediaItem, Playlist, …)
+├── services/             # Cache, streaming, subtitle, buffering, network, notification services
+├── security/             # Certificate pinning, secure storage, input validation
+├── exceptions/           # Typed-exception and error-category-vocabulary tests
+├── crash_reporting/      # CrashReporter tests
+├── memory/               # Leak-detection tests (StreamController/Timer cleanup)
+├── performance/          # Performance & benchmark tests
+├── widgets/              # Widget tests (controls, MediaFeed/MediaPlayerPool, overlays, …)
+└── test_utils/           # Test utilities and mocks
 ```
 
 ## Running Tests
@@ -192,8 +194,11 @@ flutter drive --target=test_driver/widevine_test.dart
 **Check:**
 - Widevine L1/L3 support
 - License acquisition
-- Offline playback
+- Adaptive (HLS/DASH) segment caching — a read-through cache during playback, not offline download
 - Error handling
+
+Note: there is no offline-DRM license path on Android (or iOS) to test here — only stream-time
+license acquisition.
 
 ### iOS Testing
 
@@ -354,7 +359,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.16.0'
+          flutter-version: '3.44.3'
 
       - name: Install dependencies
         run: flutter pub get
@@ -533,6 +538,6 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** 588 tests passing in the Dart layer; **no automated native tests yet**
+**Test Coverage:** 840 tests passing in the Dart layer; **no automated native tests yet**
 **Status:** Active development — native layers need on-device verification
-**Last Updated:** June 22, 2026
+**Last Updated:** August 17, 2026

@@ -1,15 +1,19 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **588 tests passing** (run
+> the original release. The suite has since grown to **840 tests passing** (run
 > `flutter test` for the live count) as audit-remediation work added regression
 > coverage. **Important caveat the original summary omitted:** these are all **Dart**
 > unit tests. There are **no automated native (Kotlin/Swift) tests**, and several
 > native features (DRM decryption, certificate pinning, casting, bandwidth metering)
-> still require on-device verification. See the
-> [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
+> still require on-device verification. Two more sections below are also stale as of
+> this update: "Next Steps to Complete Testing" and "Test Infrastructure → Not
+> Started" both predate the current `test/widgets/` suite (11 widget-test files) and
+> the `.github/workflows/ci.yml` pipeline (runs `flutter analyze`, `flutter test
+> --coverage`, `test/performance/`, `test/memory/` on every push/PR) — both now exist.
+> See the [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
 >
-> **Last Updated:** June 22, 2026
+> **Last Updated:** August 17, 2026
 
 ## Original Status (v0.1.0): **COMPLETE - ALL TESTS PASSING!**
 

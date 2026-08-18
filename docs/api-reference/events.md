@@ -187,12 +187,12 @@ Emits when available subtitle tracks change or selection changes.
 ```dart
 class SubtitleTrack {
   final String id;               // Unique identifier
-  final String name;             // Display name
+  final String title;            // Display name
   final String? language;        // Language code (e.g., 'en', 'es')
   final String? url;             // Subtitle file URL
   final SubtitleFormat format;   // SRT, WebVTT, ASS, etc.
   final bool isSelected;         // Currently selected
-  final bool isEmbedded;         // Embedded in video
+  final bool isDefault;          // Default subtitle track
   final Map<String, dynamic>? metadata;
 }
 ```
@@ -203,7 +203,7 @@ player.subtitleTracksStream.listen((List<SubtitleTrack> tracks) {
   print('Available subtitles: ${tracks.length}');
 
   for (final track in tracks) {
-    print('  - ${track.name} (${track.language})');
+    print('  - ${track.title} (${track.language})');
     if (track.isSelected) {
       print('    [SELECTED]');
     }

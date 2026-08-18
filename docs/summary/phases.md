@@ -226,7 +226,7 @@ Implement DRM support, comprehensive testing, and production readiness.
 - License acquisition
 - License renewal
 - Session management
-- Offline license support
+- Offline license support — *placeholder only; never implemented on either platform, then or since (see `production-readiness.md` Known Limitations and the current [Codebase Audit](../implementation/codebase-audit.md))*
 
 #### DRM Models
 - `DrmConfig` - Configuration model
@@ -363,7 +363,7 @@ The ZMedia Player project successfully completed all four phases, delivering a p
 
 - **Complete Feature Set** - All planned features implemented
 - **Excellent Performance** - 94-99% faster than targets
-- **Robust Testing** - 588 tests passing (Dart layer; run `flutter test` for the live count)
+- **Robust Testing** - 840 tests passing (Dart layer; run `flutter test` for the live count)
 - **Comprehensive Docs** - Complete API and implementation guides
 - **Platform Parity** - Equal support for Android and iOS
 
@@ -371,5 +371,4 @@ The ZMedia Player project successfully completed all four phases, delivering a p
 
 ---
 
-**Last Updated:** June 22, 2026
-**Version:** 0.2.2
+**Last Updated:** August 17, 2026

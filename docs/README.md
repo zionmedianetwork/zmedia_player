@@ -26,7 +26,7 @@ This documentation is organized into three main sections:
 **For developers who want to understand how it works**
 
 - Architecture overview
-- Native Android implementation (ExoPlayer)
+- Native Android implementation (AndroidX Media3)
 - Native iOS implementation (AVPlayer)
 - Platform channels design
 - Testing strategies
@@ -99,7 +99,8 @@ ZMedia Player is a comprehensive Flutter media player package that provides:
 | Feature | Android | iOS |
 |---------|---------|-----|
 | Core Playback | Yes | Yes |
-| HLS/DASH Streaming | Yes | Yes |
+| HLS Streaming | Yes | Yes |
+| DASH Streaming | Yes | No — AVPlayer has no DASH support |
 | Subtitles | Yes | Yes |
 | DRM (Widevine) | Yes | No |
 | DRM (FairPlay) | No | Yes |
@@ -112,8 +113,9 @@ ZMedia Player is a comprehensive Flutter media player package that provides:
 
 ## Project Status
 
-**Version:** 0.2.2
 **Status:** **Active development — feature-complete, hardening in progress**
+
+See the [root README](../README.md) for the current released version.
 
 All features are implemented across the Dart and native layers. The project is
 undergoing audit-driven correctness/security/robustness remediation — see the
@@ -270,5 +272,4 @@ This project is licensed under the MIT License - see the [LICENSE](../LICENSE) f
 
 **Project:** ZMedia Player
 **Organization:** Zion Media Network
-**Version:** 0.2.2
 **Status:** Active development — feature-complete, hardening in progress

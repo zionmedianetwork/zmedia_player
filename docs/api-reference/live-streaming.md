@@ -6,394 +6,217 @@ Complete guide to implementing live streaming with ZMedia Player.
 
 ## Overview
 
-ZMedia Player provides comprehensive support for live streaming via both HLS (HTTP Live Streaming) and DASH (Dynamic Adaptive Streaming over HTTP) protocols. This includes low-latency playback, DVR functionality, and adaptive bitrate streaming optimized for live content.
+ZMedia Player plays live HLS and DASH manifests through the same `load()` path as VOD
+content — set `MediaItem.isLive: true` and load the live manifest URL. Live playback quality
+(live-edge behavior, seekable/DVR window, buffering, latency, and adaptive bitrate switching)
+is governed entirely by the native player's own defaults for the manifest you give it —
+ExoPlayer/Media3 on Android, AVPlayer on iOS — not by any configuration this package applies
+on top.
+
+> **`HlsConfig` and `DashConfig` are not currently wired to native code.** `enableLiveStream`,
+> `enableDvr`, `liveLatency`, `enableSegmentPrefetch`, `maxPrefetchSegments`,
+> `enableMpdCaching`, `mpdCacheExpiration`, `enableAdaptiveBitrate`, `bitrateStrategy`,
+> `maxBitrate`/`minBitrate`, `enableAutoQualitySwitch`, and `qualitySwitchThreshold` are real,
+> constructible Dart classes/fields — but `MediaPlayer.load()` never sends them over the
+> platform channel, and neither the Android `HlsMediaSource.Factory`/`DashMediaSource.Factory`
+> construction nor the iOS `AVPlayerItem` construction path reads them. Setting
+> `MediaConfig.hlsConfig` / `MediaConfig.dashConfig` today has **no effect on playback** —
+> nothing in this guide that references those fields currently changes native behavior. They
+> are kept in the examples below only because that is the intended shape of a future,
+> not-yet-implemented wiring; every claim about what they currently *do* has been removed.
+> `isLive` itself is metadata only — it is not read by native code to alter playback either.
+
+`StreamingService` (`lib/src/services/streaming_service.dart`) is a related but separate,
+**Dart-only** helper for bandwidth-based quality-track *recommendation* math (moving-average
+bandwidth, threshold-based track selection). It is not connected to the native
+`bandwidthStream` or to `setQualityTrack` automatically — see
+[Monitoring connection quality](#monitoring-connection-quality) below for what wiring it
+actually requires.
 
 ---
 
 ## Table of Contents
 
-- [Features](#features)
-- [HLS Live Streaming](#hls-live-streaming)
-- [DASH Live Streaming](#dash-live-streaming)
-- [Configuration Options](#configuration-options)
-- [DVR Functionality](#dvr-functionality)
-- [Best Practices](#best-practices)
+- [What actually works today](#what-actually-works-today)
+- [Loading a live stream](#loading-a-live-stream)
+- [Seeking and live-edge detection](#seeking-and-live-edge-detection)
+- [Monitoring connection quality](#monitoring-connection-quality)
+- [Complete example](#complete-example)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Features
+## What actually works today
 
-### What's Supported
-
-- **HLS Live Streams** - Apple's HTTP Live Streaming protocol
-- **DASH Live Streams** - MPEG-DASH for live content
-- **Low-Latency Mode** - Configurable latency targets (2-10 seconds)
-- **DVR/Time-Shifting** - Seek within live streams
-- **Live Edge Detection** - Automatic positioning at live edge
-- **Adaptive Bitrate** - Quality adaptation for live content
-- **Segment Prefetching** - Smooth playback with buffering
-- **Live Catchup** - Jump to live after seeking backwards
-
-### Platform Support
+### Platform support
 
 | Feature | Android | iOS |
 |---------|---------|-----|
-| HLS Live | Yes | Yes |
-| DASH Live | Yes | Yes |
-| DVR | Yes | Yes |
-| Low-Latency | Yes | Yes |
+| HLS live playback | Yes (Media3 default live handling) | Yes (AVPlayer default live handling) |
+| DASH live playback | Yes (Media3) | **No** — AVPlayer/AVFoundation has no MPEG-DASH support at all, regardless of configuration |
+| Seeking within the live window / DVR | Whatever the manifest itself allows (its sliding window / `EXT-X-PLAYLIST-TYPE`) — not controlled by any flag in this package | Same |
+| `HlsConfig`/`DashConfig` tuning (latency target, DVR toggle, prefetch count, ABR strategy) | Not wired — no effect | Not wired — no effect |
+| Adaptive bitrate for HLS | ExoPlayer's own default track selection | AVPlayer's own default track selection |
+
+Because DASH has no iOS path at all, a `.mpd` URL should only ever be loaded on Android in
+your own platform-branching logic.
 
 ---
 
-## HLS Live Streaming
-
-### Basic Setup
+## Loading a live stream
 
 ```dart
 import 'package:zmedia_player/zmedia_player.dart';
 
-// Create controller with HLS live configuration
-final controller = MediaController.create(
-  config: MediaConfig(
-    hlsConfig: HlsConfig(
-      enableLiveStream: true,          // Enable live streaming mode
-      enableDvr: true,                 // Allow seeking in live stream
-      liveLatency: Duration(seconds: 3), // Target latency
-      enableAdaptiveBitrate: true,     // Adaptive quality
-      enableSegmentPrefetch: true,     // Prefetch segments
-      maxPrefetchSegments: 3,          // Number to prefetch
-    ),
-  ),
-);
+final controller = MediaController.create();
 
-// Load live HLS stream
 final liveStream = MediaItem(
   id: 'live_hls',
   title: 'Live Event',
   url: 'https://your-cdn.com/live/stream.m3u8',
+  isLive: true, // metadata only — does not change native playback behavior
 );
 
 await controller.load(liveStream);
 await controller.play();
 ```
 
-### Low-Latency HLS
-
-For ultra-low latency streaming (LL-HLS):
+DASH is the same shape, Android only:
 
 ```dart
-final llHlsConfig = HlsConfig(
-  enableLiveStream: true,
-  enableDvr: false,                    // Often disabled for LL-HLS
-  liveLatency: Duration(seconds: 2),   // Ultra-low latency
-  enableSegmentPrefetch: true,
-  maxPrefetchSegments: 1,              // Minimal prefetch for LL
-);
-```
-
----
-
-## DASH Live Streaming
-
-### Basic Setup
-
-```dart
-// Create controller with DASH live configuration
-final controller = MediaController.create(
-  config: MediaConfig(
-    dashConfig: DashConfig(
-      enableLiveStream: true,          // Enable live streaming mode
-      enableDvr: true,                 // Allow seeking in live stream
-      liveLatency: Duration(seconds: 3), // Target latency
-      enableAdaptiveBitrate: true,     // Adaptive quality
-      enableMpdCaching: true,          // Cache MPD manifest
-      mpdCacheExpiration: Duration(minutes: 5),
-      enableSegmentPrefetch: true,
-      maxPrefetchSegments: 3,
-    ),
-  ),
-);
-
-// Load live DASH stream
 final liveStream = MediaItem(
   id: 'live_dash',
   title: 'Live Event',
   url: 'https://your-cdn.com/live/stream.mpd',
+  isLive: true,
 );
-
-await controller.load(liveStream);
-await controller.play();
 ```
 
-### Low-Latency DASH
+### Custom headers for authenticated live manifests
 
-For CMAF-based low-latency DASH:
+`MediaItem.httpHeaders` (or `MediaConfig.httpHeaders`) is the header path that is actually
+wired to native `load()` — use it instead of `HlsConfig.streamingHeaders`, which is not read:
 
 ```dart
-final llDashConfig = DashConfig(
-  enableLiveStream: true,
-  enableDvr: false,                    // Often disabled for LL-DASH
-  liveLatency: Duration(seconds: 2),   // Ultra-low latency
-  enableMpdCaching: false,             // Minimal caching for LL
-  enableSegmentPrefetch: true,
-  maxPrefetchSegments: 1,
+final liveStream = MediaItem(
+  id: 'live_event',
+  title: 'Live Event',
+  url: 'https://your-cdn.com/live/stream.m3u8',
+  isLive: true,
+  httpHeaders: const {
+    'Authorization': 'Bearer YOUR_TOKEN',
+    'X-Session-ID': 'session_123',
+  },
 );
 ```
 
 ---
 
-## Configuration Options
+## Seeking and live-edge detection
 
-### Live Stream Flags
-
-#### `enableLiveStream` (bool)
-**Default:** `false`
-**Purpose:** Main flag to enable live streaming mode
+Whether you can seek backward at all, and how far, depends entirely on the manifest's own
+live window — there is no package-level DVR toggle to enable or disable it.
 
 ```dart
-HlsConfig(enableLiveStream: true)  // Enable live mode
+// Seek back 30 seconds, if the manifest's live window covers it
+await controller.seekTo(controller.position - const Duration(seconds: 30));
+
+// Jump to the current live edge (the end of the current duration)
+await controller.seekTo(controller.duration);
 ```
 
-**Effects:**
-- Disables end-of-stream detection
-- Enables live edge tracking
-- Adjusts buffering strategy for live content
-- Enables manifest refresh for live updates
-
-#### `enableDvr` (bool)
-**Default:** `false`
-**Purpose:** Enable DVR/time-shifting functionality
-
 ```dart
-HlsConfig(
-  enableLiveStream: true,
-  enableDvr: true,  // Allow seeking within live window
-)
-```
-
-**When to Enable:**
-- Sports events with replay needs
-- News broadcasts with scrubbing
-- Events where users may join late
-
-**When to Disable:**
-- Ultra-low latency streams
-- Real-time betting/trading apps
-- Interactive live content
-
-#### `liveLatency` (Duration?)
-**Default:** `null` (auto)
-**Purpose:** Target latency from live edge
-
-```dart
-HlsConfig(
-  enableLiveStream: true,
-  liveLatency: Duration(seconds: 3),  // 3 second target latency
-)
-```
-
-**Recommended Values:**
-- **Standard Live:** 5-10 seconds
-- **Low-Latency:** 2-5 seconds
-- **Ultra-Low Latency:** < 2 seconds
-
-**Trade-offs:**
-- Lower latency = More rebuffering risk
-- Higher latency = Smoother playback
-
----
-
-## DVR Functionality
-
-### Enable DVR
-
-```dart
-final controller = MediaController.create(
-  config: MediaConfig(
-    hlsConfig: HlsConfig(
-      enableLiveStream: true,
-      enableDvr: true,  // Enable DVR
-      liveLatency: Duration(seconds: 5),
-    ),
-  ),
-);
-```
-
-### Seek Within Live Window
-
-```dart
-// Get current position and duration
-final position = controller.position;
-final duration = controller.duration;
-
-// Seek back 30 seconds
-await controller.seekTo(position - Duration(seconds: 30));
-
-// Jump to live edge
-await controller.seekTo(duration);
-```
-
-### Detect Live Edge
-
-```dart
-// Listen to position updates
+// Detect how far behind live the current position is
 controller.player.positionStream.listen((position) {
   final duration = controller.duration;
-  final isAtLiveEdge = (duration - position).inSeconds < 5;
+  final behindLive = (duration - position).inSeconds;
+  final isAtLiveEdge = behindLive < 5;
 
   if (isAtLiveEdge) {
     print('Playing at live edge');
   } else {
-    print('Playing ${(duration - position).inSeconds}s behind live');
+    print('Playing ${behindLive}s behind live');
   }
 });
 ```
 
-### Jump to Live Button
-
 ```dart
 ElevatedButton(
   onPressed: () async {
-    // Jump to live edge
     await controller.seekTo(controller.duration);
   },
-  child: Text('Go to Live'),
+  child: const Text('Go to Live'),
 )
 ```
 
 ---
 
-## Best Practices
+## Monitoring connection quality
 
-### 1. Choose Appropriate Latency
-
-```dart
-// For most use cases
-HlsConfig(
-  enableLiveStream: true,
-  liveLatency: Duration(seconds: 5),  // Good balance
-)
-
-// For interactive events (gaming, betting)
-HlsConfig(
-  enableLiveStream: true,
-  liveLatency: Duration(seconds: 2),  // Lower latency
-  enableDvr: false,                    // Disable DVR
-)
-
-// For standard broadcasts
-HlsConfig(
-  enableLiveStream: true,
-  liveLatency: Duration(seconds: 10), // More stable
-  enableDvr: true,                     // Enable DVR
-)
-```
-
-### 2. Handle Network Issues
+`StreamingService` computes a recommended quality track from bandwidth samples you feed it —
+it does not read the native bandwidth estimate on its own, and it does not call
+`controller.setQualityTrack()` for you. Wiring it up end to end looks like this:
 
 ```dart
-controller.player.stateStream.listen((state) {
-  if (state.state == PlayerState.buffering) {
-    // Show buffering indicator
-    showBufferingIndicator();
-  } else if (state.state == PlayerState.error) {
-    // Handle error, maybe retry
-    handleStreamError(state.errorMessage);
-  }
-});
-```
-
-### 3. Monitor Connection Quality
-
-```dart
-// Create streaming service for bandwidth monitoring
 final streamingService = StreamingService(
-  StreamingConfig(
+  const StreamingConfig(
     enableBandwidthEstimation: true,
     enableAutoQualitySwitch: true,
   ),
 );
 
-streamingService.bandwidthStream.listen((bandwidth) {
-  print('Bandwidth: ${streamingService.getFormattedBandwidth()}');
+// Feed it real bandwidth samples from the native estimate.
+controller.player.bandwidthStream.listen(streamingService.updateBandwidth);
 
-  // Adjust latency based on bandwidth
-  if (bandwidth < 1000000) { // < 1 Mbps
-    // Consider increasing latency for stability
+// Feed it the tracks the native player actually reported.
+controller.player.qualityTracksStream.listen(streamingService.setAvailableQualityTracks);
+
+// Act on its recommendation yourself — it does not call setQualityTrack for you.
+streamingService.qualityStream.listen((recommended) {
+  if (recommended != null) {
+    controller.setQualityTrack(recommended);
   }
 });
 ```
 
-### 4. Prefetch Strategy
+Dispose `streamingService` yourself when you are done with it — it is not owned by
+`MediaController`/`MediaPlayer`.
+
+### Handling network issues
 
 ```dart
-// For stable connections
-HlsConfig(
-  enableSegmentPrefetch: true,
-  maxPrefetchSegments: 3,  // Prefetch more segments
-)
-
-// For low-latency or unstable connections
-HlsConfig(
-  enableSegmentPrefetch: true,
-  maxPrefetchSegments: 1,  // Minimal prefetch
-)
-```
-
-### 5. Custom Headers for Authentication
-
-```dart
-final controller = MediaController.create(
-  config: MediaConfig(
-    hlsConfig: HlsConfig(
-      enableLiveStream: true,
-      streamingHeaders: {
-        'Authorization': 'Bearer YOUR_TOKEN',
-        'X-Session-ID': 'session_123',
-      },
-    ),
-  ),
-);
+controller.player.stateStream.listen((state) {
+  if (state.state == PlayerState.buffering) {
+    showBufferingIndicator();
+  } else if (state.state == PlayerState.error) {
+    handleStreamError(state.errorMessage);
+  }
+});
 ```
 
 ---
 
-## Complete Example
+## Complete example
 
 ```dart
 import 'package:flutter/material.dart';
 import 'package:zmedia_player/zmedia_player.dart';
 
 class LiveStreamPage extends StatefulWidget {
+  const LiveStreamPage({super.key});
+
   @override
-  _LiveStreamPageState createState() => _LiveStreamPageState();
+  State<LiveStreamPage> createState() => _LiveStreamPageState();
 }
 
 class _LiveStreamPageState extends State<LiveStreamPage> {
-  late MediaController _controller;
+  late final MediaController _controller;
   bool _isAtLiveEdge = true;
 
   @override
   void initState() {
     super.initState();
-    _initializePlayer();
-  }
-
-  void _initializePlayer() {
-    _controller = MediaController.create(
-      config: MediaConfig(
-        hlsConfig: HlsConfig(
-          enableLiveStream: true,
-          enableDvr: true,
-          liveLatency: Duration(seconds: 5),
-          enableAdaptiveBitrate: true,
-          enableSegmentPrefetch: true,
-          maxPrefetchSegments: 3,
-        ),
-      ),
-    );
-
+    _controller = MediaController.create();
     _loadLiveStream();
     _listenToPosition();
   }
@@ -403,6 +226,7 @@ class _LiveStreamPageState extends State<LiveStreamPage> {
       id: 'live_event',
       title: 'Live Event',
       url: 'https://your-cdn.com/live/stream.m3u8',
+      isLive: true,
     );
 
     await _controller.load(liveStream);
@@ -428,13 +252,13 @@ class _LiveStreamPageState extends State<LiveStreamPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Live Stream'),
+        title: const Text('Live Stream'),
         actions: [
           if (!_isAtLiveEdge)
             TextButton.icon(
               onPressed: _jumpToLive,
-              icon: Icon(Icons.fiber_manual_record, color: Colors.red),
-              label: Text('LIVE', style: TextStyle(color: Colors.white)),
+              icon: const Icon(Icons.fiber_manual_record, color: Colors.red),
+              label: const Text('LIVE', style: TextStyle(color: Colors.white)),
             ),
         ],
       ),
@@ -465,64 +289,32 @@ class _LiveStreamPageState extends State<LiveStreamPage> {
 
 ## Troubleshooting
 
-### High Latency
+### Can't seek within the live stream
 
-**Problem:** Stream is too far behind live edge
+Seeking availability is a property of the manifest itself (its live window /
+`EXT-X-PLAYLIST-TYPE:EVENT` for HLS, its DASH `timeShiftBufferDepth`), not something this
+package can enable or disable. Check:
+- The stream manifest actually declares a live window / DVR buffer
+- You are seeking within that window — seeking earlier than the window start will fail or
+  clamp, depending on the native player
 
-**Solutions:**
-1. Reduce `liveLatency` value
-2. Reduce `maxPrefetchSegments`
-3. Check network bandwidth
-4. Verify CDN edge server proximity
+### High latency behind live edge / frequent buffering
 
-```dart
-HlsConfig(
-  liveLatency: Duration(seconds: 2),  // Lower latency
-  maxPrefetchSegments: 1,             // Less prefetching
-)
-```
+Latency and buffering are governed entirely by ExoPlayer's/AVPlayer's own defaults for the
+manifest — there is no `liveLatency` or prefetch knob in this package that changes them
+today. Reducing your CDN's segment duration and target latency at the encoder/packager level,
+and using an LL-HLS-compliant manifest, are the levers that actually affect this.
 
-### Frequent Buffering
+### DASH does not load on iOS
 
-**Problem:** Stream buffers frequently
+Expected — AVPlayer has no MPEG-DASH decoder at all. Branch by platform and only ever load a
+`.mpd` URL on Android.
 
-**Solutions:**
-1. Increase `liveLatency` value
-2. Increase `maxPrefetchSegments`
-3. Enable adaptive bitrate
-4. Check available bandwidth
+### Sync issues between multiple viewers
 
-```dart
-HlsConfig(
-  liveLatency: Duration(seconds: 8),  // More buffer
-  maxPrefetchSegments: 5,             // More prefetching
-  enableAdaptiveBitrate: true,        // Adapt quality
-)
-```
-
-### DVR Not Working
-
-**Problem:** Cannot seek within live stream
-
-**Checklist:**
-- `enableLiveStream: true`
-- `enableDvr: true`
-- Stream manifest supports DVR (EXT-X-PLAYLIST-TYPE:EVENT for HLS)
-- Sufficient DVR window on server
-
-### Sync Issues
-
-**Problem:** Multiple viewers out of sync
-
-**Solution:** Use consistent latency targets
-
-```dart
-// All clients use same configuration
-HlsConfig(
-  enableLiveStream: true,
-  liveLatency: Duration(seconds: 5),  // Same for all
-)
-```
+Sync across viewers is a property of each viewer's live-edge distance under the native
+player's own buffering behavior; this package does not offer a shared latency target to
+coordinate it.
 
 ---
 
@@ -536,11 +328,10 @@ HlsConfig(
 
 ## Related Documentation
 
-- [Getting Started](README.md) - Basic setup
+- [Getting Started](getting-started.md) - Basic setup
 - [Events & Callbacks](events.md) - Stream events
-- [Bandwidth Monitoring](../implementation/README.md#bandwidth-monitoring) - Network monitoring
+- [Advanced Features](advanced-features.md) - Bandwidth & buffering streams
 
 ---
 
-**Version:** 0.2.2
 **Status:** Active development — feature-complete, native layers need on-device verification

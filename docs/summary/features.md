@@ -39,6 +39,7 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **Cache Configuration** - Cache size and behavior
 - **Respect Safe Area** - `respectSafeArea` flag to inset around notches/system bars
 - **Immersive Landscape** - `immersiveLandscape` flag for edge-to-edge landscape playback
+- **Secure Surface** - `secureSurface` flag; **Android** blocks screenshots/screen recording of the video surface, **iOS only detects** (no OS-level block) and reports via the surface state
 
 ---
 
@@ -52,6 +53,7 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **Low-Latency Live** - Configurable latency targets
 - **MP4** - Standard MP4 files
 - **Progressive Download** - HTTP progressive streaming
+- **Local File Playback** - Play `file://` URLs (`LocalMediaUtils.fileUri` builds them from a filesystem path)
 
 ### Quality Management
 - **Auto Quality** - Automatic bitrate adaptation
@@ -68,8 +70,9 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **DVR/Time-Shifting** - Seek within live streams
 - **Latency Configuration** - Configurable live latency
 - **Segment Prefetching** - Smooth live playback
+- **Adaptive Segment Caching** - Transparent, read-through HLS/DASH segment cache during playback (**Android only**; caches what has been played for replay, not an offline download)
 
-**Total:** 19 features
+**Total:** 21 features
 
 ---
 
@@ -135,7 +138,7 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **License Acquisition** - Automatic license requests
 - **License Renewal** - Handle expiring licenses
 - **Session Management** - DRM session tracking
-- **Offline Licenses** - Download for offline viewing
+- **Minimum Security Level** - `DrmConfig.minWidevineSecurityLevel` sets a floor for Android Widevine (no iOS/FairPlay equivalent)
 - **Certificate Handling** - FairPlay certificate management
 - **Custom Headers** - DRM request customization
 
@@ -211,19 +214,34 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 
 **Total:** 5 features
 
+### MediaFeed (Feed / Scroll Playback)
+Purpose-built for TikTok/Reels-style vertical feeds, backed by `MediaPlayerPool`:
+- **Bounded Decoder Pool** - Hard cap on concurrently live `MediaController`/decoder sessions (`MediaPlayerPool`)
+- **Prewarm Window** - Prepares upcoming items ahead of the active one within the pool's capacity
+- **Activation Debounce** - Holds off acquiring a pool slot during a fast fling so flown-past items never spin up a player
+- **Live Release** - Releases a player once its item leaves the live/prewarm window
+- **Network-Aware Autoplay** - Optional `autoPlayPolicy` (e.g. `conservativeAutoPlayPolicy`) withholds autoplay on metered or poor/offline/unknown-quality connections
+
+**Total:** 5 features
+
 ---
 
 ## Cache & Offline Support
+
+> There is no download-manager UI or offline DRM on either platform. What's here is
+> disk-caching of non-DRM media (`CacheService`) and, on Android, a transparent
+> playback-time segment cache — not a "download now, watch later" flow for DRM content.
 
 ### Cache Features
 - **Progressive Download** - Download while playing
 - **LRU Eviction** - Least Recently Used removal
 - **Cache Size Management** - Set maximum cache size
-- **Download Progress** - Track download status
-- **Offline Playback** - Play downloaded content
+- **Download Progress** - Track download status (`CacheService.downloadProgressStream`)
+- **Offline Playback** - Play a cached file with no network connection (**non-DRM content only**)
 - **Cache Clearing** - Manual cache management
+- **Android Adaptive Segment Caching** - Read-through HLS/DASH segment cache during playback (Android only; see Streaming section)
 
-**Total:** 6 features
+**Total:** 7 features
 
 ---
 
@@ -270,8 +288,9 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **onCastStatusChanged** - Cast state changes
 - **onCastDevicesChanged** - Available devices
 - **onDrmSessionChanged** - DRM session updates
+- **errorStream / error** - `MediaController` convenience typed-error stream and last-error getter (re-emits `MediaPlayer.errorStream`)
 
-**Total:** 12 events
+**Total:** 13 events
 
 ---
 
@@ -303,7 +322,7 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 ## Platform-Specific
 
 ### Android
-- **ExoPlayer Integration** - Native playback engine
+- **AndroidX Media3 (ExoPlayer) Integration** - Native playback engine
 - **MediaSession API** - System integration
 - **PictureInPictureParams** - PiP configuration
 - **Google Cast SDK** - Chromecast support
@@ -326,8 +345,8 @@ Comprehensive feature set across playback, streaming, subtitles, DRM, casting, P
 
 ### By Category
 - Core Playback: 10
-- Configuration: 14
-- Streaming: 19
+- Configuration: 15
+- Streaming: 21
 - Subtitles: 9
 - Audio: 6
 - Playlists: 11
@@ -335,20 +354,24 @@ Comprehensive feature set across playback, streaming, subtitles, DRM, casting, P
 - Notifications: 11
 - Picture-in-Picture: 7
 - Casting: 11
-- ListView: 5
-- Cache: 6
+- ListView & Feed: 10
+- Cache: 7
 - UI/Widgets: 14
-- Events: 12
+- Events: 13
 - Developer: 13
 - Platform-Specific: 12
 
 ---
 
-## Completeness: 100%
+## Completeness
 
-All planned features have been successfully implemented and tested.
+The features listed above are implemented and covered by the Dart test suite. Known gaps not
+covered by this list: PlayReady (`DrmScheme.playready` exists but is not functional on either
+platform — see the DRM comparison notes), analytics (`AnalyticsService` exists but has no call
+sites in `MediaPlayer` — a host app must drive it), accessibility (no `Semantics` on the seek bar,
+no D-pad/keyboard navigation), and internationalization (no `intl`/`flutter_localizations`
+dependency; control strings are hardcoded English, layouts are not RTL-aware).
 
 ---
 
-**Version:** 0.2.2
-**Status:** Active development — feature-complete, native layers need on-device verification
+**Status:** Active development — feature-complete for the items above, native layers need on-device verification

@@ -16,7 +16,8 @@ Core `MediaPlayer` and `MediaController` API reference with all methods and prop
 All available events, streams, and callback handlers.
 
 ### [Live Streaming](live-streaming.md)
-HLS/DASH live streaming with DVR functionality and low-latency support.
+Playing live HLS (Android + iOS) and DASH (Android only) manifests — what's native-player-default
+behavior today vs. what `HlsConfig`/`DashConfig` fields are not yet wired to.
 
 ### [DRM Configuration](drm.md)
 Digital Rights Management setup for Widevine, FairPlay, and EZDRM.
@@ -65,7 +66,8 @@ MediaPlayerWidget  // UI widget with controls
 | Feature | Android | iOS |
 |---------|---------|-----|
 | Basic Playback | Yes | Yes |
-| HLS/DASH | Yes | Yes |
+| HLS | Yes | Yes |
+| DASH | Yes | No — AVPlayer has no DASH support |
 | Subtitles | Yes | Yes |
 | DRM (Widevine) | Yes | No |
 | DRM (FairPlay) | No | Yes |
@@ -84,5 +86,4 @@ MediaPlayerWidget  // UI widget with controls
 
 ---
 
-**Version:** 0.2.2
-**Last Updated:** June 22, 2026
+See the [root README](../../README.md) for the current released version.

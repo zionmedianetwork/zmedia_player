@@ -4,15 +4,14 @@ High-level overview of development progress, completed features, and project sta
 
 > **Historical (v0.1.0).** The "Production Ready / 113 tests / 100%" figures below
 > are the Oct 2025 release snapshot. The project is now in audit-driven hardening: the
-> Dart suite has grown to 350+ tests, but native code has no automated tests and needs
-> on-device verification. See the
+> Dart suite has grown to **840 tests** (run `flutter test` for the live count), but
+> native code has no automated tests and needs on-device verification. See the
 > [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
 
 ---
 
 ## Project Status (v0.1.0): **feature-complete, hardening in progress**
 
-**Version:** 0.2.2
 **Status:** Active development — native layers need on-device verification
 **Last Updated:** October 19, 2025
 
@@ -236,6 +235,5 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 **Project:** ZMedia Player
 **Organization:** Zion Media Network
-**Status:** Production Ready
-**Version:** 0.2.2
+**Status (as of v0.1.0):** Production Ready — *superseded, see the historical note at the top of this document*
 **Completion Date:** October 19, 2025
