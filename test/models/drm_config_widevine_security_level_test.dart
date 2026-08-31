@@ -27,8 +27,7 @@ void main() {
       expect(widevineSecurityLevelFromWire('L3'), WidevineSecurityLevel.l3);
     });
 
-    test('widevineSecurityLevelFromWire is case-insensitive and trims',
-        () {
+    test('widevineSecurityLevelFromWire is case-insensitive and trims', () {
       expect(widevineSecurityLevelFromWire(' l1 '), WidevineSecurityLevel.l1);
       expect(widevineSecurityLevelFromWire('l3'), WidevineSecurityLevel.l3);
     });
@@ -63,8 +62,7 @@ void main() {
       expect(config.scheme, DrmScheme.widevine);
     });
 
-    test('toMap() serializes minWidevineSecurityLevel as its wire value',
-        () {
+    test('toMap() serializes minWidevineSecurityLevel as its wire value', () {
       final config = DrmConfig.widevine(
         licenseUrl: 'https://license.example.com/widevine',
         minWidevineSecurityLevel: WidevineSecurityLevel.l1,

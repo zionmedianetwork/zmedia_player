@@ -282,7 +282,8 @@ void main() {
         final player = MediaPlayer(
           playerId: 'ch-load-config-present',
           config: const MediaConfig(
-            hlsConfig: HlsConfig(enableDvr: true, liveLatency: Duration(seconds: 4)),
+            hlsConfig:
+                HlsConfig(enableDvr: true, liveLatency: Duration(seconds: 4)),
           ),
         );
         await player.initialize();

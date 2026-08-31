@@ -309,8 +309,8 @@ class DrmConfig {
           ? EzdrmConfig.fromMap(map['ezdrmConfig'] as Map<String, dynamic>)
           : null,
       certificatePinning: pinning,
-      minWidevineSecurityLevel:
-          widevineSecurityLevelFromWire(map['minWidevineSecurityLevel'] as String?),
+      minWidevineSecurityLevel: widevineSecurityLevelFromWire(
+          map['minWidevineSecurityLevel'] as String?),
     );
   }
 

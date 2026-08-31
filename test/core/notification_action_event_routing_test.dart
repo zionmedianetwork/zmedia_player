@@ -90,9 +90,12 @@ void main() {
     });
 
     test('equality and hashCode are value-based', () {
-      const a = NotificationActionEvent('seekTo', position: Duration(seconds: 5));
-      const b = NotificationActionEvent('seekTo', position: Duration(seconds: 5));
-      const c = NotificationActionEvent('seekTo', position: Duration(seconds: 6));
+      const a =
+          NotificationActionEvent('seekTo', position: Duration(seconds: 5));
+      const b =
+          NotificationActionEvent('seekTo', position: Duration(seconds: 5));
+      const c =
+          NotificationActionEvent('seekTo', position: Duration(seconds: 6));
 
       expect(a, equals(b));
       expect(a.hashCode, equals(b.hashCode));
@@ -201,9 +204,11 @@ void main() {
   });
 
   // ===========================================================================
-  group('NotificationService — actionEventStream forwards MediaPlayer events (M-02)',
+  group(
+      'NotificationService — actionEventStream forwards MediaPlayer events (M-02)',
       () {
-    test('a "seekTo" event with a position reaches NotificationService.actionEventStream',
+    test(
+        'a "seekTo" event with a position reaches NotificationService.actionEventStream',
         () async {
       final player = MediaPlayer(playerId: 'notif-svc-seekto');
       await player.initialize();

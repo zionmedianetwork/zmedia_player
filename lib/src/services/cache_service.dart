@@ -651,8 +651,8 @@ class CacheService {
     // (with the real extension, computed below once we know it) or
     // deleted. Only the final, committed filename matters for iOS
     // playability.
-    final tempFile = File(
-        path.join(_cacheDir.path, '${safeMediaId}_$downloadToken.part'));
+    final tempFile =
+        File(path.join(_cacheDir.path, '${safeMediaId}_$downloadToken.part'));
     // Determined once the response headers are available, so a
     // `Content-Type` response header can serve as a fallback for a
     // download URL with no extension (see _deriveExtension). Assigned
@@ -685,8 +685,8 @@ class CacheService {
         mediaItem.url,
         mimeType: contentType ?? mediaItem.mimeType,
       );
-      final fileName = _buildCacheFileName(safeMediaId, extension,
-          timestamp: downloadToken);
+      final fileName =
+          _buildCacheFileName(safeMediaId, extension, timestamp: downloadToken);
       finalFile = File(path.join(_cacheDir.path, fileName));
 
       final contentLength = streamedResponse.contentLength ?? 0;
