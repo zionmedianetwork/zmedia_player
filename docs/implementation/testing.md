@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **840 tests passing** in the Dart layer (run `flutter test` for
+> **Current status:** **881 tests passing** in the Dart layer (run `flutter test` for
 > the live count). Native Kotlin/Swift code still has **no automated tests** — those
 > paths require on-device verification.
 
@@ -71,6 +71,15 @@ Test individual components in isolation.
 - License validation logic
 - Serialization/deserialization
 - State management
+- `MediaController` operation queueing — `test/core/media_controller_operation_queue_test.dart`
+  covers the contract documented in
+  [Operation ordering](../api-reference/player-api.md#operation-ordering-serialization-queue):
+  interleaved `play`/`pause` never throws and runs in FIFO order, a formerly "non-critical"
+  op (`setVolume`/`toggleMute`/`setSpeed`/`setSubtitleTrack`) submitted during an in-flight
+  `load()` still runs, a failing op doesn't poison the ops queued behind it, an op still
+  queued at `dispose()` resolves as a no-op without touching the disposed player, and the
+  10 s per-operation timeout bounds head-of-line blocking. (That file supersedes
+  `operation_lock_non_critical_test.dart`, which asserted the removed throwing behaviour.)
 
 **Example:**
 ```dart
@@ -538,6 +547,6 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** 840 tests passing in the Dart layer; **no automated native tests yet**
+**Test Coverage:** 881 tests passing in the Dart layer; **no automated native tests yet**
 **Status:** Active development — native layers need on-device verification
-**Last Updated:** August 17, 2026
+**Last Updated:** August 30, 2026

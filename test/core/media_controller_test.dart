@@ -252,18 +252,18 @@ void main() {
   });
 
   // =========================================================================
-  group('MediaController — operation lock serialization', () {
+  group('MediaController — operation queue serialization', () {
     // We use a Completer to hold the mock handler "in flight" so we can test
     // what happens to a second call while the first is still pending.
 
-    test('lock is false initially', () {
+    test('in-progress flag is false initially', () {
       _installCapture();
       final c = MediaController.create(playerId: 'mc-lock-init');
       expect(c.isOperationInProgress, isFalse);
       c.dispose();
     });
 
-    test('lock is released after a successful operation', () async {
+    test('in-progress flag clears after a successful operation', () async {
       _installCapture();
       final c = MediaController.create(playerId: 'mc-lock-success');
       await c.initialize();
@@ -271,11 +271,11 @@ void main() {
       await c.enableAutoQuality();
 
       expect(c.isOperationInProgress, isFalse,
-          reason: 'Lock must be false after operation completes');
+          reason: 'Flag must be false after operation completes');
       c.dispose();
     });
 
-    test('lock is released even when operation throws', () async {
+    test('in-progress flag clears even when operation throws', () async {
       _installCapture();
       final c = MediaController.create(playerId: 'mc-lock-throw');
       await c.initialize();
@@ -289,21 +289,29 @@ void main() {
       }
 
       expect(c.isOperationInProgress, isFalse,
-          reason: 'Lock must be released in finally block on error');
+          reason: 'Flag must be cleared in the finally block on error');
 
-      // Subsequent operation must succeed without hitting busy guard.
+      // Subsequent operation must succeed.
       await expectLater(c.enableAutoQuality(), completes);
       c.dispose();
     });
 
-    test('non-critical op while lock is held throws OperationBusyException',
+    test('a second op submitted while one is running is queued, not rejected',
         () async {
-      // Hold the first call's response until we explicitly resolve it.
+      // Issue #86: this used to assert the opposite — that a concurrent
+      // "non-critical" op was rejected with OperationBusyException. Operations
+      // are now serialized through a FIFO queue, so the second call waits its
+      // turn and runs. See media_controller_operation_queue_test.dart for the
+      // full contract.
       final holdCompleter = Completer<void>();
+      final calls = <MethodCall>[];
+      var blockedOnce = false;
 
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
           .setMockMethodCallHandler(_channel, (MethodCall call) async {
-        if (call.method == 'setVolume') {
+        calls.add(call);
+        if (call.method == 'setVolume' && !blockedOnce) {
+          blockedOnce = true;
           // Block until holdCompleter resolves.
           await holdCompleter.future;
         }
@@ -313,32 +321,29 @@ void main() {
       final c = MediaController.create(playerId: 'mc-lock-busy');
       await c.initialize();
 
-      // Start first non-critical operation (volume) — it will block in the
-      // handler. We deliberately do NOT await it yet.
+      // Start first operation (volume) — it will block in the handler. We
+      // deliberately do NOT await it yet.
       final firstOpFuture = c.setVolume(0.5);
 
-      // Give the first op a moment to acquire the lock.
+      // Give the first op a moment to start running.
       await Future<void>.delayed(const Duration(milliseconds: 10));
 
-      // While the first op holds the lock, a concurrent non-critical op
-      // (setVolume) must be rejected with OperationBusyException — not the
-      // generic StateError — because isCritical: false is now passed
-      // explicitly at the call site.
-      await expectLater(
-        c.setVolume(0.9),
-        throwsA(isA<OperationBusyException>()),
-        reason:
-            'Non-critical op while lock is held must throw OperationBusyException',
-      );
+      // Submitted while the first is still in flight: must complete, in order.
+      final secondOpFuture = c.setVolume(0.9);
 
       // Release the first operation.
       holdCompleter.complete();
       await firstOpFuture;
+      await expectLater(secondOpFuture, completes,
+          reason: 'A concurrent op must be queued and run, never rejected');
 
-      // After completion the lock must be clear.
+      expect(calls.where((call) => call.method == 'setVolume').length, 2,
+          reason: 'Both submitted operations must reach native');
+
+      // After completion the flag must be clear.
       expect(c.isOperationInProgress, isFalse);
       await expectLater(c.setVolume(0.3), completes,
-          reason: 'Lock must be free after first op completes');
+          reason: 'Queue must be free after both ops complete');
 
       c.dispose();
     });
@@ -349,10 +354,9 @@ void main() {
       final c = MediaController.create(playerId: 'mc-lock-reset');
       await c.initialize();
 
-      // Manually force the lock into the "in progress" state.
-      // (This simulates a scenario where something went wrong mid-operation.)
-      // We access isOperationInProgress as a read-only signal and call
-      // the public resetOperationState() method to clear it.
+      // resetOperationState() is a legacy recovery hook: with a real queue
+      // nothing gates on the flag, so it only clears the informational
+      // isOperationInProgress signal and must never wedge the queue.
       c.resetOperationState();
       expect(c.isOperationInProgress, isFalse,
           reason: 'resetOperationState must clear the flag');

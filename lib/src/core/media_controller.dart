@@ -39,14 +39,26 @@ class MediaController extends ChangeNotifier {
   /// Whether the controller is disposed
   bool _isDisposed = false;
 
-  /// Whether an operation is in progress (for preventing race conditions)
+  /// Whether an operation submitted through [_executeOperation] is currently
+  /// *running* (as opposed to merely queued). Informational only — it does
+  /// not gate anything. See [isOperationInProgress].
   bool _operationInProgress = false;
 
-  /// When the current operation lock was acquired (used for staleness detection)
-  DateTime? _operationStartedAt;
+  /// Tail of this controller's operation queue.
+  ///
+  /// Every call routed through [_executeOperation] awaits the *settlement*
+  /// (success, failure or timeout) of the previously submitted call before it
+  /// starts, so operations always run in the order they were requested and
+  /// never overlap. The chain itself deliberately never carries an error:
+  /// each link completes normally so that one failed operation cannot poison
+  /// everything queued behind it.
+  Future<void> _operationQueueTail = Future<void>.value();
 
-  /// How long before a held lock is considered stale (matches the
-  /// .timeout() inside _executeOperation so they agree)
+  /// Upper bound on how long a single operation may occupy the queue.
+  ///
+  /// Each queued operation is run under `.timeout(_operationTimeout)`, so a
+  /// wedged native call fails with a [TimeoutException] instead of blocking
+  /// the queue forever; the next queued operation then proceeds normally.
   static const Duration _operationTimeout = Duration(seconds: 10);
 
   /// Last position update time to prevent excessive notifications
@@ -307,8 +319,6 @@ class MediaController extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('MediaController: Error toggling play/pause: $e');
-      // Reset operation state on error to prevent getting stuck
-      _resetOperationState();
       rethrow;
     }
   }
@@ -322,8 +332,6 @@ class MediaController extends ChangeNotifier {
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error starting playback: $e');
-      // Reset operation state on error to prevent getting stuck
-      _resetOperationState();
       rethrow;
     }
   }
@@ -337,8 +345,6 @@ class MediaController extends ChangeNotifier {
       _showControls();
     } catch (e) {
       debugPrint('MediaController: Error pausing playback: $e');
-      // Reset operation state on error to prevent getting stuck
-      _resetOperationState();
       rethrow;
     }
   }
@@ -402,10 +408,7 @@ class MediaController extends ChangeNotifier {
     final clampedVolume = volume.clamp(0.0, 1.0);
 
     try {
-      await _executeOperation(
-        () => _player.setVolume(clampedVolume),
-        isCritical: false,
-      );
+      await _executeOperation(() => _player.setVolume(clampedVolume));
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error setting volume: $e');
@@ -434,10 +437,7 @@ class MediaController extends ChangeNotifier {
     if (_isDisposed) return;
 
     try {
-      await _executeOperation(
-        () => _player.setMuted(!isMuted),
-        isCritical: false,
-      );
+      await _executeOperation(() => _player.setMuted(!isMuted));
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error toggling mute: $e');
@@ -452,10 +452,7 @@ class MediaController extends ChangeNotifier {
     if (_isDisposed) return;
 
     try {
-      await _executeOperation(
-        () => _player.setSecureSurface(enabled),
-        isCritical: false,
-      );
+      await _executeOperation(() => _player.setSecureSurface(enabled));
     } catch (e) {
       debugPrint('MediaController: Error setting secure surface: $e');
       rethrow;
@@ -470,10 +467,7 @@ class MediaController extends ChangeNotifier {
     final clampedSpeed = speed.clamp(0.1, 4.0);
 
     try {
-      await _executeOperation(
-        () => _player.setSpeed(clampedSpeed),
-        isCritical: false,
-      );
+      await _executeOperation(() => _player.setSpeed(clampedSpeed));
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error setting speed: $e');
@@ -541,10 +535,7 @@ class MediaController extends ChangeNotifier {
     if (_isDisposed) return;
 
     try {
-      await _executeOperation(
-        () => _player.setSubtitleTrack(track),
-        isCritical: false,
-      );
+      await _executeOperation(() => _player.setSubtitleTrack(track));
       _showControlsTemporarily();
     } catch (e) {
       debugPrint('MediaController: Error setting subtitle track: $e');
@@ -706,89 +697,142 @@ class MediaController extends ChangeNotifier {
 
   // Private methods
 
-  /// Execute an operation with race condition protection.
+  /// Submit an operation to this controller's serialization queue.
   ///
-  /// The lock is acquired before the operation starts and is ALWAYS released
-  /// in a [finally] block — it can never get permanently stuck.  If the lock
-  /// is already held we first check whether the holder has exceeded
-  /// [_operationTimeout] (stale lock), and treat it as expired only if so.
-  /// Non-critical operations ([isCritical] == false) that arrive while a
-  /// fresh lock is held are rejected immediately with [OperationBusyException]
-  /// rather than waiting; critical ones wait briefly.
-  Future<T> _executeOperation<T>(
-    Future<T> Function() operation, {
-    bool isCritical = true,
-  }) async {
-    if (_operationInProgress) {
-      // Check if the current lock is stale (exceeded the operation timeout).
-      final started = _operationStartedAt;
-      final isStale = started != null &&
-          DateTime.now().difference(started) > _operationTimeout;
+  /// Operations are executed strictly in submission order, one at a time.
+  /// Submitting while another operation is running does **not** throw: the
+  /// new operation is appended to the queue and runs as soon as its
+  /// predecessor settles. Ordinary interleaved user input (`pause()` on one
+  /// controller immediately followed by `play()`, a `setVolume()` landing
+  /// while a `load()` is still in flight, ...) therefore always takes
+  /// effect, in order, instead of failing on timing (issue #86).
+  ///
+  /// Guarantees:
+  /// * **Ordering** — FIFO by submission. The returned future completes only
+  ///   after this operation itself has run.
+  /// * **Bounded head-of-line blocking** — each operation runs under
+  ///   `.timeout([_operationTimeout])`, so a wedged native call fails with a
+  ///   [TimeoutException] rather than stalling the queue forever. A queued
+  ///   operation therefore waits at most `_operationTimeout` per operation
+  ///   ahead of it.
+  /// * **Failure isolation** — an operation that throws completes only *its
+  ///   own* future with that error; the queue advances normally.
+  /// * **Unbounded** — the queue is a serializer, not a rate limiter or a
+  ///   debouncer. A caller that submits faster than operations complete grows
+  ///   the queue; it never drops work.
+  /// * **Disposal** — an operation still queued when [dispose] runs is
+  ///   dropped and its future completes normally as a no-op, without ever
+  ///   touching the disposed [MediaPlayer]. This deliberately matches the
+  ///   `if (_isDisposed) return;` guard every public method already applies
+  ///   on entry, so a `dispose()` racing a queued call behaves the same as a
+  ///   call made after `dispose()` — which matters because feed-style hosts
+  ///   routinely fire these calls without awaiting them.
+  ///
+  /// There is deliberately no "critical vs non-critical" distinction any
+  /// more: the old lock dropped non-critical work (`setVolume`, `toggleMute`,
+  /// `setSpeed`, `setSubtitleTrack`, `setSecureSurface`) whenever anything
+  /// else was in flight, which is precisely when a host most wants to e.g.
+  /// mute a player. Every submitted operation now runs. See
+  /// [OperationBusyException], which is deprecated for the same reason.
+  ///
+  /// Deliberately **not** implemented: superseding/collapsing semantics (e.g.
+  /// dropping a queued `seekTo` when a newer one is submitted). Collapsing
+  /// would make `seekTo(a)`'s future complete without the player ever having
+  /// been asked to move to `a`, which is a more surprising contract than the
+  /// slight redundancy of running both seeks in order — see issue #86.
+  Future<void> _executeOperation(Future<void> Function() operation) {
+    // Nothing to run — and nothing to hang either. Mirrors the disposed
+    // handling inside the queue below.
+    if (_isDisposed) return Future<void>.value();
 
-      if (isStale) {
-        // The timeout handler inside the operation body already cleared the
-        // flag, but defensively reset both fields here.
-        debugPrint(
-            'MediaController: Clearing stale lock (held > ${_operationTimeout.inSeconds}s)');
-        _operationInProgress = false;
-        _operationStartedAt = null;
-      } else {
-        // Lock is held by a live operation.
-        await Future.delayed(const Duration(milliseconds: 100));
+    final predecessor = _operationQueueTail;
 
-        if (_operationInProgress) {
-          debugPrint(
-              'MediaController: Operation in progress, skipping non-critical or queuing critical');
-          if (!isCritical) {
-            throw const OperationBusyException(
-              'Non-critical operation skipped - another operation in progress',
-            );
-          }
-          await Future.delayed(const Duration(milliseconds: 200));
-          if (_operationInProgress) {
-            throw StateError('Another operation is already in progress');
-          }
-        }
-      }
-    }
+    // `settled` is the link this submission adds to the chain. It always
+    // completes normally (never with an error) so a failing operation cannot
+    // propagate into whatever is queued behind it.
+    final settled = Completer<void>();
+    _operationQueueTail = settled.future;
 
-    _operationInProgress = true;
-    _operationStartedAt = DateTime.now();
+    // `result` is what the caller awaits: it mirrors the operation's own
+    // success/failure.
+    final result = Completer<void>();
+
+    unawaited(_runQueuedOperation(operation, predecessor, settled, result));
+
+    return result.future;
+  }
+
+  /// Body of a single queued operation. See [_executeOperation].
+  Future<void> _runQueuedOperation(
+    Future<void> Function() operation,
+    Future<void> predecessor,
+    Completer<void> settled,
+    Completer<void> result,
+  ) async {
     try {
-      return await operation().timeout(
-        _operationTimeout,
-        onTimeout: () {
-          // Timeout handler clears the lock so subsequent calls are not
-          // blocked; the finally below will also run and is a no-op.
-          _operationInProgress = false;
-          _operationStartedAt = null;
-          throw TimeoutException(
-              'Operation timed out after ${_operationTimeout.inSeconds} seconds');
-        },
-      );
-    } catch (e) {
-      debugPrint('MediaController: Operation failed: $e');
-      rethrow;
+      // Wait our turn. `predecessor` never completes with an error.
+      await predecessor;
+
+      if (_isDisposed) {
+        // dispose() ran while this operation was queued. Drop it: the
+        // underlying player is gone, so there is nothing to execute. Complete
+        // normally rather than hanging or leaking a pending future.
+        debugPrint(
+            'MediaController: Dropping queued operation — controller disposed');
+        result.complete();
+        return;
+      }
+
+      _operationInProgress = true;
+      try {
+        await operation().timeout(
+          _operationTimeout,
+          onTimeout: () => throw TimeoutException(
+            'Operation timed out after ${_operationTimeout.inSeconds} seconds',
+          ),
+        );
+        result.complete();
+      } catch (e, stackTrace) {
+        debugPrint('MediaController: Operation failed: $e');
+        result.completeError(e, stackTrace);
+      } finally {
+        _operationInProgress = false;
+      }
     } finally {
-      _operationInProgress = false;
-      _operationStartedAt = null;
+      // Always release the queue, even if something above threw
+      // unexpectedly, so the controller can never wedge permanently.
+      if (!settled.isCompleted) settled.complete();
     }
   }
 
-  /// Reset operation state (useful for recovery from stuck operations)
+  /// Legacy recovery hook — see [resetOperationState].
   void _resetOperationState() {
     if (_operationInProgress) {
-      debugPrint('MediaController: Resetting stuck operation state');
+      debugPrint('MediaController: Clearing in-progress operation flag');
       _operationInProgress = false;
     }
   }
 
-  /// Public method to reset operation state (useful for recovery from stuck operations)
+  /// Clear the informational [isOperationInProgress] flag.
+  ///
+  /// Retained for source compatibility. It is no longer needed: since
+  /// operations are serialized through a real queue (see [_executeOperation]),
+  /// nothing gates on this flag and a failed or timed-out operation can no
+  /// longer leave the controller stuck. Calling this while an operation is
+  /// actually running only makes [isOperationInProgress] report `false`
+  /// early; it does not cancel or unblock anything.
   void resetOperationState() {
     _resetOperationState();
   }
 
-  /// Check if an operation is currently in progress
+  /// Whether an operation is currently *running* on this controller.
+  ///
+  /// Informational only. Operations are serialized through an internal FIFO
+  /// queue (see [_executeOperation]), so callers never need to check this
+  /// before issuing a call — a call made while this is `true` is queued and
+  /// runs next, it is not rejected. Note also that `false` does not mean the
+  /// queue is empty: an operation can be queued but not yet started, and
+  /// check-then-act on this getter is inherently racy.
   bool get isOperationInProgress => _operationInProgress;
 
   /// Setup stream subscriptions with proper error handling
@@ -1001,6 +1045,10 @@ class MediaController extends ChangeNotifier {
 
   /// Show controls permanently
   void _showControls() {
+    // A queued operation dropped by dispose() still returns to its caller,
+    // which then runs its post-operation side effects — never touch (or
+    // schedule a timer on) a disposed controller from there.
+    if (_isDisposed) return;
     _cancelControlsTimer();
     if (!_controlsVisible) {
       _controlsVisible = true;
@@ -1010,6 +1058,7 @@ class MediaController extends ChangeNotifier {
 
   /// Hide controls
   void _hideControls() {
+    if (_isDisposed) return;
     _cancelControlsTimer();
     if (_controlsVisible) {
       _controlsVisible = false;
@@ -1019,6 +1068,9 @@ class MediaController extends ChangeNotifier {
 
   /// Show controls temporarily with auto-hide
   void _showControlsTemporarily() {
+    // See _showControls: without this, a post-dispose caller would leave a
+    // pending auto-hide Timer behind.
+    if (_isDisposed) return;
     _cancelControlsTimer();
 
     if (!_controlsVisible) {
@@ -1160,13 +1212,22 @@ class MediaController extends ChangeNotifier {
     }
   }
 
+  /// Dispose the controller and the underlying player.
+  ///
+  /// Any operation still sitting in the serialization queue (see
+  /// [_executeOperation]) is dropped: `_isDisposed` is set first, so each
+  /// queued operation sees it when its turn comes and completes its future
+  /// normally as a no-op instead of touching the disposed player. An
+  /// operation that is already *running* is not cancelled — it finishes (or
+  /// fails) against the player being torn down, exactly as before.
   @override
   void dispose() {
     if (_isDisposed) return;
 
+    // Set first: queued operations check this when their turn comes.
     _isDisposed = true;
 
-    // Reset operation state
+    // Clear the informational in-progress flag.
     _resetOperationState();
 
     // Cancel timers

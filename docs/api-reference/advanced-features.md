@@ -188,6 +188,11 @@ MediaFeed(
   where the package should own the whole feed's controller lifetime.
 - `MediaPlayerPool` can also be used directly (advanced use — sharing one pool across more than
   one `MediaFeed`, or a fake controller factory in tests) and is a `ChangeNotifier`.
+- **No host-side call serialization is needed.** A fast A→B→A→B swipe produces overlapping
+  `play`/`pause` on the same controller; each `MediaController` queues its own operations and
+  runs them in submission order, so the losing call still takes effect rather than being
+  rejected. Do not wrap these calls in a per-`playerId` promise chain of your own — see
+  [Operation ordering](player-api.md#operation-ordering-serialization-queue).
 
 ## Caching / offline
 

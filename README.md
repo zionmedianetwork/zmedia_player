@@ -344,6 +344,15 @@ The reactive `ChangeNotifier` facade — use this for UI. Created with
 `isBuffering`, `hasError`, `bufferedProgress`, `hasNext`, `hasPrevious`, `qualityTracks`,
 `subtitleTracks`, `audioTracks`, `player` (the underlying `MediaPlayer`).
 
+**Operation ordering:** every method above is submitted to a per-controller FIFO queue and
+runs one at a time, in submission order. Calling while another operation is in flight queues
+the new call — it is never rejected — so ordinary interleaved input (`pause()` immediately
+followed by `play()`, muting a player that is still loading) always takes effect, in order.
+The returned `Future` completes once that call has actually run. A wedged native call fails
+with `TimeoutException` after 10 s so the queue always advances, and an operation still
+queued when `dispose()` runs is dropped as a no-op. See
+[Operation ordering](docs/api-reference/player-api.md#operation-ordering-serialization-queue).
+
 See the [Player API](docs/api-reference/player-api.md) for full signatures.
 
 ### MediaPlayerWidget

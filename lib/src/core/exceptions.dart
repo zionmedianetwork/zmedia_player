@@ -400,11 +400,31 @@ class ProtocolMismatchException extends MediaPlayerException {
       'native: $nativeProtocolVersion, missingMethod: $missingMethod)';
 }
 
-/// Operation skipped due to another operation in progress
+/// Operation skipped because another operation was in progress.
 ///
-/// Thrown when a non-critical operation cannot be executed because
-/// another operation is currently in progress. This allows callers
-/// to decide whether to retry, ignore, or handle differently.
+/// **Deprecated and no longer thrown by this package.** It used to be raised
+/// by `MediaController` when a "non-critical" operation (`setVolume`,
+/// `toggleMute`, `setSpeed`, `setSubtitleTrack`, `setSecureSurface`) was
+/// requested while another operation held the controller's lock — so
+/// ordinary interleaved user input could fail purely on timing (issue #86).
+///
+/// `MediaController` now serializes operations through a FIFO queue instead:
+/// a call made while another is in flight is queued and runs next, never
+/// rejected. Nothing in this package raises this exception any more, so any
+/// `catch (OperationBusyException)` / `case OperationBusyException()` in
+/// consumer code is dead as a *rejection* path and can be removed.
+///
+/// The class itself is retained (rather than deleted) because
+/// [MediaPlayerException] is `sealed`: removing a member would break every
+/// exhaustive `switch` over the hierarchy. Exhaustive switches must therefore
+/// still list it; only code that expects it to actually be thrown needs to
+/// change. It will be removed in a future major release.
+@Deprecated(
+  'MediaController now queues operations instead of rejecting them, so this '
+  'is never thrown. Remove busy-retry handling; the call simply waits its '
+  'turn. Kept only so exhaustive switches over the sealed MediaPlayerException '
+  'hierarchy keep compiling. Will be removed in a future major release.',
+)
 class OperationBusyException extends MediaPlayerException {
   const OperationBusyException([
     super.message = 'Operation skipped - another operation in progress',

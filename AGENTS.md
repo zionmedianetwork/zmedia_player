@@ -53,12 +53,12 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 ### Core (`lib/src/core/`)
 | Export | Purpose |
 |---|---|
-| `MediaController` | Reactive `ChangeNotifier` facade over `MediaPlayer`; use for UI. `create()` factory. |
+| `MediaController` | Reactive `ChangeNotifier` facade over `MediaPlayer`; use for UI. `create()` factory. Serializes every operation through a per-controller FIFO queue — see the gotcha below. |
 | `MediaPlayer` | Lower-level engine; singleton per `playerId`; exposes all streams. |
 | `MediaConfig` | Player configuration (autoPlay, boxFit, DRM, streaming, `respectSafeArea`, `immersiveLandscape`, `secureSurface`, …). |
 | `CacheConfig`, `BufferConfig` | Cache + buffering sub-configs used by `MediaConfig`. |
 | `CrashReporter` | Optional crash-reporting hook (`MediaPlayer.enableCrashReporting`). |
-| `MediaPlayerException` (sealed) + subclasses | Typed errors: `MediaLoadException`, `NetworkException`, `DrmException`, `PlaybackException`, `InvalidStateException`, `PlayerDisposedException`, `ConfigurationException`, `PlatformOperationException`, `OperationBusyException`. |
+| `MediaPlayerException` (sealed) + subclasses | Typed errors: `MediaLoadException`, `NetworkException`, `DrmException`, `PlaybackException`, `InvalidStateException`, `PlayerDisposedException`, `ConfigurationException`, `PlatformOperationException`, `ProtocolMismatchException`. Plus **deprecated** `OperationBusyException` — never thrown any more (`MediaController` queues instead of rejecting), kept only so exhaustive `switch`es over the sealed hierarchy keep compiling. |
 | `MediaPlayerPool` | Bounded pool of live `MediaController`/decoder sessions; underlies `MediaFeed`'s prewarm/activate/release lifecycle for scroll feeds. |
 | `LocalMediaUtils` | Builds a `file://` URL from a filesystem path for local/cached-file playback (`fileUri`). |
 
@@ -249,6 +249,7 @@ throws rather than silently doing nothing. See [live-streaming.md](docs/api-refe
 - **Quality/subtitle/audio tracks appear only after `play()`** — native reports them once buffering starts.
 - **Notifications need the player**: `initialize(playerId, mediaPlayer: …)` or lock-screen state won't sync.
 - **MethodChannel calls are async** — always `await`.
+- **`MediaController` operations are queued, not rejected.** Every controller method (`play`, `pause`, `seekTo`, `setVolume`, `load`, track selection, `updateConfig`, …) goes onto a per-controller FIFO queue and runs one at a time, in submission order. Calling while another operation is in flight is fine — the new call waits its turn, so interleaved `pause()`/`play()` or muting a player mid-`load()` always takes effect. Consequences: the returned `Future` resolves only once that call actually ran; each operation is capped at 10 s and fails with `TimeoutException` (so one wedged native call can't stall the queue); an operation still queued when `dispose()` runs is dropped and completes as a no-op; `isOperationInProgress` is informational only (check-then-act on it is racy — you don't need it). Do **not** rebuild a per-`playerId` promise chain on top of this.
 - **Speed is a setting, transport is `play`/`pause`** — never conflate them. `setSpeed`/`MediaConfig.speed` must not start or stop playback on either platform, and with `autoPlay: false` nothing plays until an explicit `play()`. On iOS this means `AVPlayer.defaultRate` (+ a stored requested speed), *not* `rate`, which is a play command.
 - **Multiple players**: use distinct `playerId`s (e.g. in a `ListView` with `MediaListPlayer`); events route by `playerId`.
 - **iOS audio + silent switch**: the plugin sets `AVAudioSession` to `.playback` on `play()`; background audio needs `UIBackgroundModes: audio` in the host `Info.plist`.

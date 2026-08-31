@@ -2,14 +2,18 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zmedia_player/zmedia_player.dart';
 
-/// Tests for Fix 2 (operation lock) and Fix 3 (MediaController facade).
+/// Tests for Fix 2 (operation serialization) and Fix 3 (MediaController
+/// facade).
 ///
 /// Covers:
 ///   - setQualityTrack / setAudioTrack / enableAutoQuality exist and route
-///     through _executeOperation (busy-lock path is exercised)
+///     through _executeOperation (the serialization queue)
 ///   - qualityTracks / audioTracks getters reflect the player's lists
 ///   - Volume and speed stream changes notify listeners
-///   - Lock is released after normal completion (cannot get permanently stuck)
+///   - The queue drains after normal completion (cannot get permanently stuck)
+///
+/// The queue's own contract (FIFO ordering, no throw on interleaving, dispose
+/// and timeout behaviour) lives in media_controller_operation_queue_test.dart.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -57,7 +61,7 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // Fix 3: Track-control methods exist and go through the operation lock
+  // Fix 3: Track-control methods exist and go through the operation queue
   // ---------------------------------------------------------------------------
 
   group(
@@ -132,21 +136,21 @@ void main() {
   });
 
   // ---------------------------------------------------------------------------
-  // Fix 2: Operation lock correctness
+  // Fix 2: Operation queue correctness
   // ---------------------------------------------------------------------------
 
-  group('MediaController operation lock (Fix 2)', () {
-    test('lock is released after a successful operation', () async {
+  group('MediaController operation queue (Fix 2)', () {
+    test('queue drains after a successful operation', () async {
       final controller = MediaController.create(playerId: 'lock-success');
       await controller.initialize();
 
       await controller.enableAutoQuality();
 
-      // A second operation should proceed immediately (lock was released).
+      // A second operation should proceed immediately (queue is drained).
       await expectLater(
         controller.enableAutoQuality(),
         completes,
-        reason: 'Lock must be released after first operation so second can run',
+        reason: 'Queue must drain after the first operation so the second runs',
       );
 
       controller.dispose();
@@ -164,7 +168,7 @@ void main() {
       controller.dispose();
     });
 
-    test('lock is false even after a failing operation', () async {
+    test('in-progress flag is false even after a failing operation', () async {
       final controller = MediaController.create(playerId: 'lock-fail');
       await controller.initialize();
 
@@ -184,10 +188,9 @@ void main() {
       }
 
       expect(controller.isOperationInProgress, isFalse,
-          reason:
-              'Lock must be released in finally even when operation throws');
+          reason: 'Flag must be cleared in finally even when operation throws');
 
-      // A subsequent operation must succeed without hitting the busy guard.
+      // A subsequent operation must succeed.
       await expectLater(
         controller.enableAutoQuality(),
         completes,
