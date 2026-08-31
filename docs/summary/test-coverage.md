@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1052 tests passing** (run
+> the original release. The suite has since grown to **1054 tests passing** (run
 > `flutter test` for the live count) as audit-remediation work added regression
 > coverage. **Important caveat the original summary omitted:** these are all **Dart**
 > unit tests. There are **no automated native (Kotlin/Swift) tests**, and several
@@ -13,7 +13,7 @@
 > --coverage`, `test/performance/`, `test/memory/` on every push/PR) — both now exist.
 > See the [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
 >
-> **Last Updated:** August 30, 2026
+> **Last Updated:** August 31, 2026
 >
 > **Playlist regression coverage (issue #79):** `test/core/playlist_extension_test.dart`
 > (15 tests) covers the Dart-observable half of the "`setPlaylist` must not restart the
@@ -75,9 +75,9 @@
 | DrmLicense | 7 | Yes All Passing | < 1μs validation |
 | DrmSession | 3 | Yes All Passing | State Management |
 | MediaItem (DRM) | 10 | Yes All Passing | < 4μs serialization |
-| Performance | 13 | Yes All Passing | 94-99% faster than targets |
+| Performance | 15 | Yes All Passing | 94-99% faster than targets |
 
-**Total Phase 4:** 48 tests passing
+**Total Phase 4:** 50 tests passing
 
 ---
 
@@ -102,7 +102,13 @@
 | License Validation | 0.117μs | < 10μs | Yes **99% faster** |
 | MediaItem with DRM | 3.11μs | < 50μs | Yes **94% faster** |
 
-**Regression Testing:** Performance remains stable over 1000 iterations
+**Regression Testing:** Each operation above is gated on a generous *absolute*
+budget (the "Target" column), not on a comparison against a previous run or an
+earlier batch within the same run. Whether repeated use accumulates state is
+asserted separately and deterministically — see the `Repeated Use Invariants`
+group in `test/performance/drm_performance_test.dart`, which checks that 1000
+repeated serializations of identical input do not drift, that `toMap()` returns
+a fresh map per call, and that 1000 configs built in a batch stay independent.
 
 ---
 
@@ -127,7 +133,7 @@ test/models/
 ### Performance Tests
 ```
 test/performance/
-└── drm_performance_test.dart (13 benchmarks)
+└── drm_performance_test.dart (12 benchmarks + 3 repeated-use invariants)
 ```
 
 ### Test Utilities
