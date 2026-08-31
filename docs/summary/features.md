@@ -129,8 +129,12 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **Playlist Navigation** - hasNext, hasPrevious helpers
 - **Current Item Tracking** - Track playing item
 - **Playlist Metadata** - Custom playlist info
+- **In-Place Extension** - Re-issue `setPlaylist` to extend the queue, or to change
+  `mode`/`repeatMode`, without restarting the item already playing (sliding-window
+  playlists for per-item-authorised content). See
+  [Player API](../api-reference/player-api.md#extending-a-playlist-in-place)
 
-**Total:** 11 features
+**Total:** 12 features
 
 ---
 
@@ -363,7 +367,7 @@ Comprehensive feature set across playback, streaming, subtitles, DRM, casting, P
 - Streaming: 21
 - Subtitles: 9
 - Audio: 6
-- Playlists: 11
+- Playlists: 12
 - DRM: 10
 - Notifications: 11
 - Picture-in-Picture: 8

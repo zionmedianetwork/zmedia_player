@@ -181,7 +181,9 @@ serialized the same way `initialize`/`updateConfig` already do:
 `skipToNext`, `skipToPrevious` and playlist auto-advance on completion all route through
 `skipToIndex`, so they are covered by the same key. The snapshot is sent on **every** such call,
 so a rebuilt config (e.g. flipping `hlsConfig.enableDvr`) takes effect on the next load —
-including a playlist-driven one — without a separate `updateConfig()` call. Native replaces its
+including a playlist-driven one — without a separate `updateConfig()` call. On the next *load*,
+specifically: see the same-item guard below, where a `setPlaylist` for the item already playing
+stores the new config but does not reload. Native replaces its
 stored config wholesale from this before any config-dependent work runs, but deliberately does
 not re-run `applyConfig()`/volume-speed-mute reapplication from these paths (that would undo an
 in-progress runtime `setMuted()` call — see `MediaPlayerManager.kt`'s/`.swift`'s `loadMediaItem`
@@ -189,6 +191,43 @@ doc). `config` is optional on the native side on all three: an absent key leaves
 config untouched, so an older Dart caller cannot break a newer native build. Per-item
 `httpHeaders`/`drmConfig` are unaffected by all of this — they live on `MediaItem`, not
 `MediaConfig`.
+
+**`setPlaylist` and the same-item guard.** `MediaPlayer.setPlaylist()` sends the payload in the
+table above (`{playerId, playlist, startIndex, config}`) on **every** call — the #79 fix changed
+no payload. What it changed is what native does with it: `MediaPlayerInstance.setPlaylist` on
+**both** platforms updates `currentPlaylist`/`currentIndex` unconditionally but **skips** its
+`loadMediaItem` call when
+`items[startIndex]` is, key for key, the item already loaded (`currentMediaItem`) *and* that
+item is still in progress. So a playlist can be extended in place, or re-issued to change
+`mode`/`repeatMode`, without restarting the item under the viewer.
+
+- **Comparison:** whole-serialized-item structural equality (Kotlin `Map.equals`;
+  `NSDictionary.isEqual(to:)` on iOS), not an `id` check. An `id` match alone would silently
+  swallow deliberate re-issues — a re-signed `url`, refreshed `httpHeaders`, a rotated
+  `drmConfig` token or `drmConfig.headers`. A missing `id` is never self-identifying.
+- **In progress:** `STATE_READY`/`STATE_BUFFERING` on Android; on iOS a `.readyToPlay`
+  `currentItem` plus a `currentItemIsSpent` flag (set by `stop()` and the play-to-end
+  notification, cleared by `loadMediaItem`/`play`/`seekTo`) — iOS needs the flag because
+  `stop()` there is pause + `seek(to: .zero)` and a finished item stays attached, neither of
+  which is visible from `AVPlayer` state the way ExoPlayer's `playbackState` is.
+- **`skipToIndex` deliberately has no guard** (and therefore neither do
+  `skipToNext`/`skipToPrevious`): "skip to the index you are on" is a restart, and
+  `MediaRepeatMode.single` is implemented through exactly that call from
+  `MediaPlayer._handlePlaybackCompleted`.
+- **A changed `MediaConfig` does not force a reload.** The `config` snapshot above is stored
+  unconditionally and *first* — including on the skip path and the early-return paths — so the
+  next real load uses it. But storing it never by itself triggers a load: a `setPlaylist` that
+  carries a new config for an unchanged, in-progress item **stores the config and skips the
+  load**, by design. (`MediaConfig`/`HlsConfig`/`DashConfig` define no `operator ==`, so a
+  freshly built config is never equal to the previous one and comparing them would make the
+  guard useless; and most `MediaConfig` streaming fields cannot take effect mid-item natively
+  without a reload anyway.) `updateConfig()` is the "apply to live playback now" API; `load()`
+  is "apply *and* reload".
+- **Event coherence:** when native skips the load it re-emits `onStateChanged`,
+  `onDurationChanged` and the three `on*TracksChanged` events. Dart mirrors the guard in
+  `MediaPlayer._isPlaylistReloadSkipped` and skips its own "a load is coming" reset (clearing
+  track lists, forcing `buffering`, resetting speed); the native re-emit is the safety net if
+  the two comparisons ever disagree.
 
 ---
 
@@ -202,6 +241,15 @@ await controller.setPlaylist(Playlist(
   repeatMode: MediaRepeatMode.all,      // none | single | all
 ));
 await controller.skipToNext();          // / skipToPrevious / skipToIndex
+
+// Extending (or re-issuing) a playlist does NOT restart the item already
+// playing -- useful for sliding-window queues and for toggling shuffle
+// mid-playback. See docs/api-reference/player-api.md.
+await controller.setPlaylist(Playlist(
+  id: 'p', title: 'My list', items: [item1, item2, item3],
+  mode: PlaybackMode.shuffle,
+  repeatMode: MediaRepeatMode.all,
+));
 ```
 
 ### Quality / subtitles / audio (after Play)
@@ -309,7 +357,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 943 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 958 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -325,7 +373,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **943**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **958**, keep green) before proposing changes.
 - **API/data-contract/feature changes require documentation in the same change** — root `README.md`, this file, every affected file under `docs/`, and `CHANGELOG.md`. See `CLAUDE.md`'s Development Workflow for the full rule and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
@@ -337,7 +385,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (943 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (958 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating

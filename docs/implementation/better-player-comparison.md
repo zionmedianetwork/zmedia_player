@@ -58,6 +58,7 @@ Legend: ✅ implemented · ➖ not built in (do in app code) · 🟦 platform-sp
 | **Playlist** | | | |
 | Sequential / shuffle / repeat (none/single/all) | ✅ | ✅ | Fisher–Yates shuffle |
 | Add/remove/move, next/previous, queue | ✅ | ✅ | |
+| Extend/re-issue the queue without restarting the current item | ➖ | ⭐ ✅ | `setPlaylist` skips the reload for an unchanged, in-progress start item |
 | Playlist persistence (save/restore) | ✅ | ➖ | Not built in; do in app code |
 | **Configuration** | | | |
 | HTTP headers, BoxFit, autoplay, looping | ✅ | ✅ | Unified `MediaConfig` |

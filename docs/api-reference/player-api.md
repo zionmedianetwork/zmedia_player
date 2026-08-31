@@ -48,7 +48,7 @@ Contract:
 | Method | Description |
 |---|---|
 | `Future<void> load(MediaItem item)` | Load a single item |
-| `Future<void> setPlaylist(Playlist playlist, {int? startIndex})` | Load a playlist |
+| `Future<void> setPlaylist(Playlist playlist, {int? startIndex})` | Load (or extend/re-issue) a playlist. Does **not** restart the item at `startIndex` if it is already the loaded, in-progress item — see [Extending a playlist in place](#extending-a-playlist-in-place) |
 | `Future<void> play()` / `pause()` / `stop()` | Playback control |
 | `Future<void> togglePlayPause()` | Toggle play/pause |
 | `Future<void> seekTo(Duration position)` | Seek to a position. Throws `InvalidStateException` for a live item that is not seekable (`isLive && !dvrEnabled` — see [Live Streaming](live-streaming.md)) |
@@ -64,7 +64,56 @@ Contract:
 | Method | Description |
 |---|---|
 | `Future<void> skipToNext()` / `skipToPrevious()` | Move within the playlist |
-| `Future<void> skipToIndex(int index)` | Jump to an index |
+| `Future<void> skipToIndex(int index)` | Jump to an index. Always (re)loads, including when `index` is the current index — this is how `MediaRepeatMode.single` restarts an item |
+
+### Extending a playlist in place
+
+`setPlaylist` skips reloading the item at `startIndex` when it is already the loaded item
+**and** that item is still in progress. Playback (position, play/pause state, speed) is
+untouched; `Playlist` contents, `currentIndex`, `mode` and `repeatMode` always refresh.
+
+This makes two previously expensive patterns free:
+
+```dart
+// 1. Sliding window — extend the queue as the viewer advances, without
+//    restarting the episode being watched. Useful when playback
+//    authorisation is scoped per item (e.g. per-episode signed cookies) and
+//    pre-authorising the whole playlist is not viable.
+await controller.setPlaylist(Playlist(
+  id: 'series-1',
+  title: 'Series 1',
+  items: [current, next, next2],   // was [current, next]
+));
+
+// 2. Change mode/repeatMode mid-playback (e.g. toggling shuffle), which
+//    requires re-issuing the playlist.
+await controller.setPlaylist(playlist.copyWith(mode: PlaybackMode.shuffle));
+```
+
+**When it still reloads.** The guard compares the *whole serialized media item* on both
+sides of the MethodChannel, not just `id`, so re-issuing an item deliberately still works:
+
+| Change | Reloads? |
+|---|---|
+| Different `id` at `startIndex` | Yes |
+| Same `id`, changed `url` (e.g. re-signed) | Yes |
+| Same `id`/`url`, changed `httpHeaders` (refreshed signed cookie / `Authorization`) | Yes |
+| Same `id`/`url`, changed `drmConfig` — including a rotated `drmConfig.headers` | Yes |
+| Any other differing `MediaItem` field | Yes |
+| Nothing loaded yet, or state is stopped / completed / errored | Yes |
+| Identical item, currently playing / paused / buffering | **No** |
+| Identical item, but the call carries a changed `MediaConfig` | **No** — see below |
+
+A missing `id` is never self-identifying: two items are not "the same item" just because
+both lack an `id` — the rest of the item (notably `url`) must still match.
+
+**A changed `MediaConfig` does not force a reload.** `setPlaylist` carries the current
+`MediaConfig` snapshot on every call (see [Config snapshot on the load
+paths](#config-snapshot-on-the-load-paths)) and native stores it unconditionally — including
+when it skips the load — so the next real load uses it. But storing it never by itself
+triggers a load: a `setPlaylist` carrying a new config for an unchanged, in-progress item
+**stores the config and keeps playing**, by design. Call `updateConfig()` to apply a config
+change to live playback immediately, or `load()` to apply it *and* reload.
 
 > `skipToNext`/`skipToPrevious` route through `skipToIndex`, as does playlist auto-advance when
 > an item completes.
@@ -149,6 +198,11 @@ MediaPlayer.disableCrashReporting();
 Playback: `initialize`, `load`, `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`,
 `setSpeed`, `setMuted`, `setBoxFit`. Tracks: `setQualityTrack`, `enableAutoQuality`,
 `setSubtitleTrack`, `setAudioTrack`. Playlist: `skipToNext`, `skipToPrevious`, `skipToIndex`.
+`setPlaylist` has the same "don't restart the item already playing" behaviour here as on
+`MediaController` — see [Extending a playlist in place](#extending-a-playlist-in-place). When
+the reload is skipped it also skips its own reset: the cached quality/audio/subtitle track
+lists are kept, no `PlayerState.buffering` transition is emitted, and no `setSpeed(1.0)` reset
+is sent.
 PiP: `checkPipAvailability`, `enterPictureInPicture`, `exitPictureInPicture`. Cast:
 `startCastDiscovery`, `stopCastDiscovery`, `connectToCastDevice`, `loadMediaOnCastDevice`,
 `disconnectFromCastDevice`. Security: `setSecureSurface`. Config/lifecycle: `updateConfig`,
@@ -175,6 +229,13 @@ build that predates it ignores it and keeps its stored config, exactly as before
 
 Per-item `httpHeaders` and `drmConfig` are unaffected — they live on `MediaItem`, so per-item
 auth has always worked on the playlist path.
+
+One nuance on the `setPlaylist` path: "honored immediately" means "on the next *load*". When
+`setPlaylist` skips its load because the item at `startIndex` is unchanged and in progress
+(see [Extending a playlist in place](#extending-a-playlist-in-place)), the new snapshot is
+still stored, but the item keeps playing under the config it was loaded with. Re-issuing a
+playlist is therefore not a way to apply a config change now — `updateConfig()` is, and
+`load()` applies it *and* reloads.
 
 ### Streams
 

@@ -537,6 +537,21 @@ class MediaPlayerInstance: NSObject {
     private var currentPlaylist: [[String: Any]]?
     private var currentIndex = 0
     private var currentMediaItem: [String: Any]?
+
+    /// True once the currently loaded item has been played to the end, or
+    /// `stop()`ed -- i.e. it is still attached to the `AVPlayer` but there is
+    /// no longer any in-progress playback worth preserving.
+    ///
+    /// Exists purely to give `isAlreadyLoadedAndInProgress(_:)` (issue #79)
+    /// the same "is anything actually in progress?" signal ExoPlayer hands
+    /// Android for free via `playbackState`. This is the one structural
+    /// difference between the two platforms' guards: on Android `stop()`
+    /// leaves the player in `STATE_IDLE` with no media items and a finished
+    /// item sits in `STATE_ENDED`, both trivially detectable; on iOS
+    /// `stop()` is pause + `seek(to: .zero)` and finishing leaves the item
+    /// attached and `.readyToPlay`, so neither is visible from `AVPlayer`
+    /// state alone and has to be tracked explicitly.
+    private var currentItemIsSpent = false
     private var previousAccessLogEventCount = 0
     // DRM handler — non-nil only when the current media item carries a drmConfig.
     private var drmHandler: DrmHandler?
@@ -837,6 +852,9 @@ class MediaPlayerInstance: NSObject {
 
         // Store current media item (for live stream detection)
         currentMediaItem = mediaItem
+        // Fresh item: nothing has been played to the end or stopped yet
+        // (issue #79 -- see currentItemIsSpent).
+        currentItemIsSpent = false
 
         // Reset access log event counter for new media
         previousAccessLogEventCount = 0
@@ -1059,6 +1077,97 @@ class MediaPlayerInstance: NSObject {
         }
     }
 
+    /// True when `candidate` is, key for key, the item this instance already
+    /// has loaded (`currentMediaItem`) AND that item is still live in the
+    /// player (ready, not stopped, not finished) -- i.e. there is real
+    /// in-progress playback that a reload would destroy.
+    ///
+    /// Mirrors `MediaPlayerManager.kt`'s `isAlreadyLoadedAndInProgress`
+    /// exactly, including WHY the comparison is whole-dictionary structural
+    /// equality rather than an `id` check (issue #79):
+    ///
+    ///  - An `id` match is not sufficient. A consumer may legitimately
+    ///    re-issue the same `id` *expecting* a real reload: refreshed
+    ///    signed-cookie / `Authorization` values in `httpHeaders`, a rotated
+    ///    token or rotated `headers` inside `drmConfig`, or a re-signed `url`
+    ///    for the same logical episode. Each of those changes some key of
+    ///    this dictionary, so whole-dictionary equality lets them through as
+    ///    the genuine reloads they are -- and it covers every key
+    ///    `loadMediaItem` reads (`url`, `httpHeaders`, `drmConfig`) plus
+    ///    `isLive`, without an enumerated list that could go stale.
+    ///  - An `id` match is not necessary either, and a missing/null `id` must
+    ///    never be self-identifying: two items are not "the same item" merely
+    ///    by virtue of both being anonymous. Under whole-dictionary equality
+    ///    a missing `id` only ever matches another missing `id` while the
+    ///    rest of the dictionary still has to match -- and the `url` guard
+    ///    below keeps that "rest" anchored on real content, since
+    ///    `loadMediaItem` returns before assigning `currentMediaItem` when
+    ///    `url` is absent.
+    ///
+    /// Note that the *config* plays no part in this comparison: a changed
+    /// per-player config never by itself makes an unchanged item "different"
+    /// and so never forces a reload (see `setPlaylist`).
+    ///
+    /// `[String: Any]` is not `Equatable` in Swift, so the comparison goes
+    /// through `NSDictionary.isEqual(to:)`, which is a deep, structural
+    /// compare over the `NSString`/`NSNumber`/`NSNull`/`NSArray`/
+    /// `NSDictionary` values Flutter's `StandardMessageCodec` produces --
+    /// the same semantics Kotlin's `Map.equals` gives on Android.
+    ///
+    /// The playback-state condition is where the two platforms have to
+    /// differ in mechanism while matching in meaning: ExoPlayer exposes
+    /// `STATE_IDLE` after a `stop()` and `STATE_ENDED` after an item
+    /// finishes, but `AVPlayer` keeps a stopped and a finished item alike at
+    /// `.readyToPlay`, so it cannot distinguish either from live playback.
+    /// `currentItemIsSpent` is the flag this class maintains to close that
+    /// gap; when it is set there is nothing in progress to preserve and the
+    /// caller means "start this", so we fall through to a normal reload.
+    private func isAlreadyLoadedAndInProgress(_ candidate: [String: Any]) -> Bool {
+        guard let loaded = currentMediaItem else { return false }
+        guard candidate["url"] as? String != nil else { return false }
+        guard let item = avPlayer?.currentItem, item.status == .readyToPlay else { return false }
+        guard !currentItemIsSpent else { return false }
+
+        return (candidate as NSDictionary).isEqual(to: loaded)
+    }
+
+    /// Re-emits the events a load would have produced, for the case where
+    /// `setPlaylist` skipped the load because the target item is already
+    /// playing (issue #79). Mirrors `MediaPlayerManager.kt`'s
+    /// `notifyCurrentStateAfterSkippedLoad`.
+    ///
+    /// The Dart side's `setPlaylist()` historically assumed a load always
+    /// follows: it clears its cached quality/audio/subtitle track lists and
+    /// moves to `buffering`, then waits for native to repopulate them.
+    /// `MediaPlayer._isPlaylistReloadSkipped` now mirrors the guard above and
+    /// skips that reset when it can tell the item is unchanged, but the two
+    /// comparisons are made independently on either side of the channel -- so
+    /// this re-emit is the safety net that keeps Dart coherent if they ever
+    /// disagree (an older cached Dart build talking to a newer native build,
+    /// most obviously). Sends current playback state, current duration and
+    /// the current track lists: everything a consumer could be waiting on
+    /// after a `setPlaylist` call.
+    ///
+    /// Deliberately does not touch playback itself -- position, rate and the
+    /// play/pause state are exactly what the skipped reload was protecting.
+    private func notifyCurrentStateAfterSkippedLoad() {
+        guard let player = avPlayer else { return }
+
+        // Reuses the same state derivation the KVO observer uses, so a
+        // re-sync reports exactly what a genuine transition would have.
+        handleTimeControlStatusChange(player: player)
+        notifyDurationChanged()
+        checkLiveDvrWindowDuration()
+        extractAndNotifyQualityTracks()
+        extractAndNotifyAudioTracks()
+        extractAndNotifySubtitleTracks()
+    }
+
+    /// Declares (or refreshes) the native playlist, points it at
+    /// `startIndex`, and loads that item -- unless it is already the item
+    /// playing right now. Mirrors `MediaPlayerManager.kt`'s `setPlaylist`
+    /// exactly.
+    ///
     /// Config staleness fix (playlist path): `newConfig`, when present, is
     /// the current top-level (per-player) config snapshot sent by
     /// `MediaPlayer.setPlaylist()` on the Dart side -- the same wire shape
@@ -1068,21 +1177,37 @@ class MediaPlayerInstance: NSObject {
     /// `loadMediaItem(mediaItem:newConfig:)`, which -- exactly as on the
     /// `load` path -- deliberately does NOT call `applyConfig()`: see that
     /// method's doc for why reapplying `startMuted` on every item load would
-    /// undo a runtime `setMuted()` call. Mirrors
-    /// `MediaPlayerManager.kt`'s `setPlaylist` exactly.
+    /// undo a runtime `setMuted()` call. It is `nil` when an older cached
+    /// Dart build (sending only playerId/playlist/startIndex) is talking to
+    /// this native build; in that case `config` is left untouched, exactly
+    /// as before that fix.
     ///
-    /// `nil` when an older cached Dart build (sending only
-    /// playerId/playlist/startIndex) is talking to this native build; in
-    /// that case `config` is left untouched, exactly as before this fix.
+    /// Issue #79: the playlist contents and the position pointer ALWAYS
+    /// refresh -- that is the whole point of re-issuing a playlist (extending
+    /// a sliding window, changing `mode`/`repeatMode`). Only the *load* is
+    /// conditional: when the item at `startIndex` is byte-for-byte the item
+    /// already loaded and genuinely in progress
+    /// (`isAlreadyLoadedAndInProgress`), playback is left running untouched
+    /// and Dart is re-synced through `notifyCurrentStateAfterSkippedLoad`
+    /// instead of being restarted.
+    ///
+    /// The two behaviours compose deliberately: storing `newConfig` never by
+    /// itself forces a reload. A `setPlaylist` that carries a *changed*
+    /// config for an unchanged, in-progress item stores that config -- so the
+    /// next real load (a skip, an auto-advance, an explicit `load`) uses it
+    /// -- but does NOT restart the item under the viewer. `updateConfig` is
+    /// the API for applying config to live playback immediately; `load` is
+    /// the API for applying it *and* reloading.
     func setPlaylist(playlist: [String: Any], startIndex: Int, newConfig: [String: Any]? = nil) {
         // Replace the stored config first, unconditionally, so it is in
         // place before ANY config-dependent work below -- including the
-        // early-return paths (malformed/empty payload), where silently
-        // dropping the caller's freshest snapshot would reintroduce exactly
-        // the staleness this fix exists to remove. `loadMediaItem` performs
-        // the same replacement itself from `newConfig` (that is where the
-        // contract is documented); doing it here too is an idempotent no-op
-        // on the normal path, not a second, divergent way to apply config.
+        // early-return paths (malformed/empty payload) and the issue-#79
+        // skip path, where silently dropping the caller's freshest snapshot
+        // would reintroduce exactly the staleness this fix exists to remove.
+        // `loadMediaItem` performs the same replacement itself from
+        // `newConfig` (that is where the contract is documented); doing it
+        // here too is an idempotent no-op on the normal path, not a second,
+        // divergent way to apply config.
         // Mirrors `MediaPlayerManager.kt`'s `setPlaylist`.
         if let newConfig = newConfig {
             config = newConfig
@@ -1090,12 +1215,23 @@ class MediaPlayerInstance: NSObject {
 
         guard let items = playlist["items"] as? [[String: Any]] else { return }
 
+        // The playlist contents and the position pointer ALWAYS refresh --
+        // that is the whole point of re-issuing a playlist (extending the
+        // window, changing mode/repeatMode). Only the load below is
+        // conditional (issue #79).
         currentPlaylist = items
         currentIndex = max(0, min(startIndex, items.count - 1))
 
-        if !items.isEmpty {
-            loadMediaItem(mediaItem: items[currentIndex], newConfig: newConfig)
+        guard !items.isEmpty else { return }
+
+        let target = items[currentIndex]
+        if isAlreadyLoadedAndInProgress(target) {
+            zlog("MediaPlayerInstance.setPlaylist(): item at index \(currentIndex) is already loaded and playing - keeping playback and re-syncing Dart state instead of reloading")
+            notifyCurrentStateAfterSkippedLoad()
+            return
         }
+
+        loadMediaItem(mediaItem: target, newConfig: newConfig)
     }
 
     func play() {
@@ -1110,6 +1246,9 @@ class MediaPlayerInstance: NSObject {
         AudioSessionCoordinator.shared.requestActive(for: self, audible: isCurrentlyAudible())
 
         guard let player = avPlayer else { return }
+        // Playback is being (re)started -- the item is in progress again
+        // (issue #79 -- see currentItemIsSpent).
+        currentItemIsSpent = false
         if #available(iOS 16.0, *) {
             player.defaultRate = requestedSpeed
             player.play()                      // plays at defaultRate
@@ -1134,11 +1273,21 @@ class MediaPlayerInstance: NSObject {
     func stop() {
         avPlayer?.pause()
         avPlayer?.seek(to: .zero)
+        // Mirrors Android, where stop() clears ExoPlayer's media items and
+        // leaves it in STATE_IDLE: after a stop there is no in-progress
+        // playback for setPlaylist's issue-#79 guard to protect, so a
+        // subsequent setPlaylist naming this same item must reload it.
+        currentItemIsSpent = true
         audioSessionRequested = false
         AudioSessionCoordinator.shared.release(for: self)
     }
 
     func seekTo(position: Int64) {
+        // Seeking moves the playhead back inside the item, so a previously
+        // finished/stopped item is in progress again (issue #79 -- see
+        // currentItemIsSpent).
+        currentItemIsSpent = false
+
         // Wave E (DVR window duration): for a live item with DVR enabled,
         // `position` (from Dart) is window-relative -- see the periodic
         // time-observer doc in setupObservers() for why. Translate back to
@@ -1326,14 +1475,35 @@ class MediaPlayerInstance: NSObject {
         zlog("MediaPlayerInstance: Auto quality enabled - preferredPeakBitRate cleared")
     }
 
+    /// Restarts playback at `index` -- including when `index` is the index
+    /// already playing. Mirrors `MediaPlayerManager.kt`'s `skipToIndex`.
+    ///
     /// Config staleness fix (playlist path): `newConfig` carries the current
     /// config snapshot sent by `MediaPlayer.skipToIndex()` on the Dart side
     /// (which is also what `skipToNext`/`skipToPrevious`/playlist
     /// auto-advance route through) and is forwarded to
     /// `loadMediaItem(mediaItem:newConfig:)` on exactly the same terms as
     /// `setPlaylist` -- see that method's and `loadMediaItem`'s docs. `nil`
-    /// from an older cached Dart build leaves `config` untouched. Mirrors
-    /// `MediaPlayerManager.kt`'s `skipToIndex`.
+    /// from an older cached Dart build leaves `config` untouched.
+    ///
+    /// Issue #79: this method deliberately does NOT carry the "already
+    /// loaded, skip the reload" guard `setPlaylist` gained, even when `index`
+    /// is the current index.
+    ///
+    /// The two methods mean different things. `setPlaylist` declares or
+    /// refreshes the queue, and "the item at startIndex happens to be the one
+    /// playing" is incidental to that. `skipToIndex` means "(re)start the
+    /// item at this index" -- and skipping to the index you are already on is
+    /// a documented restart. Dart depends on exactly that:
+    /// `Playlist.nextIndex` returns `currentIndex` under
+    /// `MediaRepeatMode.single` (and under `MediaRepeatMode.all` for a
+    /// single-item playlist), and `MediaPlayer._handlePlaybackCompleted`
+    /// implements repeat-one by calling `skipToIndex(nextIndex)` on
+    /// completion. Guarding this method would silently break repeat-one, and
+    /// would also break the plain "replay the item I just finished" case.
+    ///
+    /// `skipToNext`/`skipToPrevious` are Dart-side wrappers over this method
+    /// and inherit the same semantics.
     func skipToIndex(index: Int, newConfig: [String: Any]? = nil) {
         guard let playlist = currentPlaylist,
               index >= 0 && index < playlist.count else { return }
@@ -1682,6 +1852,10 @@ class MediaPlayerInstance: NSObject {
               finishedItem === avPlayer?.currentItem else {
             return
         }
+        // Mirrors Android's STATE_ENDED for setPlaylist's issue-#79 guard:
+        // a finished item is not "in progress", so re-issuing a playlist
+        // that names it still restarts it.
+        currentItemIsSpent = true
         notifyStateChanged(state: "completed", isBuffering: false)
     }
 

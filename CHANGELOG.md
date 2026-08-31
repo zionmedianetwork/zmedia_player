@@ -150,6 +150,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   older native build simply ignores the new key. The MethodChannel protocol version is
   unchanged. Per-item `httpHeaders`/`drmConfig` live on `MediaItem` and were never affected.
 
+- `setPlaylist` no longer restarts the item that is already playing. Native
+  (`MediaPlayerInstance.setPlaylist` in `android/.../MediaPlayerManager.kt` and
+  `ios/.../MediaPlayerManager.swift`) called `loadMediaItem(items[startIndex])`
+  unconditionally, so **every** `setPlaylist` call re-loaded the current item — losing
+  the playback position and forcing a re-buffer. Both platforms now skip that load when
+  the item at `startIndex` is the item already loaded *and* that item is still in
+  progress. `currentPlaylist`/`currentIndex` are still updated unconditionally on both
+  platforms: only the load is skipped, so the queue contents and position pointer always
+  refresh. (#79)
+
+  **What this enables:** a playlist can now be **extended (or re-issued) in place without
+  restarting the current item**. Consumers that cannot authorise a whole playlist upfront
+  — e.g. per-item signed cookies, where pre-authorising 40 episodes would mean ~80 network
+  round-trips before the first frame — can keep a sliding window populated
+  (`setPlaylist([current, next, next2])`, extended as the viewer advances) at no playback
+  cost. The same now applies to re-issuing a playlist purely to change
+  `Playlist.mode`/`Playlist.repeatMode` (e.g. toggling shuffle), which previously
+  re-buffered the item under the viewer. The capture-position / re-issue / seek-back /
+  resume workaround is no longer needed.
+
+  **What still reloads** (the guard compares the *whole serialized media item*, not just
+  `id`, so a deliberate re-issue of the same item is never silently swallowed): a
+  different `id`; the same `id` with a changed `url`, changed `httpHeaders` (refreshed
+  signed cookies / `Authorization`), or a changed `drmConfig` (including a rotated
+  `drmConfig.headers` value, which `DrmConfig`'s own `==` does not compare); a missing
+  `id` on both sides, which is never treated as identity on its own; and any state where
+  nothing is in progress — never loaded, stopped, completed, or errored.
+
+  `skipToIndex` (and therefore `skipToNext`/`skipToPrevious`) deliberately keeps its
+  unconditional reload: skipping to the index you are already on is a restart, and
+  `MediaRepeatMode.single` is implemented through exactly that call.
+
+- `MediaPlayer.setPlaylist` no longer performs its "a load is coming" reset when the
+  current item is not being reloaded. It previously always cleared the cached
+  quality/audio/subtitle track lists (emptying the settings menu for an item that keeps
+  playing), forced `PlayerState.buffering`, and sent a `setSpeed(1.0)` reset. It now
+  mirrors the native guard (`MediaPlayer._isPlaylistReloadSkipped`) and skips all three
+  when the item at `startIndex` is unchanged and in progress. This fix changes no
+  MethodChannel payload — the `setPlaylist` call (including the `config` snapshot added
+  in #82) is still issued on every invocation. As a safety net for a
+  Dart/native disagreement (e.g. a cached older Dart build), native re-emits
+  `onStateChanged`, `onDurationChanged` and the three `on*TracksChanged` events whenever
+  it skips a load, so the Dart side re-syncs rather than stranding the UI. (#79)
+
+  **Interaction with the playlist config snapshot (#82).** `setPlaylist` carries the
+  current `MediaConfig` snapshot on every call, and native still stores it
+  unconditionally — including when the load is skipped — so the next real load uses it.
+  A changed `MediaConfig` does **not** by itself force a reload of an unchanged,
+  in-progress item: `MediaConfig`/`HlsConfig`/`DashConfig` define no `operator ==` (a
+  freshly built config is never equal to the previous one), and most `MediaConfig`
+  streaming fields cannot take effect mid-item natively without a reload anyway. Use
+  `updateConfig()` to apply a config change to live playback immediately, or `load()` to
+  apply it *and* reload.
+
 ### Changed
 - **Behaviour of every `MediaController` playback/track/config method** (`load`,
   `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`, `toggleMute`, `setSpeed`,
@@ -317,10 +371,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   silently undo an in-progress runtime `setMuted()` call the config snapshot has no
   way to know about. Last write wins between `load()` and `updateConfig()` — they
   cannot diverge, since both are serialized from the same single
-  `MediaPlayer._config` field. Known follow-up: `setPlaylist`/`skipToIndex` still
-  call the single-argument native `loadMediaItem`, so per-item streaming config
-  remains stale for playlist-driven items until an explicit `load()` or
-  `updateConfig()` call.
+  `MediaPlayer._config` field. Known follow-up at the time of this release:
+  `setPlaylist`/`skipToIndex` still called the single-argument native
+  `loadMediaItem`, so per-item streaming config remained stale for playlist-driven
+  items until an explicit `load()` or `updateConfig()` call. (Resolved since — see
+  "Playlist load paths now carry the current `MediaConfig` snapshot" under
+  `[Unreleased]`.)
 - Toggling live-stream DVR (`HlsConfig.enableDvr`/`DashConfig.enableDvr`) while the
   same media item keeps playing no longer leaves the lock-screen / notification
   scrubber permanently stuck at whichever seekability it had when the notification
