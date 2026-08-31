@@ -24,7 +24,8 @@ bitrate bounds) are wired to native, and which are not.
 Digital Rights Management setup for Widevine, FairPlay, and EZDRM.
 
 ### [Advanced Features](advanced-features.md)
-Notifications, Picture-in-Picture, Casting (AirPlay & Chromecast).
+Notifications, Picture-in-Picture, Casting (AirPlay & Chromecast), and
+`MediaPlayerWidget` gesture callbacks (including direction-aware double-tap seek).
 
 ### [Models & Data Structures](models.md)
 All data models: MediaItem, Playlist, Tracks, Configurations.

@@ -283,6 +283,8 @@ Purpose-built for TikTok/Reels-style vertical feeds, backed by `MediaPlayerPool`
 - **Loading Indicator** - Buffering display
 - **Error Display** - Show error messages
 - **BoxFit Support** - Video scaling options
+- **Gesture Callbacks** - `onTap`/`onDoubleTap`/`onLongPress` plus position-carrying
+  `onTapDown`/`onDoubleTapDown`/`onLongPressStart` (enables direction-aware double-tap seek)
 
 ### Custom Controls
 - **MediaControls Widget** - Pre-built control bar
@@ -292,7 +294,7 @@ Purpose-built for TikTok/Reels-style vertical feeds, backed by `MediaPlayerPool`
 - **Volume Slider** - Interactive volume control
 - **Speed Selector** - Playback speed options
 
-**Total:** 14 features
+**Total:** 15 features
 
 ---
 
@@ -384,7 +386,7 @@ Comprehensive feature set across playback, streaming, subtitles, DRM, casting, P
 - Casting: 11
 - ListView & Feed: 10
 - Cache: 7
-- UI/Widgets: 14
+- UI/Widgets: 15
 - Events: 13
 - Developer: 13
 - Platform-Specific: 12

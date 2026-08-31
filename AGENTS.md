@@ -94,8 +94,8 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 ### Widgets (`lib/src/widgets/`)
 | Export | Purpose |
 |---|---|
-| `MediaPlayerWidget` | The video surface + controls overlay. Primary widget. The controls overlay is **always mounted and always hit-testable** (the built-in controls additionally gate themselves with `ExcludeSemantics` + `IgnorePointer` + zero opacity while hidden); the package's own full-surface tap detector is stacked **below** it. Rule: *a gesture is handled by the topmost widget in the controls overlay that claims it, and only reaches the built-in detector when no overlay widget claimed it — regardless of visibility.* `enableBuiltInGestures: false` (default `true`) drops the detector entirely so a `customControls` host owns every gesture; `onTap`/`onDoubleTap`/`onLongPress` are then never invoked. |
-| `MediaControls`, `MaterialMediaControls`, `CupertinoMediaControls`, `AdaptiveMediaControls` | Built-in control overlays; `Adaptive` picks Material/Cupertino per platform. All three derive visibility from `MediaController.controlsVisible` (they no longer keep a private copy), so they behave correctly when passed as `customControls` and therefore left mounted while hidden. `MediaControls` exposes `onBackgroundTap`/`onBackgroundDoubleTap` so `MediaPlayerWidget` can forward its own `onTap`/`onDoubleTap` into the visible overlay. |
+| `MediaPlayerWidget` | The video surface + controls overlay. Primary widget. Forwards gestures as bare callbacks (`onTap`/`onDoubleTap`/`onLongPress`) **and** position-carrying counterparts (`onTapDown`/`onDoubleTapDown`/`onLongPressStart`). The controls overlay is **always mounted and always hit-testable** (the built-in controls additionally gate themselves with `ExcludeSemantics` + `IgnorePointer` + zero opacity while hidden); the package's own full-surface tap detector is stacked **below** it. Rule: *a gesture is handled by the topmost widget in the controls overlay that claims it, and only reaches the built-in detector when no overlay widget claimed it — regardless of visibility.* `enableBuiltInGestures: false` (default `true`) drops the detector entirely so a `customControls` host owns every gesture; none of the six callbacks are then invoked. |
+| `MediaControls`, `MaterialMediaControls`, `CupertinoMediaControls`, `AdaptiveMediaControls` | Built-in control overlays; `Adaptive` picks Material/Cupertino per platform. All three derive visibility from `MediaController.controlsVisible` (they no longer keep a private copy), so they behave correctly when passed as `customControls` and therefore left mounted while hidden. `MediaControls` exposes `onBackgroundTap`/`onBackgroundTapDown`/`onBackgroundDoubleTap`/`onBackgroundDoubleTapDown` so `MediaPlayerWidget` can forward its own tap/double-tap callbacks — position included — into the visible overlay. |
 | `CustomControlsBase` / `ControlsState` | Base class to build a fully custom overlay; implement `buildControls(context, ControlsState)`. Because the overlay stays mounted while hidden, a custom overlay owns its own visibility (`ControlsState.isVisible` / `.animation`) **and** must wrap anything that should not be tappable while invisible in `IgnorePointer` — zero opacity does not stop hit testing. |
 | `FullscreenMediaPlayer`, `MaterialFullscreenPlayer`, `CupertinoFullscreenPlayer` | Fullscreen route wrappers. |
 | `SubtitleView` | Renders the active subtitle cue. |
@@ -311,6 +311,24 @@ await controller.connectAndLoadMedia(device);
 controller.player.pipActionStream.listen((e) { /* PipConfig.actions tap, Android only */ });
 ```
 
+### Direction-aware double-tap seek
+```dart
+LayoutBuilder(
+  builder: (context, constraints) => MediaPlayerWidget(
+    controller: controller,
+    // localPosition is relative to the widget's own box, so divide by
+    // constraints.maxWidth (NOT the screen width).
+    onDoubleTapDown: (details) {
+      final back = details.localPosition.dx < constraints.maxWidth / 2;
+      final target = controller.position + Duration(seconds: back ? -10 : 10);
+      controller.seekTo(target < Duration.zero ? Duration.zero : target);
+    },
+  ),
+)
+```
+Supplying `onDoubleTapDown` (or bare `onDoubleTap`) suppresses the built-in
+double-tap-to-play/pause; supplying both runs `onDoubleTapDown` first, then `onDoubleTap`.
+
 ### Live streaming (DVR seek gating)
 ```dart
 final controller = MediaController.create(
@@ -366,6 +384,7 @@ genuinely frozen playhead. Reported for live streams with **and without** `enabl
 - **iOS audio + silent switch**: the plugin sets `AVAudioSession` to `.playback` on `play()`; background audio needs `UIBackgroundModes: audio` in the host `Info.plist`.
 - **`boxFit`** maps to native video gravity: `contain`→aspect-fit, `cover`→aspect-fill, `fill`→stretch. Changing it at runtime propagates to the native view.
 - **Color formats** in `SubtitleConfig` are ARGB ints (e.g. `0xFFFFFFFF`).
+- **Gesture callbacks come in pairs.** For each of tap / double tap / long press, `MediaPlayerWidget` exposes a bare `VoidCallback` and a position-carrying variant (`onTapDown`, `onDoubleTapDown`, `onLongPressStart`). Both fire when both are supplied (position-carrying first); supplying **either** suppresses the package default (tap→`toggleControls`, double tap→`togglePlayPause`). `details.localPosition` is relative to the widget's own box; `globalPosition` is screen-relative. A callback only runs if no widget in the controls overlay claimed the gesture first — the overlay is always mounted and stacked *above* the detector, so **visibility is not what decides ownership**. Tap and double tap fire identically in both visibility states (the visible built-in overlay re-emits them through `MediaControls.onBackgroundTap`/`onBackgroundTapDown`/`onBackgroundDoubleTap`/`onBackgroundDoubleTapDown`, whose detector spans the same box, so `localPosition` is unchanged); long press is **not** forwarded, so it only fires while the overlay is hidden.
 
 ---
 
@@ -381,7 +400,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 1006 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 1030 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -397,7 +416,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **1006**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **1030**, keep green) before proposing changes.
 - **API/data-contract/feature changes require documentation in the same change** — root `README.md`, this file, every affected file under `docs/`, and `CHANGELOG.md`. See `CLAUDE.md`'s Development Workflow for the full rule and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
@@ -409,7 +428,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (1006 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (1030 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating

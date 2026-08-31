@@ -15,6 +15,9 @@ import '../widgets/player_scaffold.dart';
 /// - Volume and mute controls via [MediaController.setVolume] /
 ///   [MediaController.toggleMute]
 /// - [PlaybackState] via [MediaController.state]
+/// - Direction-aware double-tap seek via [MediaPlayerWidget.onDoubleTapDown]
+///   (double-tap the left half of the video to rewind 10s, the right half to
+///   skip forward 10s)
 class SimplePlaybackPage extends StatefulWidget {
   const SimplePlaybackPage({super.key});
 
@@ -26,6 +29,10 @@ class _SimplePlaybackPageState extends State<SimplePlaybackPage> {
   late final MediaController _controller;
   bool _isLoading = false;
   String? _error;
+
+  /// Last direction-aware double-tap seek, shown in the body so the gesture is
+  /// observable without watching the video.
+  String? _lastSeekGesture;
 
   @override
   void initState() {
@@ -63,11 +70,32 @@ class _SimplePlaybackPageState extends State<SimplePlaybackPage> {
     super.dispose();
   }
 
+  /// Direction-aware double-tap seek -- the near-universal video-player
+  /// convention.  `details.localPosition` is relative to the player widget's
+  /// own box, so the half is decided against `playerSize.width`, NOT the
+  /// screen width.
+  ///
+  /// Supplying `onDoubleTapDown` means this page has taken over the double-tap
+  /// gesture, so the package's built-in double-tap-to-play/pause no longer
+  /// fires.  (Supplying `onDoubleTap` as well would run both: `onDoubleTapDown`
+  /// first, then `onDoubleTap`.)
+  void _onVideoDoubleTapDown(TapDownDetails details, Size playerSize) {
+    final isLeftHalf = details.localPosition.dx < playerSize.width / 2;
+    final target =
+        _controller.position + Duration(seconds: isLeftHalf ? -10 : 10);
+    _controller.seekTo(target < Duration.zero ? Duration.zero : target);
+    setState(() {
+      _lastSeekGesture =
+          isLeftHalf ? 'left half -> -10s' : 'right half -> +10s';
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return PlayerScaffold(
       title: 'Simple Playback',
       controller: _controller,
+      onVideoDoubleTapDown: _onVideoDoubleTapDown,
       body: _buildBody(),
     );
   }
@@ -92,6 +120,8 @@ class _SimplePlaybackPageState extends State<SimplePlaybackPage> {
         _PlaybackControls(controller: _controller),
         const SectionHeader('Volume'),
         _VolumeControls(controller: _controller),
+        const SectionHeader('Double-tap seek'),
+        _DoubleTapSeekCard(lastGesture: _lastSeekGesture),
         const SizedBox(height: 16),
         const _ApiNote(),
       ],
@@ -264,6 +294,45 @@ class _ErrorCard extends StatelessWidget {
   }
 }
 
+class _DoubleTapSeekCard extends StatelessWidget {
+  final String? lastGesture;
+  const _DoubleTapSeekCard({required this.lastGesture});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Double-tap the LEFT half of the video to rewind 10s, the RIGHT '
+              'half to skip forward 10s.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Powered by MediaPlayerWidget.onDoubleTapDown, whose '
+              'TapDownDetails.localPosition is relative to the player box. '
+              'It fires whether the controls overlay is visible or hidden: '
+              'when visible, the default MediaControls forward the gesture '
+              '(position included) back to the player.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 8),
+            InfoRow(
+              label: 'Last gesture',
+              value: lastGesture ?? '(none yet)',
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ApiNote extends StatelessWidget {
   const _ApiNote();
 
@@ -291,7 +360,8 @@ class _ApiNote extends StatelessWidget {
           Text(
             'MediaController.create() -> initialize() -> load(MediaItem) -> '
             'play() / pause() / stop() / seekForward() / seekBackward() / '
-            'setVolume() / toggleMute()',
+            'setVolume() / toggleMute(); '
+            'MediaPlayerWidget.onDoubleTapDown for direction-aware seek',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ],

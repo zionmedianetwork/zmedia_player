@@ -141,6 +141,30 @@ overlay **mounted and hit-testable regardless of `controlsVisible`** so that ges
 inside `customControls` survive an auto-hide; see
 [Gesture ownership](advanced-features.md#gesture-ownership).
 
+### `MediaPlayerWidget` gesture callbacks
+
+| Bare | Position-carrying | Details type |
+|---|---|---|
+| `onTap` | `onTapDown` | `TapDownDetails` |
+| `onDoubleTap` | `onDoubleTapDown` | `TapDownDetails` |
+| `onLongPress` | `onLongPressStart` | `LongPressStartDetails` |
+
+Both variants may be supplied and both fire (position-carrying first). Supplying **either**
+means the host owns that gesture, so the built-in default is suppressed (single tap →
+`toggleControls`, double tap → `togglePlayPause`; long press has no default).
+`details.localPosition` is relative to the player widget's own box after any `aspectRatio`
+sizing — divide by the widget's width, not the screen width.
+
+A callback fires only when no widget in the (always-mounted, topmost) controls overlay claimed
+the gesture first. Tap and double tap fire identically whether the overlay is visible or hidden,
+`localPosition` included: with the default controls, the visible overlay re-emits them through
+`MediaControls.onBackgroundTap` / `onBackgroundTapDown` / `onBackgroundDoubleTap` /
+`onBackgroundDoubleTapDown`, whose detector fills the same box. Long press is not forwarded, so
+it fires only while the overlay is hidden. `enableBuiltInGestures: false` disables all six.
+
+See [Gesture callbacks](advanced-features.md#gesture-callbacks) for the worked
+direction-aware double-tap seek example.
+
 ### Picture-in-Picture & casting
 
 | Method | Description |
