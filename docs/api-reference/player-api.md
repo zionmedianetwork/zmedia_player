@@ -166,7 +166,10 @@ position; prefer this over the deprecated `Stream<String> notificationActionStre
 
 `playerId`, `config`, `currentItem`, `currentPlaylist`, `currentState`, `isPlaying`,
 `isInitialized`, `isDisposed`, `isLive`, `dvrEnabled` (whether DVR is enabled for the current
-live item, derived from whichever `HlsConfig`/`DashConfig` matched its URL at `load()` time),
+live item, derived from whichever `HlsConfig`/`DashConfig` matched its
+`MediaItem.resolvedStreamingFormat` at `load()` time — its explicit `MediaItem.streamingFormat`
+if set, else path-based URL inference; see
+[Live Streaming](live-streaming.md#choosing-which-streaming-config-applies-streamingformat)),
 `isSeekable` (`false` only when `isLive && !dvrEnabled`), `currentBandwidth`, `networkQuality`,
 `bufferStatistics`, `lastBufferHealth`, the track lists/selections, and the PiP/cast status
 getters mirrored on the controller.

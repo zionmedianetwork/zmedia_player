@@ -69,11 +69,16 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **Live Edge Detection** - Automatic positioning at live
 - **DVR/Time-Shifting** - `HlsConfig`/`DashConfig.enableDvr` gates seeking on a live stream and
   enables reporting of a DVR-window duration to seek within
+- **Explicit Streaming Format** - `MediaItem.streamingFormat`
+  (`StreamingFormat.hls`/`.dash`/`.progressive`) selects which of `hlsConfig`/`dashConfig`
+  applies, overriding URL inference; `null` infers from the URL's path (`endsWith('.m3u8')`/
+  `endsWith('.mpd')`). The two configs are never cross-applied, and a live item that resolves
+  to a format with no config logs a debug-only warning
 - **Latency Configuration** - `liveLatency` sets a target offset from the live edge (Android;
   iOS 14+ only)
 - **Adaptive Segment Caching** - Transparent, read-through HLS/DASH segment cache during playback (**Android only**; caches what has been played for replay, not an offline download)
 
-**Total:** 20 features
+**Total:** 21 features
 
 ---
 
@@ -355,7 +360,7 @@ Comprehensive feature set across playback, streaming, subtitles, DRM, casting, P
 ### By Category
 - Core Playback: 10
 - Configuration: 15
-- Streaming: 20
+- Streaming: 21
 - Subtitles: 9
 - Audio: 6
 - Playlists: 11

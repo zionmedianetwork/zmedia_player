@@ -17,6 +17,17 @@
 ///    `StreamingService` yourself and wiring it to
 ///    `MediaPlayer.bandwidthStream`/`setQualityTrack` is the only way these
 ///    currently have any effect.
+///
+/// **Which config applies to which item** (issue #87): exactly one of
+/// [MediaConfig.hlsConfig] / [MediaConfig.dashConfig] applies to a loaded
+/// [MediaItem], chosen by that item's [MediaItem.resolvedStreamingFormat] —
+/// its explicit [MediaItem.streamingFormat] when set, else inferred from the
+/// URL's *path* (`endsWith('.m3u8')` -> HLS, `endsWith('.mpd')` -> DASH,
+/// anything else -> progressive, query string and fragment ignored). The two
+/// configs are never cross-applied, so an app whose backend serves HLS to one
+/// platform and DASH to another must set **both**; a live item that resolves
+/// to a format whose config is `null` logs a debug-only warning explaining
+/// that `enableDvr` has fallen back to `false`.
 class StreamingConfig {
   /// Whether to enable adaptive bitrate streaming.
   ///
@@ -308,11 +319,17 @@ class HlsConfig extends StreamingConfig {
 
   /// Whether to enable DVR functionality for live streams.
   ///
-  /// Wired: `MediaPlayer.load()` reads this field (when the loaded
-  /// [MediaItem.url] matches an HLS URL, i.e. contains `.m3u8`) and uses it
-  /// to gate `MediaPlayer.isSeekable` / `MediaPlayer.seekTo` for that live
-  /// item. This is a Dart-side gate only — it does not change what ExoPlayer
-  /// / AVPlayer themselves do with the live window; it only decides whether
+  /// Wired: `MediaPlayer.load()` reads this field (when the loaded item's
+  /// [MediaItem.resolvedStreamingFormat] is [StreamingFormat.hls] — i.e. it
+  /// declared `streamingFormat: StreamingFormat.hls`, or its URL *path* ends
+  /// in `.m3u8`) and uses it to gate `MediaPlayer.isSeekable` /
+  /// `MediaPlayer.seekTo` for that live item. It is never applied to a DASH
+  /// item: an app serving HLS on one platform and DASH on another must set
+  /// both [HlsConfig] and [DashConfig] (a live item that resolves to a format
+  /// whose config is missing logs a debug-only warning).
+  ///
+  /// This is a Dart-side gate only — it does not change what ExoPlayer /
+  /// AVPlayer themselves do with the live window; it only decides whether
   /// this package lets a seek request through to native at all. Whether a
   /// seek within the DVR window actually succeeds still depends entirely on
   /// the manifest's own live/DVR window (its sliding window /
@@ -376,8 +393,9 @@ class HlsConfig extends StreamingConfig {
 
   /// Converts this config to a map for platform communication. Consumed by
   /// `MediaPlayerInstance.loadMediaItem` (Android) and
-  /// `MediaPlayerInstance.loadMediaItem` (iOS) when the loaded media's URL
-  /// resolves to HLS (contains `.m3u8`).
+  /// `MediaPlayerInstance.loadMediaItem` (iOS) when the loaded item resolves
+  /// to [StreamingFormat.hls] — explicit [MediaItem.streamingFormat] first,
+  /// else a URL whose path ends in `.m3u8`.
   @override
   Map<String, dynamic> toMap() {
     return {
@@ -411,13 +429,15 @@ class DashConfig extends StreamingConfig {
 
   /// Whether to enable DVR functionality for live streams. See
   /// [HlsConfig.enableDvr] for the full wiring description — this is the
-  /// same Dart-side seek gate, applied when the loaded [MediaItem.url]
-  /// resolves to DASH (contains `.mpd`).
+  /// same Dart-side seek gate, applied when the loaded item's
+  /// [MediaItem.resolvedStreamingFormat] is [StreamingFormat.dash] (explicit
+  /// `streamingFormat: StreamingFormat.dash`, or a URL whose path ends in
+  /// `.mpd`). [HlsConfig] is never substituted for a DASH item.
   final bool enableDvr;
 
   /// Live stream latency target. See [HlsConfig.liveLatency] for the
-  /// Android/iOS wiring — identical, applied when the loaded [MediaItem.url]
-  /// resolves to DASH. Note DASH itself has no iOS playback path at all
+  /// Android/iOS wiring — identical, applied when the loaded item resolves to
+  /// [StreamingFormat.dash]. Note DASH itself has no iOS playback path at all
   /// (AVPlayer/AVFoundation has no MPEG-DASH support), so this only ever has
   /// an effect on Android in practice.
   final Duration? liveLatency;
@@ -471,7 +491,9 @@ class DashConfig extends StreamingConfig {
 
   /// Converts this config to a map for platform communication. Consumed by
   /// `MediaPlayerInstance.loadMediaItem` (Android only — see [liveLatency])
-  /// when the loaded media's URL resolves to DASH (contains `.mpd`).
+  /// when the loaded item resolves to [StreamingFormat.dash] — explicit
+  /// [MediaItem.streamingFormat] first, else a URL whose path ends in
+  /// `.mpd`.
   @override
   Map<String, dynamic> toMap() {
     return {
