@@ -18,19 +18,21 @@ does — is this project's recurring defect (see the audit that produced this br
 28 config fields across `HlsConfig`/`DashConfig`/etc. were declared, exported, and documented,
 but reached nothing). This is not optional cleanup; it is part of finishing the change.
 
-**Whenever a change involves an API change, a data-contract change, or a feature addition or
-removal, ALL of the following MUST be updated in the same change:**
+**Every code change ships with its documentation update in the same change.** A change is not
+complete — not committable, not PR-ready — while the docs still describe the previous behavior.
+Treat the doc update as part of the implementation, not as follow-up work.
 
-- the root `README.md`
-- `AGENTS.md`
-- every affected file under `docs/`
-- `CHANGELOG.md` (under `[Unreleased]`, in the appropriate Keep-a-Changelog category —
-  `BREAKING`/`Deprecated`/`Fixed`/`Changed`/`Added`)
+### What triggers a documentation update
 
-The three trigger categories, concretely:
+Any of the following, in any combination:
+
+- **Any code change** under `lib/`, `android/`, `ios/`, or `example/` that alters observable
+  behavior, capability, defaults, or usage. (Pure internal refactors that change nothing a
+  consumer can see — renaming a private variable, extracting a private helper — do not trigger
+  an update; if you have to argue the point, it triggers one.)
 - **API change** — a public class/method/field in `lib/zmedia_player.dart`'s export surface is
   added, removed, renamed, or its behavior changes (e.g. a getter that used to always succeed
-  now throws).
+  now throws), including changes to defaults, nullability, or thrown exception types.
 - **Data-contract change** — the shape of a `MethodChannel` payload changes in either direction
   (a new/removed/renamed key in a `load`/`initialize`/`updateConfig`/event-callback map, a new
   native→Dart event). **This is the easiest to miss**: `flutter analyze` cannot see it (it is a
@@ -42,11 +44,65 @@ The three trigger categories, concretely:
   went unwired for as long as they did.
 - **Feature addition or removal** — a config field starts (or stops) reaching a real native API,
   a field is deleted because nothing ever read it, or a field is deprecated in favor of another.
+- **Example app change** — a new demo screen, a changed setup/wiring pattern, a new or removed
+  dependency, permission, or platform configuration in `example/`. The example is documentation:
+  code snippets in `README.md` and `docs/` must stay consistent with what `example/lib` actually
+  does, and `example/README.md` must list every screen the app now has.
+- **Build, platform, or dependency change** — min SDK/deployment target, `pubspec.yaml`
+  dependencies, Gradle/CocoaPods/SPM config, required permissions or `Info.plist` keys.
+- **UI/UX change** — controls layout, theming, or behavior that diverges from, or extends, the
+  spec in [UI/UX Design Specifications](#uiux-design-specifications) below. Update that spec
+  section, and the reference screenshots under `docs/images/screenshots/` if that directory has
+  been restored (it is referenced by the spec but currently missing from the repo).
 
-When in doubt about whether a change qualifies, treat it as qualifying. Verify every doc claim
-you write against the code you just changed — do not describe a capability you have not
-confirmed by reading the native implementation, and do not leave a stale claim (e.g. "not yet
-wired", a removed field, an inert default) after the underlying code has moved on.
+When in doubt about whether a change qualifies, treat it as qualifying.
+
+### What MUST be updated
+
+In the same commit/PR as the code:
+
+- the root `README.md` — feature list, quick-start snippets, capability tables, version badge
+- `AGENTS.md`
+- every affected file under `docs/` — see the map below
+- `CHANGELOG.md` (under `[Unreleased]`, in the appropriate Keep-a-Changelog category —
+  `BREAKING`/`Deprecated`/`Fixed`/`Changed`/`Added`)
+- `example/README.md` and the affected `example/lib` code, when the change alters how a
+  consumer wires the player up
+- `CLAUDE.md` itself, when the change invalidates something it states (component map, gotchas,
+  platform notes, MethodChannel protocol list)
+- `PLAN.md` — per [Tasks and Plan](#tasks-and-plan) below
+
+### Where to look under `docs/`
+
+| Change touches | Update at minimum |
+|---|---|
+| Public API surface (`lib/zmedia_player.dart`) | `docs/api-reference/player-api.md`, `docs/api-reference/models.md` |
+| Config/value models (`HlsConfig`, `DashConfig`, `MediaConfig`, …) | `docs/api-reference/models.md`, `docs/api-reference/advanced-features.md` |
+| DRM (`DrmHandler`, `DrmConfig`) | `docs/api-reference/drm.md`, `docs/implementation/security.md` |
+| Live/DVR behavior | `docs/api-reference/live-streaming.md` |
+| Streams/events, MethodChannel events | `docs/api-reference/events.md` |
+| Casting / AirPlay | `docs/api-reference/airplay.md`, `docs/api-reference/advanced-features.md` |
+| Setup, install, first-run | `docs/QUICK_START.md`, `docs/api-reference/getting-started.md`, root `README.md` |
+| Security layer (`lib/src/security/`) | `docs/implementation/security.md` |
+| Tests added/removed, coverage claims | `docs/implementation/testing.md`, `docs/summary/test-coverage.md` |
+| Feature added/removed/completed | `docs/summary/features.md`, `docs/summary/phases.md`, `docs/summary/production-readiness.md` |
+
+This map is a floor, not a ceiling: grep the docs tree for the symbol you changed and fix every
+hit.
+
+### How to verify (do this, don't assume)
+
+1. `grep -rn "<symbol-or-field-name>" README.md AGENTS.md CLAUDE.md docs/ example/` for every
+   identifier you added, renamed, or deleted — fix every stale hit, and add the identifier to
+   the docs that should mention it but don't.
+2. For a removal, confirm zero remaining references outside `CHANGELOG.md` history entries.
+3. Verify every doc claim you write against the code you just changed — do not describe a
+   capability you have not confirmed by reading the native implementation (Kotlin *and* Swift),
+   and do not leave a stale claim (e.g. "not yet wired", a removed field, an inert default)
+   after the underlying code has moved on.
+4. Check that code snippets you touched still compile against the current API — mirror them from
+   `example/lib` where possible rather than hand-writing them.
+5. State in the PR description which docs you updated and why the untouched ones were unaffected.
 
 ## Project Overview
 
@@ -723,7 +779,12 @@ The control overlay consists of three main zones:
 - **`docs/api-reference/`** - User-facing API documentation and guides
 - **`docs/implementation/`** - Architecture, testing, security documentation
 - **`docs/summary/`** - Project status, metrics, feature lists
-- **`example/`** - Full-featured demo app with all capabilities
+- **`docs/releases/`** - Per-release notes
+- **`example/`** - Full-featured demo app with all capabilities; it is documentation too — the
+  snippets in `README.md` and `docs/` must match what `example/lib` actually does
+
+Keeping all of the above in sync with the code is mandatory on every change — see
+[Required Documentation Updates](#required-documentation-updates).
 
 ## Development Workflow
 
@@ -732,11 +793,14 @@ The control overlay consists of three main zones:
 3. Write/update tests in `test/`
 4. Run `flutter test` to verify
 5. Test in example app: `cd example && flutter run`
-6. If this change is an API change, a data-contract change, or a feature addition/removal,
-   update `README.md`, `AGENTS.md`, every affected file under `docs/`, and `CHANGELOG.md` —
-   see [Required Documentation Updates](#required-documentation-updates) above; this is
-   mandatory, not conditional on "if adding features"
-7. Ensure no breaking changes to public API (or, if the change is intentionally breaking,
+6. Update the docs in the same change: `README.md`, `AGENTS.md`, every affected file under
+   `docs/`, `CHANGELOG.md`, and `example/README.md` — see
+   [Required Documentation Updates](#required-documentation-updates) above. This applies to any
+   code, example, data-contract, or feature change, not only to "if adding features", and it is
+   part of the change, not follow-up work.
+7. Run the verification greps from that section for every identifier you added, renamed, or
+   removed, and fix every stale hit
+8. Ensure no breaking changes to public API (or, if the change is intentionally breaking,
    document it under `CHANGELOG.md`'s `BREAKING` section per step 6)
 
 ## Branching Strategy
@@ -1093,13 +1157,19 @@ flutter test
 # 5. Run analysis
 flutter analyze
 
-# 6. Create commit with YOUR credentials
+# 6. Confirm docs moved with the code (see Required Documentation Updates)
+#    Every identifier you added/renamed/removed must be consistent across the docs:
+grep -rn "<symbol-you-changed>" README.md AGENTS.md CLAUDE.md docs/ example/
+#    And the change must be listed under [Unreleased] in CHANGELOG.md:
+git diff --cached --name-only | grep -E 'README\.md|AGENTS\.md|CHANGELOG\.md|^docs/'
+
+# 7. Create commit with YOUR credentials
 git commit -m "feat: your feature description"
 
-# 7. Verify commit author
+# 8. Verify commit author
 git log -1 --format="Author: %an <%ae>"
 
-# 8. If author is wrong, fix immediately
+# 9. If author is wrong, fix immediately
 git commit --amend --reset-author
 ```
 
