@@ -112,6 +112,20 @@ class _PlayerPageState extends State<PlayerPage> {
 }
 ```
 
+## Sizing the player
+
+`MediaPlayerWidget` sizes itself from its `aspectRatio` (defaulting to the video's natural
+ratio, 16:9 when unknown), so it works inside any layout out of the box — the `AspectRatio`
+above is optional, not required.
+
+Pass `expandToFill: true` to fill the parent instead. That mode **requires a parent that hands
+the widget a definite size** (bounded with a non-zero minimum in both axes): `Positioned.fill`
+inside a `Stack`, `SizedBox.expand`, `Expanded`, or a `Scaffold` body. Given loose constraints
+(a *non-positioned* `Stack` child) or an unbounded axis (an unbounded `Column`/`ListView`), the
+widget falls back to an aspect-ratio-derived size rather than collapsing to zero, and reports a
+debug-only `FlutterError` telling you to fix the constraints. See
+[Fullscreen & display → Sizing](advanced-features.md#sizing-aspectratio-and-expandtofill).
+
 ## Two ways to drive playback
 
 - **`MediaController`** — a `ChangeNotifier` facade. Reactive getters (`isPlaying`,

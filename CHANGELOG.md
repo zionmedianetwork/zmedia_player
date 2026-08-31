@@ -150,6 +150,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MediaControls` dartdoc. Covered by 41 widget tests in
   `test/widgets/media_player_widget_gestures_test.dart`.
 
+- Debug-only diagnostic when the new `expandToFill` size floor engages: `MediaPlayerWidget`
+  reports a `FlutterError` (via `FlutterError.reportError`) naming the offending constraints,
+  the likely cause (non-positioned `Stack` child, unbounded `Column`/`ListView`) and the remedy
+  (`Positioned.fill`, `SizedBox.expand`, or `expandToFill: false`). It is compiled out of
+  release builds, never throws, and is emitted at most once per constraint condition rather
+  than once per frame — turning a previously silent black screen into a loud, actionable error.
+
 ### Fixed
 - `MediaController` now **queues** operations instead of rejecting them. Previously
   `_executeOperation` held a per-controller boolean lock that never queued: while it was
@@ -344,6 +351,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   means being left mounted rather than unmounted). Both also handle double-tap
   (`togglePlayPause`) on their opaque root, which they previously delegated to the package
   detector that is no longer reachable through them.
+
+- `MediaPlayerWidget(expandToFill: true)` no longer collapses to zero size when its parent
+  supplies constraints that do not define a size. `expandToFill: true` deliberately skips the
+  `AspectRatio` wrapper, which left the widget with no intrinsic size at all: given loose
+  constraints (a non-positioned `Stack` child receives `BoxConstraints.loose` — the normal way
+  to overlay chrome above a player), zero-minimum constraints, or constraints unbounded in an
+  axis (an unbounded `Column`/`ListView` child), the whole subtree laid out at `Size(0, 0)`.
+  That took the video *and* every control overlay (title, transport, scrubber, exit button)
+  with it while audio kept playing, and — because a zero-size layout throws nothing — produced
+  no exception, no `RenderFlex overflowed`, and no diagnostic of any kind.
+  The `expandToFill: true` path now measures its incoming constraints: when they are bounded
+  with a non-zero minimum in both axes (which includes every tight constraint, e.g.
+  `Positioned.fill`, `SizedBox.expand`, a `Scaffold` body) the fill behaviour is unchanged, and
+  otherwise the widget falls back to a definite size derived from the video's natural aspect
+  ratio (16:9 when unknown) — filling the bounded axis and deriving the other, or using the
+  screen width when both axes are unbounded. Behaviour with an explicit `aspectRatio`, or with
+  `expandToFill: false`, is unchanged. ([#85](https://github.com/zionmedianetwork/zmedia_player/issues/85))
 
 ### Changed
 - **Behaviour of every `MediaController` playback/track/config method** (`load`,

@@ -252,7 +252,34 @@ class MediaPlayerWidget extends StatefulWidget {
   /// Aspect ratio for the video (if null, uses video's natural aspect ratio)
   final double? aspectRatio;
 
-  /// Whether to expand to fill available space
+  /// Whether to expand to fill all the space the parent offers, instead of
+  /// sizing the player to an aspect ratio.
+  ///
+  /// When `true`, the widget does **not** wrap its content in an
+  /// [AspectRatio] (unless [aspectRatio] is explicitly provided, which always
+  /// wins): it is expected to be laid out by an ancestor that hands it a
+  /// definite size — for example a [Positioned.fill] inside a [Stack], a
+  /// [SizedBox.expand], or any tightly-constrained parent.
+  ///
+  /// **Constraint requirement.** `expandToFill: true` needs constraints that
+  /// are bounded *and* have a non-zero minimum in both axes. If the incoming
+  /// constraints are loose (a non-positioned [Stack] child gets
+  /// `BoxConstraints.loose`), zero-minimum, or unbounded in an axis (an
+  /// unbounded [Column]/[ListView] child), a fill-everything layout has no
+  /// intrinsic size and would silently collapse to zero — a black screen with
+  /// no exception, taking the controls overlay down with it.
+  ///
+  /// **Fallback.** Rather than collapse, the widget falls back to a definite
+  /// size derived from the video's natural aspect ratio (16:9 when unknown):
+  /// the bounded axis is filled and the other axis is computed from that
+  /// ratio; when both axes are unbounded, the screen width is used. In debug
+  /// builds this fallback also reports a [FlutterError] describing the
+  /// offending constraints and the remedy ([Positioned.fill],
+  /// [SizedBox.expand], or `expandToFill: false`). The report is emitted at
+  /// most once per state, and never throws in release builds.
+  ///
+  /// Defaults to `false`, which always applies the natural aspect ratio and is
+  /// therefore immune to loose constraints.
   final bool expandToFill;
 
   /// Whether this widget's State should be kept alive by
@@ -587,12 +614,170 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
         aspectRatio: aspectRatio,
         child: content,
       );
+    } else {
+      // expandToFill: fill the parent when it hands us a definite size, but
+      // never collapse to zero when it does not (see _buildExpandToFill).
+      content = _buildExpandToFill(content);
     }
 
     return Container(
       color: widget.backgroundColor,
       child: content,
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // expandToFill layout
+  // ---------------------------------------------------------------------------
+
+  /// Width used as a last resort when the incoming constraints are unbounded
+  /// in *both* axes and no [MediaQuery] size is available. Chosen as a common
+  /// phone-ish logical width so the player is visible rather than absent.
+  static const double _kUnboundedFallbackWidth = 640.0;
+
+  /// Whether the loose/unbounded-constraints diagnostic has already been
+  /// reported for the current constraint condition. Reset as soon as the
+  /// widget is laid out with definite constraints again, so the report is
+  /// emitted on condition changes rather than once per frame.
+  bool _reportedCollapsibleConstraints = false;
+
+  /// Builds the `expandToFill: true` subtree.
+  ///
+  /// When the parent supplies a definite size (bounded with a non-zero
+  /// minimum in both axes — which includes every tight constraint, e.g.
+  /// `Positioned.fill`, `SizedBox.expand`, a `Scaffold` body) the content is
+  /// returned untouched and fills exactly as before.
+  ///
+  /// When the parent supplies constraints that would let the widget collapse
+  /// — loose / zero-minimum (a non-positioned `Stack` child) or unbounded in
+  /// an axis (an unbounded `Column`/`ListView` child) — a definite size is
+  /// derived from the video's natural aspect ratio so the player (and its
+  /// controls overlay) can never silently paint nothing.
+  Widget _buildExpandToFill(Widget content) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (_constraintsAreDefinite(constraints)) {
+          // Intended usage: fill exactly, unchanged.
+          _reportedCollapsibleConstraints = false;
+          return content;
+        }
+
+        final aspectRatio = _getVideoAspectRatio();
+        final size = _fallbackSize(context, constraints, aspectRatio);
+        _reportCollapsibleConstraints(constraints, size);
+
+        return SizedBox(
+          width: size.width,
+          height: size.height,
+          child: content,
+        );
+      },
+    );
+  }
+
+  /// Whether [constraints] give the widget a definite size on their own.
+  ///
+  /// True for tight constraints, and for any constraints that are bounded
+  /// with a non-zero minimum in both axes. False for loose/zero-minimum or
+  /// unbounded constraints, which is exactly when a fill-everything layout
+  /// has no intrinsic size.
+  static bool _constraintsAreDefinite(BoxConstraints constraints) {
+    // A tight constraint is always definite — including a deliberate tight
+    // zero (e.g. SizedBox.shrink), which is the parent's explicit choice and
+    // must not be second-guessed or warned about.
+    if (constraints.isTight) return true;
+
+    final widthIsDefinite =
+        constraints.hasBoundedWidth && constraints.minWidth > 0;
+    final heightIsDefinite =
+        constraints.hasBoundedHeight && constraints.minHeight > 0;
+    return widthIsDefinite && heightIsDefinite;
+  }
+
+  /// Computes the size floor used when [constraints] would let the widget
+  /// collapse: fill the bounded axis and derive the other from [aspectRatio].
+  Size _fallbackSize(
+    BuildContext context,
+    BoxConstraints constraints,
+    double aspectRatio,
+  ) {
+    double width;
+    double height;
+
+    if (constraints.hasBoundedWidth && constraints.maxWidth > 0) {
+      width = constraints.maxWidth;
+      height = width / aspectRatio;
+      // Never overflow a bounded height: re-derive from the height instead.
+      if (constraints.hasBoundedHeight && height > constraints.maxHeight) {
+        height = constraints.maxHeight;
+        width = height * aspectRatio;
+      }
+    } else if (constraints.hasBoundedHeight && constraints.maxHeight > 0) {
+      // Unbounded width (e.g. an unbounded Row child): derive from height.
+      height = constraints.maxHeight;
+      width = height * aspectRatio;
+    } else {
+      // Unbounded in both axes: nothing in the constraints to derive from,
+      // so fall back to the screen width.
+      final screenWidth = MediaQuery.maybeSizeOf(context)?.width;
+      width = (screenWidth != null && screenWidth.isFinite && screenWidth > 0)
+          ? screenWidth
+          : _kUnboundedFallbackWidth;
+      height = width / aspectRatio;
+    }
+
+    // Respect any non-zero minimums / bounded maximums the parent did set.
+    return constraints.constrain(Size(width, height));
+  }
+
+  /// Debug-only diagnostic emitted when the size floor engages.
+  ///
+  /// Compiled out of release builds (the whole body runs inside an `assert`),
+  /// never throws, and reports at most once per constraint condition so it
+  /// cannot spam once per frame.
+  void _reportCollapsibleConstraints(BoxConstraints constraints, Size size) {
+    assert(() {
+      if (_reportedCollapsibleConstraints) return true;
+      _reportedCollapsibleConstraints = true;
+
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: FlutterError.fromParts(<DiagnosticsNode>[
+            ErrorSummary(
+              'MediaPlayerWidget(expandToFill: true) was given constraints '
+              'that do not define a size.',
+            ),
+            ErrorDescription(
+              'expandToFill: true intentionally skips the AspectRatio wrapper, '
+              'so the widget has no intrinsic size and relies on an ancestor '
+              'to give it one. The incoming constraints were $constraints, '
+              'which are loose, zero-minimum or unbounded in at least one '
+              'axis, so the player would have collapsed to zero size — a '
+              'black screen (taking the controls overlay with it) with no '
+              'exception at all.',
+            ),
+            ErrorDescription(
+              'The usual causes are a non-positioned Stack child (Stack passes '
+              'BoxConstraints.loose to those) and an unbounded Column / '
+              'ListView / SingleChildScrollView child.',
+            ),
+            ErrorHint(
+              'Wrap the MediaPlayerWidget in Positioned.fill (inside a Stack), '
+              'SizedBox.expand, or an Expanded/SizedBox with a definite size — '
+              'or use expandToFill: false to size the player from the video '
+              'aspect ratio.',
+            ),
+            ErrorDescription(
+              'As a fallback the player has been laid out at $size, derived '
+              'from the video aspect ratio, instead of collapsing.',
+            ),
+          ]),
+          library: 'zmedia_player',
+          context: ErrorDescription('while laying out MediaPlayerWidget'),
+        ),
+      );
+      return true;
+    }());
   }
 
   /// Builds the interactive stack: video content, subtitles, the built-in tap
