@@ -69,7 +69,7 @@ select your Team).
 | **Media Notifications** | `pages/notifications_page.dart` | `NotificationService` · `NotificationConfig` · `initialize(mediaPlayer:)` · `show`/`dismiss` · `actionStream` (lock-screen / Control Center controls) |
 | **Fullscreen Playback** | `pages/fullscreen_page.dart` | `FullscreenMediaPlayer` · `MaterialFullscreenPlayer` · orientation control (`preferredOrientations` / live `rotationLocked` / `exitOrientations`) · a single `MediaController` shared across routes |
 | **Adaptive Controls** | `pages/adaptive_controls_page.dart` | `AdaptiveMediaControls` (Material vs Cupertino) · `MaterialMediaControls` · `CupertinoMediaControls` · a minimal `CustomControlsBase` subclass |
-| **Fully Custom Controls & Overlay** | `pages/custom_controls_page.dart` | `CustomControlsBase` → `buildControls(context, state)` with `ControlsState`; a hand-built branded overlay (custom seek bar, gestures, speed/quality pickers) injected via `MediaPlayerWidget.customControls` |
+| **Fully Custom Controls & Overlay** | `pages/custom_controls_page.dart` | `CustomControlsBase` → `buildControls(context, state)` with `ControlsState`; a hand-built branded overlay (custom seek bar, gestures, speed/quality pickers) injected via `MediaPlayerWidget.customControls`. Also demonstrates gesture ownership: double-tap seek zones that stay live while the overlay is hidden, chrome gated with `IgnorePointer(ignoring: !state.isVisible)`, and the `enableBuiltInGestures` opt-out |
 | **Error Handling** | `pages/error_handling_page.dart` | `MediaPlayerException` hierarchy · `PlayerState.error` · `PlaybackState.errorMessage` · `player.stateStream` |
 
 ---

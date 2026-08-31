@@ -88,6 +88,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rejected on iOS — both are *target* offsets, constant by construction and therefore
   useless as a liveness signal.
 
+- `MediaPlayerWidget.enableBuiltInGestures` (`bool`, default `true`) — opt out of the
+  package's own tap/double-tap/long-press handling over the video surface. When `false`,
+  the transparent full-surface `GestureDetector` is not mounted at all and `onTap`,
+  `onDoubleTap` and `onLongPress` are never invoked by the package, letting a host that
+  supplies `customControls` own every gesture. Also forwarded by
+  `FullscreenMediaPlayer.enableBuiltInGestures` and
+  `MediaListPlayer.enableBuiltInGestures` (both default `true`).
+- `MediaControls.onBackgroundTap` / `MediaControls.onBackgroundDoubleTap` — callbacks for
+  a tap/double-tap on the overlay's empty background. `MediaPlayerWidget` forwards its own
+  `onTap`/`onDoubleTap` through these so they fire identically whether the overlay is
+  visible or hidden. `onBackgroundTap: null` keeps the previous behaviour
+  (`showControlsTemporarily()`); `onBackgroundDoubleTap: null` installs no double-tap
+  recognizer at all.
+
 ### Fixed
 - `MediaController` now **queues** operations instead of rejecting them. Previously
   `_executeOperation` held a per-controller boolean lock that never queued: while it was
@@ -256,6 +270,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `updateConfig()` to apply a config change to live playback immediately, or `load()` to
   apply it *and* reload.
 
+- **Gestures declared inside `customControls` no longer stop working when the controls
+  overlay auto-hides** (#84). The overlay used to be built *only* while
+  `MediaController.controlsVisible` was `true`, while the package's opaque tap detector was
+  mounted *only* while it was `false` — so a host's left/right double-tap seek zones
+  worked with the overlay visible and silently became the package's play/pause toggle the
+  moment it hid. The controls overlay is now always mounted and always hit-testable, and
+  the built-in tap detector is stacked **below** it. The rule is now: *a gesture is handled
+  by the topmost widget in the controls overlay that claims it, and only reaches the
+  built-in detector when no overlay widget claimed it — regardless of whether the overlay
+  is currently visible.* The detector keeps `HitTestBehavior.opaque`, which is what stops
+  the native platform view (`AndroidView`/`UiKitView`) beneath it from consuming taps;
+  making it `translucent` and leaving it on top would not have worked, because gesture-arena
+  members are added in hit-test order and ties go to the first member, so a topmost detector
+  would beat both host zones and the built-in controls' own buttons.
+- `MediaPlayerWidget.onTap` / `onDoubleTap` now fire consistently in both visibility
+  states. Previously they could only fire while the overlay was hidden, because the visible
+  built-in overlay covered the whole surface; they are now forwarded to the overlay's
+  background handlers as well.
+- `MaterialMediaControls` and `CupertinoMediaControls` no longer keep a private
+  `_showControls` flag that defaulted to "visible" and was disconnected from
+  `MediaController.controlsVisible`. Both now derive visibility from the controller and
+  route their tap-to-toggle through `MediaController.toggleControls()`, so they auto-hide
+  correctly and start hidden when used as `customControls` (which, with the change above,
+  means being left mounted rather than unmounted). Both also handle double-tap
+  (`togglePlayPause`) on their opaque root, which they previously delegated to the package
+  detector that is no longer reachable through them.
+
 ### Changed
 - **Behaviour of every `MediaController` playback/track/config method** (`load`,
   `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`, `toggleMute`, `setSpeed`,
@@ -301,6 +342,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ended. (iOS drives position from `AVPlayer.addPeriodicTimeObserver`, which only fires
   while time is progressing, so a hard stall still suspends updates there; this is
   documented as a platform caveat for watchdog authors.)
+
+- The built-in controls overlay is now mounted at all times instead of being rebuilt each
+  time it becomes visible. While hidden it is wrapped in `ExcludeSemantics` +
+  `IgnorePointer` + a zero `AnimatedOpacity`, so it remains exactly as untappable and as
+  invisible to screen readers as when it was not built at all — with the side benefit that
+  its 300 ms fade-out can now actually run.
+- **Behavioural note for `customControls` consumers:** the package no longer fades or
+  unmounts a host-supplied overlay — the host owns its visibility (`CustomControlsBase`
+  already provides `ControlsState.isVisible` / `.animation` for this). Because zero opacity
+  does not stop hit testing, chrome that must not be tappable while hidden needs an explicit
+  `IgnorePointer(ignoring: !state.isVisible)`, and a full-bleed scrim needs the same
+  treatment or it will absorb the tap meant to reveal the controls. Returning
+  `const SizedBox.shrink()` while hidden reproduces the previous behaviour exactly. See
+  [Gesture ownership](docs/api-reference/advanced-features.md#gesture-ownership).
 
 ### Deprecated
 - `OperationBusyException` — no longer thrown anywhere in this package. It existed solely

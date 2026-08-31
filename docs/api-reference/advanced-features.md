@@ -369,3 +369,76 @@ controller.screenCaptureStream.listen((status) {
 Subclass `CustomControlsBase` and implement `buildControls(context, ControlsState)`, then pass
 your widget to `MediaPlayerWidget(customControls: …)`. See the example app's
 "Fully Custom Controls & Overlay" page.
+
+### Gesture ownership
+
+> **A gesture is handled by the topmost widget in the controls overlay that claims it, and only
+> reaches the package's built-in tap detector when no overlay widget claimed it — regardless of
+> whether the overlay is currently visible.**
+
+`MediaPlayerWidget` keeps the controls overlay mounted and hit-testable at all times and stacks
+its own transparent, full-surface tap detector **below** it. (The detector exists so taps are not
+swallowed by the native platform view — `AndroidView`/`UiKitView` — and it keeps
+`HitTestBehavior.opaque` for exactly that reason; opacity only affects what is *below* it.)
+
+Before 0.3.1 the overlay and the detector were mutually exclusive: the overlay was not built at
+all while `controller.controlsVisible` was `false`, and the opaque detector took over. Any gesture
+a host declared inside `customControls` therefore stopped working the moment the overlay
+auto-hid — a double-tap seek zone would silently become play/pause.
+
+What this means when you write custom controls:
+
+```dart
+@override
+Widget buildControls(BuildContext context, ControlsState state) {
+  return Stack(
+    children: [
+      // Gesture zones: intentionally live in BOTH visibility states.
+      // `translucent` claims the double tap but still lets a single tap reach
+      // the package detector below, so tap-to-toggle keeps working.
+      Positioned.fill(
+        child: Row(children: [
+          Expanded(child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onDoubleTap: () => state.controller.seekBackward(),
+            child: const SizedBox.expand(),
+          )),
+          Expanded(child: GestureDetector(
+            behavior: HitTestBehavior.translucent,
+            onDoubleTap: () => state.controller.seekForward(),
+            child: const SizedBox.expand(),
+          )),
+        ]),
+      ),
+
+      // Chrome: must be explicitly made inert while hidden — zero opacity
+      // does NOT stop hit testing.
+      IgnorePointer(
+        ignoring: !state.isVisible,
+        child: Opacity(
+          opacity: state.animationValue,
+          child: MyControlBar(controller: state.controller),
+        ),
+      ),
+    ],
+  );
+}
+```
+
+Checklist:
+
+- **You own visibility.** The package no longer fades or unmounts `customControls`; read
+  `state.isVisible` / `state.animation` (or `controller.controlsVisible` directly). Returning
+  `const SizedBox.shrink()` while hidden reproduces the old "unmounted" behaviour exactly.
+- **Wrap non-gesture chrome in `IgnorePointer(ignoring: !state.isVisible)`.** Otherwise an
+  invisible button still eats the tap that was supposed to reveal the controls.
+- **Gate full-bleed scrims too.** A `Container` with a `color` is opaque to hit testing and will
+  absorb every pointer; use `IgnorePointer` around it (the example app's `BrandedControls` does).
+- **`enableBuiltInGestures: false`** opts out entirely: no detector is mounted, `onTap`,
+  `onDoubleTap` and `onLongPress` are never invoked by the package, and pointers your overlay does
+  not claim go straight to the native platform view.
+
+`onTap` / `onDoubleTap` now fire consistently in both visibility states: while the built-in
+overlay is visible, `MediaPlayerWidget` forwards them to `MediaControls.onBackgroundTap` /
+`onBackgroundDoubleTap`, so a tap on empty overlay space behaves exactly as it does when the
+overlay is hidden. Buttons rendered on top of that background still take precedence.

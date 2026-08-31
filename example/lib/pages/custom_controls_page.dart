@@ -29,6 +29,20 @@ import '../widgets/player_scaffold.dart';
 //     customControls: BrandedControls(controller: _controller),
 //   )
 //
+//   GESTURE OWNERSHIP: the overlay you pass is always mounted and always
+//   hit-testable, including while `controller.controlsVisible` is false, and
+//   the package's own tap detector sits BELOW it.  So a gesture is handled by
+//   the topmost widget in your overlay that claims it, and only reaches the
+//   package (tap → toggleControls, double tap → togglePlayPause) when nothing
+//   in your overlay claimed it.  Two things follow:
+//     • Drive your own visibility from `state.isVisible` / `state.animation` —
+//       the package will not hide your overlay for you.
+//     • Wrap chrome you do not want tappable while hidden in
+//       `IgnorePointer(ignoring: !state.isVisible)`; zero opacity alone does
+//       not stop hit testing.  See _BrandedControlsBodyState.build below.
+//   To own every gesture yourself, pass `enableBuiltInGestures: false` and the
+//   package will not install a detector at all.
+//
 // Step 3 — Drive the UI entirely from [MediaController].
 //   Use [ListenableBuilder] (scoped to what changes) rather than rebuilding
 //   the whole overlay on every notification.
@@ -66,6 +80,9 @@ class _CustomControlsPageState extends State<CustomControlsPage> {
   late final MediaController _controller;
   bool _isLoading = true;
   String? _error;
+
+  /// Drives [MediaPlayerWidget.enableBuiltInGestures] from the toggle below.
+  bool _builtInGestures = true;
 
   @override
   void initState() {
@@ -131,6 +148,14 @@ class _CustomControlsPageState extends State<CustomControlsPage> {
                           controller: _controller,
                           title: SampleMedia.bigBuckBunny.title,
                         ),
+                        // Opt-out switch, wired to the toggle below.  With
+                        // `false` the package mounts no tap detector at all,
+                        // so BrandedControls owns every gesture — and, since
+                        // its double-tap zones are `translucent` and it has no
+                        // single-tap handler of its own, single tap stops
+                        // toggling the controls.  That is the point of the
+                        // flag: nothing but your overlay is in play.
+                        enableBuiltInGestures: _builtInGestures,
                         backgroundColor: Colors.black,
                       ),
           ),
@@ -170,12 +195,44 @@ class _CustomControlsPageState extends State<CustomControlsPage> {
         const SectionHeader('Gestures'),
         _InfoBox(
           child: Text(
-            '• Single tap — toggle controls (delegated to base)\n'
+            '• Single tap — falls through to the package tap detector, which '
+            'toggles the controls (both when hidden and when visible)\n'
             '• Double-tap left half — rewind 10 s with animated feedback\n'
             '• Double-tap right half — forward 10 s with animated feedback\n'
             '• Seek-bar drag — position updated only on drag-end (not per frame)\n'
             '• Speed badge tap — cycles 0.5 / 1.0 / 1.5 / 2.0×\n'
             '• Quality badge tap — auto or any reported quality track',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        const SizedBox(height: 16),
+        const SectionHeader('Gesture ownership'),
+        _InfoBox(
+          child: Text(
+            'The overlay you pass to customControls stays mounted and '
+            'hit-testable even while controller.controlsVisible is false, and '
+            "the package's own tap detector sits BELOW it. So a gesture is "
+            'handled by the topmost widget in your overlay that claims it, and '
+            'only reaches the package when nothing in your overlay claimed '
+            'it — in either visibility state.\n\n'
+            'That is why the double-tap seek zones above keep working after the '
+            'controls auto-hide, and why every piece of chrome in '
+            'BrandedControls is wrapped in IgnorePointer(ignoring: '
+            '!state.isVisible): zero opacity does not stop hit testing.',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _builtInGestures,
+          onChanged: (v) => setState(() => _builtInGestures = v),
+          title: const Text('enableBuiltInGestures'),
+          subtitle: Text(
+            _builtInGestures
+                ? 'ON (default) — unclaimed taps toggle the controls, unclaimed '
+                    'double taps toggle play/pause.'
+                : 'OFF — no detector is mounted; onTap/onDoubleTap are never '
+                    'called and single tap no longer reveals the controls.',
             style: Theme.of(context).textTheme.bodySmall,
           ),
         ),
@@ -416,18 +473,26 @@ class _BrandedControlsBodyState extends State<_BrandedControlsBody>
         ),
 
         // ── Double-tap zones (always active, even when controls hidden) ───
+        //
+        // These really are always active: MediaPlayerWidget keeps
+        // `customControls` mounted and hit-testable regardless of
+        // `controller.controlsVisible`, and stacks its own tap detector
+        // *below* the overlay — so these zones win the double tap in both
+        // visibility states (issue #84).
         Positioned.fill(
           child: Row(
             children: [
               Expanded(
                 child: GestureDetector(
+                  // translucent: the zone claims the double tap but lets the
+                  // pointer continue down to MediaPlayerWidget's detector, so
+                  // a *single* tap still toggles the controls.
                   behavior: HitTestBehavior.translucent,
                   onDoubleTap: _onDoubleTapLeft,
                   // Single tap is NOT handled here; MediaPlayerWidget's own
-                  // tap-detector calls controller.toggleControls() when
-                  // controls are hidden, and BrandedControls receives the
-                  // toggleControls() call via CustomControlsBase when
-                  // controls are visible.
+                  // tap detector calls controller.toggleControls() for any
+                  // gesture this overlay does not claim — identically whether
+                  // the overlay is visible or hidden.
                   child: const SizedBox.expand(),
                 ),
               ),
@@ -552,7 +617,10 @@ class _BrandedControlsBodyState extends State<_BrandedControlsBody>
         ),
 
         // ── Speed picker popup ────────────────────────────────────────────
-        if (_showSpeedPicker)
+        // Gated on isVisible as well: the overlay is no longer torn out of the
+        // tree when the controls auto-hide, so a popup left open would linger
+        // (and stay tappable) on top of the video.
+        if (_showSpeedPicker && widget.state.isVisible)
           Positioned(
             bottom: 72,
             right: 12,
@@ -569,7 +637,7 @@ class _BrandedControlsBodyState extends State<_BrandedControlsBody>
           ),
 
         // ── Quality picker popup ──────────────────────────────────────────
-        if (_showQualityPicker)
+        if (_showQualityPicker && widget.state.isVisible)
           Positioned(
             bottom: 72,
             right: 12,

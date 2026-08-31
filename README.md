@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-989%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-1006%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -458,9 +458,38 @@ MediaPlayerWidget(
   errorWidget: MyErrorWidget(),
   boxFit: BoxFit.contain,
   allowFullscreen: true,
+  enableBuiltInGestures: true,          // default; false = host owns all gestures
   onTap: () {},
 )
 ```
+
+#### Gesture ownership
+
+**A gesture is handled by the topmost widget in the controls overlay that claims it, and only
+reaches the package's built-in tap detector when no overlay widget claimed it — regardless of
+whether the overlay is currently visible.**
+
+The controls overlay is always mounted and always hit-testable, and the package's own
+full-surface tap detector is stacked *below* it. So a gesture zone you declare inside
+`customControls` (e.g. left/right double-tap seek zones) keeps working when the overlay
+auto-hides, instead of being taken over by the package.
+
+Consequences when you supply `customControls`:
+
+- The package does **not** fade or unmount your overlay. Drive visibility yourself from
+  `controller.controlsVisible` (or extend `CustomControlsBase`, which hands you
+  `ControlsState.isVisible` and a ready-made fade animation).
+- Zero opacity does not stop hit testing. Wrap chrome that must not be tappable while hidden in
+  `IgnorePointer(ignoring: !state.isVisible)`, and gate any full-bleed scrim on visibility too —
+  a `Container` with a `color` is opaque to hit tests and would swallow the tap meant to reveal
+  the controls. Returning `const SizedBox.shrink()` while hidden restores the pre-0.3.1
+  "unmounted" behaviour entirely.
+- `enableBuiltInGestures: false` removes the package detector altogether: `onTap`, `onDoubleTap`
+  and `onLongPress` are then never invoked by the package, and any pointer your overlay does not
+  claim reaches the native platform view directly.
+
+The built-in controls are unaffected: while hidden they stay non-hit-testable, invisible, and
+out of the semantics tree.
 
 ### MediaItem
 
@@ -608,7 +637,7 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 989), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 1006), and open a PR.
 
 ## License
 
@@ -625,7 +654,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 989 automated tests — run `flutter test` for the current count.
+- **Tests:** 1006 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth

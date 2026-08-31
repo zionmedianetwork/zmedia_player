@@ -24,7 +24,36 @@ class MediaPlayerWidget extends StatefulWidget {
   /// Whether to show media controls overlay
   final bool showControls;
 
-  /// Custom controls widget (if null, default controls will be used)
+  /// Custom controls widget (if null, default controls will be used).
+  ///
+  /// ## Gesture ownership
+  ///
+  /// The controls overlay is **always mounted and always hit-testable**,
+  /// including while [MediaController.controlsVisible] is `false`. The
+  /// package's own full-surface tap detector (see [enableBuiltInGestures]) is
+  /// stacked *underneath* the overlay, so any gesture recognizer declared
+  /// inside [customControls] gets first refusal on every pointer — the
+  /// built-in detector only sees pointers that no widget in the overlay
+  /// claimed.
+  ///
+  /// This means a host-defined gesture zone (e.g. left/right double-tap seek
+  /// zones) keeps working when the overlay auto-hides, instead of silently
+  /// being taken over by the package.
+  ///
+  /// Two consequences worth designing for:
+  ///
+  /// * The package does **not** fade or unmount [customControls] for you.
+  ///   Drive your own visibility from [MediaController.controlsVisible] (or
+  ///   extend `CustomControlsBase` / use `CustomControlsBuilder`, which expose
+  ///   `ControlsState.isVisible` and a ready-made fade animation).
+  /// * Anything your overlay renders at zero opacity is still hit-testable.
+  ///   Wrap chrome you do not want tappable while hidden in an
+  ///   `IgnorePointer(ignoring: !state.isVisible)` and leave only the gesture
+  ///   zones live. Likewise, if your overlay paints a full-bleed scrim
+  ///   (a `Container` with a `color` is opaque to hit testing), it will
+  ///   absorb the tap that would otherwise reveal the controls — gate that
+  ///   scrim on visibility too, or return `const SizedBox.shrink()` while
+  ///   hidden to restore the pre-0.3.1 behavior entirely.
   final Widget? customControls;
 
   /// Placeholder widget shown when no media is loaded
@@ -42,14 +71,47 @@ class MediaPlayerWidget extends StatefulWidget {
   /// Background color of the player
   final Color backgroundColor;
 
-  /// Callback when the player widget is tapped
+  /// Callback when the player widget is tapped.
+  ///
+  /// Fires for a tap that no widget inside the controls overlay claimed —
+  /// identically whether the overlay is visible or hidden. When supplied it
+  /// replaces the built-in "toggle controls" behavior. Never invoked when
+  /// [enableBuiltInGestures] is `false`.
   final VoidCallback? onTap;
 
-  /// Callback when the player widget is double-tapped
+  /// Callback when the player widget is double-tapped.
+  ///
+  /// Fires for a double tap that no widget inside the controls overlay
+  /// claimed — identically whether the overlay is visible or hidden. When
+  /// supplied it replaces the built-in "toggle play/pause" behavior. Never
+  /// invoked when [enableBuiltInGestures] is `false`.
   final VoidCallback? onDoubleTap;
 
-  /// Callback when the player widget is long-pressed
+  /// Callback when the player widget is long-pressed.
+  ///
+  /// Fires for a long press that no widget inside the controls overlay
+  /// claimed. Never invoked when [enableBuiltInGestures] is `false`.
   final VoidCallback? onLongPress;
+
+  /// Whether the package installs its own tap / double-tap / long-press
+  /// handling over the video surface.
+  ///
+  /// Defaults to `true`, which is the historical behavior: a transparent,
+  /// full-surface [GestureDetector] is stacked above the native platform view
+  /// (`AndroidView` / `UiKitView`) — which would otherwise swallow pointers —
+  /// and **below** the controls overlay, so it only receives gestures that no
+  /// widget in the overlay claimed. It maps tap → [MediaController.toggleControls]
+  /// (or [onTap]) and double tap → [MediaController.togglePlayPause] (or
+  /// [onDoubleTap]).
+  ///
+  /// Set to `false` when you supply [customControls] and want to own every
+  /// gesture yourself. The detector is then not mounted at all and [onTap],
+  /// [onDoubleTap] and [onLongPress] are never invoked by the package; the
+  /// built-in controls' background tap handling is disabled too. Note that
+  /// with no detector in the way, any pointer your overlay does not claim
+  /// reaches the native platform view directly, so your overlay is
+  /// responsible for covering the surface it cares about.
+  final bool enableBuiltInGestures;
 
   /// Whether to allow fullscreen mode
   final bool allowFullscreen;
@@ -91,6 +153,7 @@ class MediaPlayerWidget extends StatefulWidget {
     this.onTap,
     this.onDoubleTap,
     this.onLongPress,
+    this.enableBuiltInGestures = true,
     this.allowFullscreen = true,
     this.aspectRatio,
     this.expandToFill = false,
@@ -396,14 +459,45 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     );
   }
 
+  /// Builds the interactive stack: video content, subtitles, the built-in tap
+  /// detector, and the controls overlay.
+  ///
+  /// ## Gesture ownership rule
+  ///
+  /// A gesture is handled by the topmost widget in the controls overlay that
+  /// claims it, and only reaches the package's built-in tap detector when no
+  /// widget in the overlay claimed it — regardless of whether the overlay is
+  /// currently visible.
+  ///
+  /// Two structural decisions make that rule hold:
+  ///
+  /// 1. **The controls overlay is always mounted** (previously it was not
+  ///    built at all while [MediaController.controlsVisible] was `false`).
+  ///    Host-supplied [MediaPlayerWidget.customControls] therefore keep their
+  ///    own gesture recognizers alive across an auto-hide, instead of being
+  ///    torn out of the tree and silently replaced by the package's detector
+  ///    (issue #84). The *built-in* controls are additionally wrapped in
+  ///    `ExcludeSemantics` + `IgnorePointer` + a zero opacity while hidden, so
+  ///    they remain exactly as untappable and as invisible to screen readers
+  ///    as when they were unmounted — see [_buildControlsOverlay].
+  ///
+  /// 2. **The built-in tap detector is stacked below the overlay.** `Stack`
+  ///    hit-tests its children topmost-first and stops at the first child that
+  ///    claims the pointer, so putting the detector *under* the overlay gives
+  ///    overlay recognizers deterministic priority — no gesture-arena race.
+  ///    (Making the detector `translucent` and leaving it on top would *not*
+  ///    work: arena members are added in hit-test order and ties are resolved
+  ///    in favour of the first member, so a topmost detector would beat both
+  ///    host zones and the built-in controls' own buttons.)
+  ///
+  /// The detector keeps [HitTestBehavior.opaque] because that is what stops
+  /// the native platform view (`AndroidView` / `UiKitView`) beneath it from
+  /// consuming the pointer — its original and still-valid purpose. Opacity
+  /// only affects what is *below* the detector, never what is above it.
   Widget _buildInteractiveContent(Widget content) {
     return ListenableBuilder(
       listenable: widget.controller,
       builder: (context, _) {
-        final showTapDetector = !widget.controller.controlsVisible;
-        final showControlsOverlay =
-            widget.showControls && widget.controller.controlsVisible;
-
         return Stack(
           alignment: Alignment.center,
           children: [
@@ -414,14 +508,11 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
             if (widget.controller.config.enableSubtitles == true)
               _buildSubtitleOverlay(),
 
-            // Controls overlay - only show when needed
-            if (showControlsOverlay)
-              Positioned.fill(child: _buildControlsOverlay()),
-
-            // Transparent tap detector overlay - positioned ABOVE native view
-            // This ensures taps are captured even when native platform view
-            // (UiKitView/AndroidView) would otherwise consume them
-            if (showTapDetector)
+            // Transparent tap detector - sits ABOVE the native view (so taps
+            // are captured even when the platform view would otherwise consume
+            // them) but BELOW the controls overlay (so overlay-owned gestures,
+            // including host-defined zones inside customControls, always win).
+            if (widget.enableBuiltInGestures)
               Positioned.fill(
                 child: GestureDetector(
                   onTap: widget.onTap ?? _handleTap,
@@ -431,6 +522,12 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
                   child: Container(color: Colors.transparent),
                 ),
               ),
+
+            // Controls overlay - always mounted so host gestures survive the
+            // overlay auto-hiding; visibility/pointer/semantics gating for the
+            // built-in controls happens inside _buildControlsOverlay().
+            if (widget.showControls)
+              Positioned.fill(child: _buildControlsOverlay()),
           ],
         );
       },
@@ -673,18 +770,40 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   }
 
   Widget _buildControlsOverlay() {
+    // Host-supplied controls: the package neither hides nor gates them.  They
+    // stay mounted and hit-testable at all times so their own recognizers keep
+    // working while the overlay is hidden; the host drives visibility from
+    // MediaController.controlsVisible.  See MediaPlayerWidget.customControls.
     if (widget.customControls != null) {
       return widget.customControls!;
     }
 
-    return AnimatedOpacity(
-      opacity: widget.controller.controlsVisible ? 1.0 : 0.0,
-      duration: const Duration(milliseconds: 300),
+    final visible = widget.controller.controlsVisible;
+
+    // Built-in controls: mounted at all times (so the fade-out can actually
+    // run, and so the stack order above stays stable), but while hidden they
+    // are removed from the semantics tree, made non-hit-testable, and faded to
+    // zero — i.e. observationally identical to not being built at all.
+    return ExcludeSemantics(
+      excluding: !visible,
       child: IgnorePointer(
-        ignoring: !widget.controller.controlsVisible,
-        child: MediaControls(
-          controller: widget.controller,
-          allowFullscreen: widget.allowFullscreen,
+        ignoring: !visible,
+        child: AnimatedOpacity(
+          opacity: visible ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 300),
+          child: MediaControls(
+            controller: widget.controller,
+            allowFullscreen: widget.allowFullscreen,
+            // Keep the host callbacks firing consistently: while the built-in
+            // overlay is visible it covers the whole surface, so the tap
+            // detector below never sees the pointer.  Forwarding the same
+            // callbacks to the overlay's background means a tap/double-tap on
+            // empty overlay space behaves exactly as it does while hidden.
+            onBackgroundTap: widget.enableBuiltInGestures ? widget.onTap : null,
+            onBackgroundDoubleTap: widget.enableBuiltInGestures
+                ? (widget.onDoubleTap ?? _handleDoubleTap)
+                : null,
+          ),
         ),
       ),
     );
@@ -997,6 +1116,12 @@ class FullscreenMediaPlayer extends StatefulWidget {
   /// Custom controls widget
   final Widget? customControls;
 
+  /// Forwarded to [MediaPlayerWidget.enableBuiltInGestures].
+  ///
+  /// Set to `false` alongside [customControls] to let the host own every
+  /// gesture on the video surface.
+  final bool enableBuiltInGestures;
+
   /// Background color
   final Color backgroundColor;
 
@@ -1029,6 +1154,7 @@ class FullscreenMediaPlayer extends StatefulWidget {
     super.key,
     required this.controller,
     this.customControls,
+    this.enableBuiltInGestures = true,
     this.backgroundColor = Colors.black,
     this.preferredOrientations,
     this.rotationLocked,
@@ -1177,6 +1303,7 @@ class _FullscreenMediaPlayerState extends State<FullscreenMediaPlayer>
                 controller: widget.controller,
                 showControls: true,
                 customControls: widget.customControls,
+                enableBuiltInGestures: widget.enableBuiltInGestures,
                 expandToFill: true,
                 backgroundColor: widget.backgroundColor,
                 onTap: () => widget.controller.toggleControls(),

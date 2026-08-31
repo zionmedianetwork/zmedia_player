@@ -45,6 +45,27 @@ class MediaControls extends StatefulWidget {
   /// Custom title to display
   final String? title;
 
+  /// Called when the empty background of the overlay is tapped.
+  ///
+  /// The overlay covers the whole video surface while visible, so this is the
+  /// hook [MediaPlayerWidget] uses to forward its own `onTap` callback and
+  /// keep it firing identically whether the overlay is visible or hidden.
+  ///
+  /// When `null` the historical behavior applies: a background tap calls
+  /// [MediaController.showControlsTemporarily], which simply restarts the
+  /// auto-hide countdown. Buttons rendered on top of the background take
+  /// precedence over this callback.
+  final VoidCallback? onBackgroundTap;
+
+  /// Called when the empty background of the overlay is double-tapped.
+  ///
+  /// [MediaPlayerWidget] forwards its own `onDoubleTap` (or the built-in
+  /// toggle-play/pause behavior) here so a double tap does the same thing
+  /// whether the overlay is visible or hidden. `null` installs no double-tap
+  /// recognizer at all, which also keeps background single taps from being
+  /// delayed by the double-tap timeout.
+  final VoidCallback? onBackgroundDoubleTap;
+
   const MediaControls({
     super.key,
     required this.controller,
@@ -58,6 +79,8 @@ class MediaControls extends StatefulWidget {
     this.showSettingsButton = true,
     this.theme,
     this.title,
+    this.onBackgroundTap,
+    this.onBackgroundDoubleTap,
   });
 
   @override
@@ -182,9 +205,13 @@ class _MediaControlsState extends State<MediaControls>
           ),
           child: Stack(
             children: [
-              // Gesture detector for tap to show/hide controls
+              // Background gesture detector.  This is the bottom-most child
+              // of the overlay stack, so every control rendered above it wins
+              // the gesture first; it only sees taps on empty overlay space.
               GestureDetector(
-                onTap: () => widget.controller.showControlsTemporarily(),
+                onTap: widget.onBackgroundTap ??
+                    () => widget.controller.showControlsTemporarily(),
+                onDoubleTap: widget.onBackgroundDoubleTap,
                 child: Container(
                   width: double.infinity,
                   height: double.infinity,
