@@ -24,13 +24,54 @@ class NotificationConfig {
   /// Show stop action
   final bool showStop;
 
-  /// Show seek forward action
+  /// Whether to offer a seek-forward control on the notification /
+  /// lock screen / Control Center.
+  ///
+  /// **The control is shown if and only if this flag is `true` AND the current
+  /// item is seekable** (`MediaPlayer.isSeekable`, i.e. not a live stream
+  /// without DVR). Both platforms enforce exactly that contract:
+  ///
+  /// - **Android** — adds a `NotificationCompat.Action` (labelled
+  ///   `"Forward {seekInterval}s"`) and advertises
+  ///   `PlaybackStateCompat.ACTION_FAST_FORWARD` on the media session, so
+  ///   Bluetooth / Android Auto / Wear surfaces offer it too. Tapping it routes
+  ///   through `MediaSessionCompat.Callback.onFastForward` and emits a
+  ///   [NotificationActions.seekForward] event.
+  /// - **iOS** — enables `MPRemoteCommandCenter.skipForwardCommand` (with
+  ///   `preferredIntervals` set from [seekInterval]); activating it emits the
+  ///   same [NotificationActions.seekForward] event.
+  ///
+  /// The gating is re-evaluated on every notification update, so if
+  /// seekability changes mid-playback (e.g. DVR is toggled on a live stream)
+  /// the control appears/disappears without needing a re-initialize.
+  ///
+  /// Like every other notification control, this only *renders* the button —
+  /// the host app must listen to [NotificationService.actionEventStream] and
+  /// perform the seek itself. See that class's dartdoc.
   final bool showSeekForward;
 
-  /// Show seek backward action
+  /// Whether to offer a seek-backward control on the notification /
+  /// lock screen / Control Center.
+  ///
+  /// Same `flag && isSeekable` contract as [showSeekForward] — see its dartdoc.
+  /// Android renders a `"Back {seekInterval}s"` action and advertises
+  /// `PlaybackStateCompat.ACTION_REWIND`
+  /// (`MediaSessionCompat.Callback.onRewind`); iOS enables
+  /// `MPRemoteCommandCenter.skipBackwardCommand`. Both emit
+  /// [NotificationActions.seekBackward].
   final bool showSeekBackward;
 
-  /// Seek forward/backward interval in seconds
+  /// Seek forward/backward interval in seconds, used by [showSeekForward] /
+  /// [showSeekBackward].
+  ///
+  /// This is a **display-only** value on both platforms: it sets the Android
+  /// action labels (`"Forward 10s"` / `"Back 10s"`) and iOS's
+  /// `MPRemoteCommandCenter.skipForwardCommand.preferredIntervals` (the number
+  /// rendered inside the Control Center skip glyphs). Neither platform performs
+  /// the seek itself — the host app's
+  /// [NotificationService.actionEventStream] handler does, and it must apply
+  /// the same interval (e.g. `controller.seekForward(Duration(seconds: 10))`)
+  /// for the label to be truthful.
   final int seekInterval;
 
   /// Whether to show notification when paused
@@ -211,8 +252,8 @@ class NotificationAction {
 /// *happened* — a lock-screen / Control Center control the user activated.
 ///
 /// [action] is one of the [NotificationActions] constants (`"play"`,
-/// `"pause"`, `"next"`, `"previous"`, `"stop"`, `"seek_forward"`,
-/// `"seek_backward"`, `"seekTo"`). [position] is only ever populated for
+/// `"pause"`, `"next"`, `"previous"`, `"stop"`, `"seekForward"`,
+/// `"seekBackward"`, `"seekTo"`). [position] is only ever populated for
 /// [NotificationActions.seekTo] — the absolute position the user scrubbed
 /// the lock-screen / Control Center progress bar to. It is `null` for every
 /// other action.

@@ -25,6 +25,11 @@ final notifications = NotificationService(const NotificationConfig(
   showPlayPause: true,
   showNext: true,
   showPrevious: true,
+  // Seek controls are opt-in (both default to false) and are only rendered when
+  // the current item is actually seekable — see the seek-control notes below.
+  showSeekForward: true,
+  showSeekBackward: true,
+  seekInterval: 10, // display-only: labels the buttons / iOS preferredIntervals
 ));
 
 // Pass the player so lock-screen state stays in sync with playback:
@@ -42,8 +47,15 @@ notifications.actionEventStream.listen((event) {
     case 'pause': controller.pause(); break;
     case 'next': controller.skipToNext(); break;
     case 'previous': controller.skipToPrevious(); break;
-    case 'seekForward': controller.seekForward(); break;
-    case 'seekBackward': controller.seekBackward(); break;
+    // NotificationActions.seekForward / .seekBackward ('seekForward' /
+    // 'seekBackward'). seekInterval is a label only — pass the matching
+    // Duration yourself so the button's "10s" is truthful.
+    case NotificationActions.seekForward:
+      controller.seekForward(const Duration(seconds: 10));
+      break;
+    case NotificationActions.seekBackward:
+      controller.seekBackward(const Duration(seconds: 10));
+      break;
     case NotificationActions.seekTo:
       // Dragging the lock-screen / Control Center scrub bar. event.position
       // is only ever non-null for this action — your app must call seekTo()
@@ -66,6 +78,22 @@ await notifications.dismiss(controller.playerId);
   action (including `"seekTo"`) but is `@Deprecated` because it cannot carry
   `position` — dragging the scrub bar is unactionable through it. Prefer
   `actionEventStream` in new code.
+- `NotificationConfig.showSeekForward` / `.showSeekBackward` gate the seek controls on
+  **both** platforms, with one shared contract: **a seek control is offered if and only if
+  the flag is `true` AND the current item is seekable** (`MediaPlayer.isSeekable` — i.e. not
+  a live stream without DVR). Both default to `false`, so seek controls are opt-in. On
+  Android the flag adds a `NotificationCompat.Action` (`"Forward 10s"` / `"Back 10s"`) and
+  advertises `ACTION_FAST_FORWARD` / `ACTION_REWIND` on the media session, so Bluetooth /
+  Android Auto / Wear surfaces offer it too; on iOS it enables
+  `MPRemoteCommandCenter.skipForwardCommand` / `.skipBackwardCommand`. The gating is
+  re-evaluated on every notification update, so toggling DVR on a live stream mid-playback
+  adds or removes the controls without re-initializing. Tapping one emits
+  `NotificationActions.seekForward` / `.seekBackward` on `actionEventStream`.
+- `NotificationConfig.seekInterval` (default `10`) is **display-only on both platforms**: it
+  sets the Android button labels and iOS's `skipForwardCommand.preferredIntervals`. Neither
+  platform seeks the player itself — your `actionEventStream` handler must apply the same
+  interval (`controller.seekForward(const Duration(seconds: 10))`), exactly as it must call
+  `play()`/`pause()` itself for the other controls.
 - `NotificationConfig.priority`, `.dismissible`, and `.customActions` are **Android only**
   (`MPRemoteCommandCenter` on iOS has no equivalent concept for any of the three — no priority/
   importance, no user-dismissible surface an app controls, and only a fixed set of semantic

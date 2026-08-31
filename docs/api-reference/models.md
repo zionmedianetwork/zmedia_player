@@ -207,6 +207,16 @@ const SubtitleConfig({
 - **Notifications:** `NotificationConfig`, `NotificationAction`, `NotificationPriority` — pass a
   `NotificationConfig` to `NotificationService` directly (not `MediaConfig`) to drive media
   playback notifications; there is no `MediaConfig.notificationConfig`.
+  `showSeekForward`/`showSeekBackward` (both default `false`) are honoured on **both**
+  platforms under one contract: **the seek control is offered iff the flag is `true` AND the
+  item is seekable** (`MediaPlayer.isSeekable`, i.e. not a live stream without DVR). Android
+  renders a `NotificationCompat.Action` and advertises `ACTION_FAST_FORWARD`/`ACTION_REWIND`;
+  iOS enables `MPRemoteCommandCenter.skipForwardCommand`/`.skipBackwardCommand`. `seekInterval`
+  (default `10`) is display-only on both platforms — it labels the Android button and sets
+  iOS's `preferredIntervals`; the host app performs the actual seek from
+  `NotificationService.actionEventStream` (`NotificationActions.seekForward` /
+  `.seekBackward`, wire values `'seekForward'` / `'seekBackward'`).
+  `priority`, `dismissible`, and `customActions` remain **Android only**.
 - **PiP:** `PipConfig`, `PipAction`, `PipState`, `PipStatus`, `PipActionEvent` (delivered via
   `MediaPlayer.pipActionStream` when a custom `PipConfig.actions` entry is tapped —
   Android-only).

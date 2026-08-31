@@ -58,8 +58,8 @@ class NotificationService {
   /// Stream of notification action events, typed as [NotificationActionEvent].
   ///
   /// You must listen to this and route each event's [NotificationActionEvent.action]
-  /// (`"play"`, `"pause"`, `"next"`, `"previous"`, `"stop"`, `"seek_forward"`,
-  /// `"seek_backward"`, `"seekTo"`) to your `MediaController`/`MediaPlayer` — see the
+  /// (`"play"`, `"pause"`, `"next"`, `"previous"`, `"stop"`, `"seekForward"`,
+  /// `"seekBackward"`, `"seekTo"`) to your `MediaController`/`MediaPlayer` — see the
   /// class-level dartdoc above. For `"seekTo"`, call
   /// `controller.seekTo(event.position!)` — that is the only action that carries a
   /// [NotificationActionEvent.position].
@@ -334,8 +334,21 @@ class NotificationActions {
   static const String next = 'next';
   static const String previous = 'previous';
   static const String stop = 'stop';
-  static const String seekForward = 'seek_forward';
-  static const String seekBackward = 'seek_backward';
+
+  /// Relative seek forward, emitted when the user activates the notification's
+  /// seek-forward button (Android) or `skipForwardCommand` (iOS) — see
+  /// [NotificationConfig.showSeekForward].
+  ///
+  /// The wire value is `'seekForward'`, which is what both platforms have
+  /// always emitted (`sendActionToFlutter("seekForward")` in
+  /// `NotificationHandler.kt` / `NotificationHandler.swift`). This constant
+  /// previously read `'seek_forward'`, a value neither platform ever sent, so
+  /// any `case NotificationActions.seekForward:` branch was dead code.
+  static const String seekForward = 'seekForward';
+
+  /// Relative seek backward — see [seekForward] for the wire-value note and
+  /// [NotificationConfig.showSeekBackward] for when it is offered.
+  static const String seekBackward = 'seekBackward';
 
   /// Absolute seek requested via the lock-screen / Control Center scrub bar
   /// (`MPRemoteCommandCenter.changePlaybackPositionCommand` on iOS,

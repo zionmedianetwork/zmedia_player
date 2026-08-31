@@ -212,6 +212,23 @@ class NotificationHandler(
     private var showNext: Boolean = true
     private var showPrevious: Boolean = true
     private var showStop: Boolean = false
+
+    // NotificationConfig.showSeekForward / showSeekBackward / seekInterval (see
+    // notification_config.dart). Contract, identical on both platforms: a seek
+    // button is rendered if and only if the flag is true AND the current item is
+    // seekable (see isSeekable below) -- a live stream without DVR can never show
+    // one, even if the host app asks for it. Applied in buildNotification() (the
+    // notification buttons themselves) and updateMediaSessionPlaybackState()
+    // (ACTION_FAST_FORWARD/ACTION_REWIND, which is what Bluetooth/Android Auto/
+    // Wear surfaces read). Because both run again on every showNotification()/
+    // updateState() call, a mid-playback change to isSeekable (e.g. a DVR toggle)
+    // re-applies the gating automatically.
+    //
+    // seekInterval is a *display* value here, exactly as it is on iOS
+    // (skipForwardCommand.preferredIntervals): it only labels the buttons
+    // ("Forward 10s"). The actual seek is performed by the host app's
+    // NotificationService.actionEventStream handler, which must apply the same
+    // interval itself -- native never seeks the player for a transport action.
     private var showSeekForward: Boolean = false
     private var showSeekBackward: Boolean = false
     private var seekInterval: Int = 10
@@ -275,9 +292,12 @@ class NotificationHandler(
      * `MediaPlayer.isSeekable` in media_player.dart exactly. Gates
      * [PlaybackStateCompat.ACTION_SEEK_TO] (see [updateMediaSessionPlaybackState]),
      * [MediaMetadataCompat.METADATA_KEY_DURATION] (see [updateMediaSessionMetadata]),
-     * and the [MediaSessionCompat.Callback.onSeekTo] callback below -- a live stream
-     * with no DVR must not offer, or honor, scrubbing from the lock screen /
-     * notification.
+     * the [MediaSessionCompat.Callback.onSeekTo] callback below, and -- together with
+     * the `showSeekForward`/`showSeekBackward` config flags -- the seek-forward/
+     * seek-backward notification buttons plus their
+     * [PlaybackStateCompat.ACTION_FAST_FORWARD]/[PlaybackStateCompat.ACTION_REWIND]
+     * advertisement. A live stream with no DVR must not offer, or honor, scrubbing or
+     * relative seeking from the lock screen / notification.
      */
     private val isSeekable: Boolean
         get() = !(isLive && !dvrEnabled)
@@ -365,6 +385,42 @@ class NotificationHandler(
                 override fun onStop() {
                     android.util.Log.d(TAG, "MediaSession: onStop")
                     sendActionToFlutter("stop")
+                }
+
+                /**
+                 * Reached both by a tap on the notification's seek-forward button (via
+                 * [buildMediaButtonPendingIntent]'s synthetic `KEYCODE_MEDIA_FAST_FORWARD`
+                 * routed through [NotificationActionReceiver]) and by any hardware /
+                 * Bluetooth / Android Auto fast-forward control, exactly like the
+                 * play/pause/next/previous callbacks above.
+                 *
+                 * Forwards `"seekForward"` -- the same action string iOS's
+                 * `skipForwardCommand` target sends (see NotificationHandler.swift) and the
+                 * value of `NotificationActions.seekForward` in notification_service.dart.
+                 * This handler does not seek the player itself; Dart/the host app owns that,
+                 * including choosing the seek amount (see the seekInterval field doc).
+                 */
+                override fun onFastForward() {
+                    android.util.Log.d(TAG, "MediaSession: onFastForward")
+                    if (!isSeekable) {
+                        // Belt-and-braces: ACTION_FAST_FORWARD is already omitted from
+                        // PlaybackStateCompat and the button is not rendered at all while
+                        // !isSeekable (see updateMediaSessionPlaybackState/buildNotification).
+                        // Reject explicitly anyway, mirroring onSeekTo's guard above.
+                        android.util.Log.d(TAG, "MediaSession: onFastForward ignored -- not seekable (live without DVR)")
+                        return
+                    }
+                    sendActionToFlutter("seekForward")
+                }
+
+                /** Seek-backward counterpart of [onFastForward]; forwards `"seekBackward"`. */
+                override fun onRewind() {
+                    android.util.Log.d(TAG, "MediaSession: onRewind")
+                    if (!isSeekable) {
+                        android.util.Log.d(TAG, "MediaSession: onRewind ignored -- not seekable (live without DVR)")
+                        return
+                    }
+                    sendActionToFlutter("seekBackward")
                 }
 
                 override fun onSeekTo(pos: Long) {
@@ -760,6 +816,21 @@ class NotificationHandler(
             compactViewIndices.add(nextActionIndex++)
         }
 
+        // NotificationConfig.showSeekBackward (see field doc): rendered if and only if
+        // the flag is set AND the current item is seekable. Placed between
+        // "previous" and play/pause so the expanded notification reads
+        // previous / -Ns / play-pause / +Ns / next, and deliberately left out of
+        // compactViewIndices -- the (max 3) compact slots stay reserved for the
+        // primary transport controls.
+        if (showSeekBackward && isSeekable) {
+            builder.addAction(createAction(
+                android.R.drawable.ic_media_rew,
+                "Back ${seekInterval}s",
+                "seekBackward"
+            ))
+            nextActionIndex++
+        }
+
         if (showPlayPause) {
             if (isPlaying) {
                 builder.addAction(createAction(
@@ -775,6 +846,17 @@ class NotificationHandler(
                 ))
             }
             compactViewIndices.add(nextActionIndex++)
+        }
+
+        // NotificationConfig.showSeekForward (see field doc): same contract and same
+        // compact-view treatment as showSeekBackward above.
+        if (showSeekForward && isSeekable) {
+            builder.addAction(createAction(
+                android.R.drawable.ic_media_ff,
+                "Forward ${seekInterval}s",
+                "seekForward"
+            ))
+            nextActionIndex++
         }
 
         if (showNext) {
@@ -872,6 +954,13 @@ class NotificationHandler(
             "pause" -> PlaybackStateCompat.ACTION_PAUSE
             "next" -> PlaybackStateCompat.ACTION_SKIP_TO_NEXT
             "stop" -> PlaybackStateCompat.ACTION_STOP
+            // Map to the two transport actions PlaybackStateCompat.toKeyCode() knows
+            // how to turn into KEYCODE_MEDIA_FAST_FORWARD / KEYCODE_MEDIA_REWIND, which
+            // MediaSessionCompat.Callback.onMediaButtonEvent then dispatches to
+            // onFastForward()/onRewind() above -- the same already-working route the
+            // other buttons take.
+            "seekForward" -> PlaybackStateCompat.ACTION_FAST_FORWARD
+            "seekBackward" -> PlaybackStateCompat.ACTION_REWIND
             else -> PlaybackStateCompat.ACTION_PLAY_PAUSE
         }
 
@@ -1094,6 +1183,19 @@ class NotificationHandler(
         if (isSeekable) {
             actions = actions or PlaybackStateCompat.ACTION_SEEK_TO
         }
+        // ACTION_FAST_FORWARD/ACTION_REWIND follow the exact same
+        // "flag AND isSeekable" contract as the notification buttons themselves
+        // (see buildNotification and the showSeekForward field doc). Advertising
+        // them here is what makes non-notification surfaces (Bluetooth, Android
+        // Auto, Wear) offer the controls, and is also what lets the synthetic
+        // media-button KeyEvent built by buildMediaButtonPendingIntent be
+        // dispatched to onFastForward()/onRewind().
+        if (showSeekForward && isSeekable) {
+            actions = actions or PlaybackStateCompat.ACTION_FAST_FORWARD
+        }
+        if (showSeekBackward && isSeekable) {
+            actions = actions or PlaybackStateCompat.ACTION_REWIND
+        }
 
         val state = PlaybackStateCompat.Builder()
             .setState(
@@ -1292,7 +1394,8 @@ class NotificationHandler(
  * [android.view.KeyEvent] and calls
  * `MediaControllerCompat.dispatchMediaButtonEvent`. That, in turn, invokes the same
  * [MediaSessionCompat.Callback] (onPlay/onPause/onSkipToNext/onSkipToPrevious/
- * onStop) already wired in [NotificationHandler.initialize] and already used by
+ * onStop/onFastForward/onRewind) already wired in [NotificationHandler.initialize]
+ * and already used by
  * Bluetooth/lock-screen/Android Auto controls — so notification taps now forward to
  * Flutter via the exact same, already-verified path (fixes B-08).
  *

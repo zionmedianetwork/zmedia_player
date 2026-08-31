@@ -54,6 +54,24 @@ class NotificationHandler: NSObject {
     private var showNext: Bool = true
     private var showPrevious: Bool = true
     private var showStop: Bool = false
+
+    // NotificationConfig.showSeekForward / showSeekBackward / seekInterval (see
+    // notification_config.dart). Contract, identical on both platforms: the
+    // skip-forward / skip-backward command is offered if and only if the flag is
+    // true AND the current item is seekable (see `isSeekable` below) -- a live
+    // stream without DVR can never show one, even if the host app asks for it.
+    // Applied in `applyCommandAvailability()`, which runs on initialize, on every
+    // ownership handoff, and on every showNotification()/updateState() call, so a
+    // mid-playback change to `isSeekable` (e.g. a DVR toggle) re-applies the
+    // gating automatically.
+    //
+    // seekInterval is a *display* value here (`preferredIntervals`, which is what
+    // Control Center renders inside the skip glyphs), exactly as it is on Android
+    // (the "Forward 10s" button label). The actual seek is performed by the host
+    // app's NotificationService.actionEventStream handler, which must apply the
+    // same interval itself -- native never seeks the player for a transport action.
+    private var showSeekForward: Bool = false
+    private var showSeekBackward: Bool = false
     private var seekInterval: Int = 10
 
     // Current media info
@@ -83,10 +101,12 @@ class NotificationHandler: NSObject {
 
     /// `false` only for a live stream without DVR enabled -- mirrors
     /// `MediaPlayer.isSeekable` in media_player.dart exactly. Gates
-    /// `changePlaybackPositionCommand`/`skipForwardCommand`/`skipBackwardCommand`
-    /// (see `applyCommandAvailability`) and `MPMediaItemPropertyPlaybackDuration`
+    /// `changePlaybackPositionCommand` outright, gates
+    /// `skipForwardCommand`/`skipBackwardCommand` *together with* the
+    /// `showSeekForward`/`showSeekBackward` config flags (both see
+    /// `applyCommandAvailability`), and gates `MPMediaItemPropertyPlaybackDuration`
     /// (see `updateNowPlayingInfo`) -- a live stream with no DVR must not offer, or
-    /// honor, scrubbing from Control Center / the lock screen.
+    /// honor, scrubbing or relative seeking from Control Center / the lock screen.
     private var isSeekable: Bool { !(isLive && !dvrEnabled) }
 
     // MARK: - NotificationConfig fields with no faithful iOS equivalent
@@ -234,6 +254,8 @@ class NotificationHandler: NSObject {
         self.showNext = config["showNext"] as? Bool ?? true
         self.showPrevious = config["showPrevious"] as? Bool ?? true
         self.showStop = config["showStop"] as? Bool ?? false
+        self.showSeekForward = config["showSeekForward"] as? Bool ?? false
+        self.showSeekBackward = config["showSeekBackward"] as? Bool ?? false
         self.seekInterval = config["seekInterval"] as? Int ?? 10
 
         // Setup audio session
@@ -340,14 +362,27 @@ class NotificationHandler: NSObject {
 
         let skipForwardTarget = remoteCommandCenter.skipForwardCommand.addTarget { _ in
             zlog("NotificationHandler: Skip forward command received")
-            Ownership.shared.currentOwner()?.sendActionToFlutter("seekForward")
+            // Belt-and-braces: the command is already disabled unless
+            // `showSeekForward && isSeekable` (see applyCommandAvailability), so the
+            // OS should never invoke this target otherwise. Reject explicitly anyway,
+            // mirroring the changePlaybackPositionCommand target below and Android's
+            // onFastForward() guard.
+            guard let owner = Ownership.shared.currentOwner(),
+                  owner.showSeekForward, owner.isSeekable else {
+                return .commandFailed
+            }
+            owner.sendActionToFlutter("seekForward")
             return .success
         }
         addedTargets.append((remoteCommandCenter.skipForwardCommand, skipForwardTarget))
 
         let skipBackwardTarget = remoteCommandCenter.skipBackwardCommand.addTarget { _ in
             zlog("NotificationHandler: Skip backward command received")
-            Ownership.shared.currentOwner()?.sendActionToFlutter("seekBackward")
+            guard let owner = Ownership.shared.currentOwner(),
+                  owner.showSeekBackward, owner.isSeekable else {
+                return .commandFailed
+            }
+            owner.sendActionToFlutter("seekBackward")
             return .success
         }
         addedTargets.append((remoteCommandCenter.skipBackwardCommand, skipBackwardTarget))
@@ -397,13 +432,22 @@ class NotificationHandler: NSObject {
         remoteCommandCenter.previousTrackCommand.isEnabled = showPrevious
         remoteCommandCenter.stopCommand.isEnabled = showStop
 
-        // Disabled for a live stream without DVR (isSeekable == false): skipping
-        // forward/backward and dragging the scrub bar are both seek operations, and
-        // a non-DVR live stream is not seekable -- see isSeekable doc.
-        remoteCommandCenter.skipForwardCommand.isEnabled = isSeekable
+        // Skip forward/backward: offered if and only if the corresponding config
+        // flag is set AND the item is seekable. Both halves matter and neither used
+        // to be honoured correctly: the flags were ignored entirely here (so a
+        // consumer asking for `showSeekForward: false` still got the command), while
+        // Android read the flags into fields it never used (so a consumer asking for
+        // `showSeekForward: true` got nothing). `isSeekable` stays part of the
+        // condition because skipping forward/backward is a seek operation, and a
+        // non-DVR live stream is not seekable -- see the isSeekable doc.
+        //
+        // preferredIntervals is set unconditionally: it is inert while the command is
+        // disabled, and keeping it out of the branch means a later enable (e.g. a DVR
+        // toggle re-running this method) can never leave a stale interval behind.
+        remoteCommandCenter.skipForwardCommand.isEnabled = showSeekForward && isSeekable
         remoteCommandCenter.skipForwardCommand.preferredIntervals = [NSNumber(value: seekInterval)]
 
-        remoteCommandCenter.skipBackwardCommand.isEnabled = isSeekable
+        remoteCommandCenter.skipBackwardCommand.isEnabled = showSeekBackward && isSeekable
         remoteCommandCenter.skipBackwardCommand.preferredIntervals = [NSNumber(value: seekInterval)]
 
         remoteCommandCenter.changePlaybackPositionCommand.isEnabled = isSeekable

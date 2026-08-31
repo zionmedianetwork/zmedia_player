@@ -27,6 +27,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   post-`dispose()` code path that reached `_showControlsTemporarily()` (now including a
   queued operation dropped by disposal) used to leave a pending `Timer` behind.
 
+- `NotificationConfig.showSeekForward` / `showSeekBackward` are now honoured, identically,
+  on both platforms (#81). Previously neither platform implemented the documented API:
+  Android parsed both flags into private fields it never read again, so no seek button was
+  ever added to the notification regardless of config; iOS ignored the flags entirely and
+  gated `MPRemoteCommandCenter.skipForwardCommand`/`.skipBackwardCommand` on `isSeekable`
+  alone, so any seekable item got the skip commands even when the consumer explicitly set
+  `showSeekForward: false`. The two platforms therefore disagreed and neither matched the
+  API. Both now enforce one contract: **a seek control is offered if and only if the flag
+  is `true` AND the item is seekable** (`MediaPlayer.isSeekable` — a live stream without
+  DVR can never show one, even if asked). Concretely:
+  - **Android** — `NotificationHandler` adds a `NotificationCompat.Action`
+    (`"Forward {seekInterval}s"` / `"Back {seekInterval}s"`, using
+    `android.R.drawable.ic_media_ff`/`ic_media_rew`) whose `PendingIntent` routes through
+    the existing `NotificationActionReceiver` → `MediaSessionCompat.Callback` path as a
+    synthetic `KEYCODE_MEDIA_FAST_FORWARD`/`KEYCODE_MEDIA_REWIND`. New `onFastForward()`/
+    `onRewind()` callbacks forward `"seekForward"`/`"seekBackward"` to Dart. The media
+    session also now advertises `PlaybackStateCompat.ACTION_FAST_FORWARD`/`ACTION_REWIND`
+    under the same gate, so Bluetooth / Android Auto / Wear surfaces offer the controls
+    too. The buttons are deliberately kept out of the three `MediaStyle` compact-view
+    slots, which stay reserved for previous / play-pause / next.
+  - **iOS** — `skipForwardCommand.isEnabled` / `skipBackwardCommand.isEnabled` are now
+    `showSeekForward && isSeekable` / `showSeekBackward && isSeekable` (was `isSeekable`
+    alone); the two flags are read from the config alongside `showPlayPause`/`showNext`/
+    `showPrevious`/`showStop`, and the command targets reject defensively if invoked while
+    ungated. `preferredIntervals` continues to use `seekInterval`.
+
+  The gating is re-derived on every `showNotification`/`updateNotificationState` call on
+  both platforms, so a mid-playback seekability change (e.g. toggling DVR on a live
+  stream) adds or removes the controls without re-initializing.
+
+  **Behaviour change to be aware of:** an app that set `showSeekForward: false` (or left
+  the default) on iOS previously still got skip controls; those now correctly disappear.
+  An app that set `showSeekForward: true` on Android previously got nothing; it now gets a
+  real button. No MethodChannel payload change was required — `NotificationConfig.toMap()`
+  already sent `showSeekForward`, `showSeekBackward`, and `seekInterval` correctly; they
+  simply were not acted on.
+- `NotificationActions.seekForward` / `.seekBackward` now hold the wire values both native
+  handlers actually emit — `'seekForward'` / `'seekBackward'`. They previously read
+  `'seek_forward'` / `'seek_backward'`, which neither Android nor iOS has ever sent, so any
+  `case NotificationActions.seekForward:` branch was dead code and silently never fired.
+  Existing apps that switch on the literal `'seekForward'`/`'seekBackward'` (as the README,
+  `AGENTS.md`, and the example app always have) are unaffected; apps using the constants
+  gain working branches.
+
 ### Changed
 - **Behaviour of every `MediaController` playback/track/config method** (`load`,
   `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`, `toggleMute`, `setSpeed`,
@@ -50,6 +94,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   compatibility but is now only a way to clear that informational flag — nothing gates on
   it, and a failed or timed-out operation can no longer leave the controller stuck.
 
+- Documented that `NotificationConfig.seekInterval` is **display-only on both platforms**:
+  it labels the Android notification action and sets iOS's
+  `skipForwardCommand.preferredIntervals`, but neither platform performs the seek. The host
+  app must apply the matching `Duration` when handling the `seekForward`/`seekBackward`
+  event on `NotificationService.actionEventStream`, exactly as it already must call
+  `play()`/`pause()` itself for the other controls.
+
 ### Deprecated
 - `OperationBusyException` — no longer thrown anywhere in this package. It existed solely
   for the "non-critical operation rejected because the lock was held" case that the queue
@@ -58,6 +109,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed**, because `MediaPlayerException` is `sealed`: deleting a member would break
   every exhaustive `switch` over the hierarchy. Exhaustive switches must therefore keep
   listing it. It will be removed in a future major release. (#86)
+
 
 ## [0.3.0] - 2026-08-18
 
