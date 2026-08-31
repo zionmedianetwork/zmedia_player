@@ -286,6 +286,8 @@ Purpose-built for TikTok/Reels-style vertical feeds, backed by `MediaPlayerPool`
 - **Gesture Callbacks** - `onTap`/`onDoubleTap`/`onLongPress` plus position-carrying
   `onTapDown`/`onDoubleTapDown`/`onLongPressStart` (enables direction-aware double-tap seek)
 
+- **In-place Controller Swap** - Hand a mounted widget a different `MediaController`; a swap to a different `playerId` releases the old native view and rebuilds one for the new player, a swap to the same `playerId` keeps the surface (no keying workaround required)
+
 ### Custom Controls
 - **MediaControls Widget** - Pre-built control bar
 - **Customizable Buttons** - Add custom actions

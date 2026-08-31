@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-1044%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-1052%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -407,7 +407,7 @@ For EZDRM, token-based DRM, offline licenses, and troubleshooting, see the
 - [Player API](docs/api-reference/player-api.md) — `MediaController` / `MediaPlayer` methods and getters
 - [Models](docs/api-reference/models.md) — `MediaItem`, `Playlist`, `MediaConfig`, DRM, and other types
 - [Events & Streams](docs/api-reference/events.md) — every stream and callback
-- [Advanced Features](docs/api-reference/advanced-features.md) — PiP, casting, notifications, caching
+- [Advanced Features](docs/api-reference/advanced-features.md) — PiP, casting, notifications, caching, controller swapping
 - [Live Streaming](docs/api-reference/live-streaming.md) — HLS (Android + iOS) and DASH (Android only) live playback
 - [DRM Configuration](docs/api-reference/drm.md) — Widevine, FairPlay, EZDRM
 - [AirPlay & Chromecast](docs/api-reference/airplay.md) — casting guide
@@ -558,6 +558,16 @@ the fallback also reports a `FlutterError` explaining the cause and the remedy (
 is compiled out of release builds, and is reported at most once per constraint condition). An
 explicit `aspectRatio` always wins over `expandToFill`.
 
+**Swapping `controller` in place.** It is safe to hand a mounted
+`MediaPlayerWidget` a *different* `MediaController` — no
+`key: ValueKey(controller.player.playerId)` workaround is needed. When the
+incoming controller wraps a different `playerId`, the widget releases the
+outgoing player's native platform view and creates a fresh one bound to the new
+player on the following frame. When it wraps the **same** `playerId` (including a
+second `MediaController` over the same `MediaPlayer`), the existing surface is
+deliberately kept alive and only the listener is moved, so rotation and relayout
+never cause a black flash.
+
 ### MediaItem
 
 ```dart
@@ -704,7 +714,7 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 1044), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 1052), and open a PR.
 
 ## License
 
@@ -721,7 +731,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 1044 automated tests — run `flutter test` for the current count.
+- **Tests:** 1052 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth

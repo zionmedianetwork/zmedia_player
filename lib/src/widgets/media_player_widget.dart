@@ -78,6 +78,23 @@ import 'overlays/error_overlay.dart';
 /// Because only `onDoubleTapDown` is supplied above, the built-in
 /// double-tap-to-play/pause default is suppressed; single tap still toggles
 /// the controls overlay because no tap callback was supplied.
+///
+/// ## Swapping [controller] in place
+///
+/// It is safe to hand this widget a *different* [MediaController] without
+/// remounting it (no `key: ValueKey(controller.player.playerId)` workaround is
+/// required).  When the incoming controller wraps a different
+/// [MediaPlayer.playerId], the widget tears the outgoing player's native
+/// platform view down — through the same path [State.dispose] uses, so the
+/// native surface is released rather than orphaned — and creates a fresh one
+/// bound to the new player on the following frame.
+///
+/// When the incoming controller wraps the **same** `playerId` (including a
+/// second [MediaController] over the same [MediaPlayer]), the existing native
+/// surface is deliberately kept alive: only the [ChangeNotifier] subscription
+/// is moved to the new controller.  Destroying and recreating the surface in
+/// that case would cause a visible black flash on every rotation/relayout for
+/// no benefit, since the surface already belongs to the correct player.
 class MediaPlayerWidget extends StatefulWidget {
   /// Media controller for this player widget
   final MediaController controller;
@@ -417,20 +434,50 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
   void didUpdateWidget(MediaPlayerWidget oldWidget) {
     super.didUpdateWidget(oldWidget);
 
+    // Does the swap (if any) change the *player*, or only the controller
+    // wrapping it?  `playerId` is a plain final field, so this comparison is
+    // safe even if either controller has already been disposed.
+    final playerChanged = oldWidget.controller.player.playerId !=
+        widget.controller.player.playerId;
+
     // Handle controller changes
     if (oldWidget.controller != widget.controller) {
       oldWidget.controller.removeListener(_onControllerChanged);
-      widget.controller.addListener(_onControllerChanged);
-      _refreshVideoSurface();
+      // addListener asserts on an already-disposed ChangeNotifier; a consumer
+      // that swaps in a controller it has already torn down should not crash
+      // the whole subtree.
+      if (!widget.controller.isDisposed) {
+        widget.controller.addListener(_onControllerChanged);
+      }
+
+      // `_refreshVideoSurface()` deliberately keeps a live native view alive
+      // (see its doc comment) so rotation/relayout does not churn the surface.
+      // That is correct for a same-player swap, but wrong when the underlying
+      // player changed: the retained surface still belongs to the OUTGOING
+      // player while every callback now targets the incoming one, so the
+      // widget drives an orphaned surface (issue #80).
+      if (playerChanged) {
+        _handlePlayerSwap();
+      } else {
+        _refreshVideoSurface();
+      }
     }
 
     // Propagate boxFit changes to native when the platform view already exists.
     // creationParams are one-shot (sent only at view creation), so a prop change
     // must be forwarded explicitly via the method channel.
-    final oldBoxFit = oldWidget.boxFit ?? oldWidget.controller.config.boxFit;
-    final newBoxFit = widget.boxFit ?? widget.controller.config.boxFit;
-    if (oldBoxFit != newBoxFit && _hasNativeView && !_isDisposed && mounted) {
-      widget.controller.player.setBoxFit(newBoxFit).ignore();
+    //
+    // Skipped when the player itself changed: the surface created by
+    // `_handlePlayerSwap` already carries the effective boxFit (creationParams
+    // plus the `setBoxFit` push in `_onPlatformViewCreated`), and the outgoing
+    // controller may already have been disposed by the consumer — reading
+    // `oldWidget.controller.config` would then throw PlayerDisposedException.
+    if (!playerChanged) {
+      final oldBoxFit = oldWidget.boxFit ?? oldWidget.controller.config.boxFit;
+      final newBoxFit = widget.boxFit ?? widget.controller.config.boxFit;
+      if (oldBoxFit != newBoxFit && _hasNativeView && !_isDisposed && mounted) {
+        widget.controller.player.setBoxFit(newBoxFit).ignore();
+      }
     }
 
     // Force resize if we detect potential sizing issues
@@ -488,11 +535,56 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     // This prevents race conditions between media loading and UI updates
   }
 
+  /// Tear the outgoing player's native view down and rebuild one bound to the
+  /// incoming player.
+  ///
+  /// Only called from [didUpdateWidget] when the swapped-in controller wraps a
+  /// different [MediaPlayer.playerId].  Unlike [_refreshVideoSurface] this does
+  /// NOT early-out on a live surface — that surface is exactly the thing that
+  /// must go away.
+  ///
+  /// Teardown reuses [_cleanupNativeView], the same path [dispose] takes:
+  /// dropping `_nativeView` unmounts the platform-view host, which is what
+  /// actually disposes the native view (`AndroidView`/`UiKitView` teardown →
+  /// `MediaPlayerView.dispose()` on both platforms).  Recreation is deferred to
+  /// a post-frame callback so a frame renders with no platform-view host in
+  /// between; without that gap Flutter would reuse the existing platform-view
+  /// element and silently keep the old native view, since `creationParams`
+  /// (which carry the `playerId`) are one-shot and never re-sent on update.
+  void _handlePlayerSwap() {
+    if (_isDisposed) return;
+
+    // Re-baseline the media-id bookkeeping onto the incoming player so
+    // `_onControllerChanged` treats its next load as new media instead of
+    // comparing against the outgoing player's item.
+    final incomingItem =
+        widget.controller.isDisposed ? null : widget.controller.currentItem;
+    _currentMediaId = incomingItem?.id ?? incomingItem?.title;
+
+    // Release the outgoing player's surface.
+    _cleanupNativeView();
+
+    if (widget.controller.isDisposed || incomingItem == null) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_isDisposed || !mounted) return;
+      // A `_createNativeView()` started for the outgoing player may still be
+      // in flight; it re-reads `widget.controller` after its awaits, so it
+      // will bind to the incoming player on its own and calling again here
+      // would just be swallowed by the `_isCreatingNativeView` guard.
+      if (_isCreatingNativeView) return;
+      _createNativeView();
+    });
+  }
+
   void _refreshVideoSurface() {
     if (_isDisposed) return;
 
-    // Only cleanup and recreate if we don't have a valid native view
+    // Only cleanup and recreate if we don't have a valid native view.
     // This prevents unnecessary surface destruction during orientation changes
+    // and relayouts.  NOTE: this early-out assumes the live surface belongs to
+    // the current player; a controller swap that changes `playerId` must go
+    // through [_handlePlayerSwap] instead.
     if (!_hasNativeView || _nativeView == null) {
       // Clean up existing view
       _cleanupNativeView();
@@ -968,8 +1060,14 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
 
       // Create platform-specific video surface
       const viewType = 'zmedia_player_view';
+      final playerId = widget.controller.player.playerId;
+      // Key the host on the playerId so a player swap can never be reconciled
+      // into the previous platform-view element: `creationParams` are one-shot
+      // and are NOT re-sent on widget update, so an element reused across a
+      // playerId change would keep rendering the outgoing player's surface.
+      final viewKey = ValueKey<String>('$viewType:$playerId');
       final creationParams = {
-        'playerId': widget.controller.player.playerId,
+        'playerId': playerId,
         'boxFit':
             _boxFitToString(widget.boxFit ?? widget.controller.config.boxFit),
       };
@@ -986,6 +1084,7 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
         // used here — it renders via texture and cannot capture the ExoPlayer
         // SurfaceView, producing black video.
         nativeView = PlatformViewLink(
+          key: viewKey,
           viewType: viewType,
           surfaceFactory: (context, controller) {
             return AndroidViewSurface(
@@ -1014,6 +1113,7 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
         );
       } else if (platform == TargetPlatform.iOS) {
         nativeView = UiKitView(
+          key: viewKey,
           viewType: viewType,
           creationParams: creationParams,
           creationParamsCodec: const StandardMessageCodec(),

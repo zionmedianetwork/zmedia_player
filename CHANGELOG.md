@@ -369,6 +369,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   screen width when both axes are unbounded. Behaviour with an explicit `aspectRatio`, or with
   `expandToFill: false`, is unchanged. ([#85](https://github.com/zionmedianetwork/zmedia_player/issues/85))
 
+- `MediaPlayerWidget` no longer keeps the outgoing player's native view when its
+  `controller` is swapped in place for one wrapping a different
+  `MediaPlayer.playerId` (#80). `didUpdateWidget` previously rewired the
+  `ChangeNotifier` subscription and then called an internal refresh that
+  deliberately early-outs whenever a live native view already exists (to avoid
+  surface churn on rotation/relayout). That early-out did not distinguish "same
+  player, new layout" from "different player entirely", so a live controller swap
+  left the widget driving the previous player's orphaned surface — visible to
+  consumers as a fullscreen route that kept rendering the outgoing episode after
+  an auto-advance. `didUpdateWidget` now compares
+  `oldWidget.controller.player.playerId` against
+  `widget.controller.player.playerId`; when they differ it performs a real
+  teardown of the platform view (the same path `dispose()` takes, so the native
+  surface is released rather than orphaned) and creates a fresh one bound to the
+  new player on the following frame. The same-`playerId` case — including a
+  second `MediaController` over the same `MediaPlayer` — keeps the existing
+  surface untouched, so rotation and relayout still never churn the surface.
+  The platform-view host is additionally keyed on the `playerId` so a swapped-in
+  player can never be reconciled into the previous host (`creationParams`, which
+  carry the `playerId`, are one-shot and are not re-sent on widget update).
+  Keying `MediaPlayerWidget` on `controller.player.playerId` to force a remount
+  is no longer necessary.
+- `MediaPlayerWidget.didUpdateWidget` no longer reads the *outgoing* controller's
+  `config` when the underlying player changed. A consumer that disposes the
+  controller it is retiring before handing the widget a replacement previously
+  triggered `PlayerDisposedException` from the `boxFit`-propagation comparison;
+  that comparison is now skipped on a player swap (the newly created surface
+  already carries the effective `boxFit` via `creationParams` and the `setBoxFit`
+  push made when the platform view is created).
+
 ### Changed
 - **Behaviour of every `MediaController` playback/track/config method** (`load`,
   `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`, `toggleMute`, `setSpeed`,
