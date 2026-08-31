@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:visibility_detector/visibility_detector.dart';
 
+import '../core/exceptions.dart';
 import '../core/media_config.dart';
 import '../core/media_controller.dart';
 import '../core/media_player_pool.dart';
@@ -538,9 +539,15 @@ class _MediaFeedState extends State<MediaFeed> {
       final controller = _pool.controllerFor(_keyFor(index, item));
       if (controller != null && !controller.isDisposed) {
         if (!isVisible && !controller.isMuted) {
-          controller.toggleMute();
+          _fireAndForget(
+            'mute of index $index (scrolled out of view)',
+            controller.toggleMute,
+          );
         } else if (isVisible && controller.isMuted) {
-          controller.toggleMute();
+          _fireAndForget(
+            'unmute of index $index (scrolled into view)',
+            controller.toggleMute,
+          );
         }
       }
     }
@@ -650,7 +657,10 @@ class _MediaFeedState extends State<MediaFeed> {
           if (_autoPlayBlockedByPolicy.remove(index) && mounted) {
             setState(() {});
           }
-          unawaited(controller.play());
+          _fireAndForget(
+            'autoplay of index $index (key=$key)',
+            controller.play,
+          );
         } else {
           debugPrint(
             'MediaFeed: autoplay held for index $index (key=$key) — '
@@ -702,12 +712,15 @@ class _MediaFeedState extends State<MediaFeed> {
       // edge). The pin above is already dropped before this branch runs, so
       // release never fights the pin/eviction guarantees Stage 7c relies
       // on.
-      unawaited(_pool.release(key));
+      _fireAndForget(
+        'release of index $index (key=$key)',
+        () => _pool.release(key),
+      );
       return;
     }
 
     if (controller.isPlaying) {
-      controller.pause();
+      _fireAndForget('pause of index $index (key=$key)', controller.pause);
     }
   }
 
@@ -768,12 +781,60 @@ class _MediaFeedState extends State<MediaFeed> {
     }
   }
 
+  /// Starts a fire-and-forget async [operation] and makes sure its failure is
+  /// handled *here* rather than escaping as an unhandled async error.
+  ///
+  /// [MediaFeed] drives controllers from UI and activation paths that must not
+  /// block, so these calls are deliberately never awaited. A bare
+  /// `controller.pause()` therefore discards a `Future` that can still fail,
+  /// and the failure surfaces in the ambient `Zone`'s uncaught-error handler
+  /// with no indication of which item or which operation produced it — which
+  /// is exactly what this wrapper exists to prevent.
+  ///
+  /// Failures are always swallowed (one item must never be able to stop the
+  /// feed, or the rest of a [_pauseOthers] loop), but not silently:
+  ///
+  /// * [PlayerDisposedException] is swallowed **quietly**. The controller was
+  ///   torn down between the moment this feed selected it and the moment the
+  ///   operation ran — an expected race while scrolling, and one the operation
+  ///   is moot in anyway. `MediaController` itself already returns without
+  ///   error when it is disposed before the call starts, so this only covers
+  ///   the narrower window where the underlying `MediaPlayer` goes away
+  ///   mid-flight.
+  /// * Anything else — a genuine native failure — is reported with
+  ///   [debugPrint], matching how [_activate] and [_prewarmIndex] already
+  ///   report theirs.
+  ///
+  /// [description] should name the operation *and* the item it belongs to;
+  /// the whole point is that the log line identifies the culprit.
+  void _fireAndForget(String description, Future<void> Function() operation) {
+    unawaited(() async {
+      try {
+        await operation();
+      } on PlayerDisposedException {
+        // Expected teardown race — see the doc comment above.
+      } catch (e) {
+        debugPrint('MediaFeed: $description failed: $e');
+      }
+    }());
+  }
+
+  /// Pauses every active controller except [activeKey].
+  ///
+  /// The `!other.isDisposed && other.isPlaying` test below is a check-then-act
+  /// that can still lose the race (the controller may be disposed, or may have
+  /// stopped on its own, before the queued `pause()` runs). That is fine: the
+  /// resulting failure is absorbed per-controller by [_fireAndForget], so one
+  /// controller failing to pause never prevents the others from being paused.
   void _pauseOthers(String activeKey) {
     for (final otherKey in _pool.activeKeys) {
       if (otherKey == activeKey) continue;
       final other = _pool.controllerFor(otherKey);
       if (other != null && !other.isDisposed && other.isPlaying) {
-        other.pause();
+        _fireAndForget(
+          'pause of key=$otherKey (superseded by key=$activeKey)',
+          other.pause,
+        );
       }
     }
   }
@@ -841,11 +902,24 @@ class _MediaFeedState extends State<MediaFeed> {
         showControls: false,
         wantKeepAlive: false,
       ),
-      play: () => controller.play(),
-      pause: () => controller.pause(),
-      togglePlayPause: () => controller.togglePlayPause(),
-      toggleMute: () => controller.toggleMute(),
-      seekTo: (position) => controller.seekTo(position),
+      // These are `VoidCallback`/`ValueChanged`, so the `Future` each
+      // controller call returns is discarded by the callback signature
+      // itself — route them through [_fireAndForget] so a host tapping
+      // play/pause cannot produce an unhandled async error.
+      play: () => _fireAndForget('play of index $index', controller.play),
+      pause: () => _fireAndForget('pause of index $index', controller.pause),
+      togglePlayPause: () => _fireAndForget(
+        'togglePlayPause of index $index',
+        controller.togglePlayPause,
+      ),
+      toggleMute: () => _fireAndForget(
+        'toggleMute of index $index',
+        controller.toggleMute,
+      ),
+      seekTo: (position) => _fireAndForget(
+        'seek of index $index',
+        () => controller.seekTo(position),
+      ),
       // Derived rather than the raw set membership so a manual play() via
       // the callback above (or any other path that starts playback) clears
       // the "blocked" badge immediately on the very next state broadcast,

@@ -386,6 +386,7 @@ genuinely frozen playhead. Reported for live streams with **and without** `enabl
 - **MethodChannel calls are async** — always `await`.
 - **`MediaController` operations are queued, not rejected.** Every controller method (`play`, `pause`, `seekTo`, `setVolume`, `load`, track selection, `updateConfig`, …) goes onto a per-controller FIFO queue and runs one at a time, in submission order. Calling while another operation is in flight is fine — the new call waits its turn, so interleaved `pause()`/`play()` or muting a player mid-`load()` always takes effect. Consequences: the returned `Future` resolves only once that call actually ran; each operation is capped at 10 s and fails with `TimeoutException` (so one wedged native call can't stall the queue); an operation still queued when `dispose()` runs is dropped and completes as a no-op; `isOperationInProgress` is informational only (check-then-act on it is racy — you don't need it). Do **not** rebuild a per-`playerId` promise chain on top of this.
 - **Speed is a setting, transport is `play`/`pause`** — never conflate them. `setSpeed`/`MediaConfig.speed` must not start or stop playback on either platform, and with `autoPlay: false` nothing plays until an explicit `play()`. On iOS this means `AVPlayer.defaultRate` (+ a stored requested speed), *not* `rate`, which is a play command.
+- **`MediaFeed` contains controller failures instead of propagating them.** Every fire-and-forget controller call it makes (`_pauseOthers`, autoplay, mute/unmute on visibility change, the `MediaFeedItemState.play`/`pause`/`togglePlayPause`/`toggleMute`/`seekTo` callbacks, which are `VoidCallback`/`ValueChanged` and discard the `Future` by signature) goes through an internal guard: `PlayerDisposedException` is swallowed silently (expected scrolling teardown race), anything else is swallowed and reported via `debugPrint` prefixed `MediaFeed:`. One item's failure never stops the others. These failures therefore do **not** reach a host `runZonedGuarded`/`PlatformDispatcher.onError` reporter. When adding a new fire-and-forget controller call to `MediaFeed`, route it through that guard too.
 - **Multiple players**: use distinct `playerId`s (e.g. in a `ListView` with `MediaListPlayer`); events route by `playerId`.
 - **Swapping a `MediaPlayerWidget.controller` in place is supported** — do *not* key the widget on `controller.player.playerId`. `didUpdateWidget` compares `oldWidget.controller.player.playerId` with the new one: different → real teardown of the platform view (same path as `dispose()`) + recreate bound to the new player next frame; same → surface kept, only the listener moves (this is what keeps rotation/relayout from churning the surface). The platform-view host is keyed on `playerId`, because `creationParams` (which carry it) are one-shot and never re-sent on update.
 - **iOS audio + silent switch**: the plugin sets `AVAudioSession` to `.playback` on `play()`; background audio needs `UIBackgroundModes: audio` in the host `Info.plist`.
@@ -426,7 +427,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 1070 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 1072 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -442,7 +443,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **1070**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **1072**, keep green) before proposing changes.
 - **Every change ships its documentation in the same change** — any code change under `lib/`, `android/`, `ios/`, or `example/` that alters observable behavior, capability, defaults, or usage, plus every API change, data-contract change, feature addition/removal, example change, and build/platform/dependency change. Update the root `README.md`, this file, every affected file under `docs/`, `CHANGELOG.md` (under `[Unreleased]`), and `example/README.md` where the wiring changed. Only a pure internal refactor with no consumer-visible effect is exempt; when in doubt, treat it as qualifying. See `CLAUDE.md`'s **Required Documentation Updates** for the doc map, the verification greps, and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - **Verify, don't assume**: `grep -rn "<symbol>" README.md AGENTS.md CLAUDE.md docs/ example/` for every identifier you added, renamed, or removed, and fix every stale hit.
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
@@ -455,7 +456,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (1070 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (1072 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating

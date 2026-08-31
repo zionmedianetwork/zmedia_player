@@ -158,6 +158,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than once per frame — turning a previously silent black screen into a loud, actionable error.
 
 ### Fixed
+- **`MediaFeed` no longer lets a failed controller call escape as an unhandled async error.**
+  `_pauseOthers` called `other.pause()` as a bare statement, discarding a `Future` that can
+  still fail; the same held for the autoplay `play()`, the `muteWhenNotVisible`
+  `toggleMute()` calls, the live-item `MediaPlayerPool.release()`, the `autoPause` `pause()`,
+  and all five `MediaFeedItemState` action callbacks (`play`, `pause`, `togglePlayPause`,
+  `toggleMute`, `seekTo` — `VoidCallback`/`ValueChanged`, so the `Future` is discarded by the
+  signature itself). Since the operation queue landed, contention no longer throws, but a
+  genuine native failure — or a `dispose()` racing a queued `pause()` — still surfaced in the
+  ambient `Zone`'s uncaught-error handler with nothing naming the item or the operation.
+  All of these now run through an internal guard: a `PlayerDisposedException` is swallowed
+  **silently** (an expected teardown race while scrolling), and any other failure is swallowed
+  but reported with `debugPrint`, prefixed `MediaFeed:` and naming both the operation and the
+  item — matching how `_activate`/`_prewarmIndex` already report theirs. Failures stay
+  per-item: one controller failing to pause never prevents the others in the same
+  `_pauseOthers` loop from being paused. **Behaviour change for hosts:** these failures no
+  longer reach a `runZonedGuarded`/`PlatformDispatcher.onError` crash reporter, so diagnose
+  feed playback problems from the `MediaFeed:` debug output instead. `MediaFeed`'s own
+  `unawaited(_activate(...))`/`unawaited(_prewarmAround(...))` are deliberately left alone —
+  an exception from a host's `itemAt` callback is a host bug that should stay loud.
+  Regression coverage: `test/widgets/media_feed_pause_others_failure_test.dart`.
 - **`toMap()` no longer hands out live references to a model's own collection fields.**
   `DrmConfig.toMap()` emitted `'headers': headers` and `'customData': customData`,
   `MediaItem.toMap()` emitted `'httpHeaders': httpHeaders` and `'metadata': metadata`,
