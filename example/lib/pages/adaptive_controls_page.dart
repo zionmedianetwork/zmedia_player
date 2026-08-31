@@ -170,99 +170,107 @@ class _MinimalCustomControls extends CustomControlsBase {
 
   @override
   Widget buildControls(BuildContext context, ControlsState state) {
-    return FadeTransition(
-      opacity: state.animation,
-      child: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Colors.black.withValues(alpha: 0.4),
-              Colors.transparent,
-              Colors.black.withValues(alpha: 0.7),
-            ],
+    // MediaPlayerWidget keeps customControls mounted (and hit-testable) even
+    // while the overlay is hidden, so that host gesture zones survive the
+    // auto-hide.  Anything that must NOT be tappable while invisible has to
+    // say so explicitly — otherwise these buttons would still swallow the tap
+    // that is supposed to bring the controls back.
+    return IgnorePointer(
+      ignoring: !state.isVisible,
+      child: FadeTransition(
+        opacity: state.animation,
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0.4),
+                Colors.transparent,
+                Colors.black.withValues(alpha: 0.7),
+              ],
+            ),
           ),
-        ),
-        child: Stack(
-          children: [
-            // Center play/pause
-            Center(
-              child: Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(40),
-                  onTap: () => controller.togglePlayPause(),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.5),
-                      shape: BoxShape.circle,
-                    ),
-                    child: ListenableBuilder(
-                      listenable: controller,
-                      builder: (context, _) => Icon(
-                        controller.isPlaying ? Icons.pause : Icons.play_arrow,
-                        color: Colors.white,
-                        size: 36,
+          child: Stack(
+            children: [
+              // Center play/pause
+              Center(
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(40),
+                    onTap: () => controller.togglePlayPause(),
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.5),
+                        shape: BoxShape.circle,
+                      ),
+                      child: ListenableBuilder(
+                        listenable: controller,
+                        builder: (context, _) => Icon(
+                          controller.isPlaying ? Icons.pause : Icons.play_arrow,
+                          color: Colors.white,
+                          size: 36,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
-            ),
-            // Bottom bar
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: ListenableBuilder(
-                  listenable: controller,
-                  builder: (context, _) {
-                    final progress = controller.progress;
-                    final pos = controller.formattedPosition;
-                    final dur = controller.formattedDuration;
-                    return Column(
-                      children: [
-                        SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            trackHeight: 2,
-                            thumbShape: const RoundSliderThumbShape(
-                              enabledThumbRadius: 6,
+              // Bottom bar
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: ListenableBuilder(
+                    listenable: controller,
+                    builder: (context, _) {
+                      final progress = controller.progress;
+                      final pos = controller.formattedPosition;
+                      final dur = controller.formattedDuration;
+                      return Column(
+                        children: [
+                          SliderTheme(
+                            data: SliderTheme.of(context).copyWith(
+                              trackHeight: 2,
+                              thumbShape: const RoundSliderThumbShape(
+                                enabledThumbRadius: 6,
+                              ),
+                              overlayShape: const RoundSliderOverlayShape(
+                                  overlayRadius: 12),
                             ),
-                            overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 12),
+                            child: Slider(
+                              value: progress.clamp(0.0, 1.0),
+                              onChanged: (v) {
+                                final dur = controller.duration;
+                                controller.seekTo(dur * v);
+                              },
+                              activeColor: Colors.white,
+                              inactiveColor: Colors.white30,
+                            ),
                           ),
-                          child: Slider(
-                            value: progress.clamp(0.0, 1.0),
-                            onChanged: (v) {
-                              final dur = controller.duration;
-                              controller.seekTo(dur * v);
-                            },
-                            activeColor: Colors.white,
-                            inactiveColor: Colors.white30,
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text('$pos / $dur',
+                                  style: const TextStyle(
+                                      color: Colors.white70, fontSize: 11)),
+                              const Text('Custom Controls',
+                                  style: TextStyle(
+                                      color: Colors.white54, fontSize: 11)),
+                            ],
                           ),
-                        ),
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text('$pos / $dur',
-                                style: const TextStyle(
-                                    color: Colors.white70, fontSize: 11)),
-                            const Text('Custom Controls',
-                                style: TextStyle(
-                                    color: Colors.white54, fontSize: 11)),
-                          ],
-                        ),
-                      ],
-                    );
-                  },
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

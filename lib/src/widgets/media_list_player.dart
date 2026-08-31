@@ -219,6 +219,12 @@ class MediaListPlayer extends StatefulWidget {
   /// Callback when player is tapped
   final VoidCallback? onTap;
 
+  /// Forwarded to [MediaPlayerWidget.enableBuiltInGestures].
+  ///
+  /// Set to `false` alongside [customControls] to let the host own every
+  /// gesture on the video surface.
+  final bool enableBuiltInGestures;
+
   const MediaListPlayer({
     super.key,
     required this.controller,
@@ -231,6 +237,7 @@ class MediaListPlayer extends StatefulWidget {
     this.onVisible,
     this.onInvisible,
     this.onTap,
+    this.enableBuiltInGestures = true,
   });
 
   @override
@@ -387,6 +394,7 @@ class _MediaListPlayerState extends State<MediaListPlayer> {
           placeholder: widget.placeholder,
           errorWidget: widget.errorWidget,
           onTap: widget.onTap,
+          enableBuiltInGestures: widget.enableBuiltInGestures,
           // A list of players must not keep every item's State (and its
           // native decoder/platform view) alive forever once mounted — see
           // MediaPlayerWidget.wantKeepAlive's doc comment.

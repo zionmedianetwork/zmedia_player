@@ -134,6 +134,13 @@ change to live playback immediately, or `load()` to apply it *and* reload.
 
 `showControls()`, `hideControls()`, `toggleControls()`, `showControlsTemporarily()`, `forceHideControls()`.
 
+`controlsVisible` is the single source of truth for overlay visibility — the built-in
+`MediaControls`, `MaterialMediaControls` and `CupertinoMediaControls` all derive their own fade
+from it rather than keeping a private copy. Note that `MediaPlayerWidget` keeps the controls
+overlay **mounted and hit-testable regardless of `controlsVisible`** so that gestures declared
+inside `customControls` survive an auto-hide; see
+[Gesture ownership](advanced-features.md#gesture-ownership).
+
 ### Picture-in-Picture & casting
 
 | Method | Description |

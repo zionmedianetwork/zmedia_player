@@ -66,7 +66,20 @@ class MaterialMediaControls extends StatefulWidget {
 
 class _MaterialMediaControlsState extends State<MaterialMediaControls>
     with SingleTickerProviderStateMixin {
-  bool _showControls = true;
+  /// Whether the overlay chrome should be shown right now.
+  ///
+  /// Mirrors [MediaController.controlsVisible] rather than holding a second,
+  /// independent copy of that state.  [MediaPlayerWidget] keeps a
+  /// `customControls` overlay mounted at all times (so host gestures survive
+  /// the overlay auto-hiding — see [MediaPlayerWidget.customControls]), which
+  /// means an overlay used that way must gate its own visibility instead of
+  /// relying on being torn out of the tree.
+  bool get _showControls => widget.controller.controlsVisible;
+
+  /// Last observed [MediaController.controlsVisible]; lets us react only to
+  /// genuine visibility flips among the controller's many notifications.
+  late bool _lastControlsVisible;
+
   bool _showVolumeSlider = false;
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
@@ -83,11 +96,15 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
   @override
   void initState() {
     super.initState();
+    _lastControlsVisible = widget.controller.controlsVisible;
     _initializeAnimations();
     _setupListeners();
   }
 
   void _setupListeners() {
+    // Visibility is owned by the MediaController; mirror it into the fade.
+    widget.controller.addListener(_onControlsVisibilityChanged);
+
     // Listen to buffer health updates — store subscription for cancellation
     _bufferHealthSubscription =
         widget.controller.player.bufferHealthStream.listen((health) {
@@ -113,31 +130,44 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
     _fadeController = AnimationController(
       duration: const Duration(milliseconds: 300),
       vsync: this,
+      // Start in sync with the controller rather than assuming "visible":
+      // this overlay is now mounted even while the controls are hidden.
+      value: widget.controller.controlsVisible ? 1.0 : 0.0,
     );
     _fadeAnimation = CurvedAnimation(
       parent: _fadeController,
       curve: Curves.easeInOut, // Material motion: standard easing
     );
-    _fadeController.forward();
+  }
+
+  /// Drives the fade from [MediaController.controlsVisible].
+  void _onControlsVisibilityChanged() {
+    if (!mounted) return;
+    final visible = widget.controller.controlsVisible;
+    if (visible == _lastControlsVisible) return;
+    _lastControlsVisible = visible;
+    setState(() {
+      if (visible) {
+        _fadeController.forward();
+      } else {
+        _fadeController.reverse();
+      }
+    });
   }
 
   @override
   void dispose() {
+    widget.controller.removeListener(_onControlsVisibilityChanged);
     _bufferHealthSubscription?.cancel();
     _qualityTracksSubscription?.cancel();
     _fadeController.dispose();
     super.dispose();
   }
 
+  /// Route the tap through the controller so visibility (and its auto-hide
+  /// timer) has exactly one owner.
   void _toggleControls() {
-    setState(() {
-      _showControls = !_showControls;
-      if (_showControls) {
-        _fadeController.forward();
-      } else {
-        _fadeController.reverse();
-      }
-    });
+    widget.controller.toggleControls();
   }
 
   void _toggleSettings() {
@@ -188,6 +218,10 @@ class _MaterialMediaControlsState extends State<MaterialMediaControls>
 
     return GestureDetector(
       onTap: _toggleControls,
+      // This overlay's root is opaque, so it owns every pointer on the video
+      // surface; handle the double tap here too, otherwise it would be lost
+      // now that the overlay stays mounted while hidden.
+      onDoubleTap: () => widget.controller.togglePlayPause(),
       behavior: HitTestBehavior.opaque,
       child: Stack(
         children: [
