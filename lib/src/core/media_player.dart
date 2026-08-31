@@ -1252,7 +1252,14 @@ class MediaPlayer {
     }
   }
 
-  /// Set and load a playlist
+  /// Set and load a playlist.
+  ///
+  /// Sends `{playerId, playlist, startIndex, config}` to native. `config` is
+  /// the current [MediaConfig] snapshot, serialized exactly the way
+  /// `initialize`/`updateConfig`/`load` already serialize it, and is carried
+  /// on **every** call so the item native loads for [startIndex] uses the
+  /// config this player holds right now rather than whatever native happened
+  /// to store at `initialize()`/the last `updateConfig()` call.
   Future<void> setPlaylist(Playlist playlist, {int? startIndex}) async {
     await _ensureInitialized();
     _markActivity();
@@ -1315,6 +1322,23 @@ class MediaPlayer {
         'playerId': playerId,
         'playlist': _playlistToMap(_currentPlaylist!),
         'startIndex': index,
+        // Config staleness fix (playlist path): native's `setPlaylist`
+        // immediately loads `items[startIndex]` through the very same
+        // `loadMediaItem` the 'load' path uses, so it needs the very same
+        // current-config snapshot -- otherwise the first playlist item is
+        // loaded against whatever config native happened to be holding from
+        // `initialize()`/the last explicit `updateConfig()` call, and a host
+        // that rebuilds its MediaConfig (e.g. flipping
+        // `hlsConfig.enableDvr`) and calls setPlaylist() silently gets the
+        // old streaming config. Native replaces its stored config wholesale
+        // from this key *before* any config-dependent work, and -- exactly
+        // like the 'load' path -- deliberately does NOT re-run
+        // `applyConfig()`/volume-speed-mute reapplication, which would undo
+        // an in-progress runtime `setMuted()`. Optional on the native side,
+        // so an older cached native build that ignores the key still
+        // behaves exactly as before. See the 'config' key on 'load' above
+        // for the full rationale.
+        'config': _configToMap(_config),
       });
 
       _currentItem = _currentPlaylist!.items[index];
@@ -2043,7 +2067,13 @@ class MediaPlayer {
     await skipToIndex(previousIndex);
   }
 
-  /// Skip to specific index in playlist
+  /// Skip to specific index in playlist.
+  ///
+  /// Sends `{playerId, index, config}` to native — `config` being the current
+  /// [MediaConfig] snapshot, for the same reason [setPlaylist] carries it
+  /// (native loads `playlist[index]` through the same `loadMediaItem` the
+  /// `load` path uses). [skipToNext], [skipToPrevious] and playlist
+  /// auto-advance on completion all route through this method.
   Future<void> skipToIndex(int index) async {
     _validatePlaylistOperation();
 
@@ -2060,6 +2090,14 @@ class MediaPlayer {
       await _invokeMethod('skipToIndex', {
         'playerId': playerId,
         'index': index,
+        // Config staleness fix (playlist path): native's `skipToIndex` loads
+        // `playlist[index]` through the same `loadMediaItem` the 'load' path
+        // uses, so the current config snapshot must travel with it too --
+        // see the 'config' key on 'setPlaylist'/'load' above. This is also
+        // the path [skipToNext], [skipToPrevious] and the auto-advance in
+        // [_handlePlaybackCompleted] all funnel through, so covering it here
+        // covers every playlist-driven load.
+        'config': _configToMap(_config),
       });
 
       _currentPlaylist = _currentPlaylist!.copyWith(currentIndex: index);

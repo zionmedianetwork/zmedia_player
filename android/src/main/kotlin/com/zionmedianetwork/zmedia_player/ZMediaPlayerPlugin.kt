@@ -300,9 +300,17 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
             val playerId = call.argument<String>("playerId")
             val playlist = call.argument<Map<String, Any>>("playlist")
             val startIndex = call.argument<Int>("startIndex") ?: 0
+            // Config staleness fix (playlist path): MediaPlayer.setPlaylist()
+            // on the Dart side now sends the current MediaConfig snapshot
+            // alongside the playlist, exactly as 'load' does -- native loads
+            // items[startIndex] through the same loadMediaItem, so it needs
+            // the same config. Optional/nullable so an older cached Dart
+            // build (playerId + playlist + startIndex only) still works with
+            // whatever config this instance already holds.
+            val config = call.argument<Map<String, Any>>("config")
 
             if (playerId != null && playlist != null) {
-                playerManager.setPlaylist(playerId, playlist, startIndex)
+                playerManager.setPlaylist(playerId, playlist, startIndex, config)
                 result.success(null)
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID and playlist are required", null)
@@ -501,9 +509,14 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
         try {
             val playerId = call.argument<String>("playerId")
             val index = call.argument<Int>("index")
+            // Config staleness fix (playlist path) -- see handleSetPlaylist.
+            // skipToNext/skipToPrevious/auto-advance all route through this
+            // method on the Dart side, so this one key covers them all.
+            // Optional/nullable for older cached Dart builds.
+            val config = call.argument<Map<String, Any>>("config")
 
             if (playerId != null && index != null) {
-                playerManager.skipToIndex(playerId, index)
+                playerManager.skipToIndex(playerId, index, config)
                 result.success(null)
             } else {
                 result.error("INVALID_ARGUMENT", "Player ID and index are required", null)

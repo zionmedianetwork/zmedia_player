@@ -241,10 +241,11 @@ With `enableDvr: true`, native also derives and reports a duration for a live it
 current DVR window length (`Timeline.Window.durationMs` on Android, `AVPlayerItem
 .seekableTimeRanges` on iOS), re-derived as the window grows, rather than the unbounded total
 broadcast time. `MediaPlayer.dvrEnabled`/`.isSeekable` expose the Dart-side gate directly. The
-config snapshot that decides all of this is carried on every `MediaPlayer.load()` call, not
-only at `initialize()`/`updateConfig()` time — except `setPlaylist`/`skipToIndex`, which still
-call a single-argument native `loadMediaItem` and can leave per-item streaming config stale
-(see the [Live Streaming guide](live-streaming.md#what-actually-works-today)).
+config snapshot that decides all of this is carried on every `MediaPlayer.load()`,
+`setPlaylist()` and `skipToIndex()` call — not only at `initialize()`/`updateConfig()` time — so
+playlist-driven items honor the current config too (`skipToNext`/`skipToPrevious`/auto-advance
+route through `skipToIndex`). See the
+[Live Streaming guide](live-streaming.md#what-actually-works-today).
 
 ## Subtitles
 

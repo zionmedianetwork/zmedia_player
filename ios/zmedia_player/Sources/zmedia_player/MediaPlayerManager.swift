@@ -236,12 +236,17 @@ class MediaPlayerManager {
         }
     }
 
-    func setPlaylist(playerId: String, playlist: [String: Any], startIndex: Int) throws {
+    func setPlaylist(
+        playerId: String,
+        playlist: [String: Any],
+        startIndex: Int,
+        config: [String: Any]? = nil
+    ) throws {
         markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
-        playerInstance.setPlaylist(playlist: playlist, startIndex: startIndex)
+        playerInstance.setPlaylist(playlist: playlist, startIndex: startIndex, newConfig: config)
     }
 
     func play(playerId: String) throws {
@@ -342,11 +347,11 @@ class MediaPlayerManager {
         playerInstance.enableAutoQuality()
     }
 
-    func skipToIndex(playerId: String, index: Int) throws {
+    func skipToIndex(playerId: String, index: Int, config: [String: Any]? = nil) throws {
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
-        playerInstance.skipToIndex(index: index)
+        playerInstance.skipToIndex(index: index, newConfig: config)
     }
 
     func updateConfig(playerId: String, config: [String: Any]) throws {
@@ -811,10 +816,14 @@ class MediaPlayerInstance: NSObject {
     /// (in short: `applyConfig()`'s `startMuted` write would silently undo
     /// a runtime `setMuted()` call, since `config`'s `startMuted` key is
     /// never kept in sync with it, unlike `volume`/`speed`/`boxFit`).
-    /// `nil` when called from `skipToIndex`/`setPlaylist` (no config change
-    /// on a playlist advance -- unchanged pre-existing behavior) or from an
-    /// older cached Dart build that predates this wiring; either way
-    /// `config` (whatever it already was) is left untouched.
+    /// Every Dart entry point that reaches this method now carries that
+    /// snapshot: `load`, and -- as of the playlist-path fix -- `setPlaylist`
+    /// and `skipToIndex` too (the latter being what `skipToNext`,
+    /// `skipToPrevious` and playlist auto-advance funnel through).
+    /// `newConfig` is therefore only `nil` when an older cached Dart build,
+    /// predating that wiring, is talking to this native build; in that case
+    /// `config` (whatever it already was) is left untouched, exactly as
+    /// before.
     func loadMediaItem(mediaItem: [String: Any], newConfig: [String: Any]? = nil) {
         if let newConfig = newConfig {
             config = newConfig
@@ -1050,14 +1059,42 @@ class MediaPlayerInstance: NSObject {
         }
     }
 
-    func setPlaylist(playlist: [String: Any], startIndex: Int) {
+    /// Config staleness fix (playlist path): `newConfig`, when present, is
+    /// the current top-level (per-player) config snapshot sent by
+    /// `MediaPlayer.setPlaylist()` on the Dart side -- the same wire shape
+    /// `initialize`/`updateConfig`/`load` already send. It replaces `config`
+    /// wholesale *before* any config-dependent work runs (see the inline
+    /// comment below), and is forwarded to
+    /// `loadMediaItem(mediaItem:newConfig:)`, which -- exactly as on the
+    /// `load` path -- deliberately does NOT call `applyConfig()`: see that
+    /// method's doc for why reapplying `startMuted` on every item load would
+    /// undo a runtime `setMuted()` call. Mirrors
+    /// `MediaPlayerManager.kt`'s `setPlaylist` exactly.
+    ///
+    /// `nil` when an older cached Dart build (sending only
+    /// playerId/playlist/startIndex) is talking to this native build; in
+    /// that case `config` is left untouched, exactly as before this fix.
+    func setPlaylist(playlist: [String: Any], startIndex: Int, newConfig: [String: Any]? = nil) {
+        // Replace the stored config first, unconditionally, so it is in
+        // place before ANY config-dependent work below -- including the
+        // early-return paths (malformed/empty payload), where silently
+        // dropping the caller's freshest snapshot would reintroduce exactly
+        // the staleness this fix exists to remove. `loadMediaItem` performs
+        // the same replacement itself from `newConfig` (that is where the
+        // contract is documented); doing it here too is an idempotent no-op
+        // on the normal path, not a second, divergent way to apply config.
+        // Mirrors `MediaPlayerManager.kt`'s `setPlaylist`.
+        if let newConfig = newConfig {
+            config = newConfig
+        }
+
         guard let items = playlist["items"] as? [[String: Any]] else { return }
 
         currentPlaylist = items
         currentIndex = max(0, min(startIndex, items.count - 1))
 
         if !items.isEmpty {
-            loadMediaItem(mediaItem: items[currentIndex])
+            loadMediaItem(mediaItem: items[currentIndex], newConfig: newConfig)
         }
     }
 
@@ -1289,12 +1326,20 @@ class MediaPlayerInstance: NSObject {
         zlog("MediaPlayerInstance: Auto quality enabled - preferredPeakBitRate cleared")
     }
 
-    func skipToIndex(index: Int) {
+    /// Config staleness fix (playlist path): `newConfig` carries the current
+    /// config snapshot sent by `MediaPlayer.skipToIndex()` on the Dart side
+    /// (which is also what `skipToNext`/`skipToPrevious`/playlist
+    /// auto-advance route through) and is forwarded to
+    /// `loadMediaItem(mediaItem:newConfig:)` on exactly the same terms as
+    /// `setPlaylist` -- see that method's and `loadMediaItem`'s docs. `nil`
+    /// from an older cached Dart build leaves `config` untouched. Mirrors
+    /// `MediaPlayerManager.kt`'s `skipToIndex`.
+    func skipToIndex(index: Int, newConfig: [String: Any]? = nil) {
         guard let playlist = currentPlaylist,
               index >= 0 && index < playlist.count else { return }
 
         currentIndex = index
-        loadMediaItem(mediaItem: playlist[index])
+        loadMediaItem(mediaItem: playlist[index], newConfig: newConfig)
     }
 
     /// Config staleness fix: shares one source of truth with the `newConfig`

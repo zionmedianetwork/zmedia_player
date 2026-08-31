@@ -421,7 +421,7 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 7. **Multiple instances are supported** - Use unique playerIds for concurrent players (e.g., ListView)
 8. **MethodChannel calls are async** - Always await native operations to prevent race conditions
 9. **`seekTo` throws on a non-seekable live stream** - `MediaPlayer.seekTo` throws `InvalidStateException` when `isLive && !dvrEnabled`; check `MediaPlayer.isSeekable` first, or set `enableDvr: true` on the matching `HlsConfig`/`DashConfig`
-10. **`load()` carries the current config, `setPlaylist`/`skipToIndex` do not (yet)** - Reloading with a changed `MediaConfig` (e.g. flipping `hlsConfig.enableDvr`) via `load()` takes effect immediately; `setPlaylist`/`skipToIndex` still call native `loadMediaItem` without a config snapshot, so per-item streaming config can be stale for playlist-driven items until an explicit `load()` or `updateConfig()` call
+10. **Every load path carries the current config snapshot** - `load()`, `setPlaylist()` and `skipToIndex()` each send a `config` key (the current `MediaConfig`, serialized exactly as `initialize`/`updateConfig` send it) with every call, so reloading with a changed `MediaConfig` (e.g. flipping `hlsConfig.enableDvr`) takes effect immediately — on playlist-driven items too. `skipToNext()`/`skipToPrevious()`/playlist auto-advance route through `skipToIndex()` and are covered by the same key. Native replaces its stored config from it before any config-dependent work, but deliberately does not re-run `applyConfig()` from these paths (that would undo an in-progress runtime `setMuted()`); the key is optional on the native side, so an older Dart caller cannot break a newer native build
 
 ## UI/UX Design Specifications
 

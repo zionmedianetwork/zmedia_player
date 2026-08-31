@@ -168,15 +168,27 @@ parse the HLS manifest for quality tracks (iOS), and the cast `MediaInfo` conten
 (`endsWith('.m3u8')`/`endsWith('.mpd')` on the URL path). `loadMediaOnCastDevice`'s reduced
 `mediaItem` map carries the key too.
 
-**`load` payload.** `MediaPlayer.load()` sends `{playerId, mediaItem, config}` — `config` is the
-current `MediaConfig` snapshot (serialized the same way `initialize`/`updateConfig` already do),
-carried on **every** `load()` call so a rebuilt config (e.g. flipping `hlsConfig.enableDvr`) takes
-effect on reload without a separate `updateConfig()` call. Native replaces its stored config
-wholesale from this before any config-dependent work runs, but deliberately does not re-run
-`applyConfig()`/volume-speed-mute reapplication from this path (that would undo an in-progress
-runtime `setMuted()` call — see `MediaPlayerManager.kt`'s/`.swift`'s `loadMediaItem` doc). Known
-gap: `setPlaylist`/`skipToIndex` still call native `loadMediaItem` without a config snapshot, so
-per-item streaming config can be stale for playlist-driven items.
+**Config-snapshot payloads (`load`, `setPlaylist`, `skipToIndex`).** Every Dart entry point that
+makes native load a media item carries the current `MediaConfig` snapshot under a `config` key,
+serialized the same way `initialize`/`updateConfig` already do:
+
+| Method | Payload |
+| --- | --- |
+| `load` | `{playerId, mediaItem, config}` |
+| `setPlaylist` | `{playerId, playlist, startIndex, config}` |
+| `skipToIndex` | `{playerId, index, config}` |
+
+`skipToNext`, `skipToPrevious` and playlist auto-advance on completion all route through
+`skipToIndex`, so they are covered by the same key. The snapshot is sent on **every** such call,
+so a rebuilt config (e.g. flipping `hlsConfig.enableDvr`) takes effect on the next load —
+including a playlist-driven one — without a separate `updateConfig()` call. Native replaces its
+stored config wholesale from this before any config-dependent work runs, but deliberately does
+not re-run `applyConfig()`/volume-speed-mute reapplication from these paths (that would undo an
+in-progress runtime `setMuted()` call — see `MediaPlayerManager.kt`'s/`.swift`'s `loadMediaItem`
+doc). `config` is optional on the native side on all three: an absent key leaves the stored
+config untouched, so an older Dart caller cannot break a newer native build. Per-item
+`httpHeaders`/`drmConfig` are unaffected by all of this — they live on `MediaItem`, not
+`MediaConfig`.
 
 ---
 
@@ -297,7 +309,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 933 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 943 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -313,7 +325,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **933**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **943**, keep green) before proposing changes.
 - **API/data-contract/feature changes require documentation in the same change** — root `README.md`, this file, every affected file under `docs/`, and `CHANGELOG.md`. See `CLAUDE.md`'s Development Workflow for the full rule and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
@@ -325,7 +337,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (933 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (943 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating

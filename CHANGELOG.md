@@ -123,6 +123,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MediaInfo` contentType, instead of always guessing `application/x-mpegurl` /
   `application/dash+xml` from the URL string.
 
+- **Playlist load paths now carry the current `MediaConfig` snapshot** (#82). `setPlaylist`
+  and `skipToIndex` previously sent no `config` key over the MethodChannel, even though
+  native loads `items[startIndex]`/`playlist[index]` through the very same `loadMediaItem`
+  the `load` path uses — so playlist-driven items were loaded against whatever config native
+  had stored at `initialize()`/the last explicit `updateConfig()` call. The mismatch was
+  silent: playback worked, just not with the `MediaConfig`-level settings
+  (`hlsConfig`/`dashConfig`, `enableDvr`, `liveLatency`, bitrate bounds, `adaptiveCacheConfig`,
+  `autoPlay`, …) the caller asked for. Both payloads now carry `config`, and native replaces
+  its stored config from it *before* any config-dependent work, exactly as the `load` path
+  does — and, exactly as on the `load` path, deliberately does **not** re-run
+  `applyConfig()`/volume-speed-mute reapplication, which would undo an in-progress runtime
+  `setMuted()`. `skipToNext`, `skipToPrevious` and playlist auto-advance on completion all
+  route through `skipToIndex`, so they are covered too.
+
+  Data-contract change (both directions stay backward compatible):
+
+  | MethodChannel call | Payload before | Payload now |
+  |---|---|---|
+  | `setPlaylist` | `{playerId, playlist, startIndex}` | `{playerId, playlist, startIndex, config}` |
+  | `skipToIndex` | `{playerId, index}` | `{playerId, index, config}` |
+
+  `config` is optional on the native side (Android `ZMediaPlayerPlugin.handleSetPlaylist`/
+  `handleSkipToIndex`, iOS `handleSetPlaylist`/`handleSkipToIndex`): an absent key leaves the
+  stored config untouched, so an older Dart caller cannot break a newer native build, and an
+  older native build simply ignores the new key. The MethodChannel protocol version is
+  unchanged. Per-item `httpHeaders`/`drmConfig` live on `MediaItem` and were never affected.
+
 ### Changed
 - **Behaviour of every `MediaController` playback/track/config method** (`load`,
   `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`, `toggleMute`, `setSpeed`,

@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-933%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-943%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -149,6 +149,11 @@ final playlist = Playlist(
 await _controller.setPlaylist(playlist);
 await _controller.skipToNext(); // skipToPrevious() / skipToIndex(i)
 ```
+
+`setPlaylist` and `skipToIndex` carry the current `MediaConfig` snapshot to native on every
+call, exactly like `load` does, so per-item streaming settings (`hlsConfig`/`dashConfig`,
+`enableDvr`, bitrate bounds, …) are never stale for playlist-driven items. `skipToNext`,
+`skipToPrevious` and auto-advance on completion all route through `skipToIndex`.
 
 ### Custom Configuration
 
@@ -549,13 +554,19 @@ example/               # demo application
 ```
 
 Dart communicates with native over a single `MethodChannel` (`zmedia_player`), routed per
-`playerId` so multiple players can run concurrently. See [`CLAUDE.md`](CLAUDE.md) and
-[`docs/implementation/`](docs/implementation/) for the full architecture.
+`playerId` so multiple players can run concurrently. Every call that makes native load a media
+item — `load` (`{playerId, mediaItem, config}`), `setPlaylist`
+(`{playerId, playlist, startIndex, config}`) and `skipToIndex` (`{playerId, index, config}`) —
+carries the current `MediaConfig` snapshot under a `config` key, so a rebuilt config takes
+effect on the next load without a separate `updateConfig()` call; the key is optional on the
+native side, so an older native build safely ignores it. See [`CLAUDE.md`](CLAUDE.md),
+[`AGENTS.md`](AGENTS.md) and [`docs/implementation/`](docs/implementation/) for the full
+architecture.
 
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 588), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 943), and open a PR.
 
 ## License
 
@@ -572,7 +583,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 588 automated tests — run `flutter test` for the current count.
+- **Tests:** 943 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth
