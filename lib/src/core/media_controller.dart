@@ -198,6 +198,27 @@ class MediaController extends ChangeNotifier {
   /// Progress percentage (0.0 to 1.0)
   double get progress => _currentState.progress;
 
+  /// Which timeline [position] is currently measured against — see
+  /// [PositionBasis]. Native-sourced, updated on every position event.
+  ///
+  /// Check this before treating a non-advancing [position] as a stall: on
+  /// [PositionBasis.liveWindow] a constant [position] is what a healthy live
+  /// edge looks like.
+  PositionBasis get positionBasis => _currentState.positionBasis;
+
+  /// How far behind the live edge the playhead is, or `null` for VOD / when
+  /// the platform cannot answer yet. See [PlaybackState.liveEdgeOffset].
+  Duration? get liveEdgeOffset => _currentState.liveEdgeOffset;
+
+  /// Whether the playhead is riding the live edge, within
+  /// [PlaybackState.defaultLiveEdgeTolerance] (15 seconds). Always `false`
+  /// for VOD.
+  ///
+  /// Drive a LIVE badge or a "jump to live" affordance from this, and see
+  /// `docs/api-reference/live-streaming.md` for the stall-watchdog pattern
+  /// that pairs it with [liveEdgeOffset].
+  bool get isAtLiveEdge => _currentState.isAtLiveEdge;
+
   /// Whether there's a next track available
   bool get hasNext => _player.currentPlaylist?.hasNext ?? false;
 

@@ -832,6 +832,50 @@ class MediaPlayer {
     return !(_isLive && !_dvrEnabled);
   }
 
+  /// How far behind the live edge the playhead currently is, or `null` when
+  /// the question does not apply (VOD) or the platform cannot answer it yet.
+  ///
+  /// Native-sourced on the existing 500ms `onPositionChanged` event (payload
+  /// key `liveEdgeOffset`, milliseconds): `Player.getCurrentLiveOffset()` on
+  /// Android, `AVPlayerItem.seekableTimeRanges.last.end - currentTime()` on
+  /// iOS. Reported for live streams with *and* without `enableDvr`.
+  ///
+  /// This exists because [PlaybackState.position] alone cannot tell a healthy
+  /// live edge from a frozen playhead: when [positionBasis] is
+  /// [PositionBasis.liveWindow], the window start slides forward with the
+  /// playhead and the position stays roughly constant during perfectly
+  /// healthy playback. This value does not — against a frozen playhead in a sliding
+  /// window it grows without bound. See
+  /// `docs/api-reference/live-streaming.md` for the worked stall-watchdog
+  /// pattern.
+  Duration? get liveEdgeOffset {
+    _throwIfDisposed();
+    return _currentState.liveEdgeOffset;
+  }
+
+  /// Whether the playhead is riding the live edge, within
+  /// [PlaybackState.defaultLiveEdgeTolerance] (15 seconds).
+  ///
+  /// Always `false` for VOD and while [liveEdgeOffset] is `null`. Use
+  /// [PlaybackState.isAtLiveEdgeWithin] on [currentState] for a different
+  /// tolerance.
+  bool get isAtLiveEdge {
+    _throwIfDisposed();
+    return _currentState.isAtLiveEdge;
+  }
+
+  /// Which timeline [PlaybackState.position] is currently measured against —
+  /// see [PositionBasis].
+  ///
+  /// Native-sourced on the existing `onPositionChanged` event (payload key
+  /// `positionBasis`). [PositionBasis.absolute] until the first such event
+  /// arrives after a [load], and on older cached native builds that predate
+  /// this field.
+  PositionBasis get positionBasis {
+    _throwIfDisposed();
+    return _currentState.positionBasis;
+  }
+
   /// Current PiP status
   PipStatus get pipStatus {
     _throwIfDisposed();
@@ -1159,7 +1203,16 @@ class MediaPlayer {
         'config': _configToMap(_config),
       });
 
-      _updateState(_currentState.copyWith(state: PlayerState.buffering));
+      // Live-edge signal is per-item and native-sourced: drop whatever the
+      // previous item reported rather than letting it leak across the load
+      // (a stale non-null offset from a live item would otherwise make a
+      // freshly-loaded VOD item read as "at the live edge"). Both are
+      // repopulated by the first `onPositionChanged` event for the new item.
+      _updateState(_currentState.copyWith(
+        state: PlayerState.buffering,
+        clearLiveEdgeOffset: true,
+        positionBasis: PositionBasis.absolute,
+      ));
 
       crashReporter?.log('Media loaded successfully', context: {
         'mediaId': item.id,
@@ -2695,17 +2748,63 @@ class MediaPlayer {
     }
   }
 
-  /// Handle position change events from platform
+  /// Handle position change events from platform.
+  ///
+  /// Besides `position`, this event carries the two live-edge fields added
+  /// for the "no live-edge signal" gap (see [PlaybackState.liveEdgeOffset] /
+  /// [PositionBasis]). Both ride this existing 500ms event deliberately
+  /// rather than getting a channel event of their own: they are sampled from
+  /// the same native tick that produces `position`, and are only ever useful
+  /// alongside it.
+  ///
+  ///  - `liveEdgeOffset` (int, milliseconds) — absent/null for VOD and for a
+  ///    live item whose offset native cannot answer yet. Absent entirely on
+  ///    older cached native builds, which is why it is read leniently and
+  ///    clears the field rather than throwing.
+  ///  - `positionBasis` (String, `'absolute'` | `'liveWindow'`) — absent on
+  ///    older cached native builds, in which case the historical assumption
+  ///    ([PositionBasis.absolute]) is kept.
   void _handlePositionChanged(Map<dynamic, dynamic> arguments) {
     if (_isDisposed) return;
 
     final positionMs = arguments['position'] as int;
     final position = Duration(milliseconds: positionMs);
 
-    _updateState(_currentState.copyWith(position: position));
+    final liveEdgeOffsetMs = (arguments['liveEdgeOffset'] as num?)?.toInt();
+    final liveEdgeOffset = liveEdgeOffsetMs == null
+        ? null
+        : Duration(milliseconds: liveEdgeOffsetMs);
+
+    final positionBasis =
+        _stringToPositionBasis(arguments['positionBasis'] as String?);
+
+    _updateState(_currentState.copyWith(
+      position: position,
+      liveEdgeOffset: liveEdgeOffset,
+      clearLiveEdgeOffset: liveEdgeOffset == null,
+      positionBasis: positionBasis,
+    ));
 
     if (!_positionController.isClosed) {
       _positionController.add(position);
+    }
+  }
+
+  /// Maps the `positionBasis` string on an `onPositionChanged` payload to
+  /// [PositionBasis].
+  ///
+  /// Falls back to [PositionBasis.absolute] for `null` (an older cached
+  /// native build that does not send the key) and for any unrecognised value
+  /// (a newer native build than this Dart layer), which preserves the
+  /// behaviour every consumer had before this field existed.
+  PositionBasis _stringToPositionBasis(String? value) {
+    switch (value) {
+      case 'liveWindow':
+        return PositionBasis.liveWindow;
+      case 'absolute':
+        return PositionBasis.absolute;
+      default:
+        return PositionBasis.absolute;
     }
   }
 

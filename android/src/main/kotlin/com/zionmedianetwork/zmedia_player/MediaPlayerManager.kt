@@ -1512,7 +1512,20 @@ class MediaPlayerInstance(
         positionUpdateRunnable = object : Runnable {
             override fun run() {
                 exoPlayer?.let { player ->
-                    if (player.isPlaying) {
+                    // Issue #88: previously gated on `player.isPlaying` alone,
+                    // which is false the moment playback rebuffers
+                    // (STATE_BUFFERING) — so a stall produced NO position
+                    // events at all and `liveEdgeOffset` froze at its last
+                    // value instead of visibly growing away from the live
+                    // edge, defeating the stall signal this event now carries.
+                    // Also sampling while the host still WANTS to play
+                    // (playWhenReady) but is stalled fixes that. Deliberately
+                    // still silent while genuinely paused (playWhenReady
+                    // false) and while idle/ended — unchanged behaviour for
+                    // every non-stall case.
+                    val stalledButIntendingToPlay = player.playWhenReady &&
+                        player.playbackState == Player.STATE_BUFFERING
+                    if (player.isPlaying || stalledButIntendingToPlay) {
                         notifyPositionChanged(player.currentPosition)
                     }
                 }
@@ -1599,12 +1612,114 @@ class MediaPlayerInstance(
         }
     }
 
+    /**
+     * Issue #88 (no live-edge signal): the offset of the playhead from the
+     * live edge in milliseconds, or `null` when the question does not apply
+     * (VOD) or ExoPlayer cannot answer it yet.
+     *
+     * Primary source is [Player.getCurrentLiveOffset], ExoPlayer's own answer
+     * to exactly this question — it already accounts for the manifest's
+     * live-edge definition and the current `Timeline.Window`'s live offset
+     * bookkeeping, so there is no reason to hand-roll the arithmetic when the
+     * platform exposes it directly. It returns [C.TIME_UNSET] when the current
+     * item is not live or the offset is not yet known.
+     *
+     * Documented fallback for the `C.TIME_UNSET` case: for a live window whose
+     * length is known, "distance from the playhead to the end of the currently
+     * known window" is the same quantity, because [Player.getCurrentPosition]
+     * and [Timeline.Window.durationUs] are both window-relative and share one
+     * zero point (see [notifyDurationChanged]'s doc) — so
+     * `window.durationMs - player.currentPosition` is the distance from the
+     * playhead to the live edge. Coerced to >= 0: the two values are sampled a
+     * few instructions apart and the window end can legitimately be observed
+     * slightly behind the playhead.
+     *
+     * `null` (rather than 0) when neither source can answer, so Dart reports
+     * `liveEdgeOffset == null` / `isAtLiveEdge == false` instead of the far
+     * more dangerous "0ms behind the edge".
+     *
+     * Deliberately NOT gated on [currentDvrEnabled], unlike
+     * [notifyDurationChanged]: the DVR gate there exists to avoid handing a
+     * consumer a scrubbable *range* it has no permission to seek within, and
+     * that reasoning does not apply to a read-only health signal. A live
+     * stream without DVR is exactly as prone to the frozen-playhead ambiguity
+     * this value resolves, so it gets the value too.
+     */
+    private fun currentLiveEdgeOffsetMs(player: ExoPlayer): Long? {
+        return try {
+            val reported = player.currentLiveOffset
+            if (reported != C.TIME_UNSET) return reported.coerceAtLeast(0L)
+
+            val timeline = player.currentTimeline
+            if (timeline.isEmpty) return null
+            val window = Timeline.Window()
+            timeline.getWindow(player.currentMediaItemIndex, window)
+            if (!window.isLive() || window.durationUs == C.TIME_UNSET) return null
+            (window.durationMs - player.currentPosition).coerceAtLeast(0L)
+        } catch (e: Exception) {
+            android.util.Log.e("MediaPlayerInstance", "Error computing live edge offset", e)
+            null
+        }
+    }
+
+    /**
+     * Issue #88 (position basis flag): which timeline the `position` reported
+     * by [notifyPositionChanged] is measured against, as the wire strings the
+     * Dart `PositionBasis` enum parses (`"absolute"` / `"liveWindow"`).
+     *
+     * `"liveWindow"` for ANY live item on Android, DVR enabled or not:
+     * [Player.getCurrentPosition] is documented as the position within the
+     * *current window*, and for a live item that window's start slides forward
+     * in wall-clock time. This is derived from [Timeline.Window.isLive] —
+     * ExoPlayer's own manifest-derived detection, the same source
+     * [notifyDurationChanged] reports `isLive` from — rather than from the
+     * Dart-supplied `MediaItem.isLive` flag or the app-level `enableDvr`
+     * config, because what is being described here is a property of the
+     * timeline ExoPlayer actually built, not of what the host asked for.
+     *
+     * Note this legitimately differs from iOS, which reports `"absolute"` for
+     * a live item *without* DVR (there, position is the `AVPlayerItem`'s own
+     * absolute timeline and only gets translated to window-relative when the
+     * DVR window is in play — see `MediaPlayerManager.swift`). Reporting each
+     * platform's actual basis is the entire point of the field; normalising it
+     * to a lie on one platform would defeat it.
+     */
+    private fun currentPositionBasis(player: ExoPlayer): String {
+        return try {
+            val timeline = player.currentTimeline
+            if (timeline.isEmpty) return "absolute"
+            val window = Timeline.Window()
+            timeline.getWindow(player.currentMediaItemIndex, window)
+            if (window.isLive()) "liveWindow" else "absolute"
+        } catch (e: Exception) {
+            android.util.Log.e("MediaPlayerInstance", "Error computing position basis", e)
+            "absolute"
+        }
+    }
+
+    /**
+     * Issue #88: `liveEdgeOffset` and `positionBasis` ride this existing
+     * 500ms event (see [startPositionUpdates]) rather than getting a channel
+     * event of their own — they are sampled from the same tick that produces
+     * `position` and are only ever meaningful alongside it, so a second
+     * high-frequency event would be pure overhead.
+     *
+     * `liveEdgeOffset` is omitted from the map entirely (rather than sent as
+     * a sentinel) when unknown; `MediaPlayer._handlePositionChanged` on the
+     * Dart side reads a missing key as `null`, the same as it does for an
+     * older native build that never sends it.
+     */
     private fun notifyPositionChanged(position: Long) {
         try {
-            val arguments = mapOf(
+            val player = exoPlayer
+            val arguments = mutableMapOf<String, Any>(
                 "playerId" to playerId,
-                "position" to position.toInt()
+                "position" to position.toInt(),
+                "positionBasis" to (player?.let { currentPositionBasis(it) } ?: "absolute")
             )
+            player?.let { p ->
+                currentLiveEdgeOffsetMs(p)?.let { arguments["liveEdgeOffset"] = it.toInt() }
+            }
             methodChannel.invokeMethod("onPositionChanged", arguments)
         } catch (e: Exception) {
             e.printStackTrace()
@@ -1657,6 +1772,16 @@ class MediaPlayerInstance(
      * offset-from-window-start basis as `durationUs` — so no separate
      * position translation is needed for a DVR window: position and
      * duration already share the same zero point.
+     *
+     * That window-relative basis has a cost this doc used to leave unstated
+     * (issue #88): because the window START also slides forward for a live
+     * item, a playhead healthily riding the live edge reports a roughly
+     * CONSTANT position — indistinguishable, from position alone, from a
+     * genuinely frozen playhead. `notifyPositionChanged` therefore also
+     * reports `positionBasis` (so a host knows which basis it is reading)
+     * and `liveEdgeOffset` (which, unlike position, grows without bound
+     * against a frozen playhead) on the same event. See
+     * [currentLiveEdgeOffsetMs] / [currentPositionBasis].
      *
      * The `isLive` value in the reported event now comes from
      * [Timeline.Window.isLive] (ExoPlayer's own manifest-derived

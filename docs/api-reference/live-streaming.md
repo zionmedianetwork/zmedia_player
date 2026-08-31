@@ -68,6 +68,8 @@ actually requires.
 - [Loading a live stream](#loading-a-live-stream)
 - [Choosing which streaming config applies (`streamingFormat`)](#choosing-which-streaming-config-applies-streamingformat)
 - [Seeking and live-edge detection](#seeking-and-live-edge-detection)
+- [Knowing which timeline `position` is on](#knowing-which-timeline-position-is-on)
+- [Stall watchdog for live streams](#stall-watchdog-for-live-streams)
 - [Monitoring connection quality](#monitoring-connection-quality)
 - [Complete example](#complete-example)
 - [Troubleshooting](#troubleshooting)
@@ -251,9 +253,14 @@ expect it to grow over time as more of the window becomes available, and treat `
 false`. `controller.position` is always reported relative to the *start* of that window on both
 platforms (Android's `ExoPlayer.getCurrentPosition()` is window-relative already; iOS
 translates `AVPlayerItem.currentTime()`, which is on an absolute timeline, into the same
-window-relative unit), so `position` and `duration` share the same zero point and the examples
-below (`controller.duration` for "jump to live edge", `duration - position` for "how far behind
-live") work identically on both platforms.
+window-relative unit), so `position` and `duration` share the same zero point and
+`controller.duration` works as a "jump to live edge" target on both platforms.
+
+> **That window-relative basis has a cost.** Because the window *start* also slides forward,
+> a playhead healthily riding the live edge reports a roughly **constant** `position` — which
+> is indistinguishable, from `position` alone, from a genuinely frozen playhead. Do not build
+> a stall detector on `position`. Use `liveEdgeOffset` / `positionBasis` instead; see
+> [Stall watchdog for live streams](#stall-watchdog-for-live-streams).
 
 ```dart
 // Seek back 30 seconds, if the manifest's live window covers it
@@ -263,29 +270,239 @@ await controller.seekTo(controller.position - const Duration(seconds: 30));
 await controller.seekTo(controller.duration);
 ```
 
-```dart
-// Detect how far behind live the current position is
-controller.player.positionStream.listen((position) {
-  final duration = controller.duration;
-  final behindLive = (duration - position).inSeconds;
-  final isAtLiveEdge = behindLive < 5;
+### How far behind the live edge am I?
 
-  if (isAtLiveEdge) {
-    print('Playing at live edge');
-  } else {
-    print('Playing ${behindLive}s behind live');
+Do **not** compute this yourself from `duration - position`. That arithmetic only
+works when `enableDvr: true` (otherwise `duration` is `0`), and it measures the
+end of the *known window*, which is not always the live edge. The package asks
+the platform directly instead:
+
+```dart
+// Native-sourced, updated on the same ~500ms tick as position.
+final Duration? behind = controller.liveEdgeOffset;  // null for VOD
+final bool atEdge = controller.isAtLiveEdge;         // false for VOD
+```
+
+| API | Type | Value |
+|-----|------|-------|
+| `controller.liveEdgeOffset` / `player.liveEdgeOffset` / `state.liveEdgeOffset` | `Duration?` | Distance behind the live edge. `null` for VOD, and for a live item the platform cannot answer for yet. Reported for live streams **with and without** `enableDvr`. |
+| `controller.isAtLiveEdge` / `player.isAtLiveEdge` / `state.isAtLiveEdge` | `bool` | `liveEdgeOffset <= PlaybackState.defaultLiveEdgeTolerance`. Always `false` when the offset is `null`. |
+| `state.isAtLiveEdgeWithin(tolerance)` | `bool` | Same test with a caller-supplied tolerance. |
+| `PlaybackState.defaultLiveEdgeTolerance` | `Duration` | **15 seconds.** |
+
+**Why 15 seconds, and when to change it.** A healthy live player does *not* sit
+at an offset of zero. A standard (non-low-latency) HLS or DASH player
+deliberately rides roughly three target segment durations behind the edge —
+commonly 15-30s — so a tolerance of a second or two would report
+`isAtLiveEdge == false` for a perfectly healthy stream and light up a
+"jump to live" button that does nothing useful. 15 seconds is the same default
+[video.js uses for its equivalent `liveTolerance` option][videojs-live-tolerance],
+and it absorbs ordinary edge jitter (an ABR switch, a segment boundary) without
+flapping a LIVE badge, while still going `false` once a viewer has scrubbed
+meaningfully back into a DVR window. Tighten it for low-latency HLS/DASH, widen
+it for long-segment streams:
+
+```dart
+final atEdge = controller.state.isAtLiveEdgeWithin(const Duration(seconds: 4)); // LL-HLS
+```
+
+[videojs-live-tolerance]: https://videojs.com/guides/live/
+
+Natively, `liveEdgeOffset` comes from `Player.getCurrentLiveOffset()` on Android
+(falling back to `Timeline.Window.durationMs - Player.getCurrentPosition()` when
+that is `C.TIME_UNSET`) and from the end of
+`AVPlayerItem.seekableTimeRanges.last` minus `AVPlayerItem.currentTime()` on
+iOS. It arrives on the existing `onPositionChanged` event under the
+`liveEdgeOffset` key — see [Events](events.md#onpositionchanged).
+
+```dart
+// LIVE badge / "jump to live" affordance
+if (controller.isAtLiveEdge)
+  const Chip(label: Text('LIVE'))
+else
+  ElevatedButton(
+    onPressed: () => controller.seekTo(controller.duration),
+    child: const Text('Go to Live'),
+  )
+```
+
+---
+
+## Knowing which timeline `position` is on
+
+`PlaybackState.positionBasis` (a `PositionBasis`) reports which timeline
+`position` is currently measured against, so a host never has to infer it from
+its own `MediaConfig`:
+
+| Value | `position` is measured from | Does a constant `position` mean a stall? |
+|-------|-----------------------------|------------------------------------------|
+| `PositionBasis.absolute` | The start of the media — a fixed zero point | **Yes** |
+| `PositionBasis.liveWindow` | The start of the live/DVR window, which itself slides forward in wall-clock time | **No** — that is what a healthy live edge looks like |
+
+Which value you get, per case:
+
+| Case | Android | iOS |
+|------|---------|-----|
+| VOD | `absolute` | `absolute` |
+| Live, `enableDvr: false` | `liveWindow` | `absolute` |
+| Live, `enableDvr: true` | `liveWindow` | `liveWindow` |
+
+The live-without-DVR row genuinely differs by platform, and that is deliberate.
+ExoPlayer's `getCurrentPosition()` is window-relative for *any* live item, DVR
+or not; on iOS the plugin only translates `AVPlayerItem.currentTime()` into
+window-relative units when the DVR window is in play, so without DVR position
+stays on the item's own absolute timeline. Each platform reports the basis its
+values are actually on — which is precisely why you should branch on
+`positionBasis` rather than on your own `enableDvr` flag.
+
+`positionBasis` is `PositionBasis.absolute` between a `load()` and the first
+native position event, and on any older cached native build that predates the
+field. `state.isPositionWindowRelative` is shorthand for
+`positionBasis == PositionBasis.liveWindow`.
+
+---
+
+## Stall watchdog for live streams
+
+This is the pattern the live-edge API exists for. **Sampling `position` and
+escalating when it stops advancing is wrong for live streams** — on
+`PositionBasis.liveWindow` the playhead and the window start advance together,
+so a healthy live edge reports a roughly constant `position` and a naive
+watchdog escalates forever (reload -> re-auth -> hard reopen, minting a new
+native player every lap).
+
+The reliable signal is `liveEdgeOffset`. Against a genuinely frozen playhead in
+a sliding window it **grows without bound**; at a healthy edge it stays bounded
+and jitters around the target latency.
+
+```dart
+import 'dart:async';
+import 'package:zmedia_player/zmedia_player.dart';
+
+/// Escalating stall watchdog that is correct for VOD, live-without-DVR and
+/// live-with-DVR alike, because it branches on what the player reports rather
+/// than on the app's own config.
+class LiveStallWatchdog {
+  LiveStallWatchdog(this.controller, {required this.onEscalate});
+
+  final MediaController controller;
+  final void Function(int level) onEscalate;
+
+  /// Escalate once the playhead has fallen this far behind the live edge.
+  /// Must comfortably exceed your stream's normal live latency — a standard
+  /// HLS stream sits 15-30s behind the edge when perfectly healthy.
+  static const _liveEdgeStallThreshold = Duration(seconds: 45);
+
+  /// Absolute-basis fallback: how many consecutive samples `position` may
+  /// repeat before we call it a stall. 6 x 2s = 12s of no progress.
+  static const _absoluteStallSamples = 6;
+
+  Timer? _timer;
+  Duration? _lastPosition;
+  int _repeats = 0;
+  int _level = 0;
+
+  void start() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _sample());
   }
-});
+
+  void _sample() {
+    // Only judge liveness while the player claims to be playing. A user pause
+    // is not a stall.
+    if (controller.state.state != PlayerState.playing) {
+      _reset();
+      return;
+    }
+
+    final stalled = controller.positionBasis == PositionBasis.liveWindow
+        ? _liveWindowStalled()
+        : _absoluteStalled();
+
+    if (!stalled) {
+      _reset();
+      return;
+    }
+
+    _level++;
+    onEscalate(_level);
+  }
+
+  /// On a sliding window, position is expected to be constant. Judge on the
+  /// distance from the live edge instead: healthy playback keeps it bounded.
+  bool _liveWindowStalled() {
+    final offset = controller.liveEdgeOffset;
+
+    // The platform cannot answer yet (playlist just loaded, or an older
+    // native build). Fall back to the position-repeat heuristic rather than
+    // guessing — but note it is weak on this basis, so it is only reached
+    // when there is genuinely nothing better.
+    if (offset == null) return _absoluteStalled();
+
+    // Riding the edge: unambiguously healthy, whatever position is doing.
+    if (controller.isAtLiveEdge) return false;
+
+    return offset > _liveEdgeStallThreshold;
+  }
+
+  /// On an absolute basis (VOD, and live-without-DVR on iOS), a position that
+  /// stops advancing really is a stall.
+  bool _absoluteStalled() {
+    final position = controller.position;
+    if (position == _lastPosition) {
+      _repeats++;
+    } else {
+      _lastPosition = position;
+      _repeats = 0;
+    }
+    return _repeats >= _absoluteStallSamples;
+  }
+
+  void _reset() {
+    _lastPosition = controller.position;
+    _repeats = 0;
+    _level = 0;
+  }
+
+  void dispose() => _timer?.cancel();
+}
 ```
 
+Wiring it up:
+
 ```dart
-ElevatedButton(
-  onPressed: () async {
-    await controller.seekTo(controller.duration);
+final watchdog = LiveStallWatchdog(
+  controller,
+  onEscalate: (level) async {
+    switch (level) {
+      case 1:
+        await controller.load(currentItem);          // in-place reload
+      case 2:
+        await controller.load(await refreshedItem()); // fresh credentials
+      default:
+        await rebuildPlayerWithNewId();               // discard the controller
+    }
   },
-  child: const Text('Go to Live'),
-)
+)..start();
+
+// ...
+watchdog.dispose();
 ```
+
+**Platform notes for watchdog authors:**
+
+- **Android** keeps emitting position events while playback is stalled but the
+  host still intends to play (`playWhenReady && STATE_BUFFERING`), so
+  `liveEdgeOffset` visibly grows through a rebuffer. It stays silent while
+  genuinely paused, idle or ended.
+- **iOS** drives position from `AVPlayer.addPeriodicTimeObserver`, which only
+  fires while time is progressing. During a hard stall, updates stop entirely,
+  so `liveEdgeOffset` freezes at its last value rather than growing. On iOS,
+  also treat "no position/state event at all for several sampling intervals
+  while `state == PlayerState.playing`" as a stall signal.
+- `liveEdgeOffset` is `null` for VOD, so `isAtLiveEdge` is always `false`
+  there — never use `isAtLiveEdge` as a proxy for "is this a live stream"; use
+  `player.isLive` or `positionBasis` for that.
 
 ---
 
@@ -470,6 +687,31 @@ The same seekability gate also removes the notification's seek-forward/seek-back
 seekable, so a live stream without DVR never shows them on either platform even if both flags
 are `true`. Enabling `enableDvr` brings them back on the next notification update — no
 re-initialize needed.
+
+### My stall detector escalates forever on a healthy live stream
+
+You are almost certainly sampling `controller.position`. On a live stream whose
+`positionBasis` is `PositionBasis.liveWindow` (always on Android; on iOS whenever
+`enableDvr: true`), the window start slides forward at the same rate as the playhead, so
+`position` stays roughly **constant during perfectly healthy playback**. A watchdog that treats
+"position stopped advancing" as a stall will reload, re-authenticate and hard-reopen the player
+in an endless loop.
+
+Branch on `controller.positionBasis` and judge liveness from `controller.liveEdgeOffset`
+(which grows without bound against a genuinely frozen playhead) rather than from `position`.
+See [Stall watchdog for live streams](#stall-watchdog-for-live-streams) for a complete,
+copy-pasteable implementation covering VOD, live-without-DVR and live-with-DVR.
+
+### `isAtLiveEdge` is false even though playback looks fine
+
+`isAtLiveEdge` compares `liveEdgeOffset` against `PlaybackState.defaultLiveEdgeTolerance`
+(15 seconds). Standard (non-low-latency) HLS/DASH streams with long target segment durations
+legitimately ride 20-30s behind the edge. Widen the tolerance for your stream with
+`controller.state.isAtLiveEdgeWithin(const Duration(seconds: 35))`, or reduce your segment
+duration / switch to low-latency HLS if you actually want to be closer to the edge.
+
+`isAtLiveEdge` is also always `false` for VOD (`liveEdgeOffset` is `null` there) — use
+`player.isLive` to ask "is this live", not `isAtLiveEdge`.
 
 ### High latency behind live edge / frequent buffering
 

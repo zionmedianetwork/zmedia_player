@@ -66,7 +66,16 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **Resolution Selection** - Choose specific resolutions
 
 ### Live Streaming
-- **Live Edge Detection** - Automatic positioning at live
+- **Live Edge Detection** - `PlaybackState.liveEdgeOffset` (distance behind the live edge) and
+  `isAtLiveEdge` (within `defaultLiveEdgeTolerance`, 15s), native-sourced from
+  `Player.getCurrentLiveOffset()` on Android and `AVPlayerItem.seekableTimeRanges` on iOS, and
+  delivered on the existing `onPositionChanged` event. Reported for live streams with and
+  without DVR; `null`/`false` for VOD
+- **Position Basis Reporting** - `PlaybackState.positionBasis` (`PositionBasis.absolute` |
+  `.liveWindow`) tells a host which timeline `position` is measured against, so a stall
+  detector does not mistake a healthy live edge (constant window-relative position) for a
+  frozen playhead. See
+  [Stall watchdog for live streams](../api-reference/live-streaming.md#stall-watchdog-for-live-streams)
 - **DVR/Time-Shifting** - `HlsConfig`/`DashConfig.enableDvr` gates seeking on a live stream and
   enables reporting of a DVR-window duration to seek within
 - **Explicit Streaming Format** - `MediaItem.streamingFormat`
@@ -291,7 +300,8 @@ Purpose-built for TikTok/Reels-style vertical feeds, backed by `MediaPlayerPool`
 
 ### State Events
 - **onStateChanged** - Playback state updates
-- **onPositionChanged** - Position updates
+- **onPositionChanged** - Position updates; also carries `positionBasis` and, for live
+  streams, `liveEdgeOffset` (see [Events](../api-reference/events.md#onpositionchanged))
 - **onDurationChanged** - Duration updates
 - **onBuffering** - Buffering status
 - **onError** - Error notifications

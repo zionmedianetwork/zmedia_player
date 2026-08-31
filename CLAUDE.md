@@ -397,6 +397,34 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   resolves to a format whose config is `null` logs a one-time warning naming the missing
   config and the consequence. The hint crosses the channel as the `streamingFormat` key of
   the `mediaItem` payload, and both natives prefer it over their own inference.
+- **Live-edge signal (issue #88).** `PlaybackState.position` is *window-relative* for a live
+  item, so at the live edge of a sliding window the playhead and the window start advance
+  together and `position` stays roughly **constant** — indistinguishable from a frozen
+  playhead. Never build a stall detector on `position` for a live stream. Three fields close
+  the gap, all native-sourced on the existing `onPositionChanged` event (payload keys
+  `liveEdgeOffset` (int ms, omitted when unknown) and `positionBasis` (String)):
+  - `liveEdgeOffset` (`Duration?`) — distance behind the live edge; `null` for VOD, reported
+    for live **with and without** DVR. Grows without bound against a genuinely frozen
+    playhead, which is what makes it the reliable signal. Android:
+    `Player.getCurrentLiveOffset()`, falling back to
+    `Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET`. iOS: end of
+    `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()` (NOT
+    `configuredTimeOffsetFromLive`/`recommendedTimeOffsetFromLive` — those are targets,
+    constant by construction).
+  - `isAtLiveEdge` / `isAtLiveEdgeWithin(tolerance)` / `PlaybackState.defaultLiveEdgeTolerance`
+    (**15s**, matching video.js's `liveTolerance`; a healthy standard-HLS player rides 15-30s
+    behind the edge, so a tighter default would read `false` for healthy playback).
+  - `positionBasis` (`PositionBasis.absolute` | `.liveWindow`) — which timeline `position` is
+    on. `liveWindow` for any live item on Android; on iOS only when `enableDvr: true`. That
+    divergence is deliberate: each platform reports the basis its values are actually on.
+
+  All three are on `PlaybackState`, `MediaPlayer` and `MediaController`. See
+  `docs/api-reference/live-streaming.md` ("Stall watchdog for live streams").
+- Android emits position events while `playWhenReady && STATE_BUFFERING` as well as while
+  `isPlaying`, so `liveEdgeOffset` keeps updating through a rebuffer. iOS's
+  `addPeriodicTimeObserver` only fires while time is progressing, so a hard stall suspends
+  updates there — a host watchdog should treat "no event at all while `state == playing`" as
+  its own iOS signal.
 
 ### Picture-in-Picture
 - Android: Uses `enterPictureInPictureMode()` API
@@ -424,6 +452,10 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 10. **Every load path carries the current config snapshot** - `load()`, `setPlaylist()` and `skipToIndex()` each send a `config` key (the current `MediaConfig`, serialized exactly as `initialize`/`updateConfig` send it) with every call, so reloading with a changed `MediaConfig` (e.g. flipping `hlsConfig.enableDvr`) takes effect immediately — on playlist-driven items too. `skipToNext()`/`skipToPrevious()`/playlist auto-advance route through `skipToIndex()` and are covered by the same key. Native replaces its stored config from it before any config-dependent work, but deliberately does not re-run `applyConfig()` from these paths (that would undo an in-progress runtime `setMuted()`); the key is optional on the native side, so an older Dart caller cannot break a newer native build
 11. **`setPlaylist` no longer restarts the item already playing** - native skips its `loadMediaItem` call when `items[startIndex]` is, key for key, the currently loaded item AND that item is still in progress (issue #79). This is what makes sliding-window playlists and mid-playback `mode`/`repeatMode` changes free. A changed `url`/`httpHeaders`/`drmConfig` for the same `id`, a different `id`, or a stopped/completed/errored player all still reload. `skipToIndex` deliberately keeps its unconditional reload — `MediaRepeatMode.single` repeats an item through exactly that call
 12. **A changed `MediaConfig` does not force a reload** - a `setPlaylist()` carrying a new config for an unchanged, in-progress item **stores that config** (gotcha 10 — the next real load uses it) but **does not reload the item** (gotcha 11). Re-issuing a playlist is therefore not a way to apply config immediately: call `updateConfig()` to apply a config change to live playback now, or `load()` to apply it *and* reload
+13. **Never stall-detect on `position` for a live stream** - when
+   `PlaybackState.positionBasis == PositionBasis.liveWindow`, a *constant* `position` is
+   healthy playback in a sliding window, not a stall. Use `liveEdgeOffset`/`isAtLiveEdge`
+   (see "Live Streaming DVR" above and `docs/api-reference/live-streaming.md`)
 
 ## UI/UX Design Specifications
 
