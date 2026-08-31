@@ -115,8 +115,11 @@ class _PlayerPageState extends State<PlayerPage> {
 ## Two ways to drive playback
 
 - **`MediaController`** — a `ChangeNotifier` facade. Reactive getters (`isPlaying`,
-  `position`, …), auto-hiding controls, operation serialization. Use it for UI. Reach the
-  lower layer via `controller.player`.
+  `position`, …), auto-hiding controls, and operation serialization: every call is queued
+  per controller and runs in submission order, so interleaved `pause()`/`play()` never
+  fails on timing (see
+  [Operation ordering](player-api.md#operation-ordering-serialization-queue)). Use it for
+  UI. Reach the lower layer via `controller.player`.
 - **`MediaPlayer`** — the engine. Stream-first, singleton per `playerId`. Use it for custom
   integrations or when you want raw streams.
 

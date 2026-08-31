@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `MediaController` now **queues** operations instead of rejecting them. Previously
+  `_executeOperation` held a per-controller boolean lock that never queued: while it was
+  held by a live operation, a "non-critical" call (`setVolume`, `toggleMute`, `setSpeed`,
+  `setSubtitleTrack`, `setSecureSurface`) was rejected immediately with
+  `OperationBusyException`, and a "critical" call slept 100 ms, then 200 ms, and then threw
+  a bare `StateError`. Ordinary interleaved user input — "pause A, then play B" from two
+  UI events, or muting a player while it is still loading — could therefore fail purely on
+  timing. Because these calls are routinely fire-and-forget in feed-style UIs (a `dispose()`
+  racing a mid-flight op is normal and must be swallowed), the throw disappeared silently
+  and the operation simply never happened: in a shorts/reels feed a fast A→B→A→B swipe
+  produced overlapping `play`/`pause` on one controller, the losing `pause()` threw, and
+  that short stayed audible with nothing left to retry it. Operations submitted through
+  `MediaController` are now appended to a per-controller FIFO queue and run strictly in
+  submission order, one at a time; nothing is dropped and no operation throws merely
+  because another was in flight. (#86)
+- `MediaController`'s auto-hide controls timer is no longer armed after `dispose()`. A
+  post-`dispose()` code path that reached `_showControlsTemporarily()` (now including a
+  queued operation dropped by disposal) used to leave a pending `Timer` behind.
+
+### Changed
+- **Behaviour of every `MediaController` playback/track/config method** (`load`,
+  `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`, `toggleMute`, `setSpeed`,
+  `setSubtitleTrack`, `setQualityTrack`, `enableAutoQuality`, `setAudioTrack`,
+  `skipToNext`/`skipToPrevious`/`skipToIndex`, `setSecureSurface`, `updateConfig`,
+  `initialize`): the returned `Future` now completes when the call's *turn* in the queue
+  has run, so it can take longer than before to resolve when other work is in flight. It
+  no longer completes with `OperationBusyException` or `StateError` for a busy controller.
+  Head-of-line blocking stays bounded: each operation runs under a 10 s timeout (unchanged
+  from before), so a wedged native call fails with `TimeoutException` and the queue
+  advances rather than stalling forever.
+- An operation still queued when `MediaController.dispose()` runs is now dropped and its
+  `Future` completes normally as a no-op, without touching the disposed `MediaPlayer`. This
+  matches the pre-existing `if (_isDisposed) return;` guard every public method already
+  applies on entry, so a `dispose()` racing a queued call behaves the same as a call made
+  after `dispose()`. An operation that is already *running* is not cancelled.
+- `MediaController.isOperationInProgress` is now explicitly documented as informational
+  only. It reports whether an operation is currently *running*, not whether the queue is
+  empty, and callers never need to consult it before issuing a call (check-then-act on it
+  was always racy). `MediaController.resetOperationState()` is retained for source
+  compatibility but is now only a way to clear that informational flag — nothing gates on
+  it, and a failed or timed-out operation can no longer leave the controller stuck.
+
+### Deprecated
+- `OperationBusyException` — no longer thrown anywhere in this package. It existed solely
+  for the "non-critical operation rejected because the lock was held" case that the queue
+  removes, so any `catch (OperationBusyException)` / busy-retry handling in consumer code
+  is now dead as a rejection path and can be deleted. The class is **retained, not
+  removed**, because `MediaPlayerException` is `sealed`: deleting a member would break
+  every exhaustive `switch` over the hierarchy. Exhaustive switches must therefore keep
+  listing it. It will be removed in a future major release. (#86)
+
 ## [0.3.0] - 2026-08-18
 
 ### BREAKING

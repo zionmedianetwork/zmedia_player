@@ -11,6 +11,38 @@ factory MediaController.create({String? playerId, MediaConfig? config});
 
 Creates the controller and its underlying `MediaPlayer`, and calls `initialize()`.
 
+### Operation ordering (serialization queue)
+
+Every `MediaController` method in the tables below is submitted to a per-controller **FIFO
+queue** and runs one at a time, in submission order. A call made while another is still in
+flight is *queued*, never rejected — so ordinary interleaved input works:
+
+```dart
+// No awaits between them: both run, in this order.
+controller.pause();
+controller.play();
+
+// Muting a player that is still loading is fine — the mute is queued behind the load.
+controller.load(item);
+controller.setVolume(0.0);
+```
+
+Contract:
+
+| | Behaviour |
+|---|---|
+| Ordering | FIFO by submission. The returned `Future` completes after *this* call has run — so it can resolve later than it used to when other work is in flight. |
+| Busy controller | Never an error. There is no "critical vs non-critical" distinction: `setVolume`, `toggleMute`, `setSpeed`, `setSubtitleTrack` and `setSecureSurface` queue like everything else. |
+| Failure isolation | A failing operation completes only *its own* `Future` with that error; the queue advances. |
+| Head-of-line blocking | Bounded: each operation runs under a 10 s timeout, so a wedged native call fails with `TimeoutException` and the queue advances rather than stalling forever. |
+| `dispose()` | An operation still *queued* when `dispose()` runs is dropped: its `Future` completes normally as a no-op and the disposed player is never touched — same as calling a method after `dispose()`. An operation already *running* is not cancelled. |
+| Not a rate limiter | The queue is unbounded and never drops or collapses work (including repeated `seekTo`s). If you need debouncing — e.g. while dragging a scrub bar — do it in your UI before calling. |
+
+> Before this behaviour existed, a busy controller rejected calls: non-critical ones threw
+> `OperationBusyException` and critical ones threw `StateError` after a short wait. Both are
+> gone; `OperationBusyException` is deprecated (see [Errors](#errors)). Hosts that built
+> their own per-controller promise chain to work around it no longer need one.
+
 ### Playback control
 
 | Method | Description |
@@ -82,8 +114,14 @@ Tracks: `qualityTracks`, `selectedQualityTrack`, `subtitleTracks`, `selectedSubt
 `audioTracks`, `selectedAudioTrack`.
 PiP/Cast: `pipStatus`, `isPipAvailable`, `isInPipMode`, `castStatus`, `isCastAvailable`, `isCasting`.
 Errors: `error` (most recently observed `MediaPlayerException`, or `null`), `errorStream`.
-Other: `controlsVisible`, `isOperationInProgress`, `playerId`, `player` (the `MediaPlayer`),
+Other: `controlsVisible`, `isOperationInProgress` (**informational only** — `true` while an
+operation is *running*; it does not mean the queue is empty, and you never need to check it
+before issuing a call, which was always racy), `playerId`, `player` (the `MediaPlayer`),
 `screenCaptureStream` (see [Advanced Features](advanced-features.md#screen-capture-protection)).
+
+`resetOperationState()` is retained for source compatibility and only clears the
+`isOperationInProgress` flag; nothing gates on it, and a failed or timed-out operation can no
+longer leave the controller stuck.
 
 `MediaController` extends `ChangeNotifier`, so `AnimatedBuilder(animation: controller)` rebuilds on any change.
 
@@ -138,9 +176,20 @@ getters mirrored on the controller.
 All player errors are subclasses of the sealed `MediaPlayerException`:
 `MediaLoadException`, `NetworkException`, `DrmException`, `PlaybackException`,
 `InvalidStateException`, `PlayerDisposedException`, `ConfigurationException`,
-`PlatformOperationException`, `OperationBusyException`. Errors also surface via
+`PlatformOperationException`, `ProtocolMismatchException`, and the deprecated
+`OperationBusyException`. Errors also surface via
 `PlaybackState.state == PlayerState.error` with `errorMessage`, and as typed exceptions on
 `errorStream`/`error` (above).
+
+`MediaController` methods can additionally complete with a `TimeoutException` (not a
+`MediaPlayerException`) when a native call exceeds the 10 s per-operation timeout — see
+[Operation ordering](#operation-ordering-serialization-queue).
+
+> **Deprecated: `OperationBusyException`.** Nothing in this package throws it any more —
+> `MediaController` queues operations instead of rejecting them, so busy-retry handling in
+> consumer code is dead as a rejection path and can be removed. The class is kept (not
+> deleted) only because `MediaPlayerException` is `sealed`, so exhaustive `switch`es over the
+> hierarchy must keep an arm for it. It will be removed in a future major release.
 
 ## Feeds and pooled playback
 
