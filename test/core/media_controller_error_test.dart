@@ -65,7 +65,8 @@ void main() {
   });
 
   group('C-01: DRM session error reachable via MediaController', () {
-    test('DRM session error drives PlayerState.error and hasError becomes '
+    test(
+        'DRM session error drives PlayerState.error and hasError becomes '
         'true', () async {
       final controller = MediaController.create(playerId: 'ctrl-drm-err-1');
       await controller.initialize();
@@ -93,7 +94,8 @@ void main() {
       controller.dispose();
     });
 
-    test('DRM failure is observable through MediaController.errorStream '
+    test(
+        'DRM failure is observable through MediaController.errorStream '
         'without reaching into .player', () async {
       final controller = MediaController.create(playerId: 'ctrl-drm-err-2');
       await controller.initialize();

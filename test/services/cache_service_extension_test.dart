@@ -33,8 +33,7 @@ void main() {
     late Directory tempDir;
 
     setUp(() async {
-      tempDir =
-          await Directory.systemTemp.createTemp('zmedia_cache_ext_test_');
+      tempDir = await Directory.systemTemp.createTemp('zmedia_cache_ext_test_');
     });
 
     tearDown(() async {
@@ -68,7 +67,8 @@ void main() {
       await service.dispose();
     });
 
-    test('a query string and fragment are stripped before taking the '
+    test(
+        'a query string and fragment are stripped before taking the '
         'extension', () async {
       final service = CacheService(CacheConfig(cacheDirectory: tempDir.path));
       await service.initialize();
@@ -96,8 +96,7 @@ void main() {
 
     test(
         'a hostile "extension" embedded in the URL cannot escape the cache '
-        'directory or inject path separators/dots into the filename',
-        () async {
+        'directory or inject path separators/dots into the filename', () async {
       final service = CacheService(CacheConfig(cacheDirectory: tempDir.path));
       await service.initialize();
 
@@ -125,7 +124,8 @@ void main() {
       await service.dispose();
     });
 
-    test('an excessively long "extension" is capped rather than adopted '
+    test(
+        'an excessively long "extension" is capped rather than adopted '
         'verbatim', () async {
       final service = CacheService(CacheConfig(cacheDirectory: tempDir.path));
       await service.initialize();
@@ -151,7 +151,8 @@ void main() {
       await service.dispose();
     });
 
-    test('a URL with no extension and no mimeType omits the extension '
+    test(
+        'a URL with no extension and no mimeType omits the extension '
         'rather than reintroducing the `.cache` bug', () async {
       final service = CacheService(CacheConfig(cacheDirectory: tempDir.path));
       await service.initialize();
@@ -198,7 +199,8 @@ void main() {
       await service.dispose();
     });
 
-    test('getCachedFileUri on a cached item still resolves to an existing, '
+    test(
+        'getCachedFileUri on a cached item still resolves to an existing, '
         'correctly-named file', () async {
       final service = CacheService(CacheConfig(cacheDirectory: tempDir.path));
       await service.initialize();
@@ -219,7 +221,8 @@ void main() {
     });
   });
 
-  group('CacheService.downloadAndCache — cached filename preserves source '
+  group(
+      'CacheService.downloadAndCache — cached filename preserves source '
       'extension', () {
     late Directory tempDir;
 
@@ -299,7 +302,8 @@ void main() {
     });
   });
 
-  group('CacheService — legacy `.cache`-suffixed entries are invalidated on '
+  group(
+      'CacheService — legacy `.cache`-suffixed entries are invalidated on '
       'load', () {
     late Directory tempDir;
 
@@ -314,7 +318,8 @@ void main() {
       }
     });
 
-    test('a pre-fix `.cache` entry is dropped (file deleted, metadata '
+    test(
+        'a pre-fix `.cache` entry is dropped (file deleted, metadata '
         'removed) the next time the cache initializes', () async {
       // Simulate what the pre-fix code left behind: a cache file literally
       // named `<id>_<timestamp>.cache`, plus a metadata entry pointing at

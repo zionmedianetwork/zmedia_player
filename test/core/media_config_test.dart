@@ -486,8 +486,7 @@ void main() {
     });
 
     test('toString reports both fields', () {
-      const config =
-          AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 999);
+      const config = AdaptiveCacheConfig(enabled: true, maxCacheSizeBytes: 999);
       final str = config.toString();
       expect(str, contains('enabled: true'));
       expect(str, contains('maxCacheSizeBytes: 999'));

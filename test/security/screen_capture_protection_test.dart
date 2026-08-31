@@ -157,8 +157,7 @@ void main() {
 
       final call =
           calls.firstWhere((c) => c.method == 'setSecureSurface', orElse: () {
-        fail(
-            'MediaConfig.secureSurface=true must trigger "setSecureSurface" '
+        fail('MediaConfig.secureSurface=true must trigger "setSecureSurface" '
             'at initialize()');
       });
       expect(call.arguments['playerId'], 'secsurf-config-init');
