@@ -36,6 +36,29 @@ class PlayerScaffold extends StatelessWidget {
   /// active for this player so only one native-view host is alive at a time.
   final Widget? playerWidget;
 
+  /// Forwarded to [MediaPlayerWidget.onDoubleTapDown], with the player box's
+  /// size supplied alongside the raw [TapDownDetails].
+  ///
+  /// `details.localPosition` is relative to the player widget's own box, so a
+  /// page maps it onto a left/right half by comparing against
+  /// `playerSize.width / 2` -- the canonical direction-aware double-tap seek.
+  /// Supplying this suppresses the widget's built-in
+  /// double-tap-to-play/pause; see the "Gesture callbacks" section of
+  /// `docs/api-reference/advanced-features.md`.
+  ///
+  /// Supplying it also switches this scaffold to the package's **default**
+  /// [MediaControls] overlay instead of [AdaptiveMediaControls]. That is not
+  /// cosmetic: the controls overlay is always mounted and sits above the
+  /// package's own tap detector, and [AdaptiveMediaControls] (via
+  /// `MaterialMediaControls`/`CupertinoMediaControls`) declares an *opaque*
+  /// root `GestureDetector` with its own `onDoubleTap`, so it would claim the
+  /// double tap before it could ever reach this callback. The default
+  /// [MediaControls] instead forwards background taps and double taps --
+  /// position included -- back to [MediaPlayerWidget], which is what makes the
+  /// gesture work in both visibility states.
+  final void Function(TapDownDetails details, Size playerSize)?
+      onVideoDoubleTapDown;
+
   const PlayerScaffold({
     super.key,
     required this.title,
@@ -44,6 +67,7 @@ class PlayerScaffold extends StatelessWidget {
     this.actions,
     this.showAdaptiveControls = true,
     this.playerWidget,
+    this.onVideoDoubleTapDown,
   });
 
   Widget _buildPlayer({required BoxFit boxFit}) {
@@ -52,17 +76,22 @@ class PlayerScaffold extends StatelessWidget {
     // fullscreen route is active.
     if (playerWidget != null) return playerWidget!;
 
-    return MediaPlayerWidget(
-      controller: controller,
-      showControls: showAdaptiveControls,
-      boxFit: boxFit,
-      customControls: showAdaptiveControls
-          ? AdaptiveMediaControls(
-              controller: controller,
-              title: title,
-            )
-          : null,
-      backgroundColor: Colors.black,
+    return LayoutBuilder(
+      builder: (context, constraints) => MediaPlayerWidget(
+        controller: controller,
+        showControls: showAdaptiveControls,
+        boxFit: boxFit,
+        customControls: showAdaptiveControls && onVideoDoubleTapDown == null
+            ? AdaptiveMediaControls(
+                controller: controller,
+                title: title,
+              )
+            : null,
+        backgroundColor: Colors.black,
+        onDoubleTapDown: onVideoDoubleTapDown == null
+            ? null
+            : (details) => onVideoDoubleTapDown!(details, constraints.biggest),
+      ),
     );
   }
 

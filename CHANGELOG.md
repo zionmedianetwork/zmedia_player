@@ -90,17 +90,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `MediaPlayerWidget.enableBuiltInGestures` (`bool`, default `true`) — opt out of the
   package's own tap/double-tap/long-press handling over the video surface. When `false`,
-  the transparent full-surface `GestureDetector` is not mounted at all and `onTap`,
-  `onDoubleTap` and `onLongPress` are never invoked by the package, letting a host that
+  the transparent full-surface `GestureDetector` is not mounted at all and none of
+  `onTap`, `onTapDown`, `onDoubleTap`, `onDoubleTapDown`, `onLongPress` or
+  `onLongPressStart` are ever invoked by the package, letting a host that
   supplies `customControls` own every gesture. Also forwarded by
   `FullscreenMediaPlayer.enableBuiltInGestures` and
   `MediaListPlayer.enableBuiltInGestures` (both default `true`).
-- `MediaControls.onBackgroundTap` / `MediaControls.onBackgroundDoubleTap` — callbacks for
-  a tap/double-tap on the overlay's empty background. `MediaPlayerWidget` forwards its own
-  `onTap`/`onDoubleTap` through these so they fire identically whether the overlay is
-  visible or hidden. `onBackgroundTap: null` keeps the previous behaviour
-  (`showControlsTemporarily()`); `onBackgroundDoubleTap: null` installs no double-tap
-  recognizer at all.
+- `MediaControls.onBackgroundTap` / `onBackgroundTapDown` / `onBackgroundDoubleTap` /
+  `onBackgroundDoubleTapDown` — callbacks for a tap/double-tap on the overlay's empty
+  background, in bare and position-carrying flavours. `MediaPlayerWidget` forwards its own
+  `onTap`/`onTapDown`/`onDoubleTap`/`onDoubleTapDown` through these so they fire
+  identically whether the overlay is visible or hidden; because the background detector
+  fills the same box as the player's own tap detector, `localPosition` is identical on both
+  paths, which is what makes direction-aware double-tap seek work with the **default**
+  controls and not just with `customControls`. Both variants fire when both are supplied
+  (position-carrying first), and supplying either suppresses the overlay's own default. With
+  all four `null` the previous behaviour is kept: a background tap calls
+  `showControlsTemporarily()` and no double-tap recognizer is installed at all.
+- `MediaPlayerWidget` now exposes position-carrying counterparts for every gesture it
+  forwards: `onTapDown` (`GestureTapDownCallback`), `onDoubleTapDown`
+  (`GestureTapDownCallback`), and `onLongPressStart`
+  (`GestureLongPressStartCallback`). Previously `onTap`, `onDoubleTap` and
+  `onLongPress` were bare `VoidCallback`s, so a host app could not tell *where* the
+  player was tapped and therefore could not implement direction-aware double-tap seek
+  (double-tap the left half to rewind, the right half to fast-forward) — the
+  near-universal video-player convention — without shadowing the package's own tap
+  detector with its own full-bleed gesture layer. Fixes
+  [#83](https://github.com/zionmedianetwork/zmedia_player/issues/83).
+
+  Interaction rules, identical for all three gestures:
+  - The existing bare callbacks are **unchanged and fully source-compatible**; nothing
+    needs to migrate.
+  - Both variants may be supplied and **both fire**, in `GestureDetector`'s own order:
+    the position-carrying variant first (on pointer-down / press recognition), the bare
+    variant second (on gesture recognition).
+  - Supplying **either** variant means the host owns that gesture, so the widget's
+    built-in default no longer runs (single tap → `toggleControls`, double tap →
+    `togglePlayPause`; long press has no built-in default).
+  - `details.localPosition` is relative to the player widget's own box — the box
+    `MediaPlayerWidget` occupies after any `aspectRatio` sizing — so hosts divide by the
+    widget's own width, not the screen width. `details.globalPosition` remains
+    screen-relative.
+  - A callback fires only when no widget in the always-mounted controls overlay claimed
+    the gesture first; overlay *visibility* is not what decides ownership. Tap and double
+    tap (including the position-carrying variants) fire identically in both visibility
+    states — with the default controls, the visible overlay re-emits them through the new
+    `MediaControls.onBackgroundTapDown` / `onBackgroundDoubleTapDown`, whose detector fills
+    the same box, so `localPosition` is byte-for-byte the same on both paths. Long press
+    is **not** forwarded to the built-in overlay, so `onLongPress` / `onLongPressStart`
+    fire only while the overlay is hidden (or, with `customControls`, whenever the host's
+    overlay does not claim the press).
+  - `enableBuiltInGestures: false` disables the position-carrying callbacks exactly as it
+    disables the bare ones, on both the detector path and the overlay-forwarding path.
+
+  Documented in the README (`MediaPlayerWidget` → "Gesture callbacks" / "Gesture
+  ownership"), `docs/api-reference/advanced-features.md` ("Gesture callbacks" /
+  "Direction-aware double-tap seek" / "`MediaControls` background callbacks"),
+  `docs/api-reference/player-api.md`, `AGENTS.md`, and the `MediaPlayerWidget` /
+  `MediaControls` dartdoc. Covered by 41 widget tests in
+  `test/widgets/media_player_widget_gestures_test.dart`.
 
 ### Fixed
 - `MediaController` now **queues** operations instead of rejecting them. Previously

@@ -17,6 +17,67 @@ import 'overlays/error_overlay.dart';
 ///
 /// This widget provides the video surface and integrates with the media controls.
 /// It handles touch interactions, aspect ratio, and control visibility.
+///
+/// ## Gesture callbacks
+///
+/// Every gesture the widget forwards comes in two flavours: a bare
+/// [VoidCallback] ([onTap], [onDoubleTap], [onLongPress]) and a
+/// position-carrying counterpart ([onTapDown], [onDoubleTapDown],
+/// [onLongPressStart]).  Four rules apply uniformly to all three gestures:
+///
+/// 1. **Both may be supplied, and both fire.**  The order is
+///    `GestureDetector`'s own: the position-carrying variant fires first (on
+///    pointer-down / press recognition), the bare variant second (on gesture
+///    recognition).
+/// 2. **Supplying *either* variant means the host has taken over that
+///    gesture**, so the widget's own built-in default for it does not run.
+///    The built-in defaults are: single tap toggles the controls overlay,
+///    double tap toggles play/pause.  Long press has no built-in default.
+/// 3. **`localPosition` is relative to the player's own box** — the box this
+///    widget occupies after any [aspectRatio] sizing, which is also the box
+///    the video surface, subtitle overlay and controls overlay fill.  So the
+///    width you divide by is the widget's own width (`context.size?.width`,
+///    or a wrapping [LayoutBuilder]'s `constraints.maxWidth`), not the
+///    screen width.  This is the coordinate space to use for
+///    left-half/right-half zones; `globalPosition` is screen-relative and is
+///    what you want for positioning an overlay in an [Overlay]/[Stack] above
+///    the whole route.
+/// 4. **A callback runs only if no overlay widget claimed the gesture
+///    first** — the controls overlay is always mounted and stacked *above*
+///    the package's own tap detector, so the overlay gets first refusal on
+///    every pointer.  Overlay *visibility* is not what decides this: the
+///    built-in [MediaControls] are made non-hit-testable while hidden, and
+///    while visible they forward background taps and double taps (with
+///    position) straight back to these callbacks, so tap and double tap
+///    behave identically in both states.  Long press is the one exception —
+///    it is not forwarded by the built-in overlay, so it only fires while the
+///    overlay is hidden.  With [customControls] the host's own recognizers
+///    decide; anything they do not claim falls through to these callbacks
+///    (set [enableBuiltInGestures] to `false` to remove the detector
+///    entirely).
+///
+/// Direction-aware double-tap seek — the near-universal video-player
+/// convention — is therefore expressed as:
+///
+/// ```dart
+/// LayoutBuilder(
+///   builder: (context, constraints) => MediaPlayerWidget(
+///     controller: controller,
+///     onDoubleTapDown: (details) {
+///       final isLeftHalf =
+///           details.localPosition.dx < constraints.maxWidth / 2;
+///       final target = isLeftHalf
+///           ? controller.position - const Duration(seconds: 10)
+///           : controller.position + const Duration(seconds: 10);
+///       controller.seekTo(target < Duration.zero ? Duration.zero : target);
+///     },
+///   ),
+/// )
+/// ```
+///
+/// Because only `onDoubleTapDown` is supplied above, the built-in
+/// double-tap-to-play/pause default is suppressed; single tap still toggles
+/// the controls overlay because no tap callback was supplied.
 class MediaPlayerWidget extends StatefulWidget {
   /// Media controller for this player widget
   final MediaController controller;
@@ -74,24 +135,95 @@ class MediaPlayerWidget extends StatefulWidget {
   /// Callback when the player widget is tapped.
   ///
   /// Fires for a tap that no widget inside the controls overlay claimed —
-  /// identically whether the overlay is visible or hidden. When supplied it
-  /// replaces the built-in "toggle controls" behavior. Never invoked when
+  /// identically whether the overlay is visible or hidden (see the
+  /// "Gesture callbacks" section of the class docs for how that is achieved).
+  /// Carries no position; use [onTapDown] when the tap location matters.
+  ///
+  /// When supplied — on its own or alongside [onTapDown] — it replaces the
+  /// built-in "toggle controls" behavior. Never invoked when
   /// [enableBuiltInGestures] is `false`.
   final VoidCallback? onTap;
+
+  /// Position-carrying counterpart of [onTap].
+  ///
+  /// Invoked on pointer-down with a [TapDownDetails] whose `localPosition` is
+  /// measured from the top-left of the player's own box (the same box the
+  /// video surface and controls overlay fill), so
+  /// `details.localPosition.dx < box.width / 2` reliably means "left half".
+  ///
+  /// Fires *before* [onTap] when both are supplied, and — like [onTap] —
+  /// fires identically whether the controls overlay is visible or hidden.
+  /// Never invoked when [enableBuiltInGestures] is `false`.
+  final GestureTapDownCallback? onTapDown;
 
   /// Callback when the player widget is double-tapped.
   ///
   /// Fires for a double tap that no widget inside the controls overlay
   /// claimed — identically whether the overlay is visible or hidden. When
-  /// supplied it replaces the built-in "toggle play/pause" behavior. Never
-  /// invoked when [enableBuiltInGestures] is `false`.
+  /// supplied — on its own or alongside [onDoubleTapDown] — it replaces the
+  /// built-in "toggle play/pause" behavior. Never invoked when
+  /// [enableBuiltInGestures] is `false`.
+  ///
+  /// Carries no position; use [onDoubleTapDown] to build the conventional
+  /// direction-aware double-tap seek (left half = rewind, right half =
+  /// forward).
   final VoidCallback? onDoubleTap;
+
+  /// Position-carrying counterpart of [onDoubleTap].
+  ///
+  /// Invoked on the pointer-down of the *second* tap of a double-tap, with a
+  /// [TapDownDetails] whose `localPosition` is measured from the top-left of
+  /// the player's own box.  Fires *before* [onDoubleTap] when both are
+  /// supplied, and fires identically whether the controls overlay is visible
+  /// or hidden (with the default controls the visible overlay forwards it via
+  /// [MediaControls.onBackgroundDoubleTapDown], which spans the same box, so
+  /// `localPosition` is unchanged across the two paths). Never invoked when
+  /// [enableBuiltInGestures] is `false`.
+  ///
+  /// The canonical use — direction-aware double-tap seek:
+  ///
+  /// ```dart
+  /// LayoutBuilder(
+  ///   builder: (context, constraints) => MediaPlayerWidget(
+  ///     controller: controller,
+  ///     onDoubleTapDown: (details) {
+  ///       // constraints.maxWidth is the player's own width — the correct
+  ///       // denominator for localPosition, unlike the screen width.
+  ///       final isLeftHalf =
+  ///           details.localPosition.dx < constraints.maxWidth / 2;
+  ///       final target = isLeftHalf
+  ///           ? controller.position - const Duration(seconds: 10)
+  ///           : controller.position + const Duration(seconds: 10);
+  ///       controller.seekTo(target < Duration.zero ? Duration.zero : target);
+  ///     },
+  ///   ),
+  /// )
+  /// ```
+  final GestureTapDownCallback? onDoubleTapDown;
 
   /// Callback when the player widget is long-pressed.
   ///
+  /// Carries no position.  Use [onLongPressStart] when the press location
+  /// matters (e.g. press-and-hold-on-the-right-edge to fast-forward).
+  ///
   /// Fires for a long press that no widget inside the controls overlay
   /// claimed. Never invoked when [enableBuiltInGestures] is `false`.
+  ///
+  /// Unlike tap and double tap, long press is **not** forwarded to the
+  /// built-in controls' background: while the default [MediaControls] overlay
+  /// is visible it covers the whole surface, so a long press over it is
+  /// absorbed by the overlay and this callback does not fire. It fires
+  /// whenever the overlay is hidden, and — with [customControls] — whenever
+  /// the host's overlay does not claim the press.
   final VoidCallback? onLongPress;
+
+  /// Position-carrying counterpart of [onLongPress].
+  ///
+  /// Invoked when a long press is recognized, with a
+  /// [LongPressStartDetails] whose `localPosition` is measured from the
+  /// top-left of the player's own box.  Fires *before* [onLongPress] when
+  /// both are supplied, and shares [onLongPress]'s overlay caveat above.
+  final GestureLongPressStartCallback? onLongPressStart;
 
   /// Whether the package installs its own tap / double-tap / long-press
   /// handling over the video surface.
@@ -101,13 +233,14 @@ class MediaPlayerWidget extends StatefulWidget {
   /// (`AndroidView` / `UiKitView`) — which would otherwise swallow pointers —
   /// and **below** the controls overlay, so it only receives gestures that no
   /// widget in the overlay claimed. It maps tap → [MediaController.toggleControls]
-  /// (or [onTap]) and double tap → [MediaController.togglePlayPause] (or
-  /// [onDoubleTap]).
+  /// (or [onTap]/[onTapDown]) and double tap → [MediaController.togglePlayPause]
+  /// (or [onDoubleTap]/[onDoubleTapDown]).
   ///
   /// Set to `false` when you supply [customControls] and want to own every
   /// gesture yourself. The detector is then not mounted at all and [onTap],
-  /// [onDoubleTap] and [onLongPress] are never invoked by the package; the
-  /// built-in controls' background tap handling is disabled too. Note that
+  /// [onTapDown], [onDoubleTap], [onDoubleTapDown], [onLongPress] and
+  /// [onLongPressStart] are never invoked by the package; the built-in
+  /// controls' background tap handling is disabled too. Note that
   /// with no detector in the way, any pointer your overlay does not claim
   /// reaches the native platform view directly, so your overlay is
   /// responsible for covering the surface it cares about.
@@ -151,8 +284,11 @@ class MediaPlayerWidget extends StatefulWidget {
     this.boxFit,
     this.backgroundColor = Colors.black,
     this.onTap,
+    this.onTapDown,
     this.onDoubleTap,
+    this.onDoubleTapDown,
     this.onLongPress,
+    this.onLongPressStart,
     this.enableBuiltInGestures = true,
     this.allowFullscreen = true,
     this.aspectRatio,
@@ -515,8 +651,22 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
             if (widget.enableBuiltInGestures)
               Positioned.fill(
                 child: GestureDetector(
-                  onTap: widget.onTap ?? _handleTap,
-                  onDoubleTap: widget.onDoubleTap ?? _handleDoubleTap,
+                  // Position-carrying variants are forwarded verbatim; they
+                  // fire before their bare counterparts (GestureDetector's
+                  // own ordering).  Supplying EITHER variant for a gesture
+                  // means the host owns it, so the package default
+                  // (_handleTap / _handleDoubleTap) is suppressed — see the
+                  // "Gesture callbacks" section of the MediaPlayerWidget
+                  // class docs.
+                  onTapDown: widget.onTapDown,
+                  onTap: widget.onTap ??
+                      (widget.onTapDown == null ? _handleTap : null),
+                  onDoubleTapDown: widget.onDoubleTapDown,
+                  onDoubleTap: widget.onDoubleTap ??
+                      (widget.onDoubleTapDown == null
+                          ? _handleDoubleTap
+                          : null),
+                  onLongPressStart: widget.onLongPressStart,
                   onLongPress: widget.onLongPress,
                   behavior: HitTestBehavior.opaque,
                   child: Container(color: Colors.transparent),
@@ -798,10 +948,22 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
             // overlay is visible it covers the whole surface, so the tap
             // detector below never sees the pointer.  Forwarding the same
             // callbacks to the overlay's background means a tap/double-tap on
-            // empty overlay space behaves exactly as it does while hidden.
+            // empty overlay space behaves exactly as it does while hidden --
+            // including the position-carrying variants, because the overlay's
+            // background detector fills the same box as the tap detector
+            // below it, so `localPosition` is identical on both paths.
+            //
+            // The suppression rule is mirrored verbatim: supplying EITHER
+            // variant means the host owns the gesture, so the package default
+            // (showControlsTemporarily / _handleDoubleTap) does not also run.
+            onBackgroundTapDown:
+                widget.enableBuiltInGestures ? widget.onTapDown : null,
             onBackgroundTap: widget.enableBuiltInGestures ? widget.onTap : null,
+            onBackgroundDoubleTapDown:
+                widget.enableBuiltInGestures ? widget.onDoubleTapDown : null,
             onBackgroundDoubleTap: widget.enableBuiltInGestures
-                ? (widget.onDoubleTap ?? _handleDoubleTap)
+                ? (widget.onDoubleTap ??
+                    (widget.onDoubleTapDown == null ? _handleDoubleTap : null))
                 : null,
           ),
         ),

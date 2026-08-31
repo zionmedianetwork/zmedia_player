@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1006 tests passing** (run
+> the original release. The suite has since grown to **1030 tests passing** (run
 > `flutter test` for the live count) as audit-remediation work added regression
 > coverage. **Important caveat the original summary omitted:** these are all **Dart**
 > unit tests. There are **no automated native (Kotlin/Swift) tests**, and several
@@ -174,7 +174,10 @@ test/test_utils/
 ### 4. Widget Tests (Low Priority)
 
 **Components to Test:**
-- [ ] MediaPlayerWidget
+- [x] MediaPlayerWidget — `boxFit`/`safeArea` props and the gesture callbacks
+      (`onTap`/`onTapDown`, `onDoubleTap`/`onDoubleTapDown`,
+      `onLongPress`/`onLongPressStart`) are covered under `test/widgets/`;
+      the native-view branch still needs on-device verification
 - [ ] MediaControls
 - [ ] SubtitleView
 - [ ] Demo pages

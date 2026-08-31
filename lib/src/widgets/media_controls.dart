@@ -51,20 +51,45 @@ class MediaControls extends StatefulWidget {
   /// hook [MediaPlayerWidget] uses to forward its own `onTap` callback and
   /// keep it firing identically whether the overlay is visible or hidden.
   ///
-  /// When `null` the historical behavior applies: a background tap calls
-  /// [MediaController.showControlsTemporarily], which simply restarts the
-  /// auto-hide countdown. Buttons rendered on top of the background take
-  /// precedence over this callback.
+  /// Carries no position; use [onBackgroundTapDown] when the tap location
+  /// matters. Both may be supplied and both fire, [onBackgroundTapDown]
+  /// first.
+  ///
+  /// When both are `null` the historical behavior applies: a background tap
+  /// calls [MediaController.showControlsTemporarily], which simply restarts
+  /// the auto-hide countdown. Supplying *either* callback replaces that
+  /// default. Buttons rendered on top of the background take precedence over
+  /// these callbacks.
   final VoidCallback? onBackgroundTap;
+
+  /// Position-carrying counterpart of [onBackgroundTap].
+  ///
+  /// The background detector fills the entire overlay, which in turn fills
+  /// the player's own box, so `details.localPosition` is measured from the
+  /// top-left of the player — the same origin and the same box as
+  /// `MediaPlayerWidget.onTapDown` reports when the overlay is hidden.
+  final GestureTapDownCallback? onBackgroundTapDown;
 
   /// Called when the empty background of the overlay is double-tapped.
   ///
   /// [MediaPlayerWidget] forwards its own `onDoubleTap` (or the built-in
   /// toggle-play/pause behavior) here so a double tap does the same thing
-  /// whether the overlay is visible or hidden. `null` installs no double-tap
-  /// recognizer at all, which also keeps background single taps from being
+  /// whether the overlay is visible or hidden. When this *and*
+  /// [onBackgroundDoubleTapDown] are `null`, no double-tap recognizer is
+  /// installed at all, which also keeps background single taps from being
   /// delayed by the double-tap timeout.
   final VoidCallback? onBackgroundDoubleTap;
+
+  /// Position-carrying counterpart of [onBackgroundDoubleTap].
+  ///
+  /// This is what makes direction-aware double-tap seek work with the default
+  /// controls: [MediaPlayerWidget] forwards its own `onDoubleTapDown` here,
+  /// and because the background detector spans the player's own box, the
+  /// `localPosition` a host receives is identical whether the overlay was
+  /// visible (this path) or hidden (the player's own tap detector).
+  ///
+  /// Fires *before* [onBackgroundDoubleTap] when both are supplied.
+  final GestureTapDownCallback? onBackgroundDoubleTapDown;
 
   const MediaControls({
     super.key,
@@ -80,7 +105,9 @@ class MediaControls extends StatefulWidget {
     this.theme,
     this.title,
     this.onBackgroundTap,
+    this.onBackgroundTapDown,
     this.onBackgroundDoubleTap,
+    this.onBackgroundDoubleTapDown,
   });
 
   @override
@@ -209,8 +236,17 @@ class _MediaControlsState extends State<MediaControls>
               // of the overlay stack, so every control rendered above it wins
               // the gesture first; it only sees taps on empty overlay space.
               GestureDetector(
+                // Position-carrying variants are forwarded verbatim and fire
+                // before their bare counterparts.  Supplying EITHER variant
+                // means the caller owns the gesture, so the overlay's own
+                // default (restart the auto-hide countdown) is suppressed --
+                // mirroring MediaPlayerWidget's tap-detector rule exactly.
+                onTapDown: widget.onBackgroundTapDown,
                 onTap: widget.onBackgroundTap ??
-                    () => widget.controller.showControlsTemporarily(),
+                    (widget.onBackgroundTapDown == null
+                        ? () => widget.controller.showControlsTemporarily()
+                        : null),
+                onDoubleTapDown: widget.onBackgroundDoubleTapDown,
                 onDoubleTap: widget.onBackgroundDoubleTap,
                 child: Container(
                   width: double.infinity,

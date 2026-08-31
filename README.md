@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-1006%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-1030%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -463,6 +463,49 @@ MediaPlayerWidget(
 )
 ```
 
+#### Gesture callbacks
+
+Every forwarded gesture comes in two flavours: a bare `VoidCallback` and a
+position-carrying counterpart.
+
+| Bare | Position-carrying | Details type |
+|---|---|---|
+| `onTap` | `onTapDown` | `TapDownDetails` |
+| `onDoubleTap` | `onDoubleTapDown` | `TapDownDetails` |
+| `onLongPress` | `onLongPressStart` | `LongPressStartDetails` |
+
+Rules (identical for all three gestures):
+
+1. Both variants may be supplied and **both fire**, in `GestureDetector`'s own order —
+   the position-carrying one first, the bare one second.
+2. Supplying **either** variant means the host owns that gesture, so the built-in
+   default is suppressed. The built-in defaults are: single tap toggles the controls
+   overlay, double tap toggles play/pause. Long press has no built-in default.
+3. `details.localPosition` is relative to the **player widget's own box** (after any
+   `aspectRatio` sizing) — divide by the widget's width, not the screen width.
+   `details.globalPosition` stays screen-relative.
+4. A callback fires only if no widget in the controls overlay claimed the gesture first
+   (see *Gesture ownership* below). Tap and double tap behave identically whether the
+   overlay is visible or hidden, `localPosition` included; long press is absorbed by the
+   visible built-in overlay.
+
+Direction-aware double-tap seek — left half rewinds, right half fast-forwards:
+
+```dart
+LayoutBuilder(
+  builder: (context, constraints) => MediaPlayerWidget(
+    controller: _controller,
+    onDoubleTapDown: (details) {
+      final isLeftHalf = details.localPosition.dx < constraints.maxWidth / 2;
+      final target = isLeftHalf
+          ? _controller.position - const Duration(seconds: 10)
+          : _controller.position + const Duration(seconds: 10);
+      _controller.seekTo(target < Duration.zero ? Duration.zero : target);
+    },
+  ),
+)
+```
+
 #### Gesture ownership
 
 **A gesture is handled by the topmost widget in the controls overlay that claims it, and only
@@ -484,12 +527,17 @@ Consequences when you supply `customControls`:
   a `Container` with a `color` is opaque to hit tests and would swallow the tap meant to reveal
   the controls. Returning `const SizedBox.shrink()` while hidden restores the pre-0.3.1
   "unmounted" behaviour entirely.
-- `enableBuiltInGestures: false` removes the package detector altogether: `onTap`, `onDoubleTap`
-  and `onLongPress` are then never invoked by the package, and any pointer your overlay does not
-  claim reaches the native platform view directly.
+- `enableBuiltInGestures: false` removes the package detector altogether: none of `onTap`,
+  `onTapDown`, `onDoubleTap`, `onDoubleTapDown`, `onLongPress` or `onLongPressStart` are then
+  invoked by the package, and any pointer your overlay does not claim reaches the native
+  platform view directly.
 
 The built-in controls are unaffected: while hidden they stay non-hit-testable, invisible, and
-out of the semantics tree.
+out of the semantics tree. While *visible* they forward background taps and double taps —
+position included — back to your `onTap` / `onTapDown` / `onDoubleTap` / `onDoubleTapDown`
+via `MediaControls.onBackgroundTap` / `onBackgroundTapDown` / `onBackgroundDoubleTap` /
+`onBackgroundDoubleTapDown`, so those four fire identically in both states. Long press is not
+forwarded, so it fires only while the overlay is hidden.
 
 ### MediaItem
 
@@ -637,7 +685,7 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 1006), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 1030), and open a PR.
 
 ## License
 
@@ -654,7 +702,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 1006 automated tests — run `flutter test` for the current count.
+- **Tests:** 1030 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth
