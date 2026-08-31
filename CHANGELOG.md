@@ -854,7 +854,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     background playback (host app must run a foreground service with a media
     notification for full background audio; that service infrastructure is deferred).
 
-## [Unreleased]
+## [0.2.0] - 2026-06-23
 
 ### BREAKING
 - Renamed the `RepeatMode` enum to `MediaRepeatMode` (values `none`/`single`/`all`)
