@@ -153,7 +153,7 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **System Integration** - Native notification display
 - **Play/Pause Button** - Toggle playback
 - **Next/Previous** - Skip tracks
-- **Seek Forward/Backward** - Jump by intervals
+- **Seek Forward/Backward** - Opt-in via `NotificationConfig.showSeekForward`/`showSeekBackward` (both default `false`); rendered only when the flag is set **and** the item is seekable. `seekInterval` labels the control on both platforms; the host app performs the seek from `actionEventStream`
 - **Stop Button** - Stop playback
 - **Media Artwork** - Display thumbnails
 - **Auto-Generated Thumbnail** - Derive artwork from a video frame when `MediaItem.artworkUrl` is absent (iOS `AVAssetImageGenerator` / Android `MediaMetadataRetriever`)

@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-871%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-894%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -239,6 +239,11 @@ final notifications = NotificationService(const NotificationConfig(
   showPlayPause: true,
   showNext: true,
   showPrevious: true,
+  // Opt-in (both default to false). A seek control is rendered only when the
+  // flag is true AND the item is seekable (not a live stream without DVR).
+  showSeekForward: true,
+  showSeekBackward: true,
+  seekInterval: 10, // display-only: labels the control, does not perform the seek
 ));
 
 // Pass the player so lock-screen state stays in sync:
@@ -250,13 +255,32 @@ await notifications.show(
   playerId: controller.playerId,
 );
 
-notifications.actionStream.listen((action) {
-  // 'play' | 'pause' | 'next' | 'previous' | 'seekForward' | 'seekBackward'
+notifications.actionEventStream.listen((event) {
+  // NotificationActions: 'play' | 'pause' | 'next' | 'previous' | 'stop'
+  //                    | 'seekForward' | 'seekBackward' | 'seekTo'
+  // NotificationService renders and forwards only — your app performs the call.
+  switch (event.action) {
+    case NotificationActions.seekForward:
+      controller.seekForward(const Duration(seconds: 10));
+      break;
+    case NotificationActions.seekBackward:
+      controller.seekBackward(const Duration(seconds: 10));
+      break;
+  }
 });
 ```
 
 When `MediaItem.artworkUrl` is null, the notification artwork is generated from a video frame
 (iOS `AVAssetImageGenerator`, Android `MediaMetadataRetriever`).
+
+`showSeekForward` / `showSeekBackward` follow one contract on both platforms: **the control is
+offered if and only if the flag is `true` and the current item is seekable**
+(`MediaPlayer.isSeekable`). Android adds a `NotificationCompat.Action` and advertises
+`ACTION_FAST_FORWARD`/`ACTION_REWIND`; iOS enables
+`MPRemoteCommandCenter.skipForwardCommand`/`.skipBackwardCommand`. `seekInterval` only labels
+the control (Android button text, iOS `preferredIntervals`) — apply the matching `Duration`
+yourself in the `actionEventStream` handler. See
+[Advanced Features](docs/api-reference/advanced-features.md#media-notifications).
 
 ### Picture-in-Picture
 

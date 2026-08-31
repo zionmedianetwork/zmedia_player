@@ -363,6 +363,12 @@ is already `true` and duration is still `0`, confirm the config actually reached
 `setPlaylist`/`skipToIndex` do not yet (see the known limitation above), so a playlist-driven
 live item can still see a stale, DVR-disabled config.
 
+The same seekability gate also removes the notification's seek-forward/seek-backward controls:
+`NotificationConfig.showSeekForward`/`showSeekBackward` are honoured only when the item is
+seekable, so a live stream without DVR never shows them on either platform even if both flags
+are `true`. Enabling `enableDvr` brings them back on the next notification update — no
+re-initialize needed.
+
 ### High latency behind live edge / frequent buffering
 
 Set `liveLatency` on the matching streaming config to give the native player a target offset

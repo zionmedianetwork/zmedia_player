@@ -75,14 +75,14 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `BufferingConfig` / `BufferHealth` / `BufferStatus` / `BufferStatistics` | Adaptive buffering config + health/stats. |
 | `NetworkStatus` / `NetworkQuality` / `ConnectionType` / `NetworkChangeEvent` | Network monitoring model. |
 | `QoEMetrics` / `PerformanceMetrics` / `EngagementMetrics` / `PlaybackEndReason` / `BufferEventType` | Analytics/QoE models. |
-| `NotificationConfig` / `NotificationAction` / `NotificationPriority` | Lock-screen / Control Center notification config. `priority`, `dismissible`, and `customActions` are wired **Android only** — no faithful `MPRemoteCommandCenter` equivalent exists on iOS. |
+| `NotificationConfig` / `NotificationAction` / `NotificationPriority` | Lock-screen / Control Center notification config. `priority`, `dismissible`, and `customActions` are wired **Android only** — no faithful `MPRemoteCommandCenter` equivalent exists on iOS. `showSeekForward`/`showSeekBackward` are wired on **both** platforms with one contract: the control is offered iff `flag && MediaPlayer.isSeekable` (Android `ACTION_FAST_FORWARD`/`ACTION_REWIND` + a notification button; iOS `skipForwardCommand`/`skipBackwardCommand`). `seekInterval` is display-only on both — the host app performs the seek. |
 | `PipConfig` / `PipAction` / `PipState` / `PipStatus` / `PipActionEvent` | Picture-in-Picture config + state. `PipConfig.actions`/`showPlaybackControls` are wired **Android only** for custom actions (`showPlaybackControls` partially affects iOS via `requiresLinearPlayback`, iOS 14+); tapping a custom action delivers a `PipActionEvent` on `MediaPlayer.pipActionStream`. |
 | `CastDevice` / `CastDeviceType` / `CastState` / `CastStatus` / `CastConfig` | Casting (Chromecast/AirPlay) model — no DLNA support exists in this package. |
 
 ### Services (`lib/src/services/`)
 | Export | Purpose |
 |---|---|
-| `NotificationService` | Lock-screen/Control Center media controls. `initialize(playerId, mediaPlayer:)` then `show()`/`dismiss()`; `actionStream`. |
+| `NotificationService` | Lock-screen/Control Center media controls. `initialize(playerId, mediaPlayer:)` then `show()`/`dismiss()`; `actionEventStream` (`actionStream` is deprecated). Action wire values live in `NotificationActions` — `seekForward`/`seekBackward` are `'seekForward'`/`'seekBackward'`, matching what both native handlers emit. |
 | `CastService` | Cast device discovery + connection. |
 | `StreamingService` | Bandwidth estimation + quality recommendation. |
 | `CacheService` | Downloads a media file to disk (`downloadAndCache`/`cacheMedia`/`preloadMedia`) and plays it back from there via `getCachedFileUri` — including fully offline for non-DRM content. Not a full download-manager (no background-transfer queue) and **not** offline DRM — no license can be persisted for offline playback on either platform. |
@@ -206,9 +206,14 @@ controller.player.drmSessionStream.listen((s) => print(s.state));
 final notifications = NotificationService(const NotificationConfig(enabled: true));
 await notifications.initialize(controller.playerId, mediaPlayer: controller.player); // pass the player!
 await notifications.show(mediaItem: item, state: controller.state, playerId: controller.playerId);
-notifications.actionStream.listen((a) { /* play|pause|next|previous|seekForward|seekBackward */ });
+notifications.actionEventStream.listen((e) { /* play|pause|next|previous|stop|seekForward|seekBackward|seekTo */ });
 ```
 If `MediaItem.artworkUrl` is null, the artwork is auto-generated from a **video frame**.
+
+Seek controls are opt-in (`showSeekForward`/`showSeekBackward`, both default `false`) and are
+rendered **iff the flag is true AND the item is seekable** — identical on Android and iOS.
+`seekInterval` only labels the control; the host app must apply the same `Duration` when it
+handles the `seekForward`/`seekBackward` event.
 
 ### Fullscreen / landscape display
 ```dart
@@ -270,7 +275,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 871 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 894 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -286,7 +291,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **871**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **894**, keep green) before proposing changes.
 - **API/data-contract/feature changes require documentation in the same change** — root `README.md`, this file, every affected file under `docs/`, and `CHANGELOG.md`. See `CLAUDE.md`'s Development Workflow for the full rule and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
@@ -298,7 +303,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (871 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (894 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating

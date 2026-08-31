@@ -150,11 +150,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
       case 'stop':
         _controller.stop();
         break;
-      case 'seekForward':
-        _controller.seekForward();
+      // NotificationConfig.seekInterval only *labels* the platform control --
+      // the host app performs the seek and must pass the matching Duration.
+      case NotificationActions.seekForward:
+        _controller.seekForward(const Duration(seconds: 10));
         break;
-      case 'seekBackward':
-        _controller.seekBackward();
+      case NotificationActions.seekBackward:
+        _controller.seekBackward(const Duration(seconds: 10));
         break;
       case NotificationActions.seekTo:
         // The host app -- not the package -- is responsible for performing
@@ -336,6 +338,10 @@ class _OptionsPanel extends StatelessWidget {
         ),
         CheckboxListTile(
           title: const Text('Show Seek Forward (+10s)'),
+          subtitle: const Text(
+            'Only rendered when the item is also seekable '
+            '(not a live stream without DVR)',
+          ),
           value: showSeekForward,
           onChanged: (v) =>
               onChanged(showNext, showPrevious, showStop, v!, showSeekBackward),
@@ -344,6 +350,10 @@ class _OptionsPanel extends StatelessWidget {
         ),
         CheckboxListTile(
           title: const Text('Show Seek Backward (-10s)'),
+          subtitle: const Text(
+            'Only rendered when the item is also seekable '
+            '(not a live stream without DVR)',
+          ),
           value: showSeekBackward,
           onChanged: (v) =>
               onChanged(showNext, showPrevious, showStop, showSeekForward, v!),
