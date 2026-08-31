@@ -266,16 +266,24 @@ class DrmConfig {
   }
 
   /// Convert to map for platform channel
+  ///
+  /// The returned map holds *copies* of this object's collection fields
+  /// rather than live references, so mutating the result never mutates
+  /// this config, and two calls never hand out the same inner collection. The
+  /// copies are shallow: a collection nested inside a `Map<String, dynamic>`
+  /// value is still shared. A `null` field stays `null` — it is never widened
+  /// to an empty collection, so the MethodChannel payload shape is unchanged.
   Map<String, dynamic> toMap() {
     return {
       'scheme': scheme.name,
       'licenseUrl': licenseUrl,
       'certificateUrl': certificateUrl,
-      'headers': headers,
+      'headers': headers == null ? null : Map<String, String>.from(headers!),
       'token': token,
       'keyId': keyId,
       'contentId': contentId,
-      'customData': customData,
+      'customData':
+          customData == null ? null : Map<String, dynamic>.from(customData!),
       'ezdrmConfig': ezdrmConfig?.toMap(),
       'certificatePinning': certificatePinning?.toMap(),
       'minWidevineSecurityLevel': minWidevineSecurityLevel?.wireValue,

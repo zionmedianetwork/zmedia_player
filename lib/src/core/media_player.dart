@@ -3192,7 +3192,9 @@ class MediaPlayer {
       'volume': config.volume,
       'speed': config.speed,
       'startMuted': config.startMuted,
-      'httpHeaders': config.httpHeaders,
+      'httpHeaders': config.httpHeaders == null
+          ? null
+          : Map<String, String>.from(config.httpHeaders!),
       'showControls': config.showControls,
       'controlsTimeout': config.controlsTimeout.inMilliseconds,
       'allowBackgroundPlayback': config.allowBackgroundPlayback,

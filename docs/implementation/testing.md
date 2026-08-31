@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1054 tests passing** in the Dart layer (run `flutter test` for
+> **Current status:** **1070 tests passing** in the Dart layer (run `flutter test` for
 > the live count). Native Kotlin/Swift code still has **no automated tests** — those
 > paths require on-device verification.
 
@@ -156,9 +156,19 @@ noise, not the code, and cannot be made reliable on shared CI hardware.
 Questions of the form "does repeated use accumulate state?" are asserted
 deterministically instead, in the `Repeated Use Invariants` group of
 `test/performance/drm_performance_test.dart`: repeated serialization of
-identical inputs must not drift, `toMap()` must return a fresh map so a
-caller mutating one result cannot corrupt later ones, and configs built at
-volume must stay independent.
+identical inputs must not drift, `toMap()` must return a fresh *outer* map so
+a caller mutating one result's top-level keys cannot corrupt later ones, and
+configs built at volume must stay independent.
+
+The matching guarantee one level down — that the collections *inside* that map
+(`DrmConfig.headers`/`.customData`, `MediaItem.httpHeaders`/`.metadata`,
+`SubtitleTrack.metadata`, `CastDevice.capabilities`,
+`PerformanceMetrics.context`) are copies rather than live references to the
+model's own fields — is covered separately in
+`test/models/to_map_defensive_copy_test.dart`. That file also pins the two
+boundaries of the fix: the copies are shallow, and a `null` field still
+serializes as a present key with a `null` value rather than an empty
+collection, so the MethodChannel payload shape does not change.
 
 ## Test Utilities
 
@@ -571,6 +581,6 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** 1054 tests passing in the Dart layer; **no automated native tests yet**
+**Test Coverage:** 1070 tests passing in the Dart layer; **no automated native tests yet**
 **Status:** Active development — native layers need on-device verification
 **Last Updated:** August 31, 2026

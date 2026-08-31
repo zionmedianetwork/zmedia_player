@@ -145,6 +145,13 @@ class MediaItem {
   }
 
   /// Converts the media item to a map for serialization
+  ///
+  /// The returned map holds *copies* of this object's collection fields
+  /// rather than live references, so mutating the result never mutates
+  /// this item, and two calls never hand out the same inner collection. The
+  /// copies are shallow: a collection nested inside a `Map<String, dynamic>`
+  /// value is still shared. A `null` field stays `null` — it is never widened
+  /// to an empty collection, so the MethodChannel payload shape is unchanged.
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -155,10 +162,12 @@ class MediaItem {
       'url': url,
       'artworkUrl': artworkUrl,
       'mimeType': mimeType,
-      'httpHeaders': httpHeaders,
+      'httpHeaders':
+          httpHeaders == null ? null : Map<String, String>.from(httpHeaders!),
       'mediaType': mediaType.name,
       'drmConfig': drmConfig?.toMap(),
-      'metadata': metadata,
+      'metadata':
+          metadata == null ? null : Map<String, dynamic>.from(metadata!),
       'isLive': isLive,
       // Null when the item leaves format detection to inference; native
       // then runs the same path-based inference as

@@ -57,6 +57,11 @@ class CastDevice {
     );
   }
 
+  /// Converts the device to a map for serialization.
+  ///
+  /// The `capabilities` entry is a *copy*, not a live reference to
+  /// [capabilities], so mutating the returned list never mutates this device
+  /// and two calls never hand out the same list.
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -64,7 +69,7 @@ class CastDevice {
       'type': type.name,
       'model': model,
       'manufacturer': manufacturer,
-      'capabilities': capabilities,
+      'capabilities': List<String>.from(capabilities),
       'isConnected': isConnected,
       'signalStrength': signalStrength,
     };

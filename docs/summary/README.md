@@ -4,7 +4,7 @@ High-level overview of development progress, completed features, and project sta
 
 > **Historical (v0.1.0).** The "Production Ready / 113 tests / 100%" figures below
 > are the Oct 2025 release snapshot. The project is now in audit-driven hardening: the
-> Dart suite has grown to **1054 tests** (run `flutter test` for the live count), but
+> Dart suite has grown to **1070 tests** (run `flutter test` for the live count), but
 > native code has no automated tests and needs on-device verification. See the
 > [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
 

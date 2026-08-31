@@ -295,13 +295,17 @@ class PerformanceMetrics {
     this.context,
   });
 
-  /// Converts to map
+  /// Converts to map.
+  ///
+  /// The `context` entry is a shallow *copy* of [context], not a live
+  /// reference to it, so mutating the returned map never mutates these
+  /// metrics. A `null` [context] stays `null`.
   Map<String, dynamic> toMap() {
     return {
       'operation': operation,
       'duration': duration,
       'timestamp': timestamp.millisecondsSinceEpoch,
-      'context': context,
+      'context': context == null ? null : Map<String, dynamic>.from(context!),
     };
   }
 

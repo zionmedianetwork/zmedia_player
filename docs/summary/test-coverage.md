@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1054 tests passing** (run
+> the original release. The suite has since grown to **1070 tests passing** (run
 > `flutter test` for the live count) as audit-remediation work added regression
 > coverage. **Important caveat the original summary omitted:** these are all **Dart**
 > unit tests. There are **no automated native (Kotlin/Swift) tests**, and several
@@ -108,7 +108,11 @@ earlier batch within the same run. Whether repeated use accumulates state is
 asserted separately and deterministically — see the `Repeated Use Invariants`
 group in `test/performance/drm_performance_test.dart`, which checks that 1000
 repeated serializations of identical input do not drift, that `toMap()` returns
-a fresh map per call, and that 1000 configs built in a batch stay independent.
+a fresh *outer* map per call, and that 1000 configs built in a batch stay
+independent. The inner collections of that map (`headers`, `customData`,
+`httpHeaders`, `metadata`, `capabilities`, `context`) are checked to be copies
+rather than live references to the model's fields in
+`test/models/to_map_defensive_copy_test.dart`.
 
 ---
 

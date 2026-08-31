@@ -158,6 +158,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than once per frame — turning a previously silent black screen into a loud, actionable error.
 
 ### Fixed
+- **`toMap()` no longer hands out live references to a model's own collection fields.**
+  `DrmConfig.toMap()` emitted `'headers': headers` and `'customData': customData`,
+  `MediaItem.toMap()` emitted `'httpHeaders': httpHeaders` and `'metadata': metadata`,
+  `SubtitleTrack.toMap()` emitted `'metadata': metadata`, `CastDevice.toMap()` emitted
+  `'capabilities': capabilities`, and `PerformanceMetrics.toMap()` emitted
+  `'context': context` — each one the *same* `Map`/`List` instance the model holds. A caller
+  who mutated what `toMap()` returned therefore mutated the model itself, and two `toMap()`
+  calls on the same object handed out the same mutable inner collection, so tampering with
+  one serialization corrupted the next. The round trip was also asymmetric:
+  `DrmConfig.fromMap` has always copied defensively (`Map<String, String>.from(...)`) on the
+  way in while `toMap()` aliased on the way out. Every one of those entries is now a copy.
+  The copies are **shallow** — a collection nested inside a `Map<String, dynamic>` value is
+  still shared — and a `null` field still serializes as a present key with a `null` value, so
+  the MethodChannel payload shape is byte-for-byte unchanged and nothing native reads is
+  affected. `MediaPlayer`'s private `_configToMap` was given the same treatment for
+  `MediaConfig.httpHeaders`; that map is encoded by the platform codec immediately, so the
+  aliasing was never observable there, and the change is consistency/defence-in-depth only.
+  The fields themselves are deliberately **not** copied at construction: every one of these
+  constructors is `const`, and copying in the constructor body would have removed `const`
+  and broken existing `const MediaItem(...)` / `const SubtitleTrack(...)` call sites.
+  Regression coverage: `test/models/to_map_defensive_copy_test.dart`.
 - `MediaController` now **queues** operations instead of rejecting them. Previously
   `_executeOperation` held a per-controller boolean lock that never queued: while it was
   held by a live operation, a "non-critical" call (`setVolume`, `toggleMute`, `setSpeed`,

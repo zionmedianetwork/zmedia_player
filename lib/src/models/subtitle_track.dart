@@ -59,6 +59,13 @@ class SubtitleTrack {
   }
 
   /// Converts the subtitle track to a map for serialization
+  ///
+  /// The returned map holds *copies* of this object's collection fields
+  /// rather than live references, so mutating the result never mutates
+  /// this track, and two calls never hand out the same inner collection. The
+  /// copies are shallow: a collection nested inside a `Map<String, dynamic>`
+  /// value is still shared. A `null` field stays `null` — it is never widened
+  /// to an empty collection, so the MethodChannel payload shape is unchanged.
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -68,7 +75,8 @@ class SubtitleTrack {
       'format': format.name,
       'isSelected': isSelected,
       'isDefault': isDefault,
-      'metadata': metadata,
+      'metadata':
+          metadata == null ? null : Map<String, dynamic>.from(metadata!),
     };
   }
 
