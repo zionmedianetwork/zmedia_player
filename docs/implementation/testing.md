@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1052 tests passing** in the Dart layer (run `flutter test` for
+> **Current status:** **1054 tests passing** in the Dart layer (run `flutter test` for
 > the live count). Native Kotlin/Swift code still has **no automated tests** — those
 > paths require on-device verification.
 
@@ -145,6 +145,20 @@ Measure and benchmark performance metrics.
 - Serialization: < 50μs
 - License check: < 10μs
 - Memory per config: ~1KB
+
+These are deliberately generous *absolute* ceilings — roughly 20x-100x the
+cost actually observed — chosen so a real order-of-magnitude regression fails
+the build while ordinary machine load does not. Wall-clock assertions are
+never expressed as a ratio between batches (e.g. "the last batch must be
+within 2x of the first"): at these timescales a ratio measures scheduler
+noise, not the code, and cannot be made reliable on shared CI hardware.
+
+Questions of the form "does repeated use accumulate state?" are asserted
+deterministically instead, in the `Repeated Use Invariants` group of
+`test/performance/drm_performance_test.dart`: repeated serialization of
+identical inputs must not drift, `toMap()` must return a fresh map so a
+caller mutating one result cannot corrupt later ones, and configs built at
+volume must stay independent.
 
 ## Test Utilities
 
@@ -475,15 +489,25 @@ flutter test test/performance/ --reporter expanded
 
 ### Interpret Results
 
+Performance tests print nothing on success. Each measured value is embedded
+in its expectation's `reason:` string, so the number is reported only when
+the budget is actually exceeded:
+
 ```
-DrmConfig creation: 45.23μs avg
-Serialization: 32.15μs avg
-License check: 5.67μs avg
+Expected: a value less than <100>
+  Actual: <143.87>
+   Which: is not a value less than <100>
+DrmConfig.widevine() averaged 143.87μs over 1000 iterations
 ```
 
 ### Performance Regression Detection
 
-Tests will fail if performance degrades by more than 20%.
+Regressions are caught by the absolute per-operation budgets listed under
+[Performance Tests](#4-performance-tests) — a test fails when an operation
+exceeds its ceiling, not when it gets some percentage slower than a previous
+run. There is no run-to-run or batch-to-batch comparison, because the suite
+keeps no baseline across runs and relative timing comparisons are not stable
+enough on shared hardware to gate a build.
 
 ## Test Maintenance
 
@@ -547,6 +571,6 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** 1052 tests passing in the Dart layer; **no automated native tests yet**
+**Test Coverage:** 1054 tests passing in the Dart layer; **no automated native tests yet**
 **Status:** Active development — native layers need on-device verification
-**Last Updated:** August 30, 2026
+**Last Updated:** August 31, 2026

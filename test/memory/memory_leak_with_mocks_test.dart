@@ -1,4 +1,12 @@
 /// Memory leak tests with proper platform channel mocking
+///
+/// The `Performance Benchmarks` group below asserts wall-clock budgets.
+/// Those budgets are deliberately generous absolute ceilings (50x-300x the
+/// observed cost) rather than ratios or tight bounds, so they catch an
+/// order-of-magnitude regression without reddening the build just because
+/// the machine is busy. Measured values are surfaced through each
+/// expectation's `reason:` string, so a passing run prints nothing and a
+/// failing one still reports the number that blew the budget.
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:zmedia_player/zmedia_player.dart';
@@ -56,8 +64,6 @@ void main() {
         controller.dispose();
         expect(controller.player.isDisposed, true);
       }
-      // ignore: avoid_print
-      print('✅ Completed 100 cycles without crash');
     });
 
     test('✅ Multiple independent controllers', () async {
@@ -144,11 +150,10 @@ void main() {
       stopwatch.stop();
       final ms = stopwatch.elapsedMilliseconds;
 
-      // ignore: avoid_print
-      print(
-          '\n⚡ Performance: 50 cycles in ${ms}ms (avg: ${(ms / 50).toStringAsFixed(2)}ms/cycle)');
-
-      expect(ms, lessThan(5000), reason: 'Should complete in under 5 seconds');
+      // ~70x the observed cost (~70ms), so only a real regression trips it.
+      expect(ms, lessThan(5000),
+          reason: 'Should complete in under 5 seconds; took ${ms}ms '
+              '(avg ${(ms / 50).toStringAsFixed(2)}ms/cycle)');
     });
 
     test('⚡ Concurrent operations are fast', () async {
@@ -165,10 +170,10 @@ void main() {
 
       final ms = stopwatch.elapsedMilliseconds;
 
-      // ignore: avoid_print
-      print('⚡ Concurrent: 10 parallel cycles in ${ms}ms');
-
-      expect(ms, lessThan(2000), reason: 'Concurrent ops should be fast');
+      // ~300x the observed cost (~6ms), so only a real regression trips it.
+      expect(ms, lessThan(2000),
+          reason: 'Concurrent ops should be fast; 10 parallel cycles took '
+              '${ms}ms');
     });
 
     test('⚡ State access is instant', () async {
@@ -189,12 +194,11 @@ void main() {
       stopwatch.stop();
       final ms = stopwatch.elapsedMilliseconds;
 
-      // ignore: avoid_print
-      print(
-          '⚡ State access: 3000 accesses in ${ms}ms (${(ms / 3000).toStringAsFixed(4)}ms/access)');
-
+      // 3000 field reads are sub-millisecond in practice, so a 200ms
+      // ceiling is a very wide margin over the observed cost.
       expect(ms, lessThan(200),
-          reason: 'State access should be nearly instant');
+          reason: 'State access should be nearly instant; 3000 accesses took '
+              '${ms}ms');
 
       controller.dispose();
     });

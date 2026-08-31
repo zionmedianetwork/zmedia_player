@@ -64,9 +64,12 @@ String? nativeErrorCodeOf(MediaPlayerException err) {
     PlayerDisposedException() ||
     ConfigurationException() ||
     ProtocolMismatchException() ||
-    // ignore: deprecated_member_use — MediaPlayerException is sealed, so this
-    // arm is still required for exhaustiveness even though the package no
-    // longer throws OperationBusyException (it queues instead).
+    // MediaPlayerException is sealed, so this arm is still required for
+    // exhaustiveness even though the package no longer throws
+    // OperationBusyException (it queues instead). The bare directive must be
+    // the last comment line before the pattern: `// ignore:` applies only to
+    // the line immediately following it.
+    // ignore: deprecated_member_use
     OperationBusyException() =>
       null,
   };

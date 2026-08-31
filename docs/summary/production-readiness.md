@@ -53,7 +53,10 @@ All operations significantly exceed performance targets:
 | MediaItem with DRM | < 100μs | **3.39μs** | Yes **97% faster** |
 
 **Performance Highlights:**
-- **Zero performance degradation** over repeated operations
+- **No state accumulation** over repeated operations — repeated config
+  construction and serialization is asserted to produce no drift, no shared
+  mutable state, and no cross-contamination between instances (see the
+  `Repeated Use Invariants` group in `test/performance/drm_performance_test.dart`)
 - **Minimal memory footprint**: ~1KB per DRM config
 - **Lightning-fast validation**: License checks in 0.098μs
 
