@@ -305,9 +305,22 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
         }
 
         let startIndex = args["startIndex"] as? Int ?? 0
+        // Config staleness fix (playlist path): MediaPlayer.setPlaylist() on
+        // the Dart side now sends the current MediaConfig snapshot alongside
+        // the playlist, exactly as 'load' does -- native loads
+        // items[startIndex] through the same loadMediaItem, so it needs the
+        // same config (mirrors ZMediaPlayerPlugin.kt's handleSetPlaylist).
+        // Optional so an older cached Dart build still works with whatever
+        // config this instance already holds.
+        let config = args["config"] as? [String: Any]
 
         do {
-            try playerManager.setPlaylist(playerId: playerId, playlist: playlist, startIndex: startIndex)
+            try playerManager.setPlaylist(
+                playerId: playerId,
+                playlist: playlist,
+                startIndex: startIndex,
+                config: config
+            )
             result(nil)
         } catch {
             result(FlutterError(code: "PLAYLIST_ERROR", message: error.localizedDescription, details: nil))
@@ -511,8 +524,14 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             return
         }
 
+        // Config staleness fix (playlist path) -- see handleSetPlaylist.
+        // skipToNext/skipToPrevious/auto-advance all route through this
+        // method on the Dart side, so this one key covers them all.
+        // Optional for older cached Dart builds.
+        let config = args["config"] as? [String: Any]
+
         do {
-            try playerManager.skipToIndex(playerId: playerId, index: index)
+            try playerManager.skipToIndex(playerId: playerId, index: index, config: config)
             result(nil)
         } catch {
             result(FlutterError(code: "SKIP_ERROR", message: error.localizedDescription, details: nil))

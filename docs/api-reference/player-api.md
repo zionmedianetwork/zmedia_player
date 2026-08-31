@@ -66,6 +66,9 @@ Contract:
 | `Future<void> skipToNext()` / `skipToPrevious()` | Move within the playlist |
 | `Future<void> skipToIndex(int index)` | Jump to an index |
 
+> `skipToNext`/`skipToPrevious` route through `skipToIndex`, as does playlist auto-advance when
+> an item completes.
+
 ### Track selection
 
 | Method | Description |
@@ -150,6 +153,28 @@ PiP: `checkPipAvailability`, `enterPictureInPicture`, `exitPictureInPicture`. Ca
 `startCastDiscovery`, `stopCastDiscovery`, `connectToCastDevice`, `loadMediaOnCastDevice`,
 `disconnectFromCastDevice`. Security: `setSecureSurface`. Config/lifecycle: `updateConfig`,
 `dispose`.
+
+#### Config snapshot on the load paths
+
+Every method that makes native load a media item sends the current `MediaConfig` under a
+`config` key, serialized exactly as `initialize`/`updateConfig` serialize it:
+
+| MethodChannel call | Payload |
+|---|---|
+| `load` | `{playerId, mediaItem, config}` |
+| `setPlaylist` | `{playerId, playlist, startIndex, config}` |
+| `skipToIndex` | `{playerId, index, config}` |
+
+Because the snapshot travels on **every** such call, rebuilding a `MediaConfig` (e.g. flipping
+`hlsConfig.enableDvr`) and loading again is honored immediately — for playlist-driven items
+too — with no separate `updateConfig()` call. Native replaces its stored config from the
+snapshot *before* any config-dependent work, but deliberately does not re-apply
+volume/speed/mute from it (that would undo an in-progress runtime `setMuted()`); use
+`updateConfig()` when you want those applied. The key is optional on the native side: a native
+build that predates it ignores it and keeps its stored config, exactly as before.
+
+Per-item `httpHeaders` and `drmConfig` are unaffected — they live on `MediaItem`, so per-item
+auth has always worked on the playlist path.
 
 ### Streams
 

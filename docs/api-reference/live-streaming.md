@@ -34,14 +34,15 @@ on top.
 > for headers (see [below](#custom-headers-for-authenticated-live-manifests)) and
 > `AdaptiveCacheConfig` for segment caching instead.
 >
-> **Reloading with a changed config now actually takes effect.** `MediaPlayer.load()` carries
-> the current `MediaConfig` snapshot (including `hlsConfig`/`dashConfig`) with every call, not
-> only at `initialize()`/`updateConfig()` time — so toggling `enableDvr`/`liveLatency`/the
-> bitrate bounds and calling `load()` again on the same or a new `MediaItem` is honored
-> immediately. **Known limitation:** `setPlaylist`/`skipToIndex` still route through a
-> single-argument native `loadMediaItem` call that does not carry a config snapshot, so
-> per-item streaming config can be stale for playlist-driven items until the next explicit
-> `load()` or `updateConfig()` call.
+> **Reloading with a changed config actually takes effect — on every load path.**
+> `MediaPlayer.load()`, `setPlaylist()` and `skipToIndex()` each carry the current
+> `MediaConfig` snapshot (including `hlsConfig`/`dashConfig`) with every call, not only at
+> `initialize()`/`updateConfig()` time — so toggling `enableDvr`/`liveLatency`/the bitrate
+> bounds and loading again is honored immediately, whether you reload a single `MediaItem` or
+> load/advance a playlist. `skipToNext`, `skipToPrevious` and playlist auto-advance on
+> completion all route through `skipToIndex`, so they carry it too. Native replaces its stored
+> config from the snapshot before any config-dependent work; the key is optional on the native
+> side, so an older native build simply ignores it and behaves as before.
 
 `StreamingService` (`lib/src/services/streaming_service.dart`) is a related but separate,
 **Dart-only** helper for bandwidth-based quality-track *recommendation* math (moving-average
@@ -445,9 +446,10 @@ enabled on the matching streaming config (see the table above and
 report the unbounded, unknowable "time since the stream started broadcasting". If `enableDvr`
 is already `true` and duration is still `0`, confirm it is set on the config for the format the
 item actually resolved to (check the debug warning, or `MediaItem.resolvedStreamingFormat`),
-and that the config actually reached native for *this* load — `load()` carries the current config snapshot on every call, but
-`setPlaylist`/`skipToIndex` do not yet (see the known limitation above), so a playlist-driven
-live item can still see a stale, DVR-disabled config.
+and that the config actually reached native for *this* load — `load()`, `setPlaylist()` and
+`skipToIndex()` all carry the current config snapshot on every call (see above), so a stale,
+DVR-disabled config is only possible if the installed native build predates that wiring and
+ignores the `config` key: rebuild the app so the native side matches this Dart package.
 
 The same seekability gate also removes the notification's seek-forward/seek-backward controls:
 `NotificationConfig.showSeekForward`/`showSeekBackward` are honoured only when the item is
