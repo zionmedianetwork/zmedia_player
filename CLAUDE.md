@@ -52,8 +52,8 @@ Any of the following, in any combination:
   dependencies, Gradle/CocoaPods/SPM config, required permissions or `Info.plist` keys.
 - **UI/UX change** — controls layout, theming, or behavior that diverges from, or extends, the
   spec in [UI/UX Design Specifications](#uiux-design-specifications) below. Update that spec
-  section, and the reference screenshots under `docs/images/screenshots/` if that directory has
-  been restored (it is referenced by the spec but currently missing from the repo).
+  section — it is the authority. (The screenshots it was written against, under
+  `docs/images/screenshots/`, are not in the repository; update those too if they are restored.)
 
 When in doubt about whether a change qualifies, treat it as qualifying.
 
@@ -515,7 +515,15 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 
 ## UI/UX Design Specifications
 
-All control overlays and layouts MUST strictly follow the design specifications shown in `docs/images/screenshots/controls_*`. These screenshots define the canonical UI/UX implementation.
+All control overlays and layouts MUST strictly follow the design specifications written out in this section. **The written spec below is the authority.**
+
+> **Note on the reference screenshots.** This section was originally written against screenshots at
+> `docs/images/screenshots/controls_*`. **That directory does not exist in the repository** — no such
+> images are checked in anywhere. Until they are restored, do not treat a missing screenshot as
+> license to improvise: implement against the measurements, colors, spacing and behavior described
+> below, and if something is genuinely underspecified, raise it rather than guessing. Screenshot
+> filenames are referenced throughout as `**Reference:**` lines; read those as names for the layout
+> being described, not as files you can open.
 
 ### Control Overlay Structure
 
@@ -753,10 +761,12 @@ The control overlay consists of three main zones:
    - Accessibility audits (TalkBack, VoiceOver)
    - Performance: Animations must maintain 60fps
 
-5. **Design assets location:** `docs/images/screenshots/controls_*`
-   - Use as reference during implementation
-   - Compare final implementation against screenshots
-   - Update screenshots if design evolves (with documentation)
+5. **Design assets:** intended location `docs/images/screenshots/controls_*` — **currently absent
+   from the repository** (see the note at the top of this section)
+   - Implement against the written spec above; it is the authority while the images are missing
+   - If the screenshots are restored, compare the implementation against them and keep both in sync
+   - If the design evolves, update the written spec in the same change — and the screenshots too,
+     once they exist
 
 ## Platform-Specific Notes
 

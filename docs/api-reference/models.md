@@ -336,6 +336,40 @@ const SubtitleConfig({
 
 Most models provide `copyWith`, and the serializable ones provide `toMap()` / `fromMap()`.
 
+#### `toMap()` returns copies, not live references
+
+`toMap()` never hands out a reference to the model's own collection fields. Every
+collection-valued entry — `DrmConfig.headers` / `.customData`, `MediaItem.httpHeaders` /
+`.metadata`, `SubtitleTrack.metadata`, `CastDevice.capabilities`,
+`PerformanceMetrics.context` — is copied on the way out, so mutating the returned payload
+can never mutate the model, and two `toMap()` calls never share the same inner collection:
+
+```dart
+const item = MediaItem(
+  id: '1',
+  title: 'Test',
+  url: 'https://example.com/video.mp4',
+  httpHeaders: {'Cookie': 'signed=1'},
+);
+
+final map = item.toMap();
+(map['httpHeaders'] as Map<String, String>)['Cookie'] = 'tampered';
+
+print(item.httpHeaders); // {Cookie: signed=1} — unchanged
+```
+
+Two caveats:
+
+- The copies are **shallow**. A collection nested *inside* a `Map<String, dynamic>` value
+  (e.g. `metadata: {'chapters': [...]}`) is still shared with the model; only the top-level
+  map/list is duplicated.
+- The **fields are not copied at construction**. These constructors are `const`, so a
+  caller that keeps a reference to the map it passed in can still mutate the model through
+  it. Pass a map you do not retain, or pass `Map.unmodifiable(...)`, if that matters to you.
+
+A `null` collection field still serializes as a **present key with a `null` value** — it is
+never widened to an empty collection — so the MethodChannel payload shape is unchanged.
+
 ### `BufferConfig` is only partly honoured on iOS
 
 This is a platform capability difference, not a wiring gap, and it is worth knowing before you tune

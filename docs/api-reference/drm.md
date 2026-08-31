@@ -118,6 +118,14 @@ certificate `GET`). Values are converted for the wire: `String` passes through u
 JSON-encoded, and `null`/unsupported values are skipped rather than sent as the literal string
 `"null"`.
 
+Both are copied by `DrmConfig.toMap()` rather than passed out by reference, so a caller that
+mutates the serialized payload cannot mutate the config (and cannot corrupt the next
+serialization of it). The copy is shallow, and `null` still serializes as a present key with a
+`null` value. The `headers`/`customData` *fields* are not copied at construction — `DrmConfig`'s
+constructor is `const` — so if you keep a reference to the map you passed in, you can still
+mutate the config through it; pass a map you do not retain when that matters. See
+[Models](models.md#tomap-returns-copies-not-live-references).
+
 ---
 
 ## DRM Session Monitoring

@@ -221,6 +221,19 @@ MediaFeed(
   runs them in submission order, so the losing call still takes effect rather than being
   rejected. Do not wrap these calls in a per-`playerId` promise chain of your own — see
   [Operation ordering](player-api.md#operation-ordering-serialization-queue).
+- **Controller failures inside the feed are contained, not propagated.** `MediaFeed` drives
+  controllers from paths that must not block (visibility changes, activation, the
+  `MediaFeedItemState` callbacks, which are `VoidCallback`/`ValueChanged` and so discard the
+  `Future` by signature), so those calls are never awaited. Every one of them is routed through
+  an internal guard that catches the failure instead of letting it escape as an **unhandled
+  async error**: a controller torn down mid-flight (`PlayerDisposedException`) is an expected
+  scrolling race and is swallowed silently, and anything else is swallowed but reported with
+  `debugPrint`, prefixed `MediaFeed:` and naming the operation and the item. One item failing
+  never stops the rest — a `pause()` that fails while `pauseOthersOnPlay` is pausing the other
+  slots does not prevent the remaining ones from being paused. Practical consequence: these
+  failures no longer reach a host's `runZonedGuarded`/`PlatformDispatcher.onError` reporter, so
+  watch the `MediaFeed:` debug output rather than your crash reporter when diagnosing feed
+  playback problems.
 
 ## Caching / offline
 
