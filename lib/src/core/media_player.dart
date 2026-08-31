@@ -202,15 +202,23 @@ class MediaPlayer {
   /// an otherwise non-seekable live stream.
   ///
   /// Recomputed on every [load] from whichever streaming config applies to
-  /// the loaded [MediaItem.url] — `HlsConfig.enableDvr` for a `.m3u8` URL
-  /// (via [MediaConfig.hlsConfig]), `DashConfig.enableDvr` for a `.mpd` URL
-  /// (via [MediaConfig.dashConfig]), or `false` when neither applies (no
-  /// streaming config configured, or a progressive URL). See
-  /// [_applyStreamingConfigForLoad]. Every consumer of this field
+  /// the loaded item's [MediaItem.resolvedStreamingFormat] —
+  /// `HlsConfig.enableDvr` for [StreamingFormat.hls] (via
+  /// [MediaConfig.hlsConfig]), `DashConfig.enableDvr` for
+  /// [StreamingFormat.dash] (via [MediaConfig.dashConfig]), or `false` when
+  /// neither applies (no streaming config configured, or progressive
+  /// media). See [_applyStreamingConfigForLoad]. Every consumer of this field
   /// ([isSeekable], [seekTo], and the notification/lock-screen surface via
   /// [NotificationService]) reads it unchanged from before this wiring
   /// landed.
   bool _dvrEnabled = false;
+
+  /// Debug-only: resolved [StreamingFormat]s already warned about by
+  /// [_warnMissingStreamingConfig], so the same misconfiguration is reported
+  /// once per player instead of on every [load]. Never populated in release
+  /// builds (the only writer lives inside an `assert`).
+  final Set<StreamingFormat> _loggedMissingStreamingConfigFormats =
+      <StreamingFormat>{};
 
   /// Current PiP status
   PipStatus _pipStatus = const PipStatus(
@@ -805,7 +813,9 @@ class MediaPlayer {
 
   /// Whether DVR is enabled for the current live media. See [_dvrEnabled]
   /// for how this is derived from the active `HlsConfig`/`DashConfig` on
-  /// every [load].
+  /// every [load] — which of the two applies follows the loaded item's
+  /// [MediaItem.resolvedStreamingFormat], i.e. its explicit
+  /// [MediaItem.streamingFormat] when set, else inference from its URL path.
   bool get dvrEnabled {
     _throwIfDisposed();
     return _dvrEnabled;
@@ -1123,9 +1133,11 @@ class MediaPlayer {
         // updateConfig() time" bug: `_config` (HlsConfig/DashConfig -- the
         // `enableDvr`/`liveLatency`/bitrate constraints, plus every other
         // top-level MediaConfig field) is inherently per-item, since
-        // whether it even applies is decided by `item.url` (`.m3u8` vs
-        // `.mpd` -- the same inference [_applyStreamingConfigForLoad] just
-        // used above, and [_configToMap]'s own doc). Sending the full,
+        // whether it even applies is decided by the item's resolved
+        // StreamingFormat (its explicit `streamingFormat`, else inference
+        // from its URL path -- the same resolution
+        // [_applyStreamingConfigForLoad] just used above, and
+        // [_configToMap]'s own doc). Sending the full,
         // current config snapshot on every load() means native's copy can
         // never disagree with what Dart just computed for THIS item, even
         // when a host builds a fresh MediaConfig and calls load() again
@@ -1949,6 +1961,11 @@ class MediaPlayer {
           'url': mediaItem.url,
           'artworkUrl': mediaItem.artworkUrl,
           'duration': mediaItem.duration?.inMilliseconds,
+          // Lets the receiver be told the container type explicitly instead
+          // of native guessing it from the URL string when building the
+          // cast MediaInfo's contentType. Null => native falls back to its
+          // own URL sniffing, as before.
+          'streamingFormat': mediaItem.streamingFormat?.name,
         },
       });
     } on PlatformException catch (e) {
@@ -2220,11 +2237,17 @@ class MediaPlayer {
 
   /// Derives [_isLive] and [_dvrEnabled] for a freshly-[load]ed [item].
   ///
-  /// The applicable streaming config is inferred from [item.url] the same
-  /// way native infers the media source type: a URL containing `.m3u8`
-  /// selects [MediaConfig.hlsConfig], one containing `.mpd` selects
-  /// [MediaConfig.dashConfig]; anything else (progressive playback) has no
-  /// applicable streaming config at all.
+  /// The applicable streaming config follows [MediaItem.resolvedStreamingFormat]
+  /// — the item's explicit [MediaItem.streamingFormat] when set, otherwise
+  /// inferred from the URL's *path* (query string and fragment stripped,
+  /// `endsWith('.m3u8')`/`endsWith('.mpd')`, case-insensitive; see
+  /// [StreamingFormat.fromUrl]). [StreamingFormat.hls] selects
+  /// [MediaConfig.hlsConfig], [StreamingFormat.dash] selects
+  /// [MediaConfig.dashConfig], and [StreamingFormat.progressive] selects
+  /// neither — progressive playback has no applicable streaming config at
+  /// all. Native runs the exact same resolution (it is handed the same
+  /// explicit hint over the channel), so Dart and native never disagree
+  /// about which config applies.
   ///
   ///  - [_dvrEnabled] becomes that config's `enableDvr` (`false` when no
   ///    config applies), gating [isSeekable]/[seekTo] for this item.
@@ -2234,25 +2257,92 @@ class MediaPlayer {
   ///    the canonical field, but an app that already set the deprecated flag
   ///    must not have media silently stop being treated as live during the
   ///    deprecation period.
+  ///
+  /// Configs are never cross-applied: an app that sets only `hlsConfig` and
+  /// loads a DASH item gets *no* streaming config, exactly as if it had set
+  /// neither. Silently reusing the HLS config for a DASH stream would trade
+  /// one invisible surprise for another; instead this method emits a
+  /// debug-only diagnostic ([_warnMissingStreamingConfig]) whenever a *live*
+  /// item ends up with no config, since that is nearly always a
+  /// misconfiguration.
   void _applyStreamingConfigForLoad(MediaItem item) {
-    final url = item.url;
+    final format = item.resolvedStreamingFormat;
     var dvrEnabled = false;
     var configEnablesLive = false;
+    var hasConfig = false;
 
-    if (url.contains('.m3u8')) {
-      final hls = _config.hlsConfig;
-      dvrEnabled = hls?.enableDvr ?? false;
-      // ignore: deprecated_member_use_from_same_package
-      configEnablesLive = hls?.enableLiveStream ?? false;
-    } else if (url.contains('.mpd')) {
-      final dash = _config.dashConfig;
-      dvrEnabled = dash?.enableDvr ?? false;
-      // ignore: deprecated_member_use_from_same_package
-      configEnablesLive = dash?.enableLiveStream ?? false;
+    switch (format) {
+      case StreamingFormat.hls:
+        final hls = _config.hlsConfig;
+        hasConfig = hls != null;
+        dvrEnabled = hls?.enableDvr ?? false;
+        // ignore: deprecated_member_use_from_same_package
+        configEnablesLive = hls?.enableLiveStream ?? false;
+      case StreamingFormat.dash:
+        final dash = _config.dashConfig;
+        hasConfig = dash != null;
+        dvrEnabled = dash?.enableDvr ?? false;
+        // ignore: deprecated_member_use_from_same_package
+        configEnablesLive = dash?.enableLiveStream ?? false;
+      case StreamingFormat.progressive:
+        // No streaming config exists for progressive media by definition.
+        break;
     }
 
     _dvrEnabled = dvrEnabled;
     _isLive = item.isLive || configEnablesLive;
+
+    if (_isLive && !hasConfig) {
+      _warnMissingStreamingConfig(item, format);
+    }
+  }
+
+  /// Debug-only diagnostic for a live item that resolved to no applicable
+  /// streaming config, which silently forces `enableDvr` to `false` (=> not
+  /// seekable => no live-window duration reported).
+  ///
+  /// Compiled out of release builds (the whole body lives inside an
+  /// `assert`), and logged at most once per resolved [StreamingFormat] per
+  /// [MediaPlayer] instance so that reloading the same misconfigured item —
+  /// or a playlist of them — cannot spam the log.
+  void _warnMissingStreamingConfig(MediaItem item, StreamingFormat format) {
+    assert(() {
+      if (!_loggedMissingStreamingConfigFormats.add(format)) return true;
+
+      final (String missing, String remedy) = switch (format) {
+        StreamingFormat.hls => (
+            'MediaConfig.hlsConfig',
+            'pass hlsConfig: HlsConfig(enableDvr: true, ...) in the '
+                'MediaConfig you initialize/updateConfig/load with',
+          ),
+        StreamingFormat.dash => (
+            'MediaConfig.dashConfig',
+            'pass dashConfig: DashConfig(enableDvr: true, ...) in the '
+                'MediaConfig you initialize/updateConfig/load with. Note '
+                'that hlsConfig is NOT reused for DASH items: an app that '
+                'serves HLS to one platform and DASH to another must set '
+                'both',
+          ),
+        StreamingFormat.progressive => (
+            'no streaming config (progressive media has none)',
+            "if this really is an HLS/DASH stream whose URL doesn't end in "
+                '.m3u8/.mpd (CDN rewrite, signed or extension-less URL), say '
+                'so explicitly with MediaItem.streamingFormat: '
+                'StreamingFormat.hls / .dash',
+          ),
+      };
+
+      debugPrint(
+        'MediaPlayer($playerId): WARNING - live item "${item.id}" resolved to '
+        'StreamingFormat.${format.name}'
+        '${item.streamingFormat == null ? ' (inferred from its URL)' : ' (explicit)'}'
+        ', but $missing is null. enableDvr therefore falls back to false, so '
+        'this stream is not seekable (MediaPlayer.isSeekable == false, seekTo '
+        'throws InvalidStateException) and no live-window duration is '
+        'reported. To enable DVR, $remedy.',
+      );
+      return true;
+    }());
   }
 
   /// Validate playlist operation
@@ -2883,10 +2973,14 @@ class MediaPlayer {
       if (config.adaptiveCacheConfig != null)
         'adaptiveCacheConfig': config.adaptiveCacheConfig!.toMap(),
       // Both cross the channel unconditionally when set; native picks
-      // whichever one applies to the media item currently being loaded by
-      // inspecting its URL (`.m3u8` -> hlsConfig, `.mpd` -> dashConfig — the
-      // same inference `MediaPlayer._applyStreamingConfigForLoad` uses on
-      // the Dart side). See StreamingConfig/HlsConfig/DashConfig's dartdocs
+      // whichever one applies to the media item currently being loaded from
+      // that item's resolved streaming format — the `streamingFormat` key of
+      // the `mediaItem` payload when the host set one, else native's own
+      // path-based inference (`….m3u8` -> hlsConfig, `….mpd` -> dashConfig),
+      // mirroring `MediaItem.resolvedStreamingFormat` /
+      // `MediaPlayer._applyStreamingConfigForLoad` on the Dart side. Neither
+      // config is ever cross-applied to the other format.
+      // See StreamingConfig/HlsConfig/DashConfig's dartdocs
       // for exactly which fields each platform actually reads.
       if (config.hlsConfig != null) 'hlsConfig': config.hlsConfig!.toMap(),
       if (config.dashConfig != null) 'dashConfig': config.dashConfig!.toMap(),

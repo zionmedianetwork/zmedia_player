@@ -463,8 +463,17 @@ class CastHandler(
         val artworkUrl = mediaItem["artworkUrl"] as? String
         val duration = (mediaItem["duration"] as? Number)?.toLong() ?: MediaInfo.UNKNOWN_DURATION
 
-        // Detect content type from URL
+        // Content type. Issue #87: an explicit `streamingFormat` hint from
+        // `MediaItem.streamingFormat` wins over URL sniffing for the two
+        // manifest formats, so a DASH manifest served from an HLS-looking or
+        // extension-less path is not advertised to the receiver as HLS. A
+        // hint of "progressive", or no hint at all, falls through to the
+        // pre-existing URL-substring detection (which still has to guess
+        // between mp4/webm/mkv, none of which the hint distinguishes).
+        val formatHint = (mediaItem["streamingFormat"] as? String)?.lowercase()
         val contentType = when {
+            formatHint == "hls" -> "application/x-mpegurl"
+            formatHint == "dash" -> "application/dash+xml"
             contentId.contains(".m3u8") || contentId.contains("/hls/") -> "application/x-mpegurl" // HLS
             contentId.contains(".mpd") -> "application/dash+xml" // DASH
             contentId.contains(".mp4") -> "video/mp4" // MP4

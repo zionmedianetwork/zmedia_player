@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-894%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-933%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -44,6 +44,9 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
   native player's own defaults for the manifest (see the
   [Live Streaming guide](docs/api-reference/live-streaming.md) for the full field-by-field wiring
   table and platform caveats)
+- `MediaItem.streamingFormat` (`StreamingFormat.hls`/`.dash`/`.progressive`) states an item's
+  format explicitly, deciding which of `hlsConfig`/`dashConfig` applies; leave it `null` to
+  infer from the URL path (`endsWith('.m3u8')`/`endsWith('.mpd')`, query and fragment ignored)
 - Subtitles: SRT, WebVTT, ASS/SSA, and embedded tracks with customizable styling
 - Manual and automatic quality/resolution selection; multiple audio tracks
 - Progressive download/caching; real-time bandwidth estimation
@@ -173,6 +176,24 @@ duration reporting), `liveLatency` (target offset from the live edge, iOS 14+), 
 `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` (track-selection bounds — iOS honors only
 `maxBitrate`). See the [Live Streaming guide](docs/api-reference/live-streaming.md) for the full
 field-by-field wiring table.
+
+Exactly one of the two configs applies to a given item, chosen by
+`MediaItem.resolvedStreamingFormat`: the item's explicit `MediaItem.streamingFormat` when set,
+otherwise inferred from the URL's *path* (`endsWith('.m3u8')` → HLS, `endsWith('.mpd')` → DASH,
+anything else → progressive; query string and fragment ignored, malformed URLs never throw).
+They are never cross-applied — an app that serves HLS to one platform and DASH to the other
+must set **both** `hlsConfig` and `dashConfig`, and in debug builds a live item that resolves to
+a format with no config logs a one-time warning explaining that `enableDvr` fell back to
+`false`. Set `streamingFormat` explicitly when the URL is not self-describing:
+
+```dart
+await controller.load(const MediaItem(
+  id: 'live', title: 'Live Stream',
+  url: 'https://cdn.example.com/live/eu/primary?token=abc', // no .m3u8/.mpd in the path
+  isLive: true,
+  streamingFormat: StreamingFormat.dash,
+));
+```
 
 ```dart
 final controller = MediaController.create();

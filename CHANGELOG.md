@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`MediaItem.streamingFormat` and the `StreamingFormat` enum** (`hls`, `dash`,
+  `progressive`) — an explicit, optional declaration of an item's container/manifest format
+  that decides which streaming config applies to it (`hls` -> `MediaConfig.hlsConfig`,
+  `dash` -> `MediaConfig.dashConfig`, `progressive` -> neither). It takes precedence over URL
+  inference on the Dart side *and* on both native platforms, so a manifest behind a CDN
+  rewrite, a signed URL whose path is masked, or an extension-less endpoint no longer has to
+  hope the URL string cooperates. Defaults to `null`, which keeps the previous
+  infer-from-the-URL behaviour. Fully supported in the constructor, `copyWith`, `toMap`/
+  `fromMap` and `toString`; `MediaItem`'s id-based equality is unchanged (no content field
+  has ever participated in it). Exported from `lib/zmedia_player.dart` via
+  `src/models/media_item.dart`.
+- **`MediaItem.resolvedStreamingFormat`** — the format that actually applies: the explicit
+  `streamingFormat` when set, otherwise inference from the URL.
+- **`StreamingFormat.fromUrl(String)` / `StreamingFormat.fromName(Object?)`** — the inference
+  routine and the wire-name decoder, exposed so hosts can reproduce the package's own
+  resolution. `fromName` returns `null` (i.e. "infer") for an unknown or non-`String` value
+  rather than guessing a concrete format.
+- **Debug-only diagnostic for an unconfigured live item.** Loading an item with
+  `isLive: true` that resolves to a format whose config is `null` now logs a warning naming
+  the resolved format, the missing config (`MediaConfig.hlsConfig`/`MediaConfig.dashConfig`,
+  or "progressive media has none"), the consequence (`enableDvr` falls back to `false` ->
+  `isSeekable == false` -> no live-window duration) and the remedy. Compiled out of release
+  builds and logged at most once per resolved format per `MediaPlayer` instance, so
+  reloading a misconfigured item cannot spam the log. This is the missing signal behind the
+  "app just behaves differently on one platform" failure mode: an app serving HLS to one
+  platform and DASH to another must set **both** `hlsConfig` and `dashConfig`, because the
+  two are deliberately never cross-applied.
+
 ### Fixed
 - `MediaController` now **queues** operations instead of rejecting them. Previously
   `_executeOperation` held a per-controller boolean lock that never queued: while it was
@@ -71,6 +100,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `AGENTS.md`, and the example app always have) are unaffected; apps using the constants
   gain working branches.
 
+- **Streaming config was selected by a substring scan of the whole media URL, so a DASH
+  stream could silently pick up `hlsConfig` (or nothing at all).** `MediaPlayer.load()`
+  matched `url.contains('.m3u8')` *before* `url.contains('.mpd')`, which mis-classified any
+  URL that merely mentioned `.m3u8` anywhere — a signed URL with a query parameter, a CDN
+  rewrite carrying the original path, a path segment such as
+  `/hls.m3u8-archive/…/manifest.mpd`. Selection now uses the URL's **path only** (query
+  string and fragment stripped via `Uri.tryParse`, with a safe truncation fallback for an
+  unparseable URL, which never throws) and matches with a case-insensitive `endsWith`, so at
+  most one format can match and the result is order-independent. The knock-on effects of a
+  wrong match were invisible: `enableDvr` silently became `false`, which gated
+  `MediaPlayer.isSeekable`/`seekTo` and suppressed live-window duration reporting.
+- **The same substring scan existed independently in native code and is fixed there too.**
+  Android (`MediaPlayerManager.kt`) used it to choose between `HlsMediaSource`/
+  `DashMediaSource`/`ProgressiveMediaSource` (on both the DRM and non-DRM paths), to decide
+  whether adaptive segment caching applied, and to pick `hlsConfig` vs `dashConfig` for the
+  live-latency target and track-selection bitrate bounds; iOS
+  (`MediaPlayerManager.swift`) used it to pick the same config and to decide whether to parse
+  the HLS manifest for quality tracks. Both now resolve format the same way Dart does, and
+  both prefer the explicit `streamingFormat` hint over inference.
+- `CastHandler.kt` now honours an explicit `streamingFormat` when choosing the cast
+  `MediaInfo` contentType, instead of always guessing `application/x-mpegurl` /
+  `application/dash+xml` from the URL string.
+
 ### Changed
 - **Behaviour of every `MediaController` playback/track/config method** (`load`,
   `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`, `toggleMute`, `setSpeed`,
@@ -100,6 +152,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   app must apply the matching `Duration` when handling the `seekForward`/`seekBackward`
   event on `NotificationService.actionEventStream`, exactly as it already must call
   `play()`/`pause()` itself for the other controls.
+
+- **Data contract:** the `mediaItem` payload sent over the MethodChannel gains a
+  `streamingFormat` key (`'hls'`/`'dash'`/`'progressive'`, or `null` when the host left
+  inference on). It is present on `load`'s `mediaItem`, on every item in `setPlaylist`'s
+  playlist map, and on `loadMediaOnCastDevice`'s reduced `mediaItem` map. Native treats an
+  absent or unrecognised value as "unset" and falls back to its own path-based inference, so
+  an older Dart build against a newer native build (or vice versa) behaves exactly as before.
 
 ### Deprecated
 - `OperationBusyException` — no longer thrown anywhere in this package. It existed solely

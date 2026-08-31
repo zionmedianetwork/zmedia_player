@@ -65,12 +65,12 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 ### Models (`lib/src/models/`)
 | Export | Purpose |
 |---|---|
-| `MediaItem` / `MediaType` | A playable item (url, title, artwork, drmConfig, headers) / `video`\|`audio`. |
+| `MediaItem` / `MediaType` / `StreamingFormat` | A playable item (url, title, artwork, drmConfig, headers) / `video`\|`audio` / `hls`\|`dash`\|`progressive`. `MediaItem.streamingFormat` (nullable) states the item's format explicitly and selects which of `hlsConfig`/`dashConfig` applies; `null` falls back to `MediaItem.resolvedStreamingFormat`'s path-based URL inference (`StreamingFormat.fromUrl`). Equality is id-based only. |
 | `PlaybackState` / `PlayerState` | State snapshot (position, duration, `bufferedPosition`, speed, volume, error) / `idle,buffering,ready,playing,paused,completed,error`. |
 | `Playlist` / `PlaybackMode` / `MediaRepeatMode` | Item collection + shuffle order / `sequential`\|`shuffle` / `none`\|`single`\|`all`. **Note: the enum is `MediaRepeatMode`, not `RepeatMode`.** |
 | `SubtitleTrack` / `SubtitleFormat` / `SubtitleConfig` / `SubtitleAlignment` | Subtitle track, format (`srt,webvtt,ass,ssa,ttml`), styling, alignment. |
 | `QualityTrack` / `AudioTrack` | Selectable video-quality / audio-track descriptors. |
-| `StreamingConfig` / `BitrateSelectionStrategy` / `HlsConfig` / `DashConfig` | Adaptive-streaming config; `HlsConfig`/`DashConfig` wire `enableDvr` (seek gating + live duration reporting), `liveLatency`, and inherited `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` to native (see [live-streaming.md](docs/api-reference/live-streaming.md) for the per-field, per-platform table). `enableLiveStream` is deprecated — use `MediaItem.isLive`. |
+| `StreamingConfig` / `BitrateSelectionStrategy` / `HlsConfig` / `DashConfig` | Adaptive-streaming config; `HlsConfig`/`DashConfig` wire `enableDvr` (seek gating + live duration reporting), `liveLatency`, and inherited `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` to native (see [live-streaming.md](docs/api-reference/live-streaming.md) for the per-field, per-platform table). Exactly one of the two applies per item, chosen by `MediaItem.resolvedStreamingFormat`; they are **never** cross-applied, so an HLS-on-iOS/DASH-on-Android app must set both. `enableLiveStream` is deprecated — use `MediaItem.isLive`. |
 | `DrmConfig` / `DrmScheme` / `EzdrmConfig` / `DrmSession` | DRM config + factories (`.widevine`, `.fairplay`, `.ezdrm`, `.token`); session state. `DrmConfig.minWidevineSecurityLevel` sets the floor for Android Widevine only (no effect on iOS FairPlay). |
 | `BufferingConfig` / `BufferHealth` / `BufferStatus` / `BufferStatistics` | Adaptive buffering config + health/stats. |
 | `NetworkStatus` / `NetworkQuality` / `ConnectionType` / `NetworkChangeEvent` | Network monitoring model. |
@@ -160,6 +160,14 @@ same technique guards the `connectionType` vocabulary in
 method that older native builds will not have, consider whether the version needs incrementing —
 purely additive native→Dart events do not, since an old native build simply never sends them.
 
+**`mediaItem` payload.** Includes `streamingFormat` (`'hls'`/`'dash'`/`'progressive'`, or `null`
+when the host left inference on) alongside `isLive`. Native prefers it over its own URL sniffing
+when picking `hlsConfig` vs `dashConfig`, the Media3 `MediaSource` type (Android), whether to
+parse the HLS manifest for quality tracks (iOS), and the cast `MediaInfo` contentType
+(`CastHandler.kt`); an absent/unknown value falls back to the same path-based inference Dart uses
+(`endsWith('.m3u8')`/`endsWith('.mpd')` on the URL path). `loadMediaOnCastDevice`'s reduced
+`mediaItem` map carries the key too.
+
 **`load` payload.** `MediaPlayer.load()` sends `{playerId, mediaItem, config}` — `config` is the
 current `MediaConfig` snapshot (serialized the same way `initialize`/`updateConfig` already do),
 carried on **every** `load()` call so a rebuilt config (e.g. flipping `hlsConfig.enableDvr`) takes
@@ -237,11 +245,21 @@ final controller = MediaController.create(
   config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
 );
 await controller.load(MediaItem(id: 'live', title: 'Live', url: 'https://cdn/live.m3u8', isLive: true));
-controller.player.isSeekable; // false for a live item unless enableDvr matched its URL at load()
+controller.player.isSeekable; // false for a live item unless enableDvr was set on the config
+                              // matching its resolved StreamingFormat at load()
 await controller.seekTo(pos); // throws InvalidStateException on live + !isSeekable
+
+// URL not self-describing (CDN rewrite / signed / extension-less)? State the format:
+await controller.load(MediaItem(
+  id: 'live2', title: 'Live', url: 'https://cdn/live/eu/primary?token=abc',
+  isLive: true, streamingFormat: StreamingFormat.dash,
+));
 ```
 Without `enableDvr: true`, a live item reports `isSeekable == false` and no duration; `seekTo`
-throws rather than silently doing nothing. See [live-streaming.md](docs/api-reference/live-streaming.md).
+throws rather than silently doing nothing. `hlsConfig` is never reused for a DASH item (and vice
+versa) — in debug builds, a live item that resolves to a format whose config is `null` logs a
+one-time warning naming the missing config and the consequence. See
+[live-streaming.md](docs/api-reference/live-streaming.md).
 
 ---
 
@@ -251,6 +269,10 @@ throws rather than silently doing nothing. See [live-streaming.md](docs/api-refe
 - **Always `dispose()`** controllers/services in `State.dispose()` — they hold native resources + timers.
 - **`MediaRepeatMode`**, not `RepeatMode` (renamed; breaking).
 - **DRM requires HTTPS** for both license and media URLs (`InputValidator` enforces it).
+- **Streaming format is resolved per item, never cross-applied.** `MediaItem.streamingFormat`
+  wins; otherwise it is inferred from the URL's *path* with `endsWith` (`.m3u8`/`.mpd`), query
+  and fragment stripped — not a `contains` scan of the whole URL. Set it explicitly for
+  rewritten/signed/extension-less manifest URLs.
 - **Quality/subtitle/audio tracks appear only after `play()`** — native reports them once buffering starts.
 - **Notifications need the player**: `initialize(playerId, mediaPlayer: …)` or lock-screen state won't sync.
 - **MethodChannel calls are async** — always `await`.
@@ -275,7 +297,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 894 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 933 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -291,7 +313,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **894**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **933**, keep green) before proposing changes.
 - **API/data-contract/feature changes require documentation in the same change** — root `README.md`, this file, every affected file under `docs/`, and `CHANGELOG.md`. See `CLAUDE.md`'s Development Workflow for the full rule and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
@@ -303,7 +325,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (894 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (933 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating

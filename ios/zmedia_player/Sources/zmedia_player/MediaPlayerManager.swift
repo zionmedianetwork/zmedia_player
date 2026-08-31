@@ -661,23 +661,79 @@ class MediaPlayerInstance: NSObject {
         )
     }
 
-    /// Wave D: returns the top-level (per-player) HlsConfig/DashConfig map
-    /// that applies to `urlString` — HlsConfig for `.m3u8`, DashConfig for
-    /// `.mpd`, `nil` for anything else (progressive playback has no
-    /// streaming config, and DASH itself has no iOS playback path at all).
-    /// Both are serialized unconditionally by MediaPlayer._configToMap on
-    /// the Dart side (see streaming_config.dart's toMap()); this mirrors
-    /// that same URL -> config inference on the Android side
+    /// Issue #87: the wire values of Dart's `StreamingFormat` enum, as sent
+    /// in the `streamingFormat` key of the `mediaItem` payload
+    /// (`MediaItem.streamingFormat?.name`). Modelled as a `String`-backed
+    /// enum so an unknown/absent value decodes to `nil` and degrades to URL
+    /// inference rather than failing.
+    enum StreamingFormat: String {
+        case hls
+        case dash
+        case progressive
+    }
+
+    /// Issue #87: resolves the streaming format of `mediaItem` — the explicit
+    /// `streamingFormat` hint the Dart layer sends when present, otherwise
+    /// inference from its URL. An absent/unknown hint falls back to
+    /// inference, so an older Dart build that never sends the key behaves
+    /// exactly as before.
+    ///
+    /// Mirrors `MediaItem.resolvedStreamingFormat` on the Dart side and
+    /// `MediaPlayerManager.kt`'s `streamingFormatOf()` on Android — all
+    /// three MUST stay in lockstep, since Dart decides
+    /// `isSeekable`/`dvrEnabled` from its answer while native decides which
+    /// of hlsConfig/dashConfig applies from this one.
+    private func streamingFormat(of mediaItem: [String: Any]?) -> StreamingFormat {
+        if let raw = (mediaItem?["streamingFormat"] as? String)?.lowercased(),
+           let hinted = StreamingFormat(rawValue: raw) {
+            return hinted
+        }
+        guard let urlString = mediaItem?["url"] as? String else { return .progressive }
+        return inferStreamingFormat(from: urlString)
+    }
+
+    /// Issue #87: infers the streaming format from `urlString`'s PATH only —
+    /// query string and fragment are stripped first, and the test is
+    /// `hasSuffix` (case-insensitive), not `contains`. A signed URL such as
+    /// `…/manifest.mpd?token=…` is therefore DASH, and a rewritten path such
+    /// as `/hls.m3u8-archive/eu/manifest.mpd` is DASH rather than being
+    /// captured by the HLS branch as it was before this fix. Never throws: an
+    /// unparseable URL degrades to a plain truncation at the first `?`/`#`.
+    private func inferStreamingFormat(from urlString: String) -> StreamingFormat {
+        var path = URL(string: urlString)?.path ?? ""
+        if path.isEmpty {
+            path = urlString.components(separatedBy: "?")[0]
+                .components(separatedBy: "#")[0]
+        }
+        let lowered = path.lowercased()
+        if lowered.hasSuffix(".m3u8") { return .hls }
+        if lowered.hasSuffix(".mpd") { return .dash }
+        return .progressive
+    }
+
+    /// Wave D / issue #87: returns the top-level (per-player) HlsConfig/
+    /// DashConfig map that applies to `mediaItem` — HlsConfig when its
+    /// resolved format is HLS, DashConfig when it is DASH, `nil` for
+    /// progressive media (which has no streaming config, and DASH itself has
+    /// no iOS playback path at all). Configs are never cross-applied: a
+    /// player configured with only `hlsConfig` that loads a DASH item gets
+    /// `nil` here, exactly as if neither were configured (Dart emits a
+    /// debug-only diagnostic for that case — see
+    /// `MediaPlayer._warnMissingStreamingConfig`). Both are serialized
+    /// unconditionally by MediaPlayer._configToMap on the Dart side (see
+    /// streaming_config.dart's toMap()); this mirrors that same format ->
+    /// config resolution on the Android side
     /// (MediaPlayerManager.kt's activeStreamingConfig).
-    private func activeStreamingConfig(for urlString: String) -> [String: Any]? {
+    private func activeStreamingConfig(for mediaItem: [String: Any]?) -> [String: Any]? {
         guard let config = config else { return nil }
-        if urlString.contains(".m3u8") {
+        switch streamingFormat(of: mediaItem) {
+        case .hls:
             return config["hlsConfig"] as? [String: Any]
-        }
-        if urlString.contains(".mpd") {
+        case .dash:
             return config["dashConfig"] as? [String: Any]
+        case .progressive:
+            return nil
         }
-        return nil
     }
 
     /// Wave E (DVR window duration): whether DVR is enabled for the item
@@ -687,8 +743,8 @@ class MediaPlayerInstance: NSObject {
     /// `MediaPlayerManager.kt`'s `currentDvrEnabled()` on Android exactly —
     /// see that method's doc.
     private var currentDvrEnabled: Bool {
-        guard let urlString = currentMediaItem?["url"] as? String else { return false }
-        let streamingConfig = activeStreamingConfig(for: urlString)
+        guard let mediaItem = currentMediaItem else { return false }
+        let streamingConfig = activeStreamingConfig(for: mediaItem)
         return streamingConfig?["enableDvr"] as? Bool ?? false
     }
 
@@ -894,9 +950,11 @@ class MediaPlayerInstance: NSObject {
         let playerItem = AVPlayerItem(asset: asset)
 
         // Wave D: HlsConfig/DashConfig wiring. Whichever config applies to
-        // this URL (HlsConfig for .m3u8, DashConfig for .mpd) drives
-        // liveLatency and maxBitrate below — see activeStreamingConfig(for:).
-        let streamingConfig = activeStreamingConfig(for: urlString)
+        // this item (HlsConfig when its resolved streaming format is HLS,
+        // DashConfig when DASH — the item's explicit `streamingFormat` hint
+        // if it carries one, else path-based inference) drives liveLatency
+        // and maxBitrate below — see activeStreamingConfig(for:).
+        let streamingConfig = activeStreamingConfig(for: mediaItem)
 
         // liveLatency -> configuredTimeOffsetFromLive. iOS 14+ only; on
         // earlier iOS this API does not exist, so liveLatency silently has
@@ -1845,8 +1903,12 @@ class MediaPlayerInstance: NSObject {
     }
 
     private func parseHLSManifest(url: URL, completion: @escaping ([[String: Any]]) -> Void) {
-        // Only parse if it's an HLS URL (.m3u8)
-        guard url.absoluteString.contains(".m3u8") else {
+        // Only parse HLS. Issue #87: follows the loaded item's resolved
+        // streaming format (explicit `MediaItem.streamingFormat` hint first,
+        // else path-based inference) instead of a `contains(".m3u8")` scan of
+        // the raw URL, so a manifest behind a rewritten/signed URL is still
+        // parsed and a non-HLS URL that merely mentions `.m3u8` is not.
+        guard streamingFormat(of: currentMediaItem) == .hls else {
             zlog("MediaPlayerInstance: Not an HLS URL, skipping manifest parsing")
             completion([])
             return

@@ -301,6 +301,15 @@ class MediaPlayerInstance(
         // AdaptiveCacheConfig's default in lib/src/core/media_config.dart,
         // which matches this value).
         private const val DEFAULT_ADAPTIVE_CACHE_MAX_SIZE_BYTES = 250L * 1024 * 1024
+
+        // Issue #87: the wire values of Dart's `StreamingFormat` enum, as
+        // sent in the `streamingFormat` key of the `mediaItem` payload
+        // (`MediaItem.streamingFormat?.name`). Kept as plain strings so an
+        // unknown/absent value can degrade to URL inference rather than
+        // failing to decode — see [streamingFormatOf].
+        internal const val FORMAT_HLS = "hls"
+        internal const val FORMAT_DASH = "dash"
+        internal const val FORMAT_PROGRESSIVE = "progressive"
     }
 
     private var exoPlayer: ExoPlayer? = null
@@ -531,11 +540,13 @@ class MediaPlayerInstance(
         val uri = Uri.parse(url)
 
         // Wave D: HlsConfig/DashConfig wiring. Whichever config applies to
-        // this URL (HlsConfig for .m3u8, DashConfig for .mpd — same
-        // inference as the format detection a few lines below) drives the
+        // this item (HlsConfig when its resolved streaming format is HLS,
+        // DashConfig when DASH — the item's explicit `streamingFormat` hint
+        // if it carries one, else path-based inference; same resolution as
+        // the media-source selection a few lines below) drives the
         // ExoPlayer track-selector's bitrate constraints regardless of
         // media-source type.
-        applyStreamingTrackSelectionConstraints(activeStreamingConfig(uri))
+        applyStreamingTrackSelectionConstraints(activeStreamingConfig(mediaItem))
 
         // Determine which DataSource.Factory to use (custom headers or default).
         val activeDataSourceFactory: androidx.media3.datasource.DataSource.Factory =
@@ -574,7 +585,7 @@ class MediaPlayerInstance(
         val adaptiveCacheConfig = config?.get("adaptiveCacheConfig") as? Map<String, Any>
         val adaptiveCachingEnabled = adaptiveCacheConfig?.get("enabled") as? Boolean ?: false
         val cacheAwareDataSourceFactory: androidx.media3.datasource.DataSource.Factory =
-            if (adaptiveCachingEnabled && drmConfig == null && isAdaptiveStreamUri(uri)) {
+            if (adaptiveCachingEnabled && drmConfig == null && isAdaptiveStreamItem(mediaItem)) {
                 try {
                     val maxSizeBytes = (adaptiveCacheConfig?.get("maxCacheSizeBytes") as? Number)
                         ?.toLong() ?: DEFAULT_ADAPTIVE_CACHE_MAX_SIZE_BYTES
@@ -612,14 +623,14 @@ class MediaPlayerInstance(
                 // Attach the DRM session manager directly to the per-format factory so that
                 // HlsMediaSource / DashMediaSource / ProgressiveMediaSource all acquire a
                 // Widevine or ClearKey license automatically during prepare().
-                mediaSource = when {
-                    uri.toString().contains(".m3u8") ->
+                mediaSource = when (streamingFormatOf(mediaItem)) {
+                    FORMAT_HLS ->
                         androidx.media3.exoplayer.hls.HlsMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
                             .createMediaSource(buildMediaItem(uri))
 
-                    uri.toString().contains(".mpd") ->
+                    FORMAT_DASH ->
                         androidx.media3.exoplayer.dash.DashMediaSource.Factory(
                             activeDataSourceFactory
                         ).setDrmSessionManagerProvider { _ -> drmSessionManager }
@@ -1010,31 +1021,86 @@ class MediaPlayerInstance(
     }
 
     /**
-     * C-03b: true for URLs this plugin already treats as adaptive-manifest
-     * formats (same detection used by [createMediaSource]) — the only
-     * formats the shared segment cache is wired for.
+     * C-03b: true when the item currently being loaded is an adaptive-manifest
+     * format (HLS or DASH — see [streamingFormatOf]); progressive media is the
+     * only case this returns false for. These are the only formats the shared
+     * segment cache is wired for.
      */
-    private fun isAdaptiveStreamUri(uri: Uri): Boolean {
-        val s = uri.toString()
-        return s.contains(".m3u8") || s.contains(".mpd")
+    private fun isAdaptiveStreamItem(mediaItem: Map<String, Any>?): Boolean {
+        val format = streamingFormatOf(mediaItem)
+        return format == FORMAT_HLS || format == FORMAT_DASH
     }
 
     /**
-     * Wave D: returns the top-level (per-player) HlsConfig/DashConfig map that
-     * applies to [uri] — HlsConfig for `.m3u8`, DashConfig for `.mpd`, `null`
-     * for anything else (progressive playback has no streaming config). Both
-     * are serialized unconditionally by MediaPlayer._configToMap on the Dart
-     * side (see streaming_config.dart's toMap()); this mirrors that same URL
-     * -> config inference on the native side.
+     * Issue #87: resolves the streaming format of [mediaItem] — the explicit
+     * `streamingFormat` hint the Dart layer sends (`MediaItem.streamingFormat`,
+     * one of `"hls"`/`"dash"`/`"progressive"`) when present, otherwise
+     * inference from the URL. An unknown/absent hint falls back to inference,
+     * so an older Dart build that never sends the key behaves exactly as
+     * before.
+     *
+     * Mirrors `MediaItem.resolvedStreamingFormat` on the Dart side and
+     * `MediaPlayerManager.swift`'s `streamingFormat(of:)` on iOS — all three
+     * MUST stay in lockstep, since Dart decides `isSeekable`/`dvrEnabled` from
+     * its answer while native decides the media-source type and which of
+     * hlsConfig/dashConfig applies from this one.
      */
-    private fun activeStreamingConfig(uri: Uri): Map<String, Any>? {
-        val topConfig = config ?: return null
+    private fun streamingFormatOf(mediaItem: Map<String, Any>?): String {
+        when ((mediaItem?.get("streamingFormat") as? String)?.lowercase()) {
+            FORMAT_HLS -> return FORMAT_HLS
+            FORMAT_DASH -> return FORMAT_DASH
+            FORMAT_PROGRESSIVE -> return FORMAT_PROGRESSIVE
+        }
+        val url = mediaItem?.get("url") as? String ?: return FORMAT_PROGRESSIVE
+        return inferStreamingFormat(url)
+    }
+
+    /**
+     * Issue #87: infers the streaming format from [url]'s PATH only —
+     * query string and fragment are stripped first, and the test is
+     * `endsWith` (case-insensitive), not `contains`. A signed URL such as
+     * `…/manifest.mpd?token=…` is therefore DASH, and a rewritten path such
+     * as `/hls.m3u8-archive/eu/manifest.mpd` is DASH rather than being
+     * captured by the HLS branch as it was before this fix. Never throws:
+     * `Uri.parse` is lenient on Android, and a null/blank path degrades to a
+     * plain truncation at the first `?`/`#`.
+     */
+    private fun inferStreamingFormat(url: String): String {
+        val path = (
+            try {
+                Uri.parse(url).path
+            } catch (e: Exception) {
+                null
+            } ?: url.substringBefore('?').substringBefore('#')
+            ).lowercase()
         return when {
-            uri.toString().contains(".m3u8") -> {
+            path.endsWith(".m3u8") -> FORMAT_HLS
+            path.endsWith(".mpd") -> FORMAT_DASH
+            else -> FORMAT_PROGRESSIVE
+        }
+    }
+
+    /**
+     * Wave D / issue #87: returns the top-level (per-player) HlsConfig/
+     * DashConfig map that applies to [mediaItem] — HlsConfig when its
+     * resolved format is HLS, DashConfig when it is DASH, `null` for
+     * progressive media (which has no streaming config). Configs are never
+     * cross-applied: a player configured with only `hlsConfig` that loads a
+     * DASH item gets `null` here, exactly as if neither were configured
+     * (Dart emits a debug-only diagnostic for that case — see
+     * `MediaPlayer._warnMissingStreamingConfig`). Both configs are
+     * serialized unconditionally by MediaPlayer._configToMap on the Dart
+     * side (see streaming_config.dart's toMap()); this mirrors that same
+     * format -> config resolution on the native side.
+     */
+    private fun activeStreamingConfig(mediaItem: Map<String, Any>?): Map<String, Any>? {
+        val topConfig = config ?: return null
+        return when (streamingFormatOf(mediaItem)) {
+            FORMAT_HLS -> {
                 @Suppress("UNCHECKED_CAST")
                 topConfig["hlsConfig"] as? Map<String, Any>
             }
-            uri.toString().contains(".mpd") -> {
+            FORMAT_DASH -> {
                 @Suppress("UNCHECKED_CAST")
                 topConfig["dashConfig"] as? Map<String, Any>
             }
@@ -1058,8 +1124,8 @@ class MediaPlayerInstance(
      * invented as a new source of truth.
      */
     private fun currentDvrEnabled(): Boolean {
-        val url = currentMediaItem?.get("url") as? String ?: return false
-        val streamingConfig = activeStreamingConfig(Uri.parse(url))
+        val mediaItem = currentMediaItem ?: return false
+        val streamingConfig = activeStreamingConfig(mediaItem)
         return streamingConfig?.get("enableDvr") as? Boolean ?: false
     }
 
@@ -1073,7 +1139,11 @@ class MediaPlayerInstance(
      * whether the item is DRM-protected.
      */
     private fun buildMediaItem(uri: Uri): MediaItem {
-        val streamingConfig = activeStreamingConfig(uri)
+        // currentMediaItem is assigned at the top of loadMediaItem(), before
+        // any media source is built, so it is always the item this URI
+        // belongs to — which is what carries the explicit `streamingFormat`
+        // hint that decides which streaming config applies.
+        val streamingConfig = activeStreamingConfig(currentMediaItem)
         val liveLatencyMs = (streamingConfig?.get("liveLatencyMs") as? Number)?.toLong()
 
         val builder = MediaItem.Builder().setUri(uri)
@@ -1120,13 +1190,22 @@ class MediaPlayerInstance(
         )
     }
 
+    /**
+     * Builds the Media3 [MediaSource] for [uri]. The source type follows the
+     * currently-loading item's resolved streaming format ([streamingFormatOf]
+     * on [currentMediaItem]) — the host's explicit `MediaItem.streamingFormat`
+     * when it set one, else path-based inference — so a DASH manifest behind
+     * an HLS-looking path, or an extension-less manifest endpoint, is loaded
+     * with the right source instead of being sniffed out of the raw URL
+     * string (issue #87).
+     */
     private fun createMediaSource(uri: Uri, dataSourceFactory: DataSource.Factory = this.dataSourceFactory): MediaSource {
-        return when {
-            uri.toString().contains(".m3u8") -> {
+        return when (streamingFormatOf(currentMediaItem)) {
+            FORMAT_HLS -> {
                 HlsMediaSource.Factory(dataSourceFactory)
                     .createMediaSource(buildMediaItem(uri))
             }
-            uri.toString().contains(".mpd") -> {
+            FORMAT_DASH -> {
                 DashMediaSource.Factory(dataSourceFactory)
                     .createMediaSource(buildMediaItem(uri))
             }

@@ -14,6 +14,8 @@ export 'src/core/exceptions.dart';
 export 'src/core/local_media_utils.dart';
 
 // Models
+// media_item.dart also exports `MediaType` and `StreamingFormat` (the
+// explicit HLS/DASH/progressive hint carried by `MediaItem.streamingFormat`).
 export 'src/models/media_item.dart';
 export 'src/models/player_state.dart';
 export 'src/models/playlist.dart';

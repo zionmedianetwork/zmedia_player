@@ -387,6 +387,16 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   deprecated in its favor
 - `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track selection (Android via
   `DefaultTrackSelector`; iOS honors only `maxBitrate` via `preferredPeakBitRate`)
+- **Which config is "the matching" one** is decided by `MediaItem.resolvedStreamingFormat`:
+  the item's explicit `MediaItem.streamingFormat` (`StreamingFormat.hls`/`.dash`/
+  `.progressive`) when set, otherwise inference from the URL's *path* — query string and
+  fragment stripped, then a case-insensitive `endsWith('.m3u8')` -> HLS /
+  `endsWith('.mpd')` -> DASH, anything else -> progressive (an unparseable URL never
+  throws). `hlsConfig` and `dashConfig` are **never** cross-applied, so an app that serves
+  HLS to one platform and DASH to another must set both; in debug builds a live item that
+  resolves to a format whose config is `null` logs a one-time warning naming the missing
+  config and the consequence. The hint crosses the channel as the `streamingFormat` key of
+  the `mediaItem` payload, and both natives prefer it over their own inference.
 
 ### Picture-in-Picture
 - Android: Uses `enterPictureInPictureMode()` API
@@ -406,7 +416,7 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 2. **Dispose controllers in State.dispose()** - Prevents memory leaks and native resource cleanup
 3. **DRM requires HTTPS** - License and media URLs must use secure connections
 4. **PiP availability is platform/device dependent** - Always check `checkPipAvailability()` first
-5. **Live streams need `MediaItem.isLive: true`** - that's the canonical flag (`HlsConfig`/`DashConfig.enableLiveStream` is deprecated and native never reads it). To allow seeking on a live stream, also set `enableDvr: true` on the matching `HlsConfig`/`DashConfig`
+5. **Live streams need `MediaItem.isLive: true`** - that's the canonical flag (`HlsConfig`/`DashConfig.enableLiveStream` is deprecated and native never reads it). To allow seeking on a live stream, also set `enableDvr: true` on the matching `HlsConfig`/`DashConfig` — "matching" means the config for the item's `resolvedStreamingFormat` (explicit `MediaItem.streamingFormat`, else path-based URL inference). The two configs are never cross-applied: an HLS-on-iOS/DASH-on-Android app must set **both**, and a URL that doesn't end in `.m3u8`/`.mpd` (CDN rewrite, signed, extension-less) needs an explicit `streamingFormat`
 6. **Subtitle styling uses ARGB color format** - e.g., 0xFFFFFFFF for white, 0x80000000 for semi-transparent black
 7. **Multiple instances are supported** - Use unique playerIds for concurrent players (e.g., ListView)
 8. **MethodChannel calls are async** - Always await native operations to prevent race conditions

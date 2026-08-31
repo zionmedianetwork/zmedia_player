@@ -21,6 +21,7 @@ const MediaItem({
   DrmConfig? drmConfig,
   Map<String, dynamic>? metadata,
   bool isLive = false,
+  StreamingFormat? streamingFormat, // null = infer from the URL path
 });
 ```
 
@@ -37,6 +38,59 @@ final item = MediaItem(id: 'local-clip', title: 'Local clip', url: LocalMediaUti
 
 A DRM-configured item cannot use a `file://` URL — DRM requires HTTPS for the media URL, so
 `InputValidator` rejects the combination.
+
+Equality is **id-based**: two `MediaItem`s with the same `id` are equal regardless of `url`,
+`isLive`, `streamingFormat` or any other content field. Give variants of the same logical
+stream distinct `id`s if you need to tell them apart.
+
+### `streamingFormat` / `StreamingFormat`
+
+```dart
+enum StreamingFormat { hls, dash, progressive }
+```
+
+`streamingFormat` declares the container/manifest format of `url`, which is what selects the
+streaming config that applies to this item: `hls` → `MediaConfig.hlsConfig`, `dash` →
+`MediaConfig.dashConfig`, `progressive` → neither. That in turn decides whether `enableDvr`,
+`liveLatency` and the bitrate bounds have any effect (see [Streaming](#streaming) below), and
+on Android which Media3 `MediaSource` is built.
+
+`null` (the default) means "infer from the URL", exposed as
+`MediaItem.resolvedStreamingFormat`:
+
+| Rule | Result |
+|---|---|
+| `streamingFormat` set | that value, always — inference is skipped entirely |
+| URL *path* ends in `.m3u8` (case-insensitive) | `StreamingFormat.hls` |
+| URL *path* ends in `.mpd` (case-insensitive) | `StreamingFormat.dash` |
+| anything else, including a malformed URL | `StreamingFormat.progressive` |
+
+The query string and fragment are stripped before matching, so
+`…/manifest.mpd?token=abc.m3u8` is DASH, and matching is `endsWith` on the path, so
+`/hls.m3u8-archive/eu/manifest.mpd` is DASH too. Inference never throws for any input.
+
+Two helpers are exported alongside the enum: `StreamingFormat.fromUrl(String)` (the inference
+above) and `StreamingFormat.fromName(Object?)` (decodes the serialized name; returns `null` for
+an unknown or non-`String` value, meaning "fall back to inference").
+
+Set it explicitly whenever the URL is not self-describing — CDN rewrites, signed URLs whose
+path is masked, or extension-less manifest endpoints:
+
+```dart
+MediaItem(
+  id: 'live',
+  title: 'Live',
+  url: 'https://cdn.example.com/live/eu/primary?token=abc',
+  isLive: true,
+  streamingFormat: StreamingFormat.dash,
+);
+```
+
+It is serialized to native as the `streamingFormat` key of the `mediaItem` payload (`null`
+when unset), and both Android and iOS prefer it over their own URL inference. See the
+[Live Streaming guide](live-streaming.md#choosing-which-streaming-config-applies-streamingformat)
+for why `hlsConfig` is never reused for a DASH item, and for the debug-only warning emitted
+when a live item resolves to a format with no config.
 
 ## MediaConfig
 
@@ -165,6 +219,11 @@ enum BitrateSelectionStrategy { auto, lowest, highest, medium }
 // QualityTrack — id, bitrate, resolution, codec.
 // AudioTrack — id, language, codec, channels.
 ```
+
+Which of `hlsConfig`/`dashConfig` applies to a given item is decided by that item's
+[`MediaItem.resolvedStreamingFormat`](#streamingformat--streamingformat) — its explicit
+`streamingFormat` when set, otherwise path-based URL inference. The two are never
+cross-applied, so an app that serves HLS on one platform and DASH on the other must set both.
 
 `HlsConfig`/`DashConfig` are serialized to the platform channel and read by native for a
 specific subset of fields — `enableDvr` (Dart-side seek gate for

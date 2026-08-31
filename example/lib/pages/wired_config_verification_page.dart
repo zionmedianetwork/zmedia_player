@@ -108,9 +108,11 @@ class _WiredConfigVerificationPageState
   );
 
   MediaItem get _liveItem => SampleMedia.hlsLiveStream;
-  // Full ~10-minute progressive MP4 — no `.m3u8`/`.mpd` in its URL, so
-  // neither HlsConfig nor DashConfig ever applies to it. This is the
-  // regression check: toggling `enableDvr` must have zero effect here.
+  // Full ~10-minute progressive MP4 — its URL path ends in neither `.m3u8`
+  // nor `.mpd` and it declares no `MediaItem.streamingFormat`, so it resolves
+  // to StreamingFormat.progressive and neither HlsConfig nor DashConfig ever
+  // applies to it. This is the regression check: toggling `enableDvr` must
+  // have zero effect here.
   MediaItem get _vodItem => SampleMedia.forBiggerFun;
 
   MediaItem get _currentSourceItem => _useLiveSource ? _liveItem : _vodItem;

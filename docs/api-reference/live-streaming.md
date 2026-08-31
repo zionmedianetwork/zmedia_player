@@ -24,6 +24,7 @@ on top.
 > | `enableAdaptiveBitrate` | **Yes (Android only)** | `DefaultTrackSelector` — `false` forces a single fixed track instead of ABR | Not honored — AVPlayer has no API to disable ABR |
 > | `maxBitrate` | **Yes** | `DefaultTrackSelector.setMaxVideoBitrate` | `AVPlayerItem.preferredPeakBitRate` |
 > | `minBitrate` | **Yes (Android only)** | `DefaultTrackSelector.setMinVideoBitrate` | Not honored — no faithful AVPlayer equivalent |
+> | `streamingFormat` (on `MediaItem`, not on the streaming config) | **Yes** | Selects which of `hlsConfig`/`dashConfig` applies, and which Media3 `MediaSource` is built (`HlsMediaSource`/`DashMediaSource`/`ProgressiveMediaSource`), overriding URL inference | Selects which of `hlsConfig`/`dashConfig` applies, and whether the HLS manifest is parsed for quality tracks |
 > | `enableLiveStream` | Deprecated | Not read by native. OR'd into `MediaPlayer.isLive` on the Dart side only — use `MediaItem.isLive` instead | Same |
 > | `bitrateStrategy`, `enableAutoQualitySwitch`, `qualitySwitchThreshold`, `enableBandwidthEstimation` | No | Not read by either platform — see `StreamingConfig`'s dartdoc | Same |
 >
@@ -55,6 +56,7 @@ actually requires.
 
 - [What actually works today](#what-actually-works-today)
 - [Loading a live stream](#loading-a-live-stream)
+- [Choosing which streaming config applies (`streamingFormat`)](#choosing-which-streaming-config-applies-streamingformat)
 - [Seeking and live-edge detection](#seeking-and-live-edge-detection)
 - [Monitoring connection quality](#monitoring-connection-quality)
 - [Complete example](#complete-example)
@@ -78,8 +80,10 @@ actually requires.
 | `enableAdaptiveBitrate: false` / `minBitrate` | Wired — `DefaultTrackSelector` | Not honored — no faithful AVPlayer API |
 | Adaptive bitrate for HLS | ExoPlayer's own track selection, constrained by `maxBitrate`/`minBitrate` when set | AVPlayer's own track selection, capped by `maxBitrate` when set |
 
-Because DASH has no iOS path at all, a `.mpd` URL should only ever be loaded on Android in
-your own platform-branching logic.
+Because DASH has no iOS path at all, a DASH manifest should only ever be loaded on Android in
+your own platform-branching logic. Note that an app doing exactly this — HLS on iOS, DASH on
+Android — must configure **both** `hlsConfig` and `dashConfig`; see
+[Choosing which streaming config applies](#choosing-which-streaming-config-applies-streamingformat).
 
 ---
 
@@ -112,6 +116,10 @@ final liveStream = MediaItem(
 );
 ```
 
+If your manifest URL does not end in `.m3u8`/`.mpd` (CDN rewrite, signed URL, extension-less
+endpoint), add `streamingFormat:` so the right streaming config is applied — see
+[Choosing which streaming config applies](#choosing-which-streaming-config-applies-streamingformat).
+
 ### Custom headers for authenticated live manifests
 
 `MediaItem.httpHeaders` (or `MediaConfig.httpHeaders`) is the header path that is actually
@@ -134,11 +142,84 @@ final liveStream = MediaItem(
 
 ---
 
+## Choosing which streaming config applies (`streamingFormat`)
+
+Exactly one of `MediaConfig.hlsConfig` / `MediaConfig.dashConfig` applies to a given
+`MediaItem`, and it decides whether `enableDvr`, `liveLatency` and the bitrate bounds reach
+the player at all. Which one applies follows the item's **resolved streaming format**
+(`MediaItem.resolvedStreamingFormat`):
+
+1. **`MediaItem.streamingFormat`, if you set it** — `StreamingFormat.hls`,
+   `StreamingFormat.dash` or `StreamingFormat.progressive`. An explicit value always wins,
+   on the Dart side and on both native platforms.
+2. **Otherwise, inference from the URL's *path*.** The query string and fragment are stripped
+   first, then the path is matched case-insensitively with `endsWith`: `.m3u8` → HLS, `.mpd` →
+   DASH, anything else → progressive. A malformed URL never throws; it resolves to
+   progressive.
+
+Because the match is `endsWith` on the path, a signed URL such as
+`…/manifest.mpd?token=abc.m3u8` resolves to DASH, and a rewritten path such as
+`/hls.m3u8-archive/eu/manifest.mpd` resolves to DASH rather than HLS. (Before v0.3.1 the rule
+was `url.contains('.m3u8')` tested before `url.contains('.mpd')`, which got both of those
+wrong.)
+
+Set `streamingFormat` explicitly whenever your URL is not self-describing — a CDN rewrite, a
+signed URL whose path is masked, or an extension-less manifest endpoint:
+
+```dart
+final liveStream = MediaItem(
+  id: 'live_dash',
+  title: 'Live Event',
+  // Nothing in this path says "DASH"; say so explicitly.
+  url: 'https://your-cdn.com/live/eu/primary?token=abc',
+  isLive: true,
+  streamingFormat: StreamingFormat.dash,
+);
+```
+
+`StreamingFormat.progressive` is also meaningful as an explicit value: it opts an item out of
+every streaming config, even if its URL ends in `.m3u8`/`.mpd`.
+
+### The two configs are never cross-applied
+
+If your backend serves **HLS to one platform and DASH to another** (a common setup: `.m3u8`
+for iOS, `.mpd` for Android), you must set **both** `hlsConfig` and `dashConfig`. Setting only
+`hlsConfig` leaves DASH items with *no* streaming config at all, so `enableDvr` is `false`
+there — which in turn makes the item non-seekable and suppresses the live-window duration:
+
+```dart
+final controller = MediaController.create(
+  config: const MediaConfig(
+    hlsConfig: HlsConfig(enableDvr: true, liveLatency: Duration(seconds: 6)),
+    dashConfig: DashConfig(enableDvr: true, liveLatency: Duration(seconds: 6)),
+  ),
+);
+```
+
+The package deliberately does *not* fall back to `hlsConfig` for a DASH item — silently
+applying an HLS config to a DASH stream would just replace one invisible surprise with
+another. Instead, in **debug builds only**, loading a live item that resolves to a format
+whose config is `null` logs a one-time warning per format, e.g.:
+
+```text
+MediaPlayer(player_1): WARNING - live item "live_dash" resolved to StreamingFormat.dash
+(inferred from its URL), but MediaConfig.dashConfig is null. enableDvr therefore falls back
+to false, so this stream is not seekable (MediaPlayer.isSeekable == false, seekTo throws
+InvalidStateException) and no live-window duration is reported. To enable DVR, pass
+dashConfig: DashConfig(enableDvr: true, ...) ...
+```
+
+The warning is compiled out of release builds and logged at most once per resolved format per
+player instance, so reloading a misconfigured item does not spam the log.
+
+---
+
 ## Seeking and live-edge detection
 
 This package rejects `seekTo` outright on a live item unless DVR is explicitly enabled — set
-`enableDvr: true` on whichever streaming config matches your URL (`HlsConfig` for `.m3u8`,
-`DashConfig` for `.mpd`):
+`enableDvr: true` on whichever streaming config matches the item's
+[resolved streaming format](#choosing-which-streaming-config-applies-streamingformat)
+(`HlsConfig` for HLS, `DashConfig` for DASH):
 
 ```dart
 final controller = MediaController.create(
@@ -147,7 +228,7 @@ final controller = MediaController.create(
 ```
 
 `MediaPlayer.isSeekable` reflects this: `false` for a live item unless `enableDvr` was set on
-the config that matched its URL at `load()` time (see `dvrEnabled`). This is purely a
+the config that matched its resolved streaming format at `load()` time (see `dvrEnabled`). This is purely a
 Dart-side gate — how *far* you can actually seek, once allowed through, still depends entirely
 on the manifest's own live window (its sliding window / `EXT-X-PLAYLIST-TYPE` for HLS, its DASH
 `timeShiftBufferDepth`); this package does not extend or shrink that window itself.
@@ -343,9 +424,13 @@ class _LiveStreamPageState extends State<LiveStreamPage> {
 
 ### Can't seek within the live stream
 
-First check `enableDvr: true` is set on the matching streaming config (`HlsConfig` for `.m3u8`,
-`DashConfig` for `.mpd`) — without it, `seekTo` is rejected before it ever reaches native (see
-[Seeking and live-edge detection](#seeking-and-live-edge-detection)). With `enableDvr: true`,
+First check `enableDvr: true` is set on the matching streaming config (`HlsConfig` for an item
+that resolves to HLS, `DashConfig` for one that resolves to DASH — see
+[Choosing which streaming config applies](#choosing-which-streaming-config-applies-streamingformat))
+— without it, `seekTo` is rejected before it ever reaches native (see
+[Seeking and live-edge detection](#seeking-and-live-edge-detection)). In debug builds, a live
+item that resolved to a format with no config logs a warning saying exactly that; if your URL
+does not end in `.m3u8`/`.mpd`, set `MediaItem.streamingFormat` explicitly. With `enableDvr: true`,
 remaining seek availability is a property of the manifest itself (its live window /
 `EXT-X-PLAYLIST-TYPE:EVENT` for HLS, its DASH `timeShiftBufferDepth`). Check:
 - The stream manifest actually declares a live window / DVR buffer
@@ -358,8 +443,9 @@ Expected when `enableDvr` is not set — duration is only reported for a live it
 enabled on the matching streaming config (see the table above and
 [Seeking and live-edge detection](#seeking-and-live-edge-detection)); it deliberately does not
 report the unbounded, unknowable "time since the stream started broadcasting". If `enableDvr`
-is already `true` and duration is still `0`, confirm the config actually reached native for
-*this* load — `load()` carries the current config snapshot on every call, but
+is already `true` and duration is still `0`, confirm it is set on the config for the format the
+item actually resolved to (check the debug warning, or `MediaItem.resolvedStreamingFormat`),
+and that the config actually reached native for *this* load — `load()` carries the current config snapshot on every call, but
 `setPlaylist`/`skipToIndex` do not yet (see the known limitation above), so a playlist-driven
 live item can still see a stale, DVR-disabled config.
 
