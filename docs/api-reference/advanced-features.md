@@ -343,6 +343,45 @@ FullscreenMediaPlayer(
   live when the value changes (it subscribes/unsubscribes automatically).
 - `exitOrientations` — what to restore when the route pops.
 
+### Swapping the controller of a mounted `MediaPlayerWidget`
+
+`MediaPlayerWidget` supports being handed a **different** `MediaController`
+without being remounted. You do *not* need
+`key: ValueKey(controller.player.playerId)` to force a rebuild — that workaround
+was only required before this behaviour was fixed (issue #80).
+
+```dart
+// Auto-advance to the next episode without popping the fullscreen route:
+setState(() => _controller = _controllerForEpisode(nextEpisode));
+```
+
+What the widget does on `didUpdateWidget`:
+
+| Swap | Native platform view | Listener |
+|---|---|---|
+| Different `MediaPlayer.playerId` | Torn down (same path `dispose()` takes, so the outgoing player's surface is released, not orphaned) and recreated on the following frame bound to the new player | Moved to the new controller |
+| Same `playerId`, different `MediaController` instance | **Kept** — the surface already belongs to the correct player, so destroying it would only produce a black flash | Moved to the new controller |
+| Same controller (rotation, relayout, parent rebuild) | **Kept** | Unchanged |
+
+Two details worth knowing:
+
+- The platform-view host is keyed on the `playerId`. `creationParams` (which
+  carry the `playerId` to native) are **one-shot** — they are sent at view
+  creation and are never re-sent on a widget update — so an element reused
+  across a `playerId` change would silently keep rendering the outgoing
+  player's surface. The key makes that structurally impossible.
+- On a player swap the `boxFit` propagation that normally runs in
+  `didUpdateWidget` is skipped: the freshly created surface already carries the
+  effective `boxFit` (via `creationParams` plus the `setBoxFit` push made when
+  the platform view is created), and the outgoing controller may already have
+  been disposed by the consumer — reading its `config` would throw
+  `PlayerDisposedException`.
+
+Note that the widget still cannot *render* an already-disposed controller
+(`build()` reads `controller.config`, which throws once the player is disposed).
+Dispose the controller you are retiring **after** the swap, or at any time once
+the widget is no longer showing it.
+
 ### Android native view (Hybrid Composition)
 
 On Android the inline/fullscreen video surface is composited with **true Hybrid

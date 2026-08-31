@@ -126,6 +126,14 @@ widget falls back to an aspect-ratio-derived size rather than collapsing to zero
 debug-only `FlutterError` telling you to fix the constraints. See
 [Fullscreen & display → Sizing](advanced-features.md#sizing-aspectratio-and-expandtofill).
 
+> **Reusing the widget across players.** `MediaPlayerWidget` may be handed a
+> different `MediaController` while it is mounted — no
+> `key: ValueKey(controller.player.playerId)` is needed. A swap to a different
+> `playerId` releases the outgoing player's native view and creates a new one
+> for the incoming player; a swap to the same `playerId` keeps the existing
+> surface. See
+> [Advanced Features → Swapping the controller of a mounted `MediaPlayerWidget`](advanced-features.md#swapping-the-controller-of-a-mounted-mediaplayerwidget).
+
 ## Two ways to drive playback
 
 - **`MediaController`** — a `ChangeNotifier` facade. Reactive getters (`isPlaying`,
