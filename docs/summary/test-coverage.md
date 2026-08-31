@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1072 tests passing** (run
+> the original release. The suite has since grown to **1089 tests passing** (run
 > `flutter test` for the live count) as audit-remediation work added regression
 > coverage. **Important caveat the original summary omitted:** these are all **Dart**
 > unit tests. There are **no automated native (Kotlin/Swift) tests**, and several
@@ -57,7 +57,7 @@
 
 | Component | Tests | Status | Coverage |
 |-----------|-------|--------|----------|
-| NotificationConfig | 3 | Yes All Passing | Creation, Configuration (plus 13 later regression tests in `test/services/notification_seek_flags_test.dart` covering `showSeekForward`/`showSeekBackward`/`seekInterval` MethodChannel serialization and config-update round-trips — the native gating they feed is still Kotlin/Swift and therefore untested here) |
+| NotificationConfig | 3 | Yes All Passing | Creation, Configuration (plus 13 later regression tests in `test/services/notification_seek_flags_test.dart` covering `showSeekForward`/`showSeekBackward`/`seekInterval` MethodChannel serialization and config-update round-trips, and 17 in `test/services/notification_update_config_test.dart` covering `NotificationService.updateConfig` — payload re-send, re-render of a showing notification, no spurious display, `enabled` transitions, before-`initialize()` behaviour and subscription hygiene — the native gating they feed is still Kotlin/Swift and therefore untested here) |
 | PipConfig | 2 | Yes All Passing | Settings, Aspect Ratios |
 | PipStatus | 2 | Yes All Passing | States, Transitions |
 | CastDevice | 3 | Yes All Passing | Device Types, Connection |

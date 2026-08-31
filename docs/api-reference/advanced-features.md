@@ -32,7 +32,8 @@ final notifications = NotificationService(const NotificationConfig(
   seekInterval: 10, // display-only: labels the buttons / iOS preferredIntervals
 ));
 
-// Pass the player so lock-screen state stays in sync with playback:
+// Pass the player so lock-screen state stays in sync with playback. This is
+// also the one point at which the config above is handed to native:
 await notifications.initialize(controller.playerId, mediaPlayer: controller.player);
 
 await notifications.show(
@@ -67,6 +68,57 @@ notifications.actionEventStream.listen((event) {
 
 await notifications.dismiss(controller.playerId);
 ```
+
+### Changing the configuration at runtime
+
+`NotificationConfig` is immutable and is handed to native **only** by `initialize()` (the
+`initializeNotification` channel call). `show()` renders from whatever config native already
+holds and never re-sends one, so building a new `NotificationConfig` and doing nothing else
+with it changes nothing on device. `updateConfig` is the supported way to change it:
+
+```dart
+// Start offering the +/-10s seek controls after the fact.
+await notifications.updateConfig(
+  const NotificationConfig(
+    enabled: true,
+    channelId: 'media_playback',
+    showPlayPause: true,
+    showNext: true,
+    showPrevious: true,
+    showSeekForward: true,
+    showSeekBackward: true,
+    seekInterval: 10,
+  ),
+  playerId: controller.playerId,
+);
+```
+
+Semantics:
+
+- **Re-sends** the whole config over the same `initializeNotification` call. Both plugins
+  rebuild their per-player notification handler from that payload and replace the registered
+  one, so re-initializing is expected and safe on Android and iOS alike.
+- **Re-renders** an already-showing notification (`isShowing == true`) from the stored
+  `MediaItem` and the most recent `PlaybackState`, so the change is visible immediately with
+  no second `show()` call. On Android this matters beyond convenience: the rebuilt handler has
+  not posted anything yet, so the tray would otherwise keep showing the previous handler's
+  notification, built with the old config.
+- **Never spuriously displays** a notification that was not already showing.
+- **Reuses** the `MediaPlayer` subscriptions established by `initialize()` — calling it
+  repeatedly cannot duplicate action events or leak subscriptions.
+- **`enabled: false`** dismisses a showing notification *first* and then sends nothing,
+  because every method on the service (`dismiss()` included) no-ops while disabled. Flipping
+  `enabled` back on re-sends the config; it does not resurrect a dismissed notification.
+- **Before `initialize()`** it does not throw and does not touch the channel: the config is
+  stored and becomes the one the next `initialize()` sends.
+- Native failures are swallowed and logged, exactly as in `initialize()`/`show()`; the new
+  config is stored either way.
+- Caveat for `priority`: it also drives the Android `NotificationChannel` importance, and the
+  OS ignores importance changes to a channel it has already created. Re-sending the config
+  re-applies `NotificationCompat.setPriority`, but the channel importance the user sees only
+  changes for a channel Android has not created yet (new `channelId`, fresh install, or the
+  user resetting the app's notification settings). `dismissible` and `customActions` are read
+  on every post and do take effect immediately.
 
 - Passing `mediaPlayer:` lets the service mirror playback state to the Now Playing info.
 - If `MediaItem.artworkUrl` is null, artwork is generated from a video frame (iOS

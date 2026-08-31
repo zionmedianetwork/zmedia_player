@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-1072%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-1089%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -314,7 +314,8 @@ final notifications = NotificationService(const NotificationConfig(
   seekInterval: 10, // display-only: labels the control, does not perform the seek
 ));
 
-// Pass the player so lock-screen state stays in sync:
+// Pass the player so lock-screen state stays in sync. This is the point at
+// which the config above reaches native:
 await notifications.initialize(controller.playerId, mediaPlayer: controller.player);
 
 await notifications.show(
@@ -337,6 +338,24 @@ notifications.actionEventStream.listen((event) {
   }
 });
 ```
+
+**Changing the config later:** `NotificationConfig` is applied to native at `initialize()`
+time and nowhere else — `show()` re-renders from whatever config native already holds. Use
+`updateConfig` to change it at runtime; nothing else takes effect.
+
+```dart
+// Re-sends the config to native and re-renders an already-showing notification
+// in place, so the new controls appear immediately.
+await notifications.updateConfig(
+  const NotificationConfig(enabled: true, showSeekForward: false),
+  playerId: controller.playerId,
+);
+```
+
+`updateConfig` never displays a notification that was not already showing, reuses (never
+duplicates) the `MediaPlayer` subscriptions from `initialize()`, dismisses a showing
+notification before adopting an `enabled: false` config, and — when called before
+`initialize()` — simply stores the config for the next `initialize()` to send.
 
 When `MediaItem.artworkUrl` is null, the notification artwork is generated from a video frame
 (iOS `AVAssetImageGenerator`, Android `MediaMetadataRetriever`).
@@ -714,7 +733,7 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 1072), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 1089), and open a PR.
 
 ## License
 
@@ -731,16 +750,20 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 1072 automated tests — run `flutter test` for the current count.
+- **Tests:** 1089 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth
   metering) warrant **on-device verification**.
 - **Verified on-device — iPhone (iOS):** playback, fullscreen, custom controls,
-  quality/subtitles, background audio, lock-screen notifications.
+  quality/subtitles, background audio, and media notifications — display, transport/seek
+  actions, lock-screen rendering, and runtime config changes via
+  [`NotificationService.updateConfig`](#media-notifications).
 - **Verified on-device — Note 9P (Android 11):** Chromecast discovery + load (main-thread
-  safe), fullscreen enter/exit via true Hybrid Composition (no surface-release crash), and
-  inline controls layout (no overflow).
+  safe), fullscreen enter/exit via true Hybrid Composition (no surface-release crash),
+  inline controls layout (no overflow), and media notifications — display, transport/seek
+  actions, lock-screen rendering, and runtime config changes via
+  `NotificationService.updateConfig`.
 
 > Not yet validated as production-ready end-to-end. Verify DRM, casting, and security features
 > on real Android and iOS devices before relying on them in production.

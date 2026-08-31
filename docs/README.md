@@ -130,7 +130,7 @@ are implemented but require on-device verification.
 - **Phase 4** - DRM & Polish (Complete)
 
 ### Key Metrics
-- **Tests:** 1072 automated tests passing (run `flutter test` for the current count);
+- **Tests:** 1089 automated tests passing (run `flutter test` for the current count);
   strong Dart-layer coverage, **no automated native tests yet**
 - **Native verification:** DRM, casting, certificate pinning, and bandwidth metering
   are implemented but need on-device testing
@@ -214,12 +214,18 @@ MediaPlayerWidget(controller: controller);
 // Enable Picture-in-Picture
 await controller.enterPictureInPicture();
 
-// Show lock-screen / Control Center notifications (via NotificationService)
+// Show lock-screen / Control Center notifications (via NotificationService).
+// The config is applied to native by initialize(); change it later with
+// updateConfig() -- show() renders from whatever config native already holds.
 final notifications = NotificationService(const NotificationConfig(enabled: true));
 await notifications.initialize(controller.playerId, mediaPlayer: controller.player);
 await notifications.show(
   mediaItem: item,
   state: controller.state,
+  playerId: controller.playerId,
+);
+await notifications.updateConfig(
+  const NotificationConfig(enabled: true, showSeekForward: true),
   playerId: controller.playerId,
 );
 

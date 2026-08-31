@@ -179,7 +179,7 @@ class _WiredConfigVerificationPageState
 
       _pipAvailable = await _controller.checkPipAvailability();
 
-      await _rebuildNotificationService();
+      await _setUpNotificationService();
       // Covers the case where autoPlay already reached PlayerState.playing
       // before _notificationService existed to catch the transition via
       // _onControllerChanged -- without this, a fast/cached load could
@@ -266,14 +266,10 @@ class _WiredConfigVerificationPageState
     );
   }
 
-  /// [NotificationConfig] is immutable and consumed once at
-  /// [NotificationService] construction (`initialize` posts the
-  /// `NotificationChannel` with it, and Android does not allow an existing
-  /// channel's importance to change later) -- so changing `priority` or
-  /// `dismissible` here means tearing down the old service and building a
-  /// fresh one, exactly as a host app would if it wanted different
-  /// notification behaviour at runtime.
-  Future<void> _rebuildNotificationService() async {
+  /// Builds the service once. The config it is constructed with reaches native
+  /// at [NotificationService.initialize] time; every later change goes through
+  /// [_applyNotificationConfig].
+  Future<void> _setUpNotificationService() async {
     await _notifActionSub?.cancel();
     _notificationService?.dispose();
 
@@ -294,6 +290,29 @@ class _WiredConfigVerificationPageState
 
     _notificationService = service;
     _notifShowing = false;
+    if (mounted) setState(() {});
+  }
+
+  /// [NotificationConfig] is immutable and is only handed to native by
+  /// [NotificationService.initialize] -- `show()` renders from whatever config
+  /// native already holds -- so a runtime change has to go through
+  /// [NotificationService.updateConfig], which re-sends it and re-renders a
+  /// notification that is already showing.
+  ///
+  /// Caveat specific to `priority`: it also drives the Android
+  /// `NotificationChannel` importance, and the OS ignores importance changes to
+  /// an already-created channel. Re-sending the config re-applies
+  /// `NotificationCompat.setPriority`, but the channel importance the user sees
+  /// only changes for a channel Android has not created yet (new `channelId`,
+  /// fresh install, or notification settings reset). `dismissible` and
+  /// `customActions` are read on every post and do change immediately.
+  Future<void> _applyNotificationConfig() async {
+    final service = _notificationService;
+    if (service == null) return;
+    await service.updateConfig(
+      _buildNotificationConfig(),
+      playerId: _controller.playerId,
+    );
     if (mounted) setState(() {});
   }
 
@@ -543,7 +562,7 @@ class _WiredConfigVerificationPageState
           selected: {_notifPriority},
           onSelectionChanged: (selected) {
             setState(() => _notifPriority = selected.first);
-            _rebuildNotificationService();
+            _applyNotificationConfig();
           },
         ),
         const SizedBox(height: 8),
@@ -554,7 +573,7 @@ class _WiredConfigVerificationPageState
           value: _notifDismissible,
           onChanged: (v) {
             setState(() => _notifDismissible = v);
-            _rebuildNotificationService();
+            _applyNotificationConfig();
           },
         ),
         const SizedBox(height: 8),

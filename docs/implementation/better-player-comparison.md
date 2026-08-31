@@ -70,7 +70,7 @@ Legend: ✅ implemented · ➖ not built in (do in app code) · 🟦 platform-sp
 | Fullscreen | ✅ | ✅ | `FullscreenMediaPlayer` + orientation API (`preferredOrientations` / `rotationLocked` / `exitOrientations`) |
 | **Advanced** | | | |
 | Picture-in-Picture | ✅ | ✅ | Both platforms; auto-enter-on-background, custom actions |
-| Media notifications (lock screen) | ✅ | ✅ | Both platforms; action stream; artwork auto-generated from a video frame when absent. Seek-forward/backward controls are opt-in (`showSeekForward`/`showSeekBackward`) and gated on seekability on both platforms |
+| Media notifications (lock screen) | ✅ | ✅ | Both platforms; action stream; artwork auto-generated from a video frame when absent. Seek-forward/backward controls are opt-in (`showSeekForward`/`showSeekBackward`) and gated on seekability on both platforms. Config is applied at `initialize()` and changed at runtime via `NotificationService.updateConfig` |
 | ListView integration (auto play/pause) | ✅ | ✅ | `MediaListPlayer` (visibility-aware) |
 | Disk cache + download-to-play (LRU, progress) | ✅ | ✅ | `CacheService` (Dart); non-DRM only — no offline DRM license on either platform |
 | Thumbnail / preview generation | ✅ | ➖ | Not built in |

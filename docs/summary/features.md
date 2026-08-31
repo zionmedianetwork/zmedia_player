@@ -177,6 +177,7 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **Auto-Generated Thumbnail** - Derive artwork from a video frame when `MediaItem.artworkUrl` is absent (iOS `AVAssetImageGenerator` / Android `MediaMetadataRetriever`)
 - **Progress Bar** - Show playback progress
 - **Notification Customization** - Configure buttons
+- **Runtime Config Updates** - `NotificationService.updateConfig(config, playerId:)` re-sends a changed `NotificationConfig` to native and re-renders a showing notification in place; the config otherwise reaches native only at `initialize()`
 - **Background Support** - Work when app backgrounded
 - **Lock Screen Controls** - Control from lock screen
 

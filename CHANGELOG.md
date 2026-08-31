@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`NotificationService.updateConfig(NotificationConfig, {required String playerId})`** —
+  the missing way to change a notification's configuration at runtime. `NotificationConfig`
+  reached native only through `initialize()` (`initializeNotification`), and `show()` renders
+  from whatever config native already holds, so flipping e.g. `showSeekForward` after
+  construction had *no effect whatsoever* on device: the only workaround was to build an
+  entirely new `NotificationService` and re-initialize it. `updateConfig` stores the new
+  config, re-sends it over the same `initializeNotification` call (both plugins rebuild their
+  per-player handler from that payload), and **re-renders a notification that is currently
+  showing** — reusing the stored `MediaItem` and most recent `PlaybackState` — so the change
+  is visible immediately without a second `show()`. If nothing is showing, nothing is
+  displayed. Called before `initialize()`, it stores the config without touching the channel
+  and the next `initialize()` sends it; disabling (`enabled: false`) dismisses a showing
+  notification first, because every method (including `dismiss`) no-ops while disabled;
+  enabling completes the native setup for a service that was initialized while disabled.
+  Existing `MediaPlayer` stream subscriptions are reused, never duplicated.
 - **`MediaItem.streamingFormat` and the `StreamingFormat` enum** (`hls`, `dash`,
   `progressive`) — an explicit, optional declaration of an item's container/manifest format
   that decides which streaming config applies to it (`hls` -> `MediaConfig.hlsConfig`,

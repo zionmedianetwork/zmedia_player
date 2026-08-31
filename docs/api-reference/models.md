@@ -313,7 +313,11 @@ const SubtitleConfig({
   iOS's `preferredIntervals`; the host app performs the actual seek from
   `NotificationService.actionEventStream` (`NotificationActions.seekForward` /
   `.seekBackward`, wire values `'seekForward'` / `'seekBackward'`).
-  `priority`, `dismissible`, and `customActions` remain **Android only**.
+  `priority`, `dismissible`, and `customActions` remain **Android only**. A
+  `NotificationConfig` reaches native only at `NotificationService.initialize()`; to change any
+  of these at runtime call `NotificationService.updateConfig(config, playerId:)`, which
+  re-sends it and re-renders a showing notification (`show()` alone renders from whatever
+  config native already holds).
 - **PiP:** `PipConfig`, `PipAction`, `PipState`, `PipStatus`, `PipActionEvent` (delivered via
   `MediaPlayer.pipActionStream` when a custom `PipConfig.actions` entry is tapped —
   Android-only).
