@@ -595,6 +595,13 @@ class MediaPlayerInstance: NSObject {
             // window's duration stays current. See checkLiveDvrWindowDuration.
             self.checkLiveDvrWindowDuration()
 
+            // Issue #88: computed from the ABSOLUTE `time` below, before any
+            // window-relative translation -- the live edge and `time` are both
+            // expressed on the AVPlayerItem's own timeline, so subtracting a
+            // window-relative position from an absolute edge would be
+            // meaningless. See currentLiveEdgeOffsetMs(at:).
+            let liveEdgeOffsetMs = self.currentLiveEdgeOffsetMs(at: time)
+
             if let window = self.currentLiveDvrWindow {
                 // `time` is on the AVPlayerItem's own absolute timeline, the
                 // same one `seekableTimeRanges` is expressed on -- NOT reset
@@ -608,9 +615,20 @@ class MediaPlayerInstance: NSObject {
                 // it changes the "position" unit specifically for a live+DVR
                 // item.
                 let relativeSeconds = max(0, CMTimeGetSeconds(time) - CMTimeGetSeconds(window.start))
-                self.notifyPositionChanged(position: Int64(relativeSeconds * 1000))
+                self.notifyPositionChanged(
+                    position: Int64(relativeSeconds * 1000),
+                    // This branch IS the window-relative translation, so it is
+                    // exactly the condition under which position stops being
+                    // measured from a fixed zero point.
+                    positionBasis: "liveWindow",
+                    liveEdgeOffsetMs: liveEdgeOffsetMs
+                )
             } else {
-                self.notifyPositionChanged(position: Int64(time.seconds * 1000))
+                self.notifyPositionChanged(
+                    position: Int64(time.seconds * 1000),
+                    positionBasis: "absolute",
+                    liveEdgeOffsetMs: liveEdgeOffsetMs
+                )
             }
         }
 
@@ -814,6 +832,54 @@ class MediaPlayerInstance: NSObject {
         guard let window = currentLiveDvrWindow else { return }
         let durationMs = Int64(CMTimeGetSeconds(window.duration) * 1000)
         notifyDurationChanged(duration: durationMs)
+    }
+
+    /// Issue #88 (no live-edge signal): how far behind the live edge the
+    /// playhead is at `time`, in milliseconds, or `nil` when the question does
+    /// not apply (VOD) or AVFoundation cannot answer it yet.
+    ///
+    /// Derived from `AVPlayerItem.seekableTimeRanges`: the live edge is the
+    /// END of the last seekable range (`start + duration`), and the offset is
+    /// that minus the item's current time. Both are on the AVPlayerItem's own
+    /// absolute timeline, so the subtraction is well defined -- which is why
+    /// this takes the raw observer `time` rather than the possibly
+    /// window-relative value that gets reported as `position`.
+    ///
+    /// Two nearby AVFoundation properties were considered and rejected as the
+    /// source, because neither answers "where is the playhead now":
+    ///  - `AVPlayerItem.configuredTimeOffsetFromLive` is the offset the app
+    ///    ASKED for (this plugin sets it from `HlsConfig/DashConfig.liveLatency`
+    ///    -- see loadMediaItem), a target, not an observation.
+    ///  - `AVPlayerItem.recommendedTimeOffsetFromLive` is the offset the
+    ///    SERVER recommends for stable playback, likewise a target.
+    /// Reporting either would make the value constant by construction and
+    /// therefore useless as a stall signal -- precisely the defect this fixes.
+    ///
+    /// Deliberately NOT gated on `currentDvrEnabled`, unlike
+    /// `currentLiveDvrWindow`: the DVR gate exists to avoid publishing a
+    /// scrubbable range without matching seek permission, and that reasoning
+    /// does not apply to a read-only health signal. A live stream without DVR
+    /// gets this value too. It IS gated on the item being live at all
+    /// (`currentMediaItem["isLive"]`), the same Dart-supplied source
+    /// `notifyDurationChanged` already uses on iOS -- unlike Android, where
+    /// ExoPlayer's `Timeline.Window.isLive()` provides manifest-derived
+    /// detection that AVFoundation has no direct equivalent for.
+    ///
+    /// Clamped to >= 0: the playhead can transiently read a few milliseconds
+    /// past the last observed edge between samples.
+    private func currentLiveEdgeOffsetMs(at time: CMTime) -> Int64? {
+        guard currentMediaItem?["isLive"] as? Bool ?? false else { return nil }
+        guard let item = avPlayer?.currentItem,
+              let range = item.seekableTimeRanges.last?.timeRangeValue,
+              range.start.isValid, !range.start.isIndefinite,
+              range.duration.isValid, !range.duration.isIndefinite,
+              time.isValid, !time.isIndefinite else { return nil }
+
+        let liveEdgeSeconds = CMTimeGetSeconds(range.start) + CMTimeGetSeconds(range.duration)
+        let currentSeconds = CMTimeGetSeconds(time)
+        guard liveEdgeSeconds.isFinite, currentSeconds.isFinite else { return nil }
+
+        return Int64(max(0, liveEdgeSeconds - currentSeconds) * 1000)
     }
 
     /// Config staleness fix: `newConfig`, when present, is the current
@@ -1974,11 +2040,28 @@ class MediaPlayerInstance: NSObject {
         return Int(min(100.0, max(0.0, percentage)))
     }
 
-    private func notifyPositionChanged(position: Int64) {
-        let arguments: [String: Any] = [
+    /// Issue #88: `positionBasis` and `liveEdgeOffset` ride this existing
+    /// 0.5s event (see `setupObservers`) rather than getting a channel event
+    /// of their own -- they are sampled from the same tick that produces
+    /// `position` and are only ever meaningful alongside it.
+    ///
+    /// `liveEdgeOffset` is omitted from the payload entirely (rather than sent
+    /// as a sentinel) when unknown; `MediaPlayer._handlePositionChanged` on the
+    /// Dart side reads a missing key as `nil`/`null`, the same as it does for
+    /// an older native build that never sends it.
+    private func notifyPositionChanged(
+        position: Int64,
+        positionBasis: String = "absolute",
+        liveEdgeOffsetMs: Int64? = nil
+    ) {
+        var arguments: [String: Any] = [
             "playerId": playerId,
-            "position": Int(position)
+            "position": Int(position),
+            "positionBasis": positionBasis
         ]
+        if let liveEdgeOffsetMs = liveEdgeOffsetMs {
+            arguments["liveEdgeOffset"] = Int(liveEdgeOffsetMs)
+        }
         methodChannel.invokeMethod("onPositionChanged", arguments: arguments)
     }
 

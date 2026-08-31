@@ -29,13 +29,40 @@ class PlaybackState {
   final Duration bufferedPosition;    // Buffered position
   final String? errorMessage;         // Error message if any
 
+  // Live streaming (see docs/api-reference/live-streaming.md)
+  final Duration? liveEdgeOffset;     // Distance behind the live edge; null for VOD
+  final PositionBasis positionBasis;  // Which timeline `position` is measured against
+
   // Computed properties
   double get progress;                // Progress percentage (0.0 - 1.0)
   bool get canPlay;                   // Can start playback
   bool get canPause;                  // Can pause playback
   bool get canSeek;                   // Can seek
+  bool get isAtLiveEdge;              // Riding the live edge (within 15s); false for VOD
+  bool get isPositionWindowRelative;  // positionBasis == PositionBasis.liveWindow
+
+  bool isAtLiveEdgeWithin(Duration tolerance);
+
+  static const Duration defaultLiveEdgeTolerance = Duration(seconds: 15);
 }
 ```
+
+#### PositionBasis Enum:
+```dart
+enum PositionBasis {
+  absolute,    // `position` is measured from a fixed zero point (the media start)
+  liveWindow,  // `position` is measured from the start of the live/DVR window,
+               // which itself slides forward — a CONSTANT position on this basis
+               // is a healthy live edge, not a stall
+}
+```
+
+> **Read this before writing a stall detector.** On `PositionBasis.liveWindow`,
+> `position` stays roughly constant during perfectly healthy playback, because
+> the window start advances at the same rate as the playhead. Use
+> `liveEdgeOffset` (which grows without bound against a genuinely frozen
+> playhead) rather than `position` to detect a live stall. See
+> [Live Streaming](live-streaming.md#stall-watchdog-for-live-streams).
 
 #### PlayerState Enum:
 ```dart
@@ -62,6 +89,9 @@ player.stateStream.listen((PlaybackState state) {
   print('Speed: ${state.speed}');
   print('Muted: ${state.isMuted}');
   print('Progress: ${state.progress}');
+  print('Position basis: ${state.positionBasis}');
+  print('Behind live edge: ${state.liveEdgeOffset}');  // null for VOD
+  print('At live edge: ${state.isAtLiveEdge}');
 
   if (state.state == PlayerState.error) {
     print('Error: ${state.errorMessage}');
@@ -77,6 +107,19 @@ player.stateStream.listen((PlaybackState state) {
 **Access**: `player.positionStream`
 
 Emits periodic updates of the current playback position. Updates approximately every 500ms during playback.
+
+On Android this stream also ticks while playback is stalled but the host still
+intends to play (`playWhenReady && STATE_BUFFERING`), so `stateStream`'s
+`liveEdgeOffset` keeps updating through a rebuffer. It stays silent while
+genuinely paused, idle or ended. On iOS the underlying
+`AVPlayer.addPeriodicTimeObserver` only fires while time is progressing, so a
+full stall suspends updates there — treat "no position event for several
+sampling intervals while `state == playing`" as its own signal on iOS.
+
+> `positionStream` carries only the `Duration`. The live-edge fields
+> (`liveEdgeOffset`, `positionBasis`) that arrive on the *same* native event
+> are surfaced through `stateStream` / `player.currentState`, or directly via
+> `player.liveEdgeOffset` / `player.isAtLiveEdge` / `player.positionBasis`.
 
 #### Usage Example:
 ```dart
@@ -570,6 +613,47 @@ Rx.combineLatest2(
 | `audioTracksStream` | On track change | Tracks loaded/changed | Yes Yes |
 
 **Note**: All streams are **broadcast streams**, meaning multiple listeners can subscribe simultaneously.
+
+---
+
+## Native Event Payloads (MethodChannel contract)
+
+These are the raw native -> Dart `MethodChannel` payloads that back the streams
+above. Host apps never construct these; they are documented because a payload
+key is invisible to `flutter analyze` and to the (channel-mocking) test suite,
+so this table is the only place the contract is recorded.
+
+### `onPositionChanged`
+
+| Key | Type | Required | Meaning |
+|-----|------|----------|---------|
+| `playerId` | String | yes | Routes the event to a `MediaPlayer` instance |
+| `position` | int (ms) | yes | Playback position, on the basis given by `positionBasis` |
+| `positionBasis` | String | no | `"absolute"` or `"liveWindow"`. Parsed into `PositionBasis`; absent or unrecognised falls back to `PositionBasis.absolute` |
+| `liveEdgeOffset` | int (ms) | no | Distance behind the live edge. **Omitted entirely** (never a sentinel) for VOD and whenever the platform cannot answer; a missing key clears `PlaybackState.liveEdgeOffset` to `null` |
+
+`positionBasis` and `liveEdgeOffset` deliberately ride this existing ~500ms
+event rather than getting a channel event of their own: they are sampled from
+the same native tick that produces `position` and are only meaningful next to
+it.
+
+Where each value comes from natively:
+
+| | Android (ExoPlayer / Media3) | iOS (AVFoundation) |
+|---|---|---|
+| `liveEdgeOffset` | `Player.getCurrentLiveOffset()`; when that returns `C.TIME_UNSET`, falls back to `Timeline.Window.durationMs - Player.getCurrentPosition()` (both window-relative, so the difference is the distance to the live edge) | End of `AVPlayerItem.seekableTimeRanges.last` (`start + duration`) minus `AVPlayerItem.currentTime()`, clamped to >= 0 |
+| `positionBasis` | `"liveWindow"` whenever `Timeline.Window.isLive()` — ExoPlayer's `getCurrentPosition()` is window-relative for **any** live item, DVR or not | `"liveWindow"` only when the live **DVR** window translation is applied; a live item without `enableDvr` reports `"absolute"`, because there `position` is the `AVPlayerItem`'s own absolute timeline |
+
+The `positionBasis` divergence between platforms for *live-without-DVR* is
+real, not a bug: each platform reports the basis its position values are
+actually on. Reporting a normalised lie on one platform would defeat the
+purpose of the flag. `liveEdgeOffset` is reported for live streams **with and
+without** DVR on both platforms.
+
+`AVPlayerItem.configuredTimeOffsetFromLive` and `recommendedTimeOffsetFromLive`
+were considered and rejected as the iOS source: both are *target* offsets (what
+the app asked for / what the server recommends), so they are constant by
+construction and useless as a liveness signal.
 
 ---
 

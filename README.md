@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-958%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-989%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -48,6 +48,10 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
 - `MediaItem.streamingFormat` (`StreamingFormat.hls`/`.dash`/`.progressive`) states an item's
   format explicitly, deciding which of `hlsConfig`/`dashConfig` applies; leave it `null` to
   infer from the URL path (`endsWith('.m3u8')`/`endsWith('.mpd')`, query and fragment ignored)
+- Live-edge signal: `liveEdgeOffset` (how far behind the live edge the playhead is, sourced from
+  `Player.getCurrentLiveOffset()` on Android and `AVPlayerItem.seekableTimeRanges` on iOS),
+  `isAtLiveEdge`, and `positionBasis` — so a healthy live edge is distinguishable from a frozen
+  playhead (on a sliding window, `position` stays constant during *healthy* playback)
 - Subtitles: SRT, WebVTT, ASS/SSA, and embedded tracks with customizable styling
 - Manual and automatic quality/resolution selection; multiple audio tracks
 - Progressive download/caching; real-time bandwidth estimation
@@ -273,6 +277,26 @@ DVR/seeking availability, latency, and adaptive bitrate for live streams are gov
 each native player's own defaults for the manifest — see the
 [Live Streaming guide](docs/api-reference/live-streaming.md) for what is and is not
 currently configurable.
+
+**Never build a stall detector on `position` for a live stream.** When
+`controller.positionBasis == PositionBasis.liveWindow` (always on Android for a live item; on
+iOS whenever `enableDvr: true`), the window start slides forward with the playhead, so a
+*constant* `position` is exactly what healthy playback looks like. Use the native-sourced
+live-edge signal instead:
+
+```dart
+final Duration? behind = controller.liveEdgeOffset; // null for VOD
+final bool atEdge = controller.isAtLiveEdge;        // within 15s of the edge
+
+// A frozen playhead in a sliding window makes `liveEdgeOffset` grow without bound;
+// a healthy edge keeps it bounded, whatever `position` is doing.
+if (controller.positionBasis == PositionBasis.liveWindow && !atEdge) {
+  // ... escalate
+}
+```
+
+See [Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall-watchdog-for-live-streams)
+for a complete, copy-pasteable implementation covering VOD, live-without-DVR and live-with-DVR.
 
 ### Media Notifications
 
@@ -584,7 +608,7 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 958), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 989), and open a PR.
 
 ## License
 
@@ -601,7 +625,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 958 automated tests — run `flutter test` for the current count.
+- **Tests:** 989 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth

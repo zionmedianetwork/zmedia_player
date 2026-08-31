@@ -36,6 +36,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   platform and DASH to another must set **both** `hlsConfig` and `dashConfig`, because the
   two are deliberately never cross-applied.
 
+- **Live-edge signal** (closes [#88](https://github.com/zionmedianetwork/zmedia_player/issues/88)).
+  With DVR enabled, a healthy live edge was previously indistinguishable from a frozen
+  playhead: `position` is window-relative for a live item, so at the live edge of a
+  *sliding* window the playhead and the window start advance together and `position` stays
+  roughly constant. A host stall watchdog that sampled `position` and escalated when it
+  stopped advancing therefore escalated forever against perfectly healthy playback. Three
+  new public members close that gap:
+  - `PlaybackState.liveEdgeOffset` (`Duration?`) — how far behind the live edge the
+    playhead currently is. `null` for VOD and while the platform cannot answer yet;
+    reported for live streams **with and without** `enableDvr`. Unlike `position`, it grows
+    without bound against a genuinely frozen playhead, which makes it the reliable live
+    stall signal.
+  - `PlaybackState.isAtLiveEdge` (`bool`) plus `isAtLiveEdgeWithin(Duration tolerance)` and
+    the public constant `PlaybackState.defaultLiveEdgeTolerance` (**15 seconds**, matching
+    video.js's `liveTolerance` default — a healthy standard-HLS player rides 15-30s behind
+    the edge, so a tighter threshold would report `false` for a healthy stream).
+    `isAtLiveEdge` is always `false` when `liveEdgeOffset` is `null`.
+  - `PlaybackState.positionBasis` (new exported enum `PositionBasis` — `absolute` |
+    `liveWindow`) plus the derived `PlaybackState.isPositionWindowRelative` — reports which
+    timeline `position` is currently measured against, so a host can branch correctly
+    without inferring the basis from its own `MediaConfig`. VOD is `absolute` on both
+    platforms; a live item is `liveWindow` on Android (ExoPlayer's `getCurrentPosition()`
+    is window-relative for any live item) and `liveWindow` on iOS only when
+    `enableDvr: true` (without DVR, iOS position is the `AVPlayerItem`'s own absolute
+    timeline). That divergence is deliberate — each platform reports the basis its values
+    are actually on.
+
+  All three are surfaced on `MediaPlayer` (`liveEdgeOffset`, `isAtLiveEdge`,
+  `positionBasis`) and on the `MediaController` facade. `position` itself is unchanged —
+  DVR scrubbers keep working exactly as before. See
+  [Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall-watchdog-for-live-streams)
+  for a complete worked implementation covering VOD, live-without-DVR and live-with-DVR.
+
+- **Data contract — `onPositionChanged` gains two optional keys** (native -> Dart). The
+  existing ~500ms position event now carries them; deliberately no new high-frequency
+  channel event was added.
+  - `positionBasis` (`String`, optional) — `"absolute"` or `"liveWindow"`. An absent or
+    unrecognised value falls back to `PositionBasis.absolute`, preserving pre-existing
+    behaviour on older cached native builds.
+  - `liveEdgeOffset` (`int`, milliseconds, optional) — **omitted entirely rather than sent
+    as a sentinel** when unknown; a missing key clears `PlaybackState.liveEdgeOffset` to
+    `null`, so a stale offset can never make a freshly-loaded VOD item read as "at the live
+    edge".
+
+  Native sources: Android uses `Player.getCurrentLiveOffset()` (falling back to
+  `Timeline.Window.durationMs - Player.getCurrentPosition()` when that returns
+  `C.TIME_UNSET`) and `Timeline.Window.isLive()` for the basis; iOS uses the end of
+  `AVPlayerItem.seekableTimeRanges.last` minus `AVPlayerItem.currentTime()`.
+  `configuredTimeOffsetFromLive`/`recommendedTimeOffsetFromLive` were evaluated and
+  rejected on iOS — both are *target* offsets, constant by construction and therefore
+  useless as a liveness signal.
+
 ### Fixed
 - `MediaController` now **queues** operations instead of rejecting them. Previously
   `_executeOperation` held a per-controller boolean lock that never queued: while it was
@@ -240,6 +292,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   playlist map, and on `loadMediaOnCastDevice`'s reduced `mediaItem` map. Native treats an
   absent or unrecognised value as "unset" and falls back to its own path-based inference, so
   an older Dart build against a newer native build (or vice versa) behaves exactly as before.
+
+- **Android:** position updates are now also emitted while playback is stalled but the host
+  still intends to play (`playWhenReady && Player.STATE_BUFFERING`), not only while
+  `isPlaying`. Previously a rebuffer produced no position events at all, which would have
+  frozen `liveEdgeOffset` at its last value instead of letting it visibly grow away from
+  the live edge — defeating the new stall signal. Unchanged while genuinely paused, idle or
+  ended. (iOS drives position from `AVPlayer.addPeriodicTimeObserver`, which only fires
+  while time is progressing, so a hard stall still suspends updates there; this is
+  documented as a platform caveat for watchdog authors.)
 
 ### Deprecated
 - `OperationBusyException` — no longer thrown anywhere in this package. It existed solely

@@ -160,6 +160,11 @@ change to live playback immediately, or `load()` to apply it *and* reload.
 State: `state`, `isPlaying`, `isPaused`, `isBuffering`, `hasError`, `isReady`, `isInitialized`.
 Position: `position`, `duration`, `progress`, `bufferedProgress`, `formattedPosition`,
 `formattedDuration`, `formattedRemainingTime`.
+Live: `positionBasis` (`PositionBasis.absolute` | `.liveWindow` — which timeline `position` is
+measured against), `liveEdgeOffset` (`Duration?`, distance behind the live edge; `null` for
+VOD), `isAtLiveEdge` (within `PlaybackState.defaultLiveEdgeTolerance`, 15s; always `false` for
+VOD). See [Live Streaming](live-streaming.md#stall-watchdog-for-live-streams) — do **not** build
+a stall detector on `position` for a live stream.
 Audio: `volume`, `isMuted`, `speed`.
 Content: `currentItem`, `currentPlaylist`, `hasNext`, `hasPrevious`.
 Tracks: `qualityTracks`, `selectedQualityTrack`, `subtitleTracks`, `selectedSubtitleTrack`,
@@ -256,9 +261,19 @@ live item, derived from whichever `HlsConfig`/`DashConfig` matched its
 `MediaItem.resolvedStreamingFormat` at `load()` time — its explicit `MediaItem.streamingFormat`
 if set, else path-based URL inference; see
 [Live Streaming](live-streaming.md#choosing-which-streaming-config-applies-streamingformat)),
-`isSeekable` (`false` only when `isLive && !dvrEnabled`), `currentBandwidth`, `networkQuality`,
+`isSeekable` (`false` only when `isLive && !dvrEnabled`), `liveEdgeOffset`,
+`isAtLiveEdge`, `positionBasis`, `currentBandwidth`, `networkQuality`,
 `bufferStatistics`, `lastBufferHealth`, the track lists/selections, and the PiP/cast status
 getters mirrored on the controller.
+
+The three live-edge getters are native-sourced and delivered on the existing `onPositionChanged`
+event (see [Events](events.md#onpositionchanged)):
+
+| Getter | Type | Value |
+|---|---|---|
+| `liveEdgeOffset` | `Duration?` | Distance behind the live edge. `null` for VOD and while the platform cannot answer. Reported for live streams with **and without** `enableDvr`. Android: `Player.getCurrentLiveOffset()`. iOS: end of `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()`. |
+| `isAtLiveEdge` | `bool` | `liveEdgeOffset <= PlaybackState.defaultLiveEdgeTolerance` (15s). `false` whenever the offset is `null`. Use `currentState.isAtLiveEdgeWithin(tolerance)` for a different threshold. |
+| `positionBasis` | `PositionBasis` | Which timeline `currentState.position` is on. `liveWindow` means a **constant `position` is not a stall** — see [Live Streaming](live-streaming.md#knowing-which-timeline-position-is-on). |
 
 ## Errors
 

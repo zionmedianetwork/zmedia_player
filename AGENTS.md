@@ -66,7 +66,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | Export | Purpose |
 |---|---|
 | `MediaItem` / `MediaType` / `StreamingFormat` | A playable item (url, title, artwork, drmConfig, headers) / `video`\|`audio` / `hls`\|`dash`\|`progressive`. `MediaItem.streamingFormat` (nullable) states the item's format explicitly and selects which of `hlsConfig`/`dashConfig` applies; `null` falls back to `MediaItem.resolvedStreamingFormat`'s path-based URL inference (`StreamingFormat.fromUrl`). Equality is id-based only. |
-| `PlaybackState` / `PlayerState` | State snapshot (position, duration, `bufferedPosition`, speed, volume, error) / `idle,buffering,ready,playing,paused,completed,error`. |
+| `PlaybackState` / `PlayerState` / `PositionBasis` | State snapshot (position, duration, `bufferedPosition`, speed, volume, error, plus `liveEdgeOffset`/`positionBasis` + derived `isAtLiveEdge`/`isAtLiveEdgeWithin`/`isPositionWindowRelative` and `defaultLiveEdgeTolerance` = 15s) / `idle,buffering,ready,playing,paused,completed,error` / `absolute`\|`liveWindow`. |
 | `Playlist` / `PlaybackMode` / `MediaRepeatMode` | Item collection + shuffle order / `sequential`\|`shuffle` / `none`\|`single`\|`all`. **Note: the enum is `MediaRepeatMode`, not `RepeatMode`.** |
 | `SubtitleTrack` / `SubtitleFormat` / `SubtitleConfig` / `SubtitleAlignment` | Subtitle track, format (`srt,webvtt,ass,ssa,ttml`), styling, alignment. |
 | `QualityTrack` / `AudioTrack` | Selectable video-quality / audio-track descriptors. |
@@ -145,6 +145,18 @@ Native→Dart events (handled in `MediaPlayer._handleMethodCall`, dispatched by 
 `onBandwidthUpdate`, `onBufferHealthUpdate`, `onDrmSessionUpdate`, `onNotificationAction`,
 `onPipStatusChanged`, `onPipAction`, `onCastStatusChanged`, `onCastDevicesChanged`,
 `onNetworkStatusChanged`, `onPlatformViewError`, `onError`.
+
+**`onPositionChanged` payload.** `{playerId: String, position: int(ms), positionBasis: String?,
+liveEdgeOffset: int(ms)?}`. `positionBasis` is `"absolute"` or `"liveWindow"` (absent or
+unrecognised -> `PositionBasis.absolute`). `liveEdgeOffset` is **omitted entirely** (never a
+sentinel) for VOD and whenever the platform cannot answer — a missing key clears
+`PlaybackState.liveEdgeOffset` to `null`. Both ride this existing ~500ms event rather than a
+new channel event. Sources: Android `Player.getCurrentLiveOffset()` (falling back to
+`Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET`) and
+`Timeline.Window.isLive()`; iOS end-of-`AVPlayerItem.seekableTimeRanges.last` minus
+`currentTime()`, with `"liveWindow"` only when the DVR window translation applies. The
+live-without-DVR basis therefore differs by platform (`liveWindow` on Android, `absolute` on
+iOS) **by design** — each reports the basis its values are actually on.
 
 **Error categories.** `onError` carries a `category` in its details, drawn from a vocabulary both
 platforms share: `NETWORK`, `HTTP`, `DRM`, `DECODER`, `SOURCE`, `UNKNOWN`. Dart maps these onto the
@@ -321,6 +333,18 @@ versa) — in debug builds, a live item that resolves to a format whose config i
 one-time warning naming the missing config and the consequence. See
 [live-streaming.md](docs/api-reference/live-streaming.md).
 
+### Live-edge signal (do not stall-detect on `position`)
+```dart
+controller.positionBasis;   // PositionBasis.absolute | .liveWindow
+controller.liveEdgeOffset;  // Duration? — distance behind the live edge; null for VOD
+controller.isAtLiveEdge;    // offset <= PlaybackState.defaultLiveEdgeTolerance (15s); false for VOD
+```
+On `PositionBasis.liveWindow` the window start slides forward with the playhead, so a
+**constant `position` is healthy playback, not a stall** — a naive position-sampling watchdog
+escalates forever. `liveEdgeOffset` is the reliable signal: it grows without bound against a
+genuinely frozen playhead. Reported for live streams with **and without** `enableDvr`. See
+[Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall-watchdog-for-live-streams).
+
 ---
 
 ## Conventions & gotchas
@@ -357,7 +381,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 958 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 989 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -373,7 +397,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **958**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **989**, keep green) before proposing changes.
 - **API/data-contract/feature changes require documentation in the same change** — root `README.md`, this file, every affected file under `docs/`, and `CHANGELOG.md`. See `CLAUDE.md`'s Development Workflow for the full rule and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
 - Verify on a real device when touching native paths (DRM, casting, PiP, notifications, layout/rotation).
@@ -385,7 +409,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (958 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (989 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating

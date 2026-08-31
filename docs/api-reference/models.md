@@ -151,6 +151,12 @@ happens.)
 ```dart
 enum PlayerState { idle, buffering, ready, playing, paused, completed, error }
 
+/// Which timeline `PlaybackState.position` is measured against.
+enum PositionBasis {
+  absolute,   // from the media start — a fixed zero point
+  liveWindow, // from the start of the live/DVR window, which itself slides forward
+}
+
 const PlaybackState({
   required PlayerState state,
   Duration position = Duration.zero,
@@ -162,9 +168,36 @@ const PlaybackState({
   double bufferPercentage = 0.0,
   Duration bufferedPosition = Duration.zero,
   String? errorMessage,
+  Duration? liveEdgeOffset,                          // null for VOD
+  PositionBasis positionBasis = PositionBasis.absolute,
 });
-// getters: progress (0..1), canPlay, canPause, canSeek
+// getters: progress (0..1), canPlay, canPause, canSeek,
+//          isAtLiveEdge, isPositionWindowRelative
+// methods: isAtLiveEdgeWithin(Duration tolerance)
+// static:  defaultLiveEdgeTolerance == Duration(seconds: 15)
 ```
+
+`copyWith` takes `liveEdgeOffset` and `positionBasis`, plus a
+`bool clearLiveEdgeOffset = false` flag — because `liveEdgeOffset` is legitimately
+nullable, `?? this.liveEdgeOffset` alone could never reset a previously reported
+offset back to `null`, which is how `load()` drops a stale live-edge signal when
+switching to a VOD item. `clearLiveEdgeOffset: true` wins over any value passed
+alongside it. Both new fields participate in `==`/`hashCode` and appear in
+`toString()`.
+
+**Live-edge fields.** `liveEdgeOffset` is how far behind the live edge the playhead
+is, native-sourced on every `onPositionChanged` event (Android:
+`Player.getCurrentLiveOffset()`; iOS: end of `AVPlayerItem.seekableTimeRanges.last`
+minus `currentTime()`). It is `null` for VOD and whenever the platform cannot answer
+yet; it *is* reported for live streams both with and without `enableDvr`.
+`isAtLiveEdge` is `liveEdgeOffset <= defaultLiveEdgeTolerance` (15s), and `false`
+whenever the offset is `null`.
+
+**`positionBasis` matters for stall detection.** On `PositionBasis.liveWindow` the
+window start slides forward with the playhead, so a *constant* `position` is what
+healthy playback looks like — not a stall. Branch on this rather than inferring the
+basis from your own `enableDvr` config. See
+[Live Streaming](live-streaming.md#stall-watchdog-for-live-streams).
 
 ## Playlist
 
