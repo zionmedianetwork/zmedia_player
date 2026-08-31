@@ -266,6 +266,53 @@ supported.
   - `respectSafeArea: true` insets the video below the status bar/notch.
   - `immersiveLandscape: true` hides the system status bar in landscape (restored on portrait/dispose).
 
+### Sizing: `aspectRatio` and `expandToFill`
+
+`MediaPlayerWidget` has two sizing modes:
+
+| Mode | Behaviour |
+|---|---|
+| `expandToFill: false` (default) | Wraps the content in an `AspectRatio` using `aspectRatio` if given, otherwise the video's natural ratio (16:9 fallback). The widget always has an intrinsic size, so it is immune to loose constraints. |
+| `expandToFill: true` | Skips the `AspectRatio` wrapper and fills whatever space the parent gives. An explicit `aspectRatio` still wins over this flag. |
+
+**`expandToFill: true` requires a definite size from the parent** — constraints that are bounded
+*and* have a non-zero minimum in both axes. Every tight constraint qualifies:
+
+```dart
+Stack(
+  children: [
+    Positioned.fill(                      // tight constraints — correct
+      child: MediaPlayerWidget(controller: controller, expandToFill: true),
+    ),
+    Positioned(top: 8, left: 8, child: myOverlayChrome),
+  ],
+)
+```
+
+`SizedBox.expand`, `Expanded`/`Flexible(fit: FlexFit.tight)`, and a `Scaffold` body work
+equally well.
+
+**Size floor.** If the incoming constraints would let the widget collapse — loose /
+zero-minimum (a **non-positioned `Stack` child** receives `BoxConstraints.loose`), or unbounded
+in an axis (a child of an unbounded `Column`, `ListView`, or `SingleChildScrollView`) — the
+widget no longer lays out at `Size(0, 0)`. It falls back to a definite size derived from the
+video's natural aspect ratio (16:9 when unknown):
+
+- one axis bounded → that axis is filled and the other is derived from the ratio (re-derived
+  from the other axis if the first would overflow a bounded maximum);
+- both axes unbounded → the `MediaQuery` screen width is used.
+
+Before this fallback existed, that case silently painted nothing: the video *and* the entire
+controls overlay disappeared while audio kept playing, with no exception, no `RenderFlex
+overflowed`, and nothing in the logs — a zero-size layout throws nothing.
+
+**Debug diagnostic.** When the fallback engages, debug builds report a `FlutterError` (via
+`FlutterError.reportError`, `library: 'zmedia_player'`) naming the offending constraints, the
+likely cause, and the remedy (`Positioned.fill`, `SizedBox.expand`, or `expandToFill: false`).
+It never throws, is compiled out of release builds, and is emitted at most once per constraint
+condition rather than once per frame. Treat it as a layout bug in the host app: the fallback
+keeps the player visible, but the constraints are still not what `expandToFill: true` wants.
+
 ### Orientation control
 
 `FullscreenMediaPlayer` no longer forces landscape. Three optional, non-breaking

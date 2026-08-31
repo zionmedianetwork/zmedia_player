@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-1030%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-1044%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -459,6 +459,9 @@ MediaPlayerWidget(
   boxFit: BoxFit.contain,
   allowFullscreen: true,
   enableBuiltInGestures: true,          // default; false = host owns all gestures
+
+  aspectRatio: 16 / 9,                  // optional; overrides the video's natural ratio
+  expandToFill: false,                  // true = fill the parent instead of sizing to a ratio
   onTap: () {},
 )
 ```
@@ -538,6 +541,22 @@ position included — back to your `onTap` / `onTapDown` / `onDoubleTap` / `onDo
 via `MediaControls.onBackgroundTap` / `onBackgroundTapDown` / `onBackgroundDoubleTap` /
 `onBackgroundDoubleTapDown`, so those four fire identically in both states. Long press is not
 forwarded, so it fires only while the overlay is hidden.
+
+**Sizing: `aspectRatio` / `expandToFill`.** By default (`expandToFill: false`) the widget sizes
+itself from `aspectRatio`, falling back to the video's natural ratio (16:9 when unknown), so it
+always has an intrinsic size. `expandToFill: true` skips that and fills whatever space the
+parent gives it — which means the parent **must** hand it a definite size: constraints that are
+bounded with a non-zero minimum in both axes, i.e. `Positioned.fill` inside a `Stack`,
+`SizedBox.expand`, an `Expanded`, or a `Scaffold` body.
+
+If the constraints could let the widget collapse instead — loose/zero-minimum (a
+**non-positioned `Stack` child** gets `BoxConstraints.loose`) or unbounded in an axis (an
+unbounded `Column`/`ListView` child) — the widget falls back to a definite size derived from the
+video aspect ratio rather than laying out at `Size(0, 0)`. It fills the bounded axis and derives
+the other from the ratio; when both axes are unbounded it uses the screen width. In debug builds
+the fallback also reports a `FlutterError` explaining the cause and the remedy (it never throws,
+is compiled out of release builds, and is reported at most once per constraint condition). An
+explicit `aspectRatio` always wins over `expandToFill`.
 
 ### MediaItem
 
@@ -685,7 +704,7 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 1030), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 1044), and open a PR.
 
 ## License
 
@@ -702,7 +721,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 1030 automated tests — run `flutter test` for the current count.
+- **Tests:** 1044 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth
