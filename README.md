@@ -3,7 +3,7 @@
 A comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms.
 
 [![Version](https://img.shields.io/github/v/release/zionmedianetwork/zmedia_player?label=version&color=blue&sort=semver)](https://github.com/zionmedianetwork/zmedia_player/releases)
-[![Tests](https://img.shields.io/badge/tests-943%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
+[![Tests](https://img.shields.io/badge/tests-958%20passing-brightgreen.svg)](docs/summary/test-coverage.md)
 [![Platform](https://img.shields.io/badge/platform-Android%20%7C%20iOS-lightgrey.svg)](docs/summary/features.md)
 
 > **Working with this package as an AI agent or tool?** Start from [`AGENTS.md`](AGENTS.md) —
@@ -31,7 +31,8 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
 - Cross-platform: Android (AndroidX Media3/ExoPlayer) and iOS (AVPlayer)
 - Custom HTTP headers for authenticated requests
 - `BoxFit` video scaling (contain, cover, fill, …), applied to the native layer at runtime
-- Playlist management with sequential/shuffle modes and `MediaRepeatMode` (none/single/all)
+- Playlist management with sequential/shuffle modes and `MediaRepeatMode` (none/single/all),
+  extendable in place without restarting the item already playing
 - Broadcast-stream state model with typed exceptions and error recovery
 
 **Streaming & subtitles**
@@ -148,12 +149,29 @@ final playlist = Playlist(
 
 await _controller.setPlaylist(playlist);
 await _controller.skipToNext(); // skipToPrevious() / skipToIndex(i)
+
+// Extending a playlist in place does NOT restart the item already playing --
+// re-issue setPlaylist to append items (a sliding window for content that is
+// authorised per item) or to change mode/repeatMode mid-playback:
+await _controller.setPlaylist(playlist.copyWith(
+  items: [...playlist.items, nextEpisode],
+));
 ```
 
 `setPlaylist` and `skipToIndex` carry the current `MediaConfig` snapshot to native on every
 call, exactly like `load` does, so per-item streaming settings (`hlsConfig`/`dashConfig`,
 `enableDvr`, bitrate bounds, …) are never stale for playlist-driven items. `skipToNext`,
 `skipToPrevious` and auto-advance on completion all route through `skipToIndex`.
+
+> `setPlaylist` skips reloading the item at `startIndex` only when it is byte-for-byte the item
+> already loaded *and* still in progress. A changed `url`, `httpHeaders`, or `drmConfig` for the
+> same `id` is a genuine change and still reloads, as does a stopped/completed/errored player.
+> `skipToIndex` always reloads (that is how `MediaRepeatMode.single` repeats an item).
+> A changed `MediaConfig` is **not** a reason to reload: a `setPlaylist` carrying a new config
+> for an unchanged, in-progress item stores that config (the next real load uses it) but keeps
+> playing. Call `updateConfig()` to apply a config change to live playback immediately, or
+> `load()` to apply it *and* reload. See
+> [Player API](docs/api-reference/player-api.md#extending-a-playlist-in-place).
 
 ### Custom Configuration
 
@@ -566,7 +584,7 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 943), and open a PR.
+`flutter analyze` clean and `flutter test` green (currently 958), and open a PR.
 
 ## License
 
@@ -583,7 +601,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 943 automated tests — run `flutter test` for the current count.
+- **Tests:** 958 automated tests — run `flutter test` for the current count.
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth

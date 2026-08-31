@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **943 tests passing** (run
+> the original release. The suite has since grown to **958 tests passing** (run
 > `flutter test` for the live count) as audit-remediation work added regression
 > coverage. **Important caveat the original summary omitted:** these are all **Dart**
 > unit tests. There are **no automated native (Kotlin/Swift) tests**, and several
@@ -13,7 +13,16 @@
 > --coverage`, `test/performance/`, `test/memory/` on every push/PR) — both now exist.
 > See the [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
 >
-> **Last Updated:** August 17, 2026
+> **Last Updated:** August 30, 2026
+>
+> **Playlist regression coverage (issue #79):** `test/core/playlist_extension_test.dart`
+> (15 tests) covers the Dart-observable half of the "`setPlaylist` must not restart the
+> item already playing" fix — payload shape, playlist/index state after an in-place
+> extension, the suppressed track-list/`buffering`/speed reset, and every case that must
+> still reload (changed `url`/`httpHeaders`/`drmConfig` for the same `id`, a different
+> `id`, and the idle/completed states). The native halves of that fix
+> (`MediaPlayerInstance.setPlaylist` in Kotlin and Swift) remain untested here, per the
+> "no automated native tests" caveat above, and need on-device verification.
 
 ## Original Status (v0.1.0): **COMPLETE - ALL TESTS PASSING!**
 

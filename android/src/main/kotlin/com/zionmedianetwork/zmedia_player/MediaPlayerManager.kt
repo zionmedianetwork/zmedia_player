@@ -707,8 +707,113 @@ class MediaPlayerInstance(
     }
 
     /**
-     * Config staleness fix (playlist path): [newConfig], when present, is the
-     * current top-level (per-player) config snapshot sent by
+     * True when [candidate] is, key for key, the item this instance already
+     * has loaded ([currentMediaItem]) AND that item is still live in the
+     * player (prepared, not stopped, not finished) -- i.e. there is real
+     * in-progress playback that a reload would destroy.
+     *
+     * Issue #79: [setPlaylist] used to call [loadMediaItem] unconditionally,
+     * so a consumer that keeps the native playlist populated incrementally
+     * (a sliding window of "current + next few", re-issued as the viewer
+     * advances -- the only workable shape when playback authorisation is
+     * scoped per item and pre-authorising a 40-item playlist would mean ~80
+     * round-trips before the first frame) restarted the item under the
+     * viewer on every extension. Re-issuing a playlist purely to change
+     * `mode`/`repeatMode` had the same cost. This is the guard that makes
+     * those calls free.
+     *
+     * The comparison is whole-map structural equality, deliberately NOT an
+     * `id` check:
+     *
+     *  - An `id` match is not sufficient. A consumer may legitimately
+     *    re-issue the same `id` *expecting* a real reload: refreshed
+     *    signed-cookie / `Authorization` values in `httpHeaders`, a rotated
+     *    token or rotated `headers` inside `drmConfig`, or a re-signed `url`
+     *    for the same logical episode. Each of those changes some key of
+     *    this map, so whole-map equality lets them through as the genuine
+     *    reloads they are. (This also covers every key [loadMediaItem]
+     *    actually reads -- `url`, `httpHeaders`, `drmConfig` -- plus
+     *    `isLive`, which is read later, without an enumerated list that
+     *    could go stale as new keys are added.)
+     *  - An `id` match is not necessary either, and a missing/null `id` must
+     *    never be self-identifying: two items are not "the same item" merely
+     *    by virtue of both being anonymous. Under whole-map equality a null
+     *    `id` only ever matches another null `id` while the rest of the map
+     *    still has to match -- and the `url` guard below makes sure that
+     *    "rest of the map" always contains real, non-null content, since
+     *    [loadMediaItem] returns before assigning [currentMediaItem] when
+     *    `url` is absent.
+     *
+     * Note that the *config* plays no part in this comparison: a changed
+     * per-player config never by itself makes an unchanged item "different"
+     * and so never forces a reload (see [setPlaylist]).
+     *
+     * Values here are MethodChannel-decoded primitives / Lists / Maps, all
+     * of which implement structural `equals`, so `==` is a deep compare.
+     *
+     * The playback-state condition matters as much as the item comparison:
+     * [stop] leaves [currentMediaItem] set but puts ExoPlayer in
+     * `STATE_IDLE` with no media items, and a finished item sits in
+     * `STATE_ENDED`. In both cases there is nothing in progress to preserve
+     * and the caller means "start this", so those states fall through to a
+     * normal reload exactly as before this fix.
+     */
+    private fun isAlreadyLoadedAndInProgress(candidate: Map<String, Any>): Boolean {
+        val loaded = currentMediaItem ?: return false
+        if (candidate["url"] as? String == null) return false
+
+        val playbackState = exoPlayer?.playbackState ?: return false
+        if (playbackState != Player.STATE_READY && playbackState != Player.STATE_BUFFERING) {
+            return false
+        }
+
+        return candidate == loaded
+    }
+
+    /**
+     * Re-emits the events a load would have produced, for the case where
+     * [setPlaylist] skipped the load because the target item is already
+     * playing (issue #79).
+     *
+     * The Dart side's `setPlaylist()` historically assumed a load always
+     * follows: it clears its cached quality/audio/subtitle track lists and
+     * moves to `buffering`, then waits for native to repopulate them.
+     * `MediaPlayer._isPlaylistReloadSkipped` now mirrors the guard above and
+     * skips that reset when it can tell the item is unchanged, but the two
+     * comparisons are made independently on either side of the channel -- so
+     * this re-emit is the safety net that keeps Dart coherent if they ever
+     * disagree (an older cached Dart build talking to a newer native build,
+     * most obviously). Sends current playback state, current duration and
+     * the current track lists: everything a consumer could be waiting on
+     * after a `setPlaylist` call.
+     *
+     * Deliberately does not touch playback itself -- position, playWhenReady
+     * and speed are exactly what the skipped reload was protecting.
+     */
+    private fun notifyCurrentStateAfterSkippedLoad() {
+        val player = exoPlayer ?: return
+
+        val state = when (player.playbackState) {
+            Player.STATE_IDLE -> "idle"
+            Player.STATE_BUFFERING -> "buffering"
+            Player.STATE_READY -> if (player.playWhenReady) "playing" else "ready"
+            Player.STATE_ENDED -> "completed"
+            else -> "idle"
+        }
+        notifyStateChanged(state, player.playbackState == Player.STATE_BUFFERING)
+        notifyDurationChanged()
+        extractAndNotifyQualityTracks()
+        extractAndNotifyAudioTracks()
+        extractAndNotifySubtitleTracks()
+    }
+
+    /**
+     * Declares (or refreshes) the native playlist, points it at
+     * [startIndex], and loads that item -- unless it is already the item
+     * playing right now.
+     *
+     * Config staleness fix (playlist path): [newConfig], when present, is
+     * the current top-level (per-player) config snapshot sent by
      * `MediaPlayer.setPlaylist()` on the Dart side -- the same wire shape
      * `initialize`/`updateConfig`/`load` already send. It replaces [config]
      * wholesale *before* any config-dependent work runs (see the inline
@@ -716,10 +821,26 @@ class MediaPlayerInstance(
      * as on the `load` path -- deliberately does NOT re-run [applyConfig]:
      * see [loadMediaItem]'s doc for why reapplying volume/speed/`startMuted`
      * on every item load would undo an in-progress runtime [setMuted] call.
-     *
-     * `null` when an older cached Dart build (that sends only
+     * It is `null` when an older cached Dart build (that sends only
      * playerId/playlist/startIndex) is talking to this native build; in that
-     * case [config] is left untouched, exactly as before this fix.
+     * case [config] is left untouched, exactly as before that fix.
+     *
+     * Issue #79: the playlist contents and the position pointer ALWAYS
+     * refresh -- that is the whole point of re-issuing a playlist (extending
+     * a sliding window, changing `mode`/`repeatMode`). Only the *load* is
+     * conditional: when the item at [startIndex] is byte-for-byte the item
+     * already loaded and genuinely in progress
+     * ([isAlreadyLoadedAndInProgress]), playback is left running untouched
+     * and Dart is re-synced through [notifyCurrentStateAfterSkippedLoad]
+     * instead of being restarted.
+     *
+     * The two behaviours compose deliberately: storing [newConfig] never by
+     * itself forces a reload. A `setPlaylist` that carries a *changed*
+     * config for an unchanged, in-progress item stores that config -- so the
+     * next real load (a skip, an auto-advance, an explicit `load`) uses it
+     * -- but does NOT restart the item under the viewer. `updateConfig` is
+     * the API for applying config to live playback immediately; `load` is
+     * the API for applying it *and* reloading.
      */
     fun setPlaylist(
         playlist: Map<String, Any>,
@@ -728,23 +849,40 @@ class MediaPlayerInstance(
     ) {
         // Replace the stored config first, unconditionally, so it is in
         // place before ANY config-dependent work below -- including the
-        // early-return paths (malformed/empty payload), where silently
-        // dropping the caller's freshest snapshot would reintroduce exactly
-        // the staleness this fix exists to remove. [loadMediaItem] performs
-        // the same replacement itself from [newConfig] (that is where the
-        // contract is documented); doing it here too is an idempotent no-op
-        // on the normal path, not a second, divergent way to apply config.
+        // early-return paths (malformed/empty payload) and the issue-#79
+        // skip path, where silently dropping the caller's freshest snapshot
+        // would reintroduce exactly the staleness this fix exists to remove.
+        // [loadMediaItem] performs the same replacement itself from
+        // [newConfig] (that is where the contract is documented); doing it
+        // here too is an idempotent no-op on the normal path, not a second,
+        // divergent way to apply config.
         if (newConfig != null) {
             config = newConfig
         }
 
         val items = playlist["items"] as? List<Map<String, Any>> ?: return
+
+        // The playlist contents and the position pointer ALWAYS refresh --
+        // that is the whole point of re-issuing a playlist (extending the
+        // window, changing mode/repeatMode). Only the load below is
+        // conditional (issue #79).
         currentPlaylist = items
         currentIndex = startIndex.coerceIn(0, items.size - 1)
 
-        if (items.isNotEmpty()) {
-            loadMediaItem(items[currentIndex], newConfig)
+        if (items.isEmpty()) return
+
+        val target = items[currentIndex]
+        if (isAlreadyLoadedAndInProgress(target)) {
+            android.util.Log.d(
+                "MediaPlayerInstance",
+                "setPlaylist(): item at index $currentIndex is already loaded and playing - " +
+                    "keeping playback and re-syncing Dart state instead of reloading"
+            )
+            notifyCurrentStateAfterSkippedLoad()
+            return
         }
+
+        loadMediaItem(target, newConfig)
     }
 
     fun play() {
@@ -957,12 +1095,34 @@ class MediaPlayerInstance(
     }
 
     /**
+     * Restarts playback at [index] -- including when [index] is the index
+     * already playing.
+     *
      * Config staleness fix (playlist path): [newConfig] carries the current
      * config snapshot sent by `MediaPlayer.skipToIndex()` on the Dart side
      * (which is also what `skipToNext`/`skipToPrevious`/playlist auto-advance
      * route through) and is forwarded to [loadMediaItem] on exactly the same
      * terms as [setPlaylist] -- see that method's and [loadMediaItem]'s docs.
      * `null` from an older cached Dart build leaves [config] untouched.
+     *
+     * Issue #79: this method deliberately does NOT carry the "already
+     * loaded, skip the reload" guard [setPlaylist] gained, even when [index]
+     * is the current index.
+     *
+     * The two methods mean different things. `setPlaylist` declares/refreshes
+     * the queue, and "the item at startIndex happens to be the one playing"
+     * is incidental to that. `skipToIndex` means "(re)start the item at this
+     * index" -- and skipping to the index you are already on is a documented
+     * restart. Dart depends on exactly that: `Playlist.nextIndex` returns
+     * `currentIndex` under [MediaRepeatMode.single] (and under
+     * [MediaRepeatMode.all] for a single-item playlist), and
+     * `MediaPlayer._handlePlaybackCompleted` implements repeat-one by
+     * calling `skipToIndex(nextIndex)` on completion. Guarding this method
+     * would silently break repeat-one, and would also break the plain
+     * "replay the item I just finished" case.
+     *
+     * `skipToNext`/`skipToPrevious` are Dart-side wrappers over this method
+     * and inherit the same semantics.
      */
     fun skipToIndex(index: Int, newConfig: Map<String, Any>? = null) {
         currentPlaylist?.let { playlist ->

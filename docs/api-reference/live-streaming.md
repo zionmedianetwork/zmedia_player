@@ -43,6 +43,15 @@ on top.
 > completion all route through `skipToIndex`, so they carry it too. Native replaces its stored
 > config from the snapshot before any config-dependent work; the key is optional on the native
 > side, so an older native build simply ignores it and behaves as before.
+>
+> One nuance for playlists: re-issuing the *same* playlist is not a way to force a reload.
+> `setPlaylist` skips the load entirely when the item at `startIndex` is the item already
+> loaded and still in progress (see
+> [Extending a playlist in place](player-api.md#extending-a-playlist-in-place)). The new
+> config snapshot is still stored in that case — the next real load uses it — but the item
+> keeps playing with the streaming config it was loaded under. Call `updateConfig()` to apply
+> a config change to live playback immediately, or `load()` on the item to apply it *and*
+> reload.
 
 `StreamingService` (`lib/src/services/streaming_service.dart`) is a related but separate,
 **Dart-only** helper for bandwidth-based quality-track *recommendation* math (moving-average
@@ -450,6 +459,11 @@ and that the config actually reached native for *this* load — `load()`, `setPl
 `skipToIndex()` all carry the current config snapshot on every call (see above), so a stale,
 DVR-disabled config is only possible if the installed native build predates that wiring and
 ignores the `config` key: rebuild the app so the native side matches this Dart package.
+
+If you flipped `enableDvr` on an item that is *already playing*, re-issuing the same playlist
+will not apply it: `setPlaylist` stores the new config but skips the reload when the start item
+is already loaded and in progress. Call `updateConfig()`, or `load()` on the item, to apply it
+now.
 
 The same seekability gate also removes the notification's seek-forward/seek-backward controls:
 `NotificationConfig.showSeekForward`/`showSeekBackward` are honoured only when the item is

@@ -244,7 +244,11 @@ broadcast time. `MediaPlayer.dvrEnabled`/`.isSeekable` expose the Dart-side gate
 config snapshot that decides all of this is carried on every `MediaPlayer.load()`,
 `setPlaylist()` and `skipToIndex()` call — not only at `initialize()`/`updateConfig()` time — so
 playlist-driven items honor the current config too (`skipToNext`/`skipToPrevious`/auto-advance
-route through `skipToIndex`). See the
+route through `skipToIndex`). Re-issuing the same playlist is still not a way to *apply* a
+changed config to the item playing right now: `setPlaylist` stores the snapshot but skips the
+load when the item at `startIndex` is already loaded and in progress (see
+[Extending a playlist in place](player-api.md#extending-a-playlist-in-place)) — use
+`updateConfig()` or `load()` for that. See the
 [Live Streaming guide](live-streaming.md#what-actually-works-today).
 
 ## Subtitles

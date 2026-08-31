@@ -1260,6 +1260,21 @@ class MediaPlayer {
   /// on **every** call so the item native loads for [startIndex] uses the
   /// config this player holds right now rather than whatever native happened
   /// to store at `initialize()`/the last `updateConfig()` call.
+  ///
+  /// The item at [startIndex] is **not** reloaded when it is byte-for-byte
+  /// the item already loaded and playback of it is genuinely in progress
+  /// (issue #79). The playlist contents and the position pointer still
+  /// refresh; only the load is skipped, so a consumer can extend a sliding
+  /// window or change `mode`/`repeatMode` without restarting the item under
+  /// the viewer. See [_isPlaylistReloadSkipped].
+  ///
+  /// Those two behaviours interact deliberately: carrying a changed
+  /// [MediaConfig] does **not** by itself force a reload. A `setPlaylist`
+  /// that carries a new config for an unchanged, in-progress item **stores
+  /// that config** — the next real load (a skip, an auto-advance, an
+  /// explicit [load]) uses it — but does **not** reload. Call
+  /// [updateConfig] to apply a config change to live playback immediately,
+  /// or [load] to apply it *and* reload.
   Future<void> setPlaylist(Playlist playlist, {int? startIndex}) async {
     await _ensureInitialized();
     _markActivity();
@@ -1288,33 +1303,47 @@ class MediaPlayer {
       InputValidator.validateMediaItemWithDrm(item);
     }
 
+    // Issue #79: decide, BEFORE any local state is overwritten, whether the
+    // item at [index] is the one already playing. Native applies the same
+    // test and skips its reload in that case, so a consumer can extend or
+    // re-issue a playlist (a sliding window of "current + next few", or a
+    // shuffle/repeat-mode change) without restarting the item under the
+    // viewer. When the reload is skipped, the destructive local resets below
+    // (clearing the cached track lists, forcing `buffering`, resetting the
+    // speed) must be skipped too — they exist to avoid showing stale UI for
+    // a *different* item, and applying them here would produce exactly the
+    // flicker this fix removes. See [_isPlaylistReloadSkipped].
+    final reloadSkipped = _isPlaylistReloadSkipped(playlist.items[index]);
+
     try {
       _currentPlaylist = playlist.copyWith(currentIndex: index);
 
-      // Clear previous track data immediately to prevent stale UI
-      _subtitleTracks = [];
-      _audioTracks = [];
-      _qualityTracks = [];
-      if (!_subtitleTracksController.isClosed) {
-        _subtitleTracksController.add(_subtitleTracks);
-      }
-      if (!_audioTracksController.isClosed) {
-        _audioTracksController.add(_audioTracks);
-      }
-      if (!_qualityTracksController.isClosed) {
-        _qualityTracksController.add(_qualityTracks);
-      }
+      if (!reloadSkipped) {
+        // Clear previous track data immediately to prevent stale UI
+        _subtitleTracks = [];
+        _audioTracks = [];
+        _qualityTracks = [];
+        if (!_subtitleTracksController.isClosed) {
+          _subtitleTracksController.add(_subtitleTracks);
+        }
+        if (!_audioTracksController.isClosed) {
+          _audioTracksController.add(_audioTracks);
+        }
+        if (!_qualityTracksController.isClosed) {
+          _qualityTracksController.add(_qualityTracks);
+        }
 
-      // Reset playback speed to normal (1.0x) when loading new playlist.
-      // Skipped when already 1.0: the round trip is pure overhead, and on iOS
-      // this call was what defeated `autoPlay: false` before the
-      // rate/defaultRate split.
-      if (_currentState.speed != 1.0) {
-        try {
-          await setSpeed(1.0);
-        } catch (e) {
-          // Ignore errors from speed reset - don't block playlist loading
-          debugPrint('Failed to reset speed: $e');
+        // Reset playback speed to normal (1.0x) when loading new playlist.
+        // Skipped when already 1.0: the round trip is pure overhead, and on
+        // iOS this call was what defeated `autoPlay: false` before the
+        // rate/defaultRate split.
+        if (_currentState.speed != 1.0) {
+          try {
+            await setSpeed(1.0);
+          } catch (e) {
+            // Ignore errors from speed reset - don't block playlist loading
+            debugPrint('Failed to reset speed: $e');
+          }
         }
       }
 
@@ -1342,7 +1371,9 @@ class MediaPlayer {
       });
 
       _currentItem = _currentPlaylist!.items[index];
-      _updateState(_currentState.copyWith(state: PlayerState.buffering));
+      if (!reloadSkipped) {
+        _updateState(_currentState.copyWith(state: PlayerState.buffering));
+      }
     } on PlatformException catch (e) {
       _handleLoadError('Failed to set playlist: ${e.message ?? e.code}');
       throw MediaLoadException(
@@ -1363,6 +1394,69 @@ class MediaPlayer {
         details: {'itemCount': playlist.items.length},
       );
     }
+  }
+
+  /// Whether native will skip reloading [target] because it is already the
+  /// loaded, in-progress item — the Dart-side mirror of the guard added to
+  /// `MediaPlayerInstance.setPlaylist` on both platforms for issue #79.
+  ///
+  /// Why the guard exists: `setPlaylist` used to reload `items[startIndex]`
+  /// unconditionally, so a consumer that has to keep the native playlist
+  /// populated incrementally (per-item playback authorisation makes
+  /// pre-authorising a whole 40-item playlist prohibitive) restarted the item
+  /// under the viewer every time it extended the window. The same applied to
+  /// re-issuing a playlist purely to change `mode`/`repeatMode`.
+  ///
+  /// The comparison is whole-serialized-item structural equality —
+  /// `MediaItem.toMap()` on both sides, deep-compared — anchored on the fact
+  /// that a loaded item always has a non-null `url`:
+  ///
+  ///  * Deliberately NOT `MediaItem ==`, which compares `id` only. An `id`
+  ///    match is not enough to call two items "the same": a consumer may
+  ///    legitimately re-issue the same `id` *expecting* a reload — refreshed
+  ///    signed-cookie/`Authorization` values in [MediaItem.httpHeaders], a
+  ///    rotated token or rotated `headers` in [MediaItem.drmConfig], or a
+  ///    re-signed [MediaItem.url] for the same logical episode. (Note
+  ///    `DrmConfig ==` does not compare its `headers` either, which is a
+  ///    second reason to compare the serialized maps rather than the models.)
+  ///    Every one of those changes some key of the map, so whole-map equality
+  ///    lets them through as the genuine reloads they are.
+  ///  * An `id` match is not *necessary* either, and an absent/null `id` is
+  ///    never self-identifying — two items are not "the same item" merely by
+  ///    virtue of both being anonymous. Under whole-map equality a missing
+  ///    `id` only ever matches another missing `id` while the rest of the map
+  ///    (crucially the `url`) still has to match, so identity always rests on
+  ///    real content.
+  ///  * It cannot go stale: any [MediaItem] field added later is part of the
+  ///    comparison automatically.
+  ///
+  /// The state check mirrors native's "there is something in progress worth
+  /// protecting" condition (`STATE_READY`/`STATE_BUFFERING` on Android; a
+  /// ready, non-spent `AVPlayerItem` on iOS). From `idle` (never loaded, or
+  /// stopped), `completed` or `error`, native reloads, so Dart must not
+  /// suppress its own reset.
+  ///
+  /// This is a best-effort local mirror, not the source of truth: native
+  /// re-emits the current state, duration and track lists whenever it skips a
+  /// load, so a disagreement between the two comparisons self-heals rather
+  /// than stranding the UI.
+  bool _isPlaylistReloadSkipped(MediaItem target) {
+    final current = _currentItem;
+    if (current == null) return false;
+
+    switch (_currentState.state) {
+      case PlayerState.playing:
+      case PlayerState.paused:
+      case PlayerState.ready:
+      case PlayerState.buffering:
+        break;
+      case PlayerState.idle:
+      case PlayerState.completed:
+      case PlayerState.error:
+        return false;
+    }
+
+    return _deepEquals(current.toMap(), target.toMap());
   }
 
   /// Start or resume playback
@@ -3121,4 +3215,39 @@ class MediaPlayer {
       sampleRate: map['sampleRate'] as int?,
     );
   }
+}
+
+/// Structural (deep) equality for the JSON-shaped values produced by
+/// [MediaItem.toMap] — nested `Map`s ([MediaItem.httpHeaders],
+/// [MediaItem.metadata], the serialized `drmConfig`) and `List`s are compared
+/// element-wise, everything else by `==`.
+///
+/// Hand-rolled rather than pulling in `package:collection`'s
+/// `DeepCollectionEquality` so this stays dependency-free. Used by
+/// [MediaPlayer._isPlaylistReloadSkipped] (issue #79) to compare a playlist's
+/// start item against the currently loaded one exactly as native compares the
+/// two MethodChannel payloads: `Map`/`List` values arriving over the channel
+/// are structurally comparable on both platforms, so the two sides agree on
+/// what "the same item" means.
+bool _deepEquals(Object? a, Object? b) {
+  if (identical(a, b)) return true;
+
+  if (a is Map && b is Map) {
+    if (a.length != b.length) return false;
+    for (final entry in a.entries) {
+      if (!b.containsKey(entry.key)) return false;
+      if (!_deepEquals(entry.value, b[entry.key])) return false;
+    }
+    return true;
+  }
+
+  if (a is List && b is List) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (!_deepEquals(a[i], b[i])) return false;
+    }
+    return true;
+  }
+
+  return a == b;
 }
