@@ -1306,31 +1306,51 @@ Use repeatMode: MediaRepeatMode.all instead."
 
 ### Release Process
 
-The release workflow respects branch protection rules on `main` by creating a pull request for version bumps:
+Releasing is **two workflows**, and the split is the point: nothing is tagged or published
+until the version bump is on `main`.
 
-1. **Commit Analysis**: Analyzes commits since last release
-2. **Version Calculation**: Determines new version using semantic versioning (or uses manual version if specified)
-3. **Changelog Generation**: Auto-generates categorized changelog
-4. **Version Bump**: Updates `pubspec.yaml`, `CHANGELOG.md`, and `README.md` version badge
-5. **Release Branch**: Creates a `release/vX.Y.Z` branch with version bump commits
-6. **Pull Request**: Creates PR to `main` with version changes (triggers required status checks)
-7. **Git Tag**: Creates annotated tag `v{version}` from release branch
-8. **GitHub Release**: Creates release with generated notes
+**Phase 1 — `release.yml` ("Release", manually dispatched):**
+
+1. **Commit Analysis**: analyzes non-merge commits since the latest tag
+2. **Version Calculation**: semantic versioning (or `manual_version` if specified)
+3. **Pre-flight guard**: fails immediately if `v{version}` already exists — before any branch
+   is pushed or PR opened
+4. **Quality gates**: `dart format --set-exit-if-changed`, `flutter analyze`, `flutter test`
+   (the same gates as `ci.yml`, so a release can never ship a commit CI would reject)
+5. **Version Bump**: updates `pubspec.yaml`, `ios/zmedia_player.podspec` and the `README.md`
+   tests badge — each edit verified, failing loudly rather than shipping a stale version
+6. **Changelog**: `scripts/promote_changelog.py` closes the hand-written `[Unreleased]`
+   section as `## [X.Y.Z] - <date>` and opens a fresh empty `[Unreleased]` above it
+7. **Release Branch + PR**: pushes `release/vX.Y.Z` and opens the bump PR with auto-merge
+   enabled
+
+**Phase 2 — `release-publish.yml` ("Publish Release", automatic):**
+
+8. Triggered by a push to `main` that changes `pubspec.yaml` (i.e. the bump PR merging)
+9. **Git Tag**: annotated `v{version}` on **main's own commit**
+10. **GitHub Release**: body rendered from that version's `CHANGELOG.md` section
+
+**Why two phases.** Phase 1 used to tag the `release/vX.Y.Z` branch and then squash-merge it,
+so the tagged commit existed on no branch — `git describe` was unusable anywhere in the
+release path — and the release shipped whether or not the PR merged. Four of six bump PRs
+were closed unmerged (#51, #54, #59, #61), which is why `CHANGELOG.md` has no `[0.2.3]` or
+`[0.2.4]` entry although both tags exist. A release now exists if and only if `main` carries
+its version bump.
 
 **Branch Protection Compatibility:**
 
-- Release workflow creates a PR instead of pushing directly to `main`
-- This allows required status checks to run before merging version bumps
-- The Git tag and GitHub release are created immediately from the release branch
-- After the PR passes checks, merge it to update `main` with the new version
+- Phase 1 opens a PR instead of pushing to `main`, so required status checks run on the bump
+- Auto-merge is enabled on that PR; it merges itself once checks pass, which fires phase 2
+- If auto-merge or PR creation is blocked (org policy / missing `RELEASE_PAT`), the run warns
+  loudly and **nothing is released** — merge the PR manually to publish
 
 **Post-Release Steps:**
 
-1. Workflow creates the release and tag automatically
-2. A PR is created for the version bump (e.g., `release/v1.2.3 → main`)
-3. Wait for required status checks to pass on the PR
-4. Merge the PR to update `main` with the new version
-5. Delete the release branch after merge (optional)
+1. Merge the bump PR (automatic when auto-merge is enabled)
+2. `release-publish.yml` tags `main` and publishes the release — no manual step
+3. The release branch is deleted by the auto-merge
+4. To publish a bump that landed some other way, dispatch **Publish Release** manually; it
+   no-ops when the version is already tagged
 
 **Manual Version Override:**
 
@@ -1342,16 +1362,21 @@ The release workflow respects branch protection rules on `main` by creating a pu
 **Files Updated During Release:**
 
 - `pubspec.yaml` - Package version
-- `CHANGELOG.md` - Version history with categorized changes
-- `README.md` - Version badge (`[![Version](https://img.shields.io/badge/version-X.Y.Z-blue.svg)]`)
-- `ios/zmedia_player.podspec` - CocoaPods version metadata (the workflow fails loudly if it cannot update this, rather than shipping a stale version)
+- `CHANGELOG.md` - `[Unreleased]` promoted to the released version (see
+  `scripts/promote_changelog.py`); a fresh empty `[Unreleased]` is left at the top
+- `README.md` - tests badge (the version badge is a dynamic shields.io
+  `github/v/release` badge and needs no edit)
+- `ios/zmedia_player.podspec` - CocoaPods version metadata
+
+Every one of these edits is verified after it is made; the workflow fails rather than
+shipping a file it did not actually change.
 
 **Release Branch:**
 
 - Created as `release/vX.Y.Z` (e.g., `release/v1.2.3`)
-- Contains version bump commits
-- Used as source for git tag
-- Can be deleted after PR is merged to `main`
+- Contains exactly one commit: `chore(release): bump version to X.Y.Z`
+- Deleted automatically when the bump PR merges
+- **Not** the tag source any more — the tag is cut from `main` after the merge
 
 ### Pre-releases
 

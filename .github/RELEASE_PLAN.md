@@ -47,23 +47,29 @@ BREAKING CHANGE: (MAJOR version bump)
 
 ## Release Workflow Triggers
 
-### 1. Manual Release (Recommended)
-- **Trigger**: GitHub Actions manual dispatch
-- **When**: After significant changes are merged to main
+### 1. Prepare a release — `release.yml` (manual)
+- **Trigger**: GitHub Actions manual dispatch ("Release")
+- **When**: after significant changes are merged to `main`
 - **Options**:
   - Version bump type (auto/major/minor/patch)
+  - Manual version (overrides the bump type)
   - Pre-release flag (alpha/beta/rc)
-  - Dry run mode (test without releasing)
+  - Dry run mode (computes and prints everything, changes nothing)
+- **Result**: a `release/vX.Y.Z` branch and a version-bump PR. Nothing is tagged
+  or published by this workflow.
 
-### 2. Automatic Release (Optional)
-- **Trigger**: Push to main branch with specific commit message
-- **Pattern**: Commit message starts with `release:`
-- **Example**: `release: v1.2.0`
+### 2. Publish a release — `release-publish.yml` (automatic)
+- **Trigger**: a push to `main` that changes `pubspec.yaml` — i.e. the bump PR
+  merging
+- **Result**: annotated tag `v{version}` on main's commit, plus the GitHub release
+- **Idempotent**: no-ops when `v{version}` is already tagged, so an unrelated
+  `pubspec.yaml` edit or a workflow re-run publishes nothing
+- **Manual fallback**: dispatch it by hand (optionally naming a version) to
+  publish a bump that reached `main` some other way
 
-### 3. Tag-based Release
-- **Trigger**: Push tag matching `v*.*.*` pattern
-- **When**: Manual tag creation
-- **Use case**: Emergency releases
+There is no tag-push trigger: pushing a `v*` tag by hand creates no release. Cut
+releases through `release.yml`, or dispatch **Publish Release** after the bump
+is on `main`.
 
 ## Release Process Steps
 
@@ -74,39 +80,54 @@ BREAKING CHANGE: (MAJOR version bump)
 4. Update version in platform-specific files (if needed)
 
 ### Step 2: Changelog Generation
-1. Generate changelog from conventional commits
-2. Group changes by type:
+1. Promote the hand-written `[Unreleased]` section in `CHANGELOG.md` to
+   `## [X.Y.Z] - <date>` and open a fresh empty `[Unreleased]` above it
+   (`scripts/promote_changelog.py`). The curated notes ARE the release notes —
+   they are not replaced by a generated list.
+2. Generate a categorized commit summary (used for the bump PR body, and as the
+   changelog body only when `[Unreleased]` is empty). Non-merge commits only,
+   grouped by type:
+   - 💥 Breaking Changes (checked first, from `type!:` subjects and
+     `BREAKING CHANGE:` footers)
    - 🚀 Features
    - 🐛 Bug Fixes
    - ⚡ Performance Improvements
-   - 📚 Documentation
    - 🔧 Refactoring
-   - 💥 Breaking Changes
-3. Include commit author and PR links
-4. Prepend to `CHANGELOG.md`
+   - 📚 Documentation
+   - ✅ Tests
+   - Other Changes
+3. Include commit author and short hash
 
-### Step 3: Git Operations
-1. Create release branch: `release/v{version}`
-2. Commit version bump and changelog
-3. Create signed git tag: `v{version}`
-4. Push branch and tag to origin
+### Step 3: Git Operations (phase 1 — `release.yml`)
+1. Guard: abort if `v{version}` already exists, before anything is pushed
+2. Create release branch: `release/v{version}`
+3. Commit the version bump and changelog
+4. Push the branch and open the version-bump PR to `main`, with auto-merge enabled
 
-### Step 4: GitHub Release
-1. Create GitHub release from tag
-2. Generate release notes:
-   - Auto-generated from changelog
-   - Include highlights section (customizable)
-   - List of contributors
-   - Installation instructions
-3. Attach release assets:
-   - Source code (auto)
-   - Optional: Compiled binaries
+**No tag is created in phase 1.** The bump must reach `main` first.
 
-### Step 5: Post-Release (GitHub Only)
-1. Create PR to merge release branch to main
+### Step 4: Publish (phase 2 — `release-publish.yml`)
+Triggered by the push to `main` that carries the version bump (or dispatched
+manually):
+1. Read the version from `pubspec.yaml`; no-op if `v{version}` is already tagged
+2. Create the annotated tag `v{version}` on **main's own commit**
+3. Create the GitHub release, with the body rendered from that version's
+   `CHANGELOG.md` section
+
+### Step 5: Post-Release
+1. Nothing manual — the release branch is deleted by the auto-merge
 2. Update documentation site (if applicable)
 3. Notify stakeholders via Slack/Discord (optional)
 4. Close milestone (if using GitHub milestones)
+
+### Why the two phases
+The tag used to be cut from the ephemeral `release/vX.Y.Z` branch, which was then
+squash-merged and deleted — so the tagged commit belonged to no branch, and
+`git describe` could not be used anywhere in the release path. Worse, the release
+shipped whether or not the bump PR merged: four of six were closed unmerged
+(#51, #54, #59, #61), leaving `v0.2.3` and `v0.2.4` tagged with no `CHANGELOG.md`
+entry and `main` several versions behind. Tagging only after the merge makes
+"a release exists" and "`main` knows about it" the same event.
 
 ## Changelog Configuration
 

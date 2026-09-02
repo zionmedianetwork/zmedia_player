@@ -1,0 +1,172 @@
+name: Publish Release
+
+# PHASE 2 of 2 — "publish".
+#
+# release.yml prepares a version bump and opens a PR; this workflow fires once
+# that bump lands on main, and creates the tag and GitHub release from main's own
+# commit.
+#
+# The tag used to be cut from the ephemeral release/vX.Y.Z branch, which was then
+# squash-merged and deleted — so the tagged commit existed on no branch, which is
+# why `git describe` could not be used anywhere in the release path. Worse, the
+# release shipped even when the bump PR was never merged: 4 of 6 were closed
+# unmerged, leaving tags with no corresponding CHANGELOG entry (v0.2.3, v0.2.4).
+#
+# Tagging here makes the two events one: a release exists if and only if main
+# carries its version bump.
+
+on:
+  push:
+    branches: [main]
+    paths: ['pubspec.yaml']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (defaults to pubspec.yaml on main)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Tag and publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Decide whether to publish
+        id: decide
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${MANUAL_VERSION:-$(grep '^version:' pubspec.yaml | sed 's/version: //' | tr -d '[:space:]')}"
+          if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+            echo "::error::Invalid version in pubspec.yaml: '$VERSION'"
+            exit 1
+          fi
+
+          # Idempotent by construction: an already-tagged version is a no-op, so
+          # unrelated pubspec.yaml edits (a dependency bump, say) and workflow
+          # re-runs publish nothing.
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "ℹ️ v$VERSION is already tagged — nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "✅ Publishing v$VERSION from $(git rev-parse --short HEAD)"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Extract release notes from CHANGELOG.md
+        if: ${{ steps.decide.outputs.publish == 'true' }}
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # The CHANGELOG section written by release.yml is the single source of
+          # truth for what a release says — the GitHub release body is rendered
+          # from it rather than from a second, independently generated list.
+          python3 - "$VERSION" <<'PY' > RELEASE_BODY.md
+          import re, sys
+          version = sys.argv[1]
+          lines = open("CHANGELOG.md").read().splitlines()
+          heading = re.compile(r"^## \[([^\]]+)\]")
+          start = next((i for i, l in enumerate(lines)
+                        if (m := heading.match(l)) and m.group(1) == version), None)
+          if start is None:
+              print(f"Release v{version}.\n")
+              print("_No CHANGELOG section was found for this version._")
+              sys.exit(0)
+          end = next((i for i in range(start + 1, len(lines)) if heading.match(lines[i])), len(lines))
+          print("\n".join(lines[start + 1:end]).strip())
+          PY
+
+          # Keep the install/docs footer every published release has carried.
+          cat >> RELEASE_BODY.md <<EOF
+
+          ### Installation
+
+          Add to your \`pubspec.yaml\`:
+
+          \`\`\`yaml
+          dependencies:
+            zmedia_player:
+              git:
+                url: https://github.com/${REPO}.git
+                ref: v${VERSION}
+          \`\`\`
+
+          Then run \`flutter pub get\`.
+
+          ### Documentation
+          - [API Reference](https://github.com/${REPO}/tree/main/docs/api-reference)
+          - [Examples](https://github.com/${REPO}/tree/main/example)
+
+          > **Note**: This package is distributed via GitHub releases only. pub.dev publishing is planned for a future release.
+          EOF
+
+          echo "Release body:"
+          head -40 RELEASE_BODY.md
+
+      - name: Create and push tag
+        if: ${{ steps.decide.outputs.publish == 'true' }}
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Annotated, on main's commit — reachable from main, so `git describe`
+          # and `git tag --merged main` both work from here on.
+          git tag -a "v$VERSION" -m "Release v$VERSION"
+          git push origin "v$VERSION"
+          echo "✅ Tagged v$VERSION at $(git rev-parse --short HEAD) on main"
+
+      - name: Create GitHub Release
+        if: ${{ steps.decide.outputs.publish == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.decide.outputs.version }}
+          name: ZMedia Player v${{ steps.decide.outputs.version }}
+          body_path: RELEASE_BODY.md
+          draft: false
+          prerelease: ${{ contains(steps.decide.outputs.version, '-') }}
+          generate_release_notes: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Summary
+        if: ${{ always() }}
+        env:
+          VERSION: ${{ steps.decide.outputs.version }}
+          PUBLISHED: ${{ steps.decide.outputs.publish }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            if [ "$PUBLISHED" = "true" ]; then
+              echo "## Published v$VERSION"
+              echo
+              echo "- Tag \`v$VERSION\` created on main"
+              echo "- Release: https://github.com/$REPO/releases/tag/v$VERSION"
+            else
+              echo "## Nothing to publish"
+              echo
+              echo "\`v$VERSION\` is already tagged."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

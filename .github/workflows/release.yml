@@ -1,5 +1,20 @@
 name: Release
 
+# PHASE 1 of 2 — "prepare".
+#
+# This workflow computes the next version, updates the four versioned files, and
+# opens the version-bump PR. It deliberately does NOT create the tag or the GitHub
+# release: that is done by release-publish.yml, which triggers once the bump lands
+# on main and tags main's own commit.
+#
+# Why the split: this workflow used to tag the ephemeral release/vX.Y.Z branch and
+# then squash-merge the PR, so the tagged commit was never in main's history
+# (`git describe` was unusable, hence the tag-sort workarounds below). Worse, the
+# release shipped whether or not the PR merged — 4 of 6 bump PRs were closed
+# unmerged (#51, #54, #59, #61), which is why CHANGELOG.md has no [0.2.3] or
+# [0.2.4] entry while both tags exist. Tagging only after the merge makes "a
+# release exists" and "main knows about it" the same event.
+
 on:
   workflow_dispatch:
     inputs:
@@ -29,7 +44,7 @@ on:
           - beta
           - rc
       dry_run:
-        description: 'Dry run (no actual release)'
+        description: 'Dry run (compute and print everything, change nothing)'
         required: false
         default: false
         type: boolean
@@ -38,35 +53,37 @@ permissions:
   contents: write
   pull-requests: write
 
-# Prevent concurrent releases
 concurrency:
   group: release-workflow
   cancel-in-progress: false
 
+env:
+  # Pinned so a release is gated by a known SDK. `channel: stable` floats — a
+  # release run picked up 3.47.2 while the package documents 3.44.3, meaning the
+  # release gate could pass or fail on an SDK nobody chose.
+  FLUTTER_VERSION: '3.44.3'
+
 jobs:
-  release:
-    name: Create Release
+  prepare:
+    name: Prepare Release
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
-    outputs:
-      version: ${{ steps.version.outputs.new_version }}
-      changelog: ${{ steps.changelog.outputs.changelog }}
-
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
-          fetch-depth: 0  # Fetch all history for changelog generation
+          fetch-depth: 0  # Full history for changelog generation
           # Prefer a PAT (RELEASE_PAT) so the release-branch push and the
           # version-bump PR are attributed to a real user and can trigger the
           # required status checks. Falls back to GITHUB_TOKEN when unset.
           token: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-          ref: main  # Always work from main branch
+          ref: main
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
 
@@ -76,102 +93,67 @@ jobs:
       - name: Get current version
         id: current_version
         run: |
-          set -e  # Exit on error
+          set -euo pipefail
 
-          # Source of truth for "what was last released" is the latest git TAG,
-          # NOT pubspec.yaml on main. The version-bump PR back to main is gated by
-          # branch protection + auto-merge prereqs and frequently does not land, so
-          # main's pubspec.yaml lags several releases behind (and the auto path then
-          # recomputes a version that collides with an existing tag). Tags are
-          # always pushed successfully, so they are the reliable baseline. Use a
-          # semver sort across ALL tags — the newest release tag is often on an
-          # unmerged release/* branch, so it is NOT reachable via `git describe`.
+          # Source of truth for "what was last released" is the latest git TAG.
+          # (Since release-publish.yml tags main directly, tags are now always
+          # reachable from main — but sorting all tags stays correct regardless
+          # and keeps this working for the tags cut under the old scheme.)
           LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -n1)
           if [ -n "$LATEST_TAG" ]; then
             CURRENT_VERSION="${LATEST_TAG#v}"
             echo "Current version from latest tag $LATEST_TAG: $CURRENT_VERSION"
           else
-            # First release ever — fall back to pubspec.yaml.
             CURRENT_VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: //')
             echo "No tags yet — current version from pubspec.yaml: $CURRENT_VERSION"
           fi
 
-          # Validate version format (MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-prerelease)
           if ! echo "$CURRENT_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "❌ Error: Invalid version format: $CURRENT_VERSION"
-            echo "Expected format: MAJOR.MINOR.PATCH (e.g., 1.2.3 or 1.2.3-beta.1)"
+            echo "::error::Invalid current version format: $CURRENT_VERSION (expected MAJOR.MINOR.PATCH[-prerelease])"
             exit 1
           fi
 
-          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
-          echo "Current version: $CURRENT_VERSION"
-
-      - name: Get latest tag
-        id: latest_tag
-        run: |
-          # Highest release tag by semver across ALL refs. NOT `git describe`,
-          # which only finds tags reachable from HEAD (main) — the newest release
-          # tag usually lives on an unmerged release/* branch, so `git describe`
-          # would return a much older tag (e.g. v0.1.0) and make the changelog
-          # range + compare link span far too much history.
-          LATEST_TAG=$(git tag -l 'v*' --sort=-version:refname | head -n1)
-          if [ -n "$LATEST_TAG" ]; then
-            HAS_TAGS="true"
-          else
-            HAS_TAGS="false"
-            echo "No previous tags found - this will be the first release"
-          fi
-
-          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
-          echo "has_tags=$HAS_TAGS" >> $GITHUB_OUTPUT
-          echo "Latest tag: ${LATEST_TAG:-none}"
+          {
+            echo "version=$CURRENT_VERSION"
+            echo "tag=$LATEST_TAG"
+            echo "has_tags=$([ -n "$LATEST_TAG" ] && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Analyze commits for version bump
-        id: version_bump_analysis
+        id: bump
+        env:
+          HAS_TAGS: ${{ steps.current_version.outputs.has_tags }}
+          LATEST_TAG: ${{ steps.current_version.outputs.tag }}
         run: |
-          set -e  # Exit on error
+          set -euo pipefail
 
-          # Get commits since last tag (or all commits if no tag)
-          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
-            echo "Analyzing commits since ${{ steps.latest_tag.outputs.tag }}"
-            COMMIT_COUNT=$(git rev-list --count ${{ steps.latest_tag.outputs.tag }}..HEAD)
-
-            if [ "$COMMIT_COUNT" = "0" ]; then
-              # Always-bump policy: never abort on an empty commit range. With no
-              # qualifying commits the bump type falls through to the default
-              # "patch" below, so every release run still advances the version.
-              echo "⚠️ No new commits since last tag ${{ steps.latest_tag.outputs.tag }} —"
-              echo "   proceeding anyway and bumping at least a patch (always-bump policy)."
-            fi
-
-            RANGE="${{ steps.latest_tag.outputs.tag }}..HEAD"
-            SUBJECTS=$(git log "$RANGE" --pretty=format:"%s")
-            BODIES=$(git log "$RANGE" --pretty=format:"%B")
+          if [ "$HAS_TAGS" = "true" ]; then
+            RANGE="${LATEST_TAG}..HEAD"
+            echo "Analyzing commits in $RANGE"
           else
+            RANGE="HEAD"
             echo "Analyzing all commits (first release)"
-            SUBJECTS=$(git log --pretty=format:"%s")
-            BODIES=$(git log --pretty=format:"%B")
           fi
 
-          # Detect version bump type.
-          #
-          # Conventional Commits marks a breaking change in either of two ways, and a
-          # release must treat both as major:
-          #   1. a "!" before the colon in the subject -- feat!:, chore(android)!:
-          #   2. a "BREAKING CHANGE:" (or "BREAKING-CHANGE:") footer in the body
-          #
-          # This previously searched commit SUBJECTS ONLY, for the literal string
-          # "BREAKING CHANGE:", and so detected neither in practice: the "!" marker was
-          # never checked at all, and a footer by definition never appears in a subject.
-          # Both breaking commits in the v0.3.0 range (feat!: and chore(android)!:) were
-          # therefore mis-detected as "minor" -- silently, since the only symptom is a
-          # version number that looks plausible. Hence BODIES as well as SUBJECTS below.
-          #
-          # The footer match is deliberately case-sensitive: the spec requires uppercase,
-          # and matching loosely would let prose such as "this is a breaking change:" in a
-          # commit body force a major release.
-          BUMP_TYPE="patch"
+          # Merge commits are excluded: their subjects are PR titles, which would
+          # otherwise let an unrelated "Merge pull request ... feat/..." branch
+          # name drive the bump type.
+          SUBJECTS=$(git log --no-merges "$RANGE" --pretty=format:"%s")
+          BODIES=$(git log --no-merges "$RANGE" --pretty=format:"%B")
 
+          if [ -z "$SUBJECTS" ]; then
+            # Always-bump policy: never abort on an empty range; fall through to
+            # the "patch" default so every run still advances the version.
+            echo "::warning::No new non-merge commits since ${LATEST_TAG:-the beginning} — bumping a patch anyway."
+          fi
+
+          # Conventional Commits marks a breaking change two ways, and both must
+          # map to major: a "!" before the colon in the subject, or a
+          # "BREAKING CHANGE:"/"BREAKING-CHANGE:" footer in the body. The footer
+          # match is case-sensitive on purpose — the spec requires uppercase, and
+          # matching loosely would let prose ("this is a breaking change:") force
+          # a major release.
+          BUMP_TYPE="patch"
           if echo "$SUBJECTS" | grep -qE '^[a-zA-Z]+(\([^)]*\))?!:' \
              || echo "$BODIES" | grep -qE '^BREAKING[ -]CHANGE:'; then
             BUMP_TYPE="major"
@@ -181,411 +163,343 @@ jobs:
             BUMP_TYPE="patch"
           fi
 
-          echo "detected_bump=$BUMP_TYPE" >> $GITHUB_OUTPUT
+          echo "detected=$BUMP_TYPE" >> "$GITHUB_OUTPUT"
           echo "Detected bump type: $BUMP_TYPE"
 
       - name: Determine new version
         id: version
+        env:
+          CURRENT: ${{ steps.current_version.outputs.version }}
+          DETECTED: ${{ steps.bump.outputs.detected }}
+          INPUT_BUMP: ${{ inputs.version_bump }}
+          MANUAL_VERSION: ${{ inputs.manual_version }}
+          PRE_RELEASE: ${{ inputs.pre_release }}
         run: |
-          CURRENT="${{ steps.current_version.outputs.version }}"
+          set -euo pipefail
 
-          # Check if manual version is specified
-          if [ -n "${{ github.event.inputs.manual_version }}" ]; then
-            MANUAL_VERSION="${{ github.event.inputs.manual_version }}"
-
-            # Validate manual version format
+          if [ -n "$MANUAL_VERSION" ]; then
             if ! echo "$MANUAL_VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-              echo "❌ Error: Invalid manual version format: $MANUAL_VERSION"
-              echo "Expected format: MAJOR.MINOR.PATCH (e.g., 1.2.3)"
+              echo "::error::Invalid manual version format: $MANUAL_VERSION (expected MAJOR.MINOR.PATCH)"
               exit 1
             fi
-
             BASE_VERSION="$MANUAL_VERSION"
-            echo "Using manual version: $MANUAL_VERSION"
             BUMP="manual"
           else
-            # Remove any existing pre-release suffix
-            BASE_VERSION=$(echo "$CURRENT" | sed 's/-.*$//')
-
-            # Parse version
+            BASE_VERSION="${CURRENT%%-*}"   # drop any pre-release suffix
             IFS='.' read -r MAJOR MINOR PATCH <<< "$BASE_VERSION"
 
-            # Determine bump type
-            if [ "${{ github.event.inputs.version_bump }}" = "auto" ]; then
-              BUMP="${{ steps.version_bump_analysis.outputs.detected_bump }}"
-            else
-              BUMP="${{ github.event.inputs.version_bump }}"
-            fi
+            if [ "$INPUT_BUMP" = "auto" ]; then BUMP="$DETECTED"; else BUMP="$INPUT_BUMP"; fi
 
-            # Apply version bump
             case "$BUMP" in
-              major)
-                MAJOR=$((MAJOR + 1))
-                MINOR=0
-                PATCH=0
-                ;;
-              minor)
-                MINOR=$((MINOR + 1))
-                PATCH=0
-                ;;
-              patch)
-                PATCH=$((PATCH + 1))
-                ;;
+              major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+              minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+              patch) PATCH=$((PATCH + 1)) ;;
+              *) echo "::error::Unknown bump type: $BUMP"; exit 1 ;;
             esac
-
             BASE_VERSION="$MAJOR.$MINOR.$PATCH"
           fi
 
           NEW_VERSION="$BASE_VERSION"
 
-          # Add pre-release suffix if specified
-          PRE_RELEASE="${{ github.event.inputs.pre_release }}"
           if [ "$PRE_RELEASE" != "none" ] && [ -n "$PRE_RELEASE" ]; then
-            # Get pre-release number
-            PRE_NUM=$(git tag -l "v${BASE_VERSION}-${PRE_RELEASE}.*" | wc -l | tr -d ' ')
-            PRE_NUM=$((PRE_NUM + 1))
-            NEW_VERSION="${BASE_VERSION}-${PRE_RELEASE}.${PRE_NUM}"
+            # Highest existing suffix + 1. Counting tags with `wc -l` (the previous
+            # approach) reuses a number as soon as any pre-release tag is deleted.
+            HIGHEST=$(git tag -l "v${BASE_VERSION}-${PRE_RELEASE}.*" \
+              | sed "s/^v${BASE_VERSION}-${PRE_RELEASE}\.//" \
+              | grep -E '^[0-9]+$' | sort -n | tail -1 || true)
+            NEW_VERSION="${BASE_VERSION}-${PRE_RELEASE}.$(( ${HIGHEST:-0} + 1 ))"
           fi
 
-          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "bump_type=$BUMP" >> $GITHUB_OUTPUT
+          {
+            echo "new_version=$NEW_VERSION"
+            echo "bump_type=$BUMP"
+          } >> "$GITHUB_OUTPUT"
           echo "New version: $NEW_VERSION (bump: $BUMP)"
 
-      - name: Generate Changelog
-        id: changelog
+      - name: Guard against an existing tag or release branch
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
         run: |
-          set -e  # Exit on error
-
-          # Get commit range based on whether previous tags exist
-          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
-            COMMIT_RANGE="${{ steps.latest_tag.outputs.tag }}..HEAD"
-            echo "Generating changelog from ${{ steps.latest_tag.outputs.tag }} to HEAD"
-          else
-            COMMIT_RANGE="HEAD"
-            echo "Generating changelog from all commits (first release)"
-          fi
-
-          # Create changelog header
-          cat > RELEASE_CHANGELOG.md << 'EOF'
-          ## What's Changed
-
-          EOF
-
-          # Get commits and categorize (using process substitution to avoid subshell)
-          while IFS='|' read -r subject author hash; do
-            # Categorize commit
-            if echo "$subject" | grep -qi "^feat"; then
-              echo "- 🚀 $subject (@$author) ($hash)" >> feat.txt
-            elif echo "$subject" | grep -qi "^fix"; then
-              echo "- 🐛 $subject (@$author) ($hash)" >> fix.txt
-            elif echo "$subject" | grep -qi "^perf"; then
-              echo "- ⚡ $subject (@$author) ($hash)" >> perf.txt
-            elif echo "$subject" | grep -qi "^docs"; then
-              echo "- 📚 $subject (@$author) ($hash)" >> docs.txt
-            elif echo "$subject" | grep -qi "^refactor"; then
-              echo "- 🔧 $subject (@$author) ($hash)" >> refactor.txt
-            elif echo "$subject" | grep -qi "^test"; then
-              echo "- ✅ $subject (@$author) ($hash)" >> test.txt
-            elif echo "$subject" | grep -qi "BREAKING CHANGE"; then
-              echo "- 💥 $subject (@$author) ($hash)" >> breaking.txt
-            else
-              echo "- $subject (@$author) ($hash)" >> other.txt
-            fi
-          done < <(git log ${COMMIT_RANGE} --pretty=format:"%s|%an|%h")
-
-          # Build changelog
-          [ -f breaking.txt ] && echo -e "\n### 💥 Breaking Changes\n" >> RELEASE_CHANGELOG.md && cat breaking.txt >> RELEASE_CHANGELOG.md
-          [ -f feat.txt ] && echo -e "\n### 🚀 Features\n" >> RELEASE_CHANGELOG.md && cat feat.txt >> RELEASE_CHANGELOG.md
-          [ -f fix.txt ] && echo -e "\n### 🐛 Bug Fixes\n" >> RELEASE_CHANGELOG.md && cat fix.txt >> RELEASE_CHANGELOG.md
-          [ -f perf.txt ] && echo -e "\n### ⚡ Performance Improvements\n" >> RELEASE_CHANGELOG.md && cat perf.txt >> RELEASE_CHANGELOG.md
-          [ -f refactor.txt ] && echo -e "\n### 🔧 Refactoring\n" >> RELEASE_CHANGELOG.md && cat refactor.txt >> RELEASE_CHANGELOG.md
-          [ -f docs.txt ] && echo -e "\n### 📚 Documentation\n" >> RELEASE_CHANGELOG.md && cat docs.txt >> RELEASE_CHANGELOG.md
-          [ -f test.txt ] && echo -e "\n### ✅ Tests\n" >> RELEASE_CHANGELOG.md && cat test.txt >> RELEASE_CHANGELOG.md
-          [ -f other.txt ] && echo -e "\n### Other Changes\n" >> RELEASE_CHANGELOG.md && cat other.txt >> RELEASE_CHANGELOG.md
-
-          # Add comparison link (only if previous tags exist)
-          if [ "${{ steps.latest_tag.outputs.has_tags }}" = "true" ]; then
-            echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/compare/${{ steps.latest_tag.outputs.tag }}...v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
-          else
-            echo -e "\n**Full Changelog**: https://github.com/${{ github.repository }}/commits/v${{ steps.version.outputs.new_version }}" >> RELEASE_CHANGELOG.md
-          fi
-
-          # Clean up temp files
-          rm -f feat.txt fix.txt perf.txt docs.txt refactor.txt test.txt breaking.txt other.txt
-
-          # Output changelog
-          CHANGELOG=$(cat RELEASE_CHANGELOG.md)
-          echo "changelog<<EOF" >> $GITHUB_OUTPUT
-          echo "$CHANGELOG" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-          echo "Generated changelog:"
-          cat RELEASE_CHANGELOG.md
-
-      - name: Update pubspec.yaml
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        run: |
-          NEW_VERSION="${{ steps.version.outputs.new_version }}"
-          sed -i "s/^version: .*/version: $NEW_VERSION/" pubspec.yaml
-          echo "Updated pubspec.yaml to version $NEW_VERSION"
-
-      - name: Update iOS podspec version
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        run: |
-          set -e
-          NEW_VERSION="${{ steps.version.outputs.new_version }}"
-          PODSPEC="ios/zmedia_player.podspec"
-
-          # The podspec version was previously never bumped by this workflow and
-          # drifted to 0.1.0 while pubspec.yaml reached 0.2.5. It is not checked
-          # for local path installs, but it is release metadata that should not
-          # be wrong, and it would matter if this were ever published as a pod.
-          sed -i "s/^\([[:space:]]*s\.version[[:space:]]*=[[:space:]]*\).*/\1'$NEW_VERSION'/" "$PODSPEC"
-
-          # Fail loudly rather than silently shipping a stale version if the
-          # podspec's formatting ever changes out from under this sed.
-          if ! grep -q "s\.version *= *'$NEW_VERSION'" "$PODSPEC"; then
-            echo "ERROR: failed to update $PODSPEC to $NEW_VERSION. Current line:"
-            grep -n 's\.version' "$PODSPEC" || echo "  (no s.version line found)"
+          set -euo pipefail
+          # Runs before anything is written or pushed. Previously a re-run would
+          # force-push the release branch and open a PR, and only then die on
+          # `git tag` — leaving a dangling branch and PR behind.
+          if git rev-parse -q --verify "refs/tags/v$NEW_VERSION" >/dev/null; then
+            echo "::error::Tag v$NEW_VERSION already exists. Pick a different version, or delete the tag if the release was abandoned."
             exit 1
           fi
-          echo "Updated $PODSPEC to version $NEW_VERSION"
+          echo "✅ v$NEW_VERSION is free"
 
-      - name: Update CHANGELOG.md
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+      - name: Quality gates (format, analyze, test)
+        id: gates
         run: |
-          set -e  # Exit on error
-          NEW_VERSION="${{ steps.version.outputs.new_version }}"
-          TODAY=$(date +%Y-%m-%d)
+          set -euo pipefail
 
-          # Create new changelog entry
-          {
-            echo "# Changelog"
-            echo ""
-            echo "All notable changes to this project will be documented in this file."
-            echo ""
-            echo "The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),"
-            echo "and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)."
-            echo ""
-            echo "## [$NEW_VERSION] - $TODAY"
-            echo ""
-            cat RELEASE_CHANGELOG.md | tail -n +3  # Skip the "What's Changed" header
-            echo ""
+          # The release must not be able to ship a commit that CI would reject,
+          # so this mirrors ci.yml's gates rather than running tests alone.
+          echo "── dart format ──"
+          dart format --set-exit-if-changed lib/ test/
 
-            # Append existing changelog if it exists and has content beyond header
-            if [ -f CHANGELOG.md ]; then
-              # Count lines in existing changelog
-              LINE_COUNT=$(wc -l < CHANGELOG.md)
-              if [ "$LINE_COUNT" -gt 8 ]; then
-                # Append old changelog content (skip header)
-                tail -n +8 CHANGELOG.md
-              fi
-            fi
-          } > CHANGELOG.new.md
+          echo "── flutter analyze ──"
+          flutter analyze lib/ test/
 
-          mv CHANGELOG.new.md CHANGELOG.md
-          echo "✅ Updated CHANGELOG.md"
-
-      - name: Run test suite (gates release; computes tests badge)
-        id: tests
-        run: |
-          echo "Running the full test suite for the release gate + tests badge..."
+          echo "── flutter test ──"
           set +e
           flutter test --reporter expanded 2>&1 | tee test_output.log
           TEST_EXIT=${PIPESTATUS[0]}
           set -e
-
           if [ "$TEST_EXIT" -ne 0 ]; then
-            echo "❌ Tests failed — aborting the release so the README badge never lies."
+            echo "::error::Tests failed — aborting the release so the README badge never lies."
             exit 1
           fi
 
-          # The expanded/compact reporter prints incrementing "+N" pass counters;
-          # the highest value is the total number of passing tests.
+          # The expanded reporter prints incrementing "+N" counters; the highest
+          # is the passing total.
           PASSING=$(grep -oE '\+[0-9]+' test_output.log | tr -d '+' | sort -n | tail -1)
           if [ -z "$PASSING" ]; then
-            echo "⚠️ Could not parse the passing test count; the tests badge will be left unchanged."
+            echo "::warning::Could not parse the passing test count; the tests badge will be left unchanged."
           else
             echo "✅ $PASSING tests passing"
           fi
-          echo "passing=$PASSING" >> $GITHUB_OUTPUT
+          echo "passing=$PASSING" >> "$GITHUB_OUTPUT"
 
-      - name: Update README.md badges (version + tests)
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+      - name: Generate release notes
+        id: notes
+        env:
+          HAS_TAGS: ${{ steps.current_version.outputs.has_tags }}
+          LATEST_TAG: ${{ steps.current_version.outputs.tag }}
         run: |
-          NEW_VERSION="${{ steps.version.outputs.new_version }}"
-          PASSING="${{ steps.tests.outputs.passing }}"
+          set -euo pipefail
 
-          # Version badge — now a dynamic shields.io github/v/release badge that
-          # always reflects the latest published release. It needs no edit here and
-          # never goes stale on main, even when the version-bump PR back to main is
-          # not merged (which previously left the static badge a release behind).
-          echo "ℹ️ Version badge is dynamic (github/v/release for $NEW_VERSION) — no edit needed."
-
-          # Tests badge — refreshed to the live passing count from the gate above.
-          if [ -n "$PASSING" ]; then
-            sed -i "s/tests-[0-9]\+%20passing/tests-${PASSING}%20passing/" README.md
-            echo "✅ Updated README.md tests badge to ${PASSING} passing"
+          if [ "$HAS_TAGS" = "true" ]; then
+            RANGE="${LATEST_TAG}..HEAD"
           else
-            echo "⚠️ Skipped tests badge update (no passing count parsed)."
+            RANGE="HEAD"
           fi
 
-      - name: Create release branch and commit version bump
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+          # Merge commits are dropped (`--no-merges`): their subjects are PR
+          # titles that duplicate the real commits and used to fill an "Other
+          # Changes" section with noise.
+          : > breaking.txt; : > feat.txt; : > fix.txt; : > perf.txt
+          : > refactor.txt; : > docs.txt; : > test.txt; : > other.txt
+
+          while IFS='|' read -r hash subject author; do
+            [ -z "$hash" ] && continue
+            body=$(git log -1 --pretty=format:%B "$hash")
+            # Breaking is checked FIRST and against subject *and* body. The old
+            # order tested `^feat` before it, so `feat!:` filed as a feature, and
+            # it only ever searched subjects — where a BREAKING CHANGE footer
+            # cannot appear. The 💥 section was therefore unreachable.
+            if echo "$subject" | grep -qE '^[a-zA-Z]+(\([^)]*\))?!:' \
+               || echo "$body" | grep -qE '^BREAKING[ -]CHANGE:'; then
+              echo "- 💥 $subject (@$author) ($hash)" >> breaking.txt
+            # Every type below is anchored with its colon, so "feature flag
+            # cleanup" no longer files as a Feature.
+            elif echo "$subject" | grep -qiE '^feat(\([^)]*\))?:'; then
+              echo "- 🚀 $subject (@$author) ($hash)" >> feat.txt
+            elif echo "$subject" | grep -qiE '^fix(\([^)]*\))?:'; then
+              echo "- 🐛 $subject (@$author) ($hash)" >> fix.txt
+            elif echo "$subject" | grep -qiE '^perf(\([^)]*\))?:'; then
+              echo "- ⚡ $subject (@$author) ($hash)" >> perf.txt
+            elif echo "$subject" | grep -qiE '^refactor(\([^)]*\))?:'; then
+              echo "- 🔧 $subject (@$author) ($hash)" >> refactor.txt
+            elif echo "$subject" | grep -qiE '^docs(\([^)]*\))?:'; then
+              echo "- 📚 $subject (@$author) ($hash)" >> docs.txt
+            elif echo "$subject" | grep -qiE '^test(\([^)]*\))?:'; then
+              echo "- ✅ $subject (@$author) ($hash)" >> test.txt
+            else
+              echo "- $subject (@$author) ($hash)" >> other.txt
+            fi
+          done < <(git log --no-merges "$RANGE" --pretty=format:"%h|%s|%an")
+
+          : > COMMIT_NOTES.md
+          add_section() {
+            [ -s "$2" ] || return 0
+            printf '\n### %s\n\n' "$1" >> COMMIT_NOTES.md
+            cat "$2" >> COMMIT_NOTES.md
+          }
+          add_section '💥 Breaking Changes' breaking.txt
+          add_section '🚀 Features' feat.txt
+          add_section '🐛 Bug Fixes' fix.txt
+          add_section '⚡ Performance Improvements' perf.txt
+          add_section '🔧 Refactoring' refactor.txt
+          add_section '📚 Documentation' docs.txt
+          add_section '✅ Tests' test.txt
+          add_section 'Other Changes' other.txt
+
+          rm -f breaking.txt feat.txt fix.txt perf.txt refactor.txt docs.txt test.txt other.txt
+
+          echo "Generated commit notes:"
+          cat COMMIT_NOTES.md
+
+      - name: Update version in pubspec.yaml, podspec and README badge
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+          PASSING: ${{ steps.gates.outputs.passing }}
         run: |
-          set -e
-          NEW_VERSION="${{ steps.version.outputs.new_version }}"
+          set -euo pipefail
+
+          # Each edit is verified. Only the podspec used to be — a silent sed
+          # miss on pubspec.yaml would have shipped a release whose package
+          # version never changed.
+          sed -i "s/^version: .*/version: $NEW_VERSION/" pubspec.yaml
+          grep -q "^version: $NEW_VERSION$" pubspec.yaml || {
+            echo "::error::Failed to update pubspec.yaml to $NEW_VERSION"; grep -n '^version:' pubspec.yaml; exit 1; }
+          echo "✅ pubspec.yaml -> $NEW_VERSION"
+
+          PODSPEC="ios/zmedia_player.podspec"
+          sed -i "s/^\([[:space:]]*s\.version[[:space:]]*=[[:space:]]*\).*/\1'$NEW_VERSION'/" "$PODSPEC"
+          grep -q "s\.version *= *'$NEW_VERSION'" "$PODSPEC" || {
+            echo "::error::Failed to update $PODSPEC to $NEW_VERSION"; grep -n 's\.version' "$PODSPEC"; exit 1; }
+          echo "✅ $PODSPEC -> $NEW_VERSION"
+
+          # The version badge is a dynamic shields.io github/v/release badge and
+          # needs no edit. Only the tests badge is rewritten here.
+          if [ -n "$PASSING" ]; then
+            sed -i "s/tests-[0-9]\+%20passing/tests-${PASSING}%20passing/" README.md
+            grep -q "tests-${PASSING}%20passing" README.md || {
+              echo "::error::Failed to update the README tests badge to $PASSING — has the badge markup changed?"; grep -n 'tests-' README.md; exit 1; }
+            echo "✅ README tests badge -> $PASSING passing"
+          else
+            echo "::warning::Skipped the tests badge update (no passing count parsed)."
+          fi
+
+      - name: Test release tooling
+        run: python3 scripts/test_promote_changelog.py
+
+      - name: Promote [Unreleased] in CHANGELOG.md
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+        run: |
+          set -euo pipefail
+          python3 scripts/promote_changelog.py \
+            --version "$NEW_VERSION" \
+            --changelog CHANGELOG.md \
+            --fallback-notes COMMIT_NOTES.md
+
+      - name: Create release branch and commit version bump
+        id: release_branch
+        if: ${{ !inputs.dry_run }}
+        env:
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+        run: |
+          set -euo pipefail
           RELEASE_BRANCH="release/v$NEW_VERSION"
 
-          # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Create release branch from main. Use -B so a leftover local branch
-          # (e.g. from a re-run in the same job) is reset rather than erroring.
+          # -B so a leftover local branch from a re-run is reset rather than
+          # erroring. The remote push is force: the branch is ephemeral (created
+          # per release, deleted on merge), so overwriting one left by a failed
+          # run is intended.
           git checkout -B "$RELEASE_BRANCH"
-
-          # Commit version bump
           git add pubspec.yaml CHANGELOG.md README.md ios/zmedia_player.podspec
           git commit -m "chore(release): bump version to $NEW_VERSION"
-
-          # Force-push the release branch. It is ephemeral (created per release,
-          # deleted after merge), so overwriting a stale branch left behind by a
-          # previous failed run is intended — this avoids the non-fast-forward
-          # error when release/vX.Y.Z already exists on the remote.
           git push --force origin "$RELEASE_BRANCH"
 
-          echo "✅ Created and pushed release branch: $RELEASE_BRANCH"
-          echo "release_branch=$RELEASE_BRANCH" >> $GITHUB_OUTPUT
-        id: release_branch
+          echo "release_branch=$RELEASE_BRANCH" >> "$GITHUB_OUTPUT"
+          echo "✅ Pushed release branch: $RELEASE_BRANCH"
 
-      - name: Create Pull Request for version bump
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+      - name: Create version-bump PR
+        id: bump_pr
+        if: ${{ !inputs.dry_run }}
+        env:
+          # Values reach the shell through the environment, never through `${{ }}`
+          # interpolated into the command line. Release notes are built from commit
+          # subjects and author names — a subject containing backticks or $(...)
+          # used to execute on the runner with RELEASE_PAT in scope.
+          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+          RELEASE_BRANCH: ${{ steps.release_branch.outputs.release_branch }}
+          PASSING: ${{ steps.gates.outputs.passing }}
         run: |
-          NEW_VERSION="${{ steps.version.outputs.new_version }}"
-          RELEASE_BRANCH="${{ steps.release_branch.outputs.release_branch }}"
+          set -euo pipefail
 
-          PR_URL=$(gh pr create \
-            --base main \
-            --head "$RELEASE_BRANCH" \
-            --title "chore(release): v$NEW_VERSION" \
-            --body "$(cat <<'EOF'
-          ## Release v$NEW_VERSION
+          {
+            echo "## Release v$NEW_VERSION"
+            echo
+            echo "Automated version bump. Mechanical by design — no behavior changes."
+            echo
+            echo "| File | Change |"
+            echo "|---|---|"
+            echo "| \`pubspec.yaml\` | version -> \`$NEW_VERSION\` |"
+            echo "| \`ios/zmedia_player.podspec\` | version -> \`$NEW_VERSION\` |"
+            echo "| \`CHANGELOG.md\` | \`[Unreleased]\` closed as \`[$NEW_VERSION]\` |"
+            echo "| \`README.md\` | tests badge -> \`${PASSING:-unchanged}\` passing |"
+            echo
+            echo "**Merging this PR publishes the release.** \`release-publish.yml\` then tags"
+            echo "main's own commit as \`v$NEW_VERSION\` and creates the GitHub release from the"
+            echo "new CHANGELOG section. Nothing is tagged until this lands, so closing this PR"
+            echo "cancels the release cleanly."
+            echo
+            echo "### Release notes"
+            echo
+            cat COMMIT_NOTES.md
+          } > PR_BODY.md
 
-          Automated version bump for release v$NEW_VERSION.
-
-          ### Changes
-          - Updated \`pubspec.yaml\` to v$NEW_VERSION
-          - Updated \`CHANGELOG.md\` with release notes
-          - Updated \`README.md\` tests badge (version badge is dynamic)
-
-          ### Changelog
-          ${{ steps.changelog.outputs.changelog }}
-
-          ---
-          🤖 This PR was automatically created by the release workflow.
-          Auto-merge is enabled — it merges to main once required checks pass.
-          EOF
-          )") || PR_URL=""
-
-          if [ -z "$PR_URL" ]; then
-            echo "::warning::Could not create the version-bump PR automatically. The default GITHUB_TOKEN is blocked when the org/repo policy 'Allow GitHub Actions to create and approve pull requests' is disabled. Set a RELEASE_PAT secret (Contents + Pull requests: write) or open the PR manually: $RELEASE_BRANCH -> main. The tag and release will still be created from $RELEASE_BRANCH."
-          else
+          # --body-file, not --body "$(...)": the body is data, not shell input.
+          if PR_URL=$(gh pr create \
+                --base main \
+                --head "$RELEASE_BRANCH" \
+                --title "chore(release): v$NEW_VERSION" \
+                --body-file PR_BODY.md); then
             echo "✅ Created version-bump PR: $PR_URL"
-            # Enable auto-merge so the version bump (pubspec + CHANGELOG + badges)
-            # lands on main automatically once required checks pass. Without this,
-            # main lagged a release behind whenever the PR was left unmerged.
+            echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
             if gh pr merge --auto --squash --delete-branch "$PR_URL"; then
-              echo "✅ Auto-merge enabled — PR will merge to main when checks pass."
+              echo "✅ Auto-merge enabled — the release publishes once required checks pass."
             else
-              echo "::warning::Could not enable auto-merge on $PR_URL. Enable 'Allow auto-merge' in repo Settings → General, and ensure RELEASE_PAT has 'Pull requests: write'. Merge the PR manually to update main."
+              echo "::warning::Could not enable auto-merge on $PR_URL. Enable 'Allow auto-merge' in Settings → General and ensure RELEASE_PAT has 'Pull requests: write'. Merge the PR manually to publish the release."
             fi
+          else
+            echo "::warning::Could not create the version-bump PR. The default GITHUB_TOKEN is blocked when the org policy 'Allow GitHub Actions to create and approve pull requests' is disabled. Set a RELEASE_PAT secret (Contents + Pull requests: write), or open the PR manually: $RELEASE_BRANCH -> main. NOTHING IS RELEASED until that PR merges."
+            echo "pr_url=" >> "$GITHUB_OUTPUT"
           fi
 
-          echo "Version-bump PR step finished (see log/warnings above)"
+      - name: Summary
+        if: ${{ always() }}
         env:
-          # A PAT bypasses the 'Actions cannot create or approve PRs' policy.
-          # Falls back to GITHUB_TOKEN (which works only if that policy is on).
-          GH_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
-
-      - name: Create and push tag
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          NEW_VERSION: ${{ steps.version.outputs.new_version }}
+          BUMP_TYPE: ${{ steps.version.outputs.bump_type }}
+          PRE_RELEASE: ${{ inputs.pre_release }}
+          PASSING: ${{ steps.gates.outputs.passing }}
+          PR_URL: ${{ steps.bump_pr.outputs.pr_url }}
+          RELEASE_BRANCH: ${{ steps.release_branch.outputs.release_branch }}
         run: |
-          set -e
-          NEW_VERSION="${{ steps.version.outputs.new_version }}"
-
-          # Create annotated tag from release branch
-          git tag -a "v$NEW_VERSION" -m "Release v$NEW_VERSION"
-
-          # Push tag
-          git push origin "v$NEW_VERSION"
-
-          echo "✅ Created and pushed tag v$NEW_VERSION"
-
-      - name: Create GitHub Release
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ steps.version.outputs.new_version }}
-          name: ZMedia Player v${{ steps.version.outputs.new_version }}
-          body: |
-            ## ZMedia Player v${{ steps.version.outputs.new_version }}
-
-            ${{ steps.changelog.outputs.changelog }}
-
-            ### Installation
-
-            Add to your `pubspec.yaml`:
-            ```yaml
-            dependencies:
-              zmedia_player:
-                git:
-                  url: https://github.com/${{ github.repository }}.git
-                  ref: v${{ steps.version.outputs.new_version }}
-            ```
-
-            Then run:
-            ```bash
-            flutter pub get
-            ```
-
-            ### Documentation
-            - [API Reference](https://github.com/${{ github.repository }}/tree/main/docs/api-reference)
-            - [Examples](https://github.com/${{ github.repository }}/tree/main/example)
-
-            > **Note**: This package is currently distributed via GitHub releases only. pub.dev publishing is planned for a future release.
-          draft: false
-          prerelease: ${{ github.event.inputs.pre_release != 'none' }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          generate_release_notes: false
-
-      - name: Dry run summary
-        if: ${{ github.event.inputs.dry_run == 'true' }}
-        run: |
-          echo "=== DRY RUN SUMMARY ==="
-          echo "New version would be: ${{ steps.version.outputs.new_version }}"
-          echo "Bump type: ${{ steps.version.outputs.bump_type }}"
-          echo "Pre-release: ${{ github.event.inputs.pre_release }}"
-          echo ""
-          echo "Changelog:"
-          cat RELEASE_CHANGELOG.md
-          echo ""
-          echo "No changes were made (dry run mode)"
-
-      - name: Release summary
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        run: |
-          NEW_VERSION="${{ steps.version.outputs.new_version }}"
-          RELEASE_BRANCH="${{ steps.release_branch.outputs.release_branch }}"
-
-          echo "=== RELEASE SUMMARY ==="
-          echo "✅ Released version: v$NEW_VERSION"
-          echo "✅ Release branch created: $RELEASE_BRANCH"
-          echo "✅ Pull request created for version bump"
-          echo "✅ Tag created: v$NEW_VERSION"
-          echo "✅ GitHub release created"
-          echo ""
-          echo "📦 View release: https://github.com/${{ github.repository }}/releases/tag/v$NEW_VERSION"
-          echo "🔀 View PR: https://github.com/${{ github.repository }}/pulls"
-          echo ""
-          echo "⚠️  Note: Merge the version bump PR after status checks pass to update main branch."
+          set -euo pipefail
+          {
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "## Dry run — nothing was changed"
+            else
+              echo "## Release prepared"
+            fi
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Version | \`${NEW_VERSION:-not computed}\` |"
+            echo "| Bump | \`${BUMP_TYPE:-n/a}\` |"
+            echo "| Pre-release | \`${PRE_RELEASE}\` |"
+            echo "| Tests | \`${PASSING:-not parsed}\` passing |"
+            if [ "$DRY_RUN" != "true" ]; then
+              echo "| Release branch | \`${RELEASE_BRANCH:-not created}\` |"
+              # Reported from the step's real output rather than asserted
+              # unconditionally, which is what the old summary did — it printed
+              # "✅ Pull request created" even on the path that warned it could
+              # not create one.
+              echo "| Bump PR | ${PR_URL:-**not created — see warnings above**} |"
+            fi
+            echo
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "No tag, release, branch or PR was created."
+            else
+              echo "**The release is not published yet.** Merging the bump PR triggers"
+              echo "\`release-publish.yml\`, which tags main and creates the GitHub release."
+            fi
+            echo
+            echo "### Release notes preview"
+            echo
+            if [ -f COMMIT_NOTES.md ]; then cat COMMIT_NOTES.md; else echo "_not generated_"; fi
+          } >> "$GITHUB_STEP_SUMMARY"
