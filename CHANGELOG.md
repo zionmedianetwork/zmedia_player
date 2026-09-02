@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-02
+
 ### Added
 - **`NotificationService.updateConfig(NotificationConfig, {required String playerId})`** —
   the missing way to change a notification's configuration at runtime. `NotificationConfig`
@@ -523,7 +525,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removed**, because `MediaPlayerException` is `sealed`: deleting a member would break
   every exhaustive `switch` over the hierarchy. Exhaustive switches must therefore keep
   listing it. It will be removed in a future major release. (#86)
-
 
 ## [0.3.0] - 2026-08-18
 
