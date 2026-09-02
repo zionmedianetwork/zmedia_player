@@ -13,6 +13,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # Pinned to match .github/workflows/release.yml. A floating `channel: stable`
+  # meant CI and the release gate could run on different SDKs, so "CI is green"
+  # did not imply "the release will build".
+  FLUTTER_VERSION: '3.44.3'
+
 jobs:
   lint-analyze-test:
     name: Lint, Analyze & Test
@@ -21,11 +27,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
 
@@ -36,6 +43,9 @@ jobs:
 
       - name: Get dependencies
         run: flutter pub get
+
+      - name: Test release tooling
+        run: python3 scripts/test_promote_changelog.py
 
       - name: Check code formatting
         run: |
@@ -98,11 +108,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
 
@@ -124,11 +135,12 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           channel: 'stable'
           cache: true
 
