@@ -82,7 +82,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 ### Services (`lib/src/services/`)
 | Export | Purpose |
 |---|---|
-| `NotificationService` | Lock-screen/Control Center media controls. `initialize(playerId, mediaPlayer:)` then `show()`/`dismiss()`; `actionEventStream` (`actionStream` is deprecated). Action wire values live in `NotificationActions` — `seekForward`/`seekBackward` are `'seekForward'`/`'seekBackward'`, matching what both native handlers emit. |
+| `NotificationService` | Lock-screen/Control Center media controls. `initialize(playerId, mediaPlayer:)` then `show()`/`dismiss()`; `actionEventStream` (`actionStream` is deprecated). The `NotificationConfig` crosses the channel **only** at `initialize()` (`show()` renders from whatever native holds) — change it afterwards with `updateConfig(config, playerId:)`, which re-sends it and re-renders a showing notification in place. Action wire values live in `NotificationActions` — `seekForward`/`seekBackward` are `'seekForward'`/`'seekBackward'`, matching what both native handlers emit. |
 | `CastService` | Cast device discovery + connection. |
 | `StreamingService` | Bandwidth estimation + quality recommendation. |
 | `CacheService` | Downloads a media file to disk (`downloadAndCache`/`cacheMedia`/`preloadMedia`) and plays it back from there via `getCachedFileUri` — including fully offline for non-DRM content. Not a full download-manager (no background-transfer queue) and **not** offline DRM — no license can be persisted for offline playback on either platform. |
@@ -287,8 +287,22 @@ final notifications = NotificationService(const NotificationConfig(enabled: true
 await notifications.initialize(controller.playerId, mediaPlayer: controller.player); // pass the player!
 await notifications.show(mediaItem: item, state: controller.state, playerId: controller.playerId);
 notifications.actionEventStream.listen((e) { /* play|pause|next|previous|stop|seekForward|seekBackward|seekTo */ });
+
+// Runtime config change -- the ONLY thing that re-sends the config to native.
+await notifications.updateConfig(
+  const NotificationConfig(enabled: true, showSeekForward: true),
+  playerId: controller.playerId,
+);
 ```
 If `MediaItem.artworkUrl` is null, the artwork is auto-generated from a **video frame**.
+
+The config is applied at `initialize()` and changed thereafter **only** via `updateConfig()`;
+`show()` re-renders from whatever config native already holds, so mutating flags anywhere else
+has no effect. `updateConfig` re-sends `initializeNotification`, re-renders an already-showing
+notification (stored `MediaItem` + latest `PlaybackState`) but never displays one that was not
+showing, reuses the `initialize()` stream subscriptions rather than duplicating them, dismisses
+before adopting an `enabled: false` config, and stores-without-sending when called before
+`initialize()`.
 
 Seek controls are opt-in (`showSeekForward`/`showSeekBackward`, both default `false`) and are
 rendered **iff the flag is true AND the item is seekable** — identical on Android and iOS.
@@ -427,7 +441,7 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 1072 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
+test/                             # 1089 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
 example/                         # Feature-per-page gallery app (verified on a physical iPhone)
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
@@ -443,7 +457,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **1072**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (currently **1089**, keep green) before proposing changes.
 - **Every change ships its documentation in the same change** — any code change under `lib/`, `android/`, `ios/`, or `example/` that alters observable behavior, capability, defaults, or usage, plus every API change, data-contract change, feature addition/removal, example change, and build/platform/dependency change. Update the root `README.md`, this file, every affected file under `docs/`, `CHANGELOG.md` (under `[Unreleased]`), and `example/README.md` where the wiring changed. Only a pure internal refactor with no consumer-visible effect is exempt; when in doubt, treat it as qualifying. See `CLAUDE.md`'s **Required Documentation Updates** for the doc map, the verification greps, and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - **Verify, don't assume**: `grep -rn "<symbol>" README.md AGENTS.md CLAUDE.md docs/ example/` for every identifier you added, renamed, or removed, and fix every stale hit.
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
@@ -456,10 +470,13 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (1072 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested (1089 tests)**; **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
-and lock-screen notifications have been verified on a physical iPhone. Live-stream DVR seek gating
+and lock-screen notifications have been verified on a physical iPhone. Media notifications —
+display, transport/seek actions, lock-screen rendering, and runtime config changes via
+`NotificationService.updateConfig` — have been verified on **both** a physical iPhone and a
+physical Android device. Live-stream DVR seek gating
 and DVR-window duration reporting (`enableDvr`) have been verified on a physical Android device
 (Note 9P) against a live HLS stream; the equivalent iOS wiring has not yet been verified on a
 physical device.

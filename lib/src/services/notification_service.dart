@@ -27,10 +27,21 @@ import '../core/media_player.dart';
 /// represent. **The host app is responsible for calling `seekTo(event.position)` on
 /// its controller when it receives a `seekTo` event** — this service does not do it
 /// for you, exactly as it does not call `play()`/`pause()` for you either.
+///
+/// ## Changing the configuration at runtime
+///
+/// The [NotificationConfig] passed to the constructor is applied to native at
+/// [initialize] time. To change it afterwards — e.g. to start offering the
+/// ±[NotificationConfig.seekInterval]s seek controls — call [updateConfig];
+/// mutating or re-passing a [NotificationConfig] anywhere else has no effect,
+/// and neither does [show], which renders from whatever config native already
+/// holds.
 class NotificationService {
   static const MethodChannel _channel = MethodChannel('zmedia_player');
 
-  final NotificationConfig _config;
+  /// Not `final`: [updateConfig] replaces it at runtime. Internal state only —
+  /// the config a caller hands in is still deeply immutable.
+  NotificationConfig _config;
   final StreamController<String> _actionController =
       StreamController<String>.broadcast();
   final StreamController<NotificationActionEvent> _actionEventController =
@@ -38,6 +49,17 @@ class NotificationService {
 
   bool _isShowing = false;
   MediaItem? _currentMedia;
+
+  /// The most recent [PlaybackState] handed to [show]/[updateState]. Kept so
+  /// [updateConfig] can re-render an already-visible notification without the
+  /// caller having to supply the state again.
+  PlaybackState? _lastState;
+
+  /// `true` once [initialize] has been called at all — including a call that
+  /// returned early because [NotificationConfig.enabled] was `false`, which
+  /// sends nothing to native. [updateConfig] uses this to decide whether it may
+  /// talk to native yet (see its dartdoc).
+  bool _initializeCalled = false;
   MediaPlayer? _mediaPlayer;
   StreamSubscription<NotificationActionEvent>? _notificationActionSubscription;
   StreamSubscription<PlaybackState>? _stateSubscription;
@@ -118,48 +140,169 @@ class NotificationService {
   }
 
   /// Initialize the notification service
+  ///
+  /// Sends the [NotificationConfig] this service was constructed with to
+  /// native (`initializeNotification`), which is the **only** point at which
+  /// the initial config crosses the MethodChannel. To change the config after
+  /// this, call [updateConfig] — nothing else re-sends it, [show] included.
+  ///
+  /// Sends nothing at all when [NotificationConfig.enabled] is `false`; the
+  /// service is still considered initialized in that case, so a later
+  /// [updateConfig] that flips `enabled` back on can complete the native setup
+  /// on its own without a second [initialize] call.
   Future<void> initialize(String playerId, {MediaPlayer? mediaPlayer}) async {
+    _initializeCalled = true;
+
+    // Kept so show() can read the live isSeekable/dvrEnabled state at the
+    // moment it builds the 'mediaItem' payload (see show() below) — those
+    // aren't parameters of show() itself. Recorded *before* the `enabled`
+    // gate and before the channel call so that a service initialized while
+    // disabled (or one whose native call failed) still has the player to wire
+    // up if updateConfig later enables notifications.
+    _mediaPlayer = mediaPlayer;
+
     if (!_config.enabled) return;
 
     try {
-      await _channel.invokeMethod('initializeNotification', {
-        'playerId': playerId,
-        'config': _config.toMap(),
-      });
-
-      // Kept so show() can read the live isSeekable/dvrEnabled state at the
-      // moment it builds the 'mediaItem' payload (see show() below) — those
-      // aren't parameters of show() itself.
-      _mediaPlayer = mediaPlayer;
-
-      // Subscribe to notification actions from MediaPlayer if provided. The
-      // typed event stream is the source of truth (it carries `position` for
-      // "seekTo"); the deprecated string stream is derived from it so both
-      // stay in sync and existing `actionStream` consumers keep working.
-      if (mediaPlayer != null) {
-        _notificationActionSubscription =
-            mediaPlayer.notificationActionEventStream.listen((event) {
-          if (!_actionEventController.isClosed) {
-            _actionEventController.add(event);
-          }
-          if (!_actionController.isClosed) {
-            _actionController.add(event.action);
-          }
-        });
-
-        // Keep the platform's Now Playing info (lock screen / Control Center)
-        // in sync with real playback state. Without this the widget's
-        // play/pause button stays frozen at the state captured by show(), so
-        // its controls appear dead. updateState is a no-op while not showing.
-        _stateSubscription = mediaPlayer.stateStream.listen((state) {
-          updateState(state: state, playerId: playerId);
-        });
-      }
+      await _sendConfigToNative(playerId);
+      _wireMediaPlayer(playerId);
 
       debugPrint('NotificationService: Initialized successfully');
     } catch (e) {
       debugPrint('NotificationService: Failed to initialize: $e');
     }
+  }
+
+  /// Applies a new [NotificationConfig] at runtime.
+  ///
+  /// [NotificationConfig] is immutable and is only handed to native by
+  /// [initialize]; [show] renders from whatever config native already holds and
+  /// never re-sends one. This is therefore the only way to change notification
+  /// behaviour (which action buttons are offered, [NotificationConfig.seekInterval],
+  /// [NotificationConfig.showWhenPaused], ...) without constructing a whole new
+  /// [NotificationService].
+  ///
+  /// What it does, in order:
+  ///
+  /// 1. **Disabling** (`enabled` goes `true` → `false`) dismisses a currently
+  ///    showing notification *before* adopting the new config — every method on
+  ///    this service, [dismiss] included, no-ops while disabled, so tearing it
+  ///    down afterwards would be impossible.
+  /// 2. **Stores** the config. It is used by every subsequent call
+  ///    ([show]/[updateState]/[dismiss]) and by the next [initialize].
+  /// 3. **Re-sends it to native** via the same `initializeNotification` channel
+  ///    call [initialize] uses. Both platforms tolerate this: each rebuilds its
+  ///    per-player notification handler from the payload and replaces the
+  ///    registered one (`ZMediaPlayerPlugin.handleInitializeNotification` in
+  ///    Kotlin and Swift alike). Nothing is sent when the new config is
+  ///    disabled, matching [initialize].
+  /// 4. **Re-renders**, but only if a notification was showing ([isShowing]):
+  ///    the stored [MediaItem] and the most recent [PlaybackState] are replayed
+  ///    through [show] so the new config is visible immediately, without the
+  ///    caller calling [show] again. This matters beyond convenience on Android,
+  ///    where the rebuilt handler has not posted anything yet and the tray still
+  ///    holds the notification the *previous* handler posted with the old
+  ///    config. If no notification was showing, nothing is displayed — this
+  ///    never spuriously pops one up.
+  ///
+  /// Streams are never re-subscribed: the [MediaPlayer] wiring set up by
+  /// [initialize] is reused as-is (and established here only if [initialize]
+  /// skipped it because notifications were disabled at the time), so calling
+  /// this repeatedly cannot duplicate action events or leak subscriptions.
+  ///
+  /// **Before [initialize]:** does not throw and does not touch the channel —
+  /// the config is simply stored and becomes the one the next [initialize]
+  /// sends. (Sending it here would create a native handler for a player that
+  /// has no action/state wiring yet.)
+  ///
+  /// Failures are swallowed and logged, exactly as in [initialize] and [show];
+  /// the new config is stored either way.
+  Future<void> updateConfig(
+    NotificationConfig config, {
+    required String playerId,
+  }) async {
+    final wasShowing = _isShowing;
+
+    // Step 1: dismiss while the *old* (enabled) config still permits it.
+    if (_config.enabled && !config.enabled && wasShowing) {
+      await dismiss(playerId);
+    }
+
+    // Step 2.
+    _config = config;
+
+    // Step 3.
+    if (!config.enabled) return;
+    if (!_initializeCalled) {
+      debugPrint(
+        'NotificationService: updateConfig called before initialize — config '
+        'stored and will be sent by the next initialize() call',
+      );
+      return;
+    }
+
+    try {
+      await _sendConfigToNative(playerId);
+      // No-op when initialize() already wired things up; covers the case where
+      // it could not because notifications were disabled at the time.
+      _wireMediaPlayer(playerId);
+    } catch (e) {
+      debugPrint('NotificationService: Failed to update config: $e');
+      return;
+    }
+
+    // Step 4.
+    final media = _currentMedia;
+    if (!wasShowing || media == null) return;
+
+    final state = _lastState ?? _mediaPlayer?.currentState;
+    if (state == null) return;
+
+    await show(mediaItem: media, state: state, playerId: playerId);
+  }
+
+  /// The one place the config crosses the MethodChannel, shared by [initialize]
+  /// and [updateConfig] so the payload can never drift between them.
+  Future<void> _sendConfigToNative(String playerId) {
+    return _channel.invokeMethod('initializeNotification', {
+      'playerId': playerId,
+      'config': _config.toMap(),
+    });
+  }
+
+  /// Subscribes to the [MediaPlayer] recorded by [initialize], if any.
+  ///
+  /// Idempotent: returns immediately when the subscriptions already exist, so
+  /// [updateConfig] can call it freely without duplicating action events or
+  /// orphaning a subscription.
+  void _wireMediaPlayer(String playerId) {
+    final mediaPlayer = _mediaPlayer;
+    if (mediaPlayer == null) return;
+    if (_notificationActionSubscription != null || _stateSubscription != null) {
+      return;
+    }
+
+    // Subscribe to notification actions from MediaPlayer if provided. The
+    // typed event stream is the source of truth (it carries `position` for
+    // "seekTo"); the deprecated string stream is derived from it so both
+    // stay in sync and existing `actionStream` consumers keep working.
+    _notificationActionSubscription =
+        mediaPlayer.notificationActionEventStream.listen((event) {
+      if (!_actionEventController.isClosed) {
+        _actionEventController.add(event);
+      }
+      if (!_actionController.isClosed) {
+        _actionController.add(event.action);
+      }
+    });
+
+    // Keep the platform's Now Playing info (lock screen / Control Center)
+    // in sync with real playback state. Without this the widget's
+    // play/pause button stays frozen at the state captured by show(), so
+    // its controls appear dead. updateState is a no-op while not showing.
+    _stateSubscription = mediaPlayer.stateStream.listen((state) {
+      updateState(state: state, playerId: playerId);
+    });
   }
 
   /// Show or update notification
@@ -171,6 +314,8 @@ class NotificationService {
     if (!_config.enabled) return;
 
     _currentMedia = mediaItem;
+    // Kept for updateConfig, which re-renders from the stored item + state.
+    _lastState = state;
 
     assert(() {
       if (!_actionStreamListenedTo && !_debugNoListenerWarningLogged) {
@@ -255,6 +400,9 @@ class NotificationService {
     required String playerId,
   }) async {
     if (!_isShowing || !_config.enabled || _currentMedia == null) return;
+
+    // Kept for updateConfig, which re-renders from the stored item + state.
+    _lastState = state;
 
     // Hide notification if paused and configured to do so
     if (!_config.showWhenPaused && state.state == PlayerState.paused) {

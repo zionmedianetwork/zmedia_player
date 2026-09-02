@@ -7,6 +7,9 @@ import '../widgets/player_scaffold.dart';
 /// Demonstrates media playback notifications via [NotificationService]:
 /// - Configuring [NotificationConfig] with show/hide action flags
 /// - [NotificationService.initialize] with a [MediaPlayer]
+/// - [NotificationService.updateConfig] to change those flags at runtime --
+///   the config only reaches native at `initialize()` time, so toggling a
+///   checkbox here has to re-send it or nothing changes on the lock screen
 /// - [NotificationService.show] to display / update the notification
 /// - [NotificationService.dismiss] to remove the notification
 /// - [NotificationService.actionEventStream] to receive play/pause/next/seekTo
@@ -169,6 +172,30 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  /// Pushes the checkbox state to native.
+  ///
+  /// [NotificationConfig] is immutable and is only handed to native by
+  /// [NotificationService.initialize] -- `show()` renders from whatever config
+  /// native already holds. Without this call the checkboxes would flip local
+  /// booleans and change nothing on the lock screen / notification tray.
+  ///
+  /// `updateConfig` also re-renders a notification that is currently showing,
+  /// so a toggle is visible immediately with no extra "Show / Update" tap.
+  Future<void> _applyNotificationConfig() async {
+    try {
+      await _notificationService.updateConfig(
+        _buildNotificationConfig(),
+        playerId: _controller.playerId,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Update notification config failed: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _showNotification() async {
     final item = _controller.currentItem;
     if (item == null) return;
@@ -251,6 +278,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
               _showSeekForward = fwd;
               _showSeekBackward = bwd;
             });
+            _applyNotificationConfig();
           },
         ),
         const SizedBox(height: 16),
@@ -339,8 +367,8 @@ class _OptionsPanel extends StatelessWidget {
         CheckboxListTile(
           title: const Text('Show Seek Forward (+10s)'),
           subtitle: const Text(
-            'Only rendered when the item is also seekable '
-            '(not a live stream without DVR)',
+            'Applied immediately via updateConfig(). Rendered only when the '
+            'item is also seekable — the demo playlist is all VOD, so it is',
           ),
           value: showSeekForward,
           onChanged: (v) =>
@@ -351,8 +379,8 @@ class _OptionsPanel extends StatelessWidget {
         CheckboxListTile(
           title: const Text('Show Seek Backward (-10s)'),
           subtitle: const Text(
-            'Only rendered when the item is also seekable '
-            '(not a live stream without DVR)',
+            'Applied immediately via updateConfig(). Rendered only when the '
+            'item is also seekable — the demo playlist is all VOD, so it is',
           ),
           value: showSeekBackward,
           onChanged: (v) =>
@@ -384,6 +412,9 @@ class _NotifNote extends StatelessWidget {
         'iOS requires user permission and UIBackgroundModes (audio) in Info.plist.\n'
         'API: NotificationService(config) -> initialize(playerId, mediaPlayer) -> '
         'show(mediaItem, state, playerId) / dismiss(playerId).\n'
+        'The config reaches native only at initialize(); the checkboxes above '
+        'call updateConfig(config, playerId:), which re-sends it and re-renders '
+        'a showing notification in place.\n'
         'Actions arrive on actionEventStream (drag the lock-screen / Control '
         'Center scrub bar to test "seekTo", which carries the target '
         'position).',
