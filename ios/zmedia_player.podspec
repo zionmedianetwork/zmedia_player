@@ -1,6 +1,6 @@
 Pod::Spec.new do |s|
   s.name             = 'zmedia_player'
-  s.version          = '0.3.0'
+  s.version          = '0.4.0'
   s.summary          = 'A comprehensive Flutter media player package.'
   s.description      = <<-DESC
 A comprehensive Flutter media player package with advanced features for video and audio playback.
