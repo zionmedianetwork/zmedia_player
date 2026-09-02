@@ -19,6 +19,15 @@ on:
   push:
     branches: [main]
     paths: ['pubspec.yaml']
+  schedule:
+    # Reconciliation. A push made with GITHUB_TOKEN does not trigger workflows,
+    # so when RELEASE_PAT is unset the bump PR merging never fires the push
+    # trigger above — exactly what happened to v0.4.0, which had to be published
+    # by hand. A scheduled run is not subject to that restriction, so this hourly
+    # check publishes any prepared-but-untagged version on its own. It is a
+    # safety net, not the main path: with RELEASE_PAT set, the push trigger
+    # publishes within seconds and this finds nothing to do.
+    - cron: '17 * * * *'
   workflow_dispatch:
     inputs:
       version:
@@ -39,6 +48,8 @@ jobs:
     name: Tag and publish
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Never let the hourly reconciliation run on a fork.
+    if: github.repository == 'zionmedianetwork/zmedia_player'
 
     steps:
       - name: Checkout code
@@ -61,10 +72,16 @@ jobs:
           fi
 
           # Idempotent by construction: an already-tagged version is a no-op, so
-          # unrelated pubspec.yaml edits (a dependency bump, say) and workflow
-          # re-runs publish nothing.
+          # unrelated pubspec.yaml edits (a dependency bump, say), the hourly
+          # reconciliation and workflow re-runs all publish nothing.
           if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
             echo "ℹ️ v$VERSION is already tagged — nothing to publish."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif ! grep -qE "^## \\[$(echo "$VERSION" | sed 's/\./\\./g')\\]" CHANGELOG.md; then
+            # Proof that release.yml prepared this version. Without it, hand-editing
+            # pubspec.yaml on main — or bumping it mid-development — would be
+            # published by the hourly reconciliation as if it were a real release.
+            echo "::warning::pubspec.yaml says $VERSION but CHANGELOG.md has no [$VERSION] section — not publishing. Run the Release workflow to prepare a release."
             echo "publish=false" >> "$GITHUB_OUTPUT"
           else
             echo "✅ Publishing v$VERSION from $(git rev-parse --short HEAD)"
