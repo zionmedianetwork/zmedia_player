@@ -59,8 +59,13 @@ BREAKING CHANGE: (MAJOR version bump)
   or published by this workflow.
 
 ### 2. Publish a release — `release-publish.yml` (automatic)
-- **Trigger**: a push to `main` that changes `pubspec.yaml` — i.e. the bump PR
-  merging
+- **Trigger**: a push to `main` that changes `pubspec.yaml` (the bump PR merging),
+  an hourly reconciliation cron, or manual dispatch
+- **Guard**: publishes only when the version is untagged AND `CHANGELOG.md` has a
+  matching `## [X.Y.Z]` section, so a hand-edited version is never published
+- **Why a cron**: a push made with `GITHUB_TOKEN` does not trigger workflows, so
+  without a `RELEASE_PAT` the merge fires nothing (this is why v0.4.0 needed a
+  manual publish). A scheduled run has no such restriction
 - **Result**: annotated tag `v{version}` on main's commit, plus the GitHub release
 - **Idempotent**: no-ops when `v{version}` is already tagged, so an unrelated
   `pubspec.yaml` edit or a workflow re-run publishes nothing
@@ -101,7 +106,8 @@ is on `main`.
 ### Step 3: Git Operations (phase 1 — `release.yml`)
 1. Guard: abort if `v{version}` already exists, before anything is pushed
 2. Create release branch: `release/v{version}`
-3. Commit the version bump and changelog
+3. Commit the version bump (`pubspec.yaml`, `ios/zmedia_player.podspec`) and the
+   changelog. `README.md` is not touched — its badges are self-updating
 4. Push the branch and open the version-bump PR to `main`, with auto-merge enabled
 
 **No tag is created in phase 1.** The bump must reach `main` first.

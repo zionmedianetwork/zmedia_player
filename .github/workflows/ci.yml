@@ -13,6 +13,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 env:
   # Pinned to match .github/workflows/release.yml. A floating `channel: stable`
   # meant CI and the release gate could run on different SDKs, so "CI is green"
@@ -72,10 +75,74 @@ jobs:
         continue-on-error: false
 
       - name: Run tests
+        id: tests
         run: |
+          set -euo pipefail
           echo "Running Flutter tests..."
-          flutter test --coverage --reporter expanded
+          set +e
+          flutter test --coverage --reporter expanded 2>&1 | tee test_output.log
+          TEST_EXIT=${PIPESTATUS[0]}
+          set -e
+          [ "$TEST_EXIT" -eq 0 ] || exit "$TEST_EXIT"
+
+          # The expanded reporter prints incrementing "+N" counters; the highest
+          # is the passing total. It feeds the README tests badge below, so the
+          # badge tracks every merge to main rather than being rewritten once per
+          # release (which left it stale by 283 at v0.3.0).
+          PASSING=$(grep -oE '\+[0-9]+' test_output.log | tr -d '+' | sort -n | tail -1) || true
+          echo "passing=$PASSING" >> "$GITHUB_OUTPUT"
+          echo "✅ ${PASSING:-?} tests passing"
         continue-on-error: false
+
+      - name: Publish tests badge
+        # main only, and never from a fork: the badge is repo state, not PR state.
+        if: >-
+          github.event_name == 'push' &&
+          github.ref == 'refs/heads/main' &&
+          github.repository == 'zionmedianetwork/zmedia_player' &&
+          steps.tests.outputs.passing != ''
+        env:
+          PASSING: ${{ steps.tests.outputs.passing }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Shields renders this JSON through its `endpoint` badge. It lives on an
+          # orphan `badges` branch — never on main — so refreshing the count needs
+          # no commit to the source tree, no PR, and cannot collide with branch
+          # protection. Everything happens in a scratch clone so the checkout this
+          # job is using is left untouched (later steps still need coverage/).
+          WORK=$(mktemp -d)
+          printf '{\n  "schemaVersion": 1,\n  "label": "tests",\n  "message": "%s passing",\n  "color": "brightgreen"\n}\n' \
+            "$PASSING" > "$WORK/tests.json"
+
+          REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${REPO}.git"
+          cd "$WORK"
+          git init -q .
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add origin "$REMOTE"
+
+          if git fetch -q --depth=1 origin badges 2>/dev/null; then
+            git checkout -q -b badges FETCH_HEAD
+          else
+            git checkout -q -b badges
+            printf 'Badge data rendered by shields.io. Written by ci.yml; do not edit by hand.\n' > README.md
+            git add README.md
+          fi
+
+          mkdir -p badges
+          mv tests.json badges/tests.json
+          git add badges/tests.json
+
+          if git diff --cached --quiet; then
+            echo "Badge unchanged ($PASSING passing) — nothing to push."
+          else
+            git commit -q -m "chore(badges): tests -> $PASSING passing"
+            git push -q origin badges
+            echo "✅ Published tests badge: $PASSING passing"
+          fi
 
       - name: Check test coverage
         run: |

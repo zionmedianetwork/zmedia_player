@@ -249,13 +249,13 @@ jobs:
           TEST_EXIT=${PIPESTATUS[0]}
           set -e
           if [ "$TEST_EXIT" -ne 0 ]; then
-            echo "::error::Tests failed — aborting the release so the README badge never lies."
+            echo "::error::Tests failed — aborting the release."
             exit 1
           fi
 
           # The expanded reporter prints incrementing "+N" counters; the highest
           # is the passing total.
-          PASSING=$(grep -oE '\+[0-9]+' test_output.log | tr -d '+' | sort -n | tail -1)
+          PASSING=$(grep -oE '\+[0-9]+' test_output.log | tr -d '+' | sort -n | tail -1) || true
           if [ -z "$PASSING" ]; then
             echo "::warning::Could not parse the passing test count; the tests badge will be left unchanged."
           else
@@ -332,11 +332,10 @@ jobs:
           echo "Generated commit notes:"
           cat COMMIT_NOTES.md
 
-      - name: Update version in pubspec.yaml, podspec and README badge
+      - name: Update version in pubspec.yaml and podspec
         if: ${{ !inputs.dry_run }}
         env:
           NEW_VERSION: ${{ steps.version.outputs.new_version }}
-          PASSING: ${{ steps.gates.outputs.passing }}
         run: |
           set -euo pipefail
 
@@ -354,16 +353,12 @@ jobs:
             echo "::error::Failed to update $PODSPEC to $NEW_VERSION"; grep -n 's\.version' "$PODSPEC"; exit 1; }
           echo "✅ $PODSPEC -> $NEW_VERSION"
 
-          # The version badge is a dynamic shields.io github/v/release badge and
-          # needs no edit. Only the tests badge is rewritten here.
-          if [ -n "$PASSING" ]; then
-            sed -i "s/tests-[0-9]\+%20passing/tests-${PASSING}%20passing/" README.md
-            grep -q "tests-${PASSING}%20passing" README.md || {
-              echo "::error::Failed to update the README tests badge to $PASSING — has the badge markup changed?"; grep -n 'tests-' README.md; exit 1; }
-            echo "✅ README tests badge -> $PASSING passing"
-          else
-            echo "::warning::Skipped the tests badge update (no passing count parsed)."
-          fi
+          # README is not touched by a release. Both of its badges are
+          # self-updating: the release badge is a shields github/v/release badge,
+          # and the tests badge is a shields endpoint badge fed by ci.yml on every
+          # push to main. Editing them here is what left the count stale by 283 at
+          # v0.3.0 — the sed only ran when a bump PR actually merged, and four of
+          # six never did.
 
       - name: Test release tooling
         run: python3 scripts/test_promote_changelog.py
@@ -396,7 +391,7 @@ jobs:
           # per release, deleted on merge), so overwriting one left by a failed
           # run is intended.
           git checkout -B "$RELEASE_BRANCH"
-          git add pubspec.yaml CHANGELOG.md README.md ios/zmedia_player.podspec
+          git add pubspec.yaml CHANGELOG.md ios/zmedia_player.podspec
           git commit -m "chore(release): bump version to $NEW_VERSION"
           git push --force origin "$RELEASE_BRANCH"
 
@@ -428,7 +423,7 @@ jobs:
             echo "| \`pubspec.yaml\` | version -> \`$NEW_VERSION\` |"
             echo "| \`ios/zmedia_player.podspec\` | version -> \`$NEW_VERSION\` |"
             echo "| \`CHANGELOG.md\` | \`[Unreleased]\` closed as \`[$NEW_VERSION]\` |"
-            echo "| \`README.md\` | tests badge -> \`${PASSING:-unchanged}\` passing |"
+            echo "| \`README.md\` | untouched — both badges are self-updating (\`${PASSING:-?}\` passing at this commit) |"
             echo
             echo "**Merging this PR publishes the release.** \`release-publish.yml\` then tags"
             echo "main's own commit as \`v$NEW_VERSION\` and creates the GitHub release from the"

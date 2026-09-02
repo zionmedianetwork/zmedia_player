@@ -61,7 +61,8 @@ When in doubt about whether a change qualifies, treat it as qualifying.
 
 In the same commit/PR as the code:
 
-- the root `README.md` — feature list, quick-start snippets, capability tables, version badge
+- the root `README.md` — feature list, quick-start snippets, capability tables (the release
+  and tests badges are self-updating; never hand-edit them)
 - `AGENTS.md`
 - every affected file under `docs/` — see the map below
 - `CHANGELOG.md` (under `[Unreleased]`, in the appropriate Keep-a-Changelog category —
@@ -1317,8 +1318,9 @@ until the version bump is on `main`.
    is pushed or PR opened
 4. **Quality gates**: `dart format --set-exit-if-changed`, `flutter analyze`, `flutter test`
    (the same gates as `ci.yml`, so a release can never ship a commit CI would reject)
-5. **Version Bump**: updates `pubspec.yaml`, `ios/zmedia_player.podspec` and the `README.md`
-   tests badge — each edit verified, failing loudly rather than shipping a stale version
+5. **Version Bump**: updates `pubspec.yaml` and `ios/zmedia_player.podspec` — each edit
+   verified, failing loudly rather than shipping a stale version. `README.md` is not touched;
+   its badges update themselves
 6. **Changelog**: `scripts/promote_changelog.py` closes the hand-written `[Unreleased]`
    section as `## [X.Y.Z] - <date>` and opens a fresh empty `[Unreleased]` above it
 7. **Release Branch + PR**: pushes `release/vX.Y.Z` and opens the bump PR with auto-merge
@@ -1326,9 +1328,21 @@ until the version bump is on `main`.
 
 **Phase 2 — `release-publish.yml` ("Publish Release", automatic):**
 
-8. Triggered by a push to `main` that changes `pubspec.yaml` (i.e. the bump PR merging)
+8. Triggered by a push to `main` that changes `pubspec.yaml` (i.e. the bump PR merging),
+   by an **hourly reconciliation cron**, or by manual dispatch
 9. **Git Tag**: annotated `v{version}` on **main's own commit**
 10. **GitHub Release**: body rendered from that version's `CHANGELOG.md` section
+
+It publishes only when `pubspec.yaml`'s version is untagged **and** `CHANGELOG.md` has a
+matching `## [X.Y.Z]` section — proof that `release.yml` prepared it. A hand-edited or
+mid-development version bump is therefore never published by the cron.
+
+**Why the cron exists.** A push made with `GITHUB_TOKEN` does not trigger workflows. When
+`RELEASE_PAT` is unset, the bump PR is created and merged by `app/github-actions`, so the push
+trigger never fires — v0.4.0 had to be published by hand for exactly this reason. A scheduled
+run is not subject to that restriction, so the hourly check completes any prepared release on
+its own. Setting `RELEASE_PAT` makes the push trigger work and reduces the cron to a no-op
+safety net.
 
 **Why two phases.** Phase 1 used to tag the `release/vX.Y.Z` branch and then squash-merge it,
 so the tagged commit existed on no branch — `git describe` was unusable anywhere in the
@@ -1364,9 +1378,13 @@ its version bump.
 - `pubspec.yaml` - Package version
 - `CHANGELOG.md` - `[Unreleased]` promoted to the released version (see
   `scripts/promote_changelog.py`); a fresh empty `[Unreleased]` is left at the top
-- `README.md` - tests badge (the version badge is a dynamic shields.io
-  `github/v/release` badge and needs no edit)
 - `ios/zmedia_player.podspec` - CocoaPods version metadata
+
+`README.md` is **not** touched by a release. Both badges are self-updating: the release badge
+is a shields `github/v/release` badge, and the tests badge is a shields `endpoint` badge fed by
+`ci.yml` on every push to `main` (it writes `badges/tests.json` on an orphan `badges` branch).
+The release used to rewrite the tests count with `sed`, which only took effect when a bump PR
+actually merged — the count was stale by 283 at v0.3.0.
 
 Every one of these edits is verified after it is made; the workflow fails rather than
 shipping a file it did not actually change.
