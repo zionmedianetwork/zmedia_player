@@ -60,10 +60,14 @@ select your Team).
 | Page | File | Public API exercised |
 |------|------|----------------------|
 | **Simple Playback** | `pages/simple_playback_page.dart` | `MediaController.create` · `initialize` · `load(MediaItem)` · `play`/`pause`/`stop` · `seekForward`/`seekBackward` · `setVolume` · `toggleMute` |
+| **Local File Playback** | `pages/local_file_playback_page.dart` | `LocalMediaUtils.fileUri` · `InputValidator.validateUrl` — loading a bundled asset copied out to a real file and played from a `file://` `MediaItem`, no network required, no local-file-specific load path |
 | **Playlist** | `pages/playlist_page.dart` | `setPlaylist(Playlist)` · `skipToNext`/`skipToPrevious`/`skipToIndex` · `MediaRepeatMode` (none/all/single) · `PlaybackMode` (sequential/shuffle) · auto-advance on completion |
 | **Adaptive Streaming & Quality** | `pages/streaming_quality_page.dart` | `player.qualityTracksStream` · `setQualityTrack` · `enableAutoQuality` · `player.bandwidthStream` · HLS & DASH sources |
+| **Cache → Playback (C-03a)** | `pages/cache_playback_page.dart` | `CacheService.downloadAndCache` · `CacheService.getCachedMediaItem` · `LocalMediaUtils.fileUri` — download a progressive source to disk, then `load()` it back from cache with the network off (airplane mode) to prove no network is used |
+| **Adaptive Segment Cache (C-03b, Android-only)** | `pages/adaptive_cache_playback_page.dart` | `MediaConfig.adaptiveCacheConfig` (`AdaptiveCacheConfig`) — transparent Media3 segment/init-segment/manifest caching for HLS/DASH during ordinary playback, no separate download step; verify offline replay of already-played content via airplane mode |
 | **Subtitles** | `pages/subtitles_page.dart` | `setSubtitleTrack` · `disableSubtitles` · `player.subtitleTracksStream` · `selectedSubtitleTrack` · `SubtitleConfig` |
 | **DRM (Widevine / FairPlay / EZDRM)** | `pages/drm_page.dart` | `DrmConfig.widevine` · `DrmConfig.fairplay(certificateUrl:)` · `DrmConfig.ezdrm` · `EzdrmConfig` · `CertificatePinningConfig` · `player.drmSessionStream` |
+| **Screen-Capture Protection (B-12)** | `pages/secure_output_page.dart` | `MediaConfig.secureSurface` · `MediaController.setSecureSurface` · `.isSecureSurfaceEnabled` · `.screenCaptureStream`/`.screenCaptureStatus` (`ScreenCaptureStatus.isCaptured`). Documents the platform asymmetry: Android's `FLAG_SECURE` blocks capture outright (screenshot/recording comes back black, `isCaptured` never flips true); iOS only *detects* `UIScreen.isCaptured` and leaves reacting to it (e.g. a warning overlay) to the host app |
 | **Picture-in-Picture** | `pages/pip_page.dart` | `checkPipAvailability` · `enterPictureInPicture`/`exitPictureInPicture` · `pipStatusStream` · `PipConfig` |
 | **Casting (Chromecast / AirPlay)** | `pages/casting_page.dart` | `startCastDiscovery`/`stopCastDiscovery` · `connectToCastDevice`/`connectAndLoadMedia`/`disconnectFromCastDevice` · `castStatusStream` · `player.castDevicesStream` · `AirPlayButton` |
 | **Media Notifications** | `pages/notifications_page.dart` | `NotificationService` · `NotificationConfig` · `initialize(mediaPlayer:)` · `updateConfig` (runtime config changes — the action checkboxes) · `show`/`dismiss` · `actionStream` (lock-screen / Control Center controls) |
@@ -74,6 +78,29 @@ select your Team).
 | **Network Status** | `pages/network_status_page.dart` | `MediaPlayer.networkStatus`/`.networkStatusStream`/`.networkChangeStream` · `NetworkStatus`/`NetworkQuality`/`ConnectionType`. Manual verification harness — no media is loaded; toggle airplane mode / switch Wi-Fi↔cellular to generate events. Documents that `downloadSpeed` is a system link *hint* on Android and a fixed per-transport constant on iOS, not a throughput measurement on either platform |
 | **Wired Config Verification** | `pages/wired_config_verification_page.dart` | On-device harness for `HlsConfig.enableDvr`/`.liveLatency`, `NotificationConfig.customActions`/`.priority`/`.dismissible` (Android only), and `PipConfig.actions` (Android only). Its Live Latency section documents that `liveLatency` is a *maintained* target on Android (defeated only by a manifest time-anchor defect, issue #110) but a **join-time-only** setting on iOS 14+ (`automaticallyPreservesTimeOffsetFromLive = false` — no restore after a rebuffer) |
 | **Media Feed (pooled controllers)** | `pages/media_feed_pool_page.dart`, `pages/feed_page.dart` | `MediaFeed` pooled-controller playback for a scrolling feed; per-item `_NetworkStatusLine` readout of `connectionType`/`quality`/`isMetered` for the most recently active controller |
+| **Multi-Player (B-02 / H-07)** | `pages/multi_player_page.dart` | Manual regression harness: two concurrently live `MediaController`s exercising cross-instance isolation that only manifests with 2+ live players — notification/completion event filtering (B-02) and Now Playing / remote-command ownership handoff on dispose (H-07), via `NotificationService.initialize`/`.dispose`, per-player `stateStream`/`errorStream` |
+
+---
+
+## Measurement harnesses (Stage 7a)
+
+Six pages under `pages/measurement/`, reached from the home screen via **Stage 7a Measurement
+Harness** (`pages/measurement/measurement_hub_page.dart`), are **on-device measurement tools for
+this package's own defaults, not general feature demos** like the pages above — several load real
+media purely to produce a number (decoder ceiling, memory, bandwidth, time-to-first-frame) that
+justified `MediaFeed`'s pool/prewarm/prefetch defaults (Stage 7b), and are not meant as copy-from
+usage examples. Each emits `[7A-MEASURE] start:<phase> ...`/`end:<phase> ...` markers so an
+external reading (Android Studio's Network Profiler, `adb shell dumpsys media.resource_manager` /
+`meminfo`, Xcode Instruments) can be correlated against the exact in-app window.
+
+| Page | File | What it measures / public API exercised |
+|------|------|------|
+| **Measurement Hub** | `pages/measurement/measurement_hub_page.dart` | Index page linking the five harnesses below; not a measurement itself |
+| **Decoder Ceiling** | `pages/measurement/decoder_ceiling_page.dart` | Spawns one `MediaController` at a time, each with its own native player, until the hardware decoder pool is exhausted; tracks per-player outcome via `MediaPlayer.errorStream` (revisable, since decoder exhaustion fails the renderer asynchronously, not `load()`/`play()`) |
+| **Memory: Paused vs Playing** | `pages/measurement/memory_paused_playing_page.dart` | Compares resident memory (`dart:io`'s `ProcessInfo.currentRss`) for N players left `pause()`d-but-prepared vs N left `play()`ing, to test whether pooling (not just capping concurrent *playing* items) is required |
+| **Time to First Frame** | `pages/measurement/time_to_first_frame_page.dart` | In-app timing of `load()`→first `PlayerState.playing` for a cold start vs a prewarmed one (`load()` → `PlayerState.ready` → dwell → `play()`), across progressive/HLS/DASH sources |
+| **Scroll Bandwidth** | `pages/measurement/scroll_bandwidth_page.dart` | Bandwidth during a fast fling through 50 `MediaListPlayer` items, each with its own host-owned `MediaController` created/disposed by standard `ListView.builder` recycling — today's actual F-02 baseline, no pooling |
+| **Live Off-Screen Bandwidth** | `pages/measurement/live_offscreen_bandwidth_page.dart` | Whether a `MediaListPlayer` playing a live (`MediaItem.isLive: true`) source still consumes bandwidth after being auto-`pause()`d by scrolling off-screen (Phase 4's existing off-screen-pause behavior, unmodified) |
 
 ---
 
@@ -153,12 +180,16 @@ example/
     data/
       sample_media.dart             # Reusable MediaItem / Playlist sample constants
     pages/
-      home_page.dart                # Feature gallery (cards → pages)
+      home_page.dart                # Feature gallery (cards → pages) — not itself a feature page
       simple_playback_page.dart
+      local_file_playback_page.dart
       playlist_page.dart
       streaming_quality_page.dart
+      cache_playback_page.dart
+      adaptive_cache_playback_page.dart
       subtitles_page.dart
       drm_page.dart
+      secure_output_page.dart
       pip_page.dart
       casting_page.dart
       notifications_page.dart
@@ -166,9 +197,22 @@ example/
       adaptive_controls_page.dart
       custom_controls_page.dart     # Flagship: fully bespoke overlay via CustomControlsBase
       error_handling_page.dart
+      network_status_page.dart
+      wired_config_verification_page.dart
+      media_feed_pool_page.dart
+      feed_page.dart
+      multi_player_page.dart
+      measurement/                 # Stage 7a on-device measurement harnesses (see below)
+        measurement_hub_page.dart
+        decoder_ceiling_page.dart
+        memory_paused_playing_page.dart
+        time_to_first_frame_page.dart
+        scroll_bandwidth_page.dart
+        live_offscreen_bandwidth_page.dart
     widgets/
       feature_card.dart             # Card used on the home screen
       player_scaffold.dart          # Shared scaffold: AppBar + 16:9 player + scrollable body
+      measurement_log_panel.dart    # Shared on-screen event log for the measurement/ harnesses
   android/                          # Runner (PiP relay + permissions)
   ios/                              # Runner (background-audio mode, signing)
 ```

@@ -8,6 +8,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **13 of the example app's 19 widget tests hung and failed with `pumpAndSettle timed out`**,
+  in `example/test/pages/wired_config_verification_page_test.dart` (all 6),
+  `example/test/pages/measurement/scroll_bandwidth_page_test.dart` (5 of 5) and
+  `example/test/pages/measurement/live_offscreen_bandwidth_page_test.dart` (2 of 3) — a
+  pre-existing regression, reproduced identically against a clean `origin/main` worktree, not
+  introduced by this branch. All three pages mount a real (mocked-channel) `MediaController`
+  that calls `initialize()`/`load()`, which starts `BufferingService.startMonitoring`'s
+  periodic 500ms `Timer` (and, on `wired_config_verification_page_test.dart`,
+  `NetworkResilienceService`'s 5s one too); each tick round-trips the mocked platform
+  buffer-status channel and schedules a new frame, so `pumpAndSettle` — which waits for zero
+  scheduled frames — could never converge on these pages and always burned its full retry
+  budget before throwing. `example/test/pages/media_feed_pool_page_test.dart` had already hit
+  and solved the identical problem (see its `_pumpOnDeviceScreen`/`_cleanUp` doc comments);
+  the three fixed files now follow the same established pattern — bounded, explicitly-sized
+  `pump()` sequences instead of `pumpAndSettle`, each sized to the specific async chain it
+  follows (initial `initialize()`/`load()`, a reload via `updateConfig()`+`load()`, or a
+  single mocked platform round trip) — rather than waiting for a tree that never settles. No
+  assertion was weakened or removed: the DVR-toggle-reloads-and-flips-the-seek-outcome
+  end-to-end coverage in `wired_config_verification_page_test.dart` and the narrow-viewport
+  layout regression coverage in all three files still run, and still pass for the reason they
+  were written to check. One additional latent issue surfaced and was fixed while bounding
+  `scroll_bandwidth_page_test.dart`'s teardown: a `MediaListPlayer` visibility-driven
+  autoplay/pause `Future.delayed(300ms)` could still be pending when a test ended right after
+  dragging the feed, tripping flutter_test's "Timer is still pending" invariant — its
+  `_cleanUp` now flushes a bounded window sized past that debounce. The v0.3.0 GitHub release
+  body claimed "871 package tests and 19 example tests pass" — that published artifact is
+  unchanged (it is a historical record), but it is the origin of the "19 example tests pass"
+  claim that has been false since whichever change introduced these hangs, undetected because
+  no in-repo doc asserted the example suite's count at all (see the `Changed` entry below).
+  Result: 19/19 example tests passing; the package suite is unaffected.
+
 - **iOS `NetworkMonitor.estimateBandwidth(from:)` reported `connectionType: "none"` and
   `downloadSpeed: 0` for a *connected* `NWPath`, the iOS counterpart to issue #112's Android
   fix.** Its final fallthrough — reached for a satisfied path whose interface matched none of
@@ -23,6 +54,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`"unknown"` was already an accepted intentional-fallback value) — no test change was needed.
 
 ### Changed
+- **`example/README.md`'s feature table was missing 11 of the app's 27 feature pages** —
+  `local_file_playback_page.dart`, `cache_playback_page.dart`,
+  `adaptive_cache_playback_page.dart`, `secure_output_page.dart`, `multi_player_page.dart`,
+  and all six pages under `pages/measurement/`. Each added row names the specific public API
+  the page demonstrates (derived from the page's own dartdoc and code, not its filename); the
+  six `measurement/` pages are on-device measurement *harnesses* for this package's own
+  pool/prewarm/prefetch defaults, not general usage demos, so they now live in their own
+  "Measurement harnesses (Stage 7a)" section rather than the main gallery table, with that
+  distinction called out explicitly. The "Project structure" tree (previously missing several
+  already-existing pages, predating this change) was brought up to date to match. No stale API
+  names were found in the previously-existing rows.
+- **Corrected stale hardcoded Dart test-suite counts across the docs** (`AGENTS.md`,
+  `README.md`, `docs/README.md`, `docs/implementation/README.md`,
+  `docs/implementation/testing.md`, `docs/summary/README.md`, `docs/summary/phases.md`,
+  `docs/summary/test-coverage.md`): several asserted a stale **1089**, when `flutter test`
+  currently reports **1104** — the count drifts on every commit that adds a test, which is
+  exactly how it went stale by 15. Every live (non-historical) count now explicitly hedges
+  with "run `flutter test` for the current count" rather than asserting a number that will go
+  stale on the next commit; a couple were simplified to drop the number entirely in favor of
+  just that instruction. Historical snapshots (the v0.1.0 `113/113`/`179/179` figures, the
+  DRM `47 tests` figure in `docs/summary/production-readiness.md`, and
+  `docs/implementation/codebase-audit.md`'s references to the original findings) are
+  unaffected — they are explicitly-marked historical records, not current-state claims.
+  Separately, **no doc stated the `example/` app's own test count anywhere**, part of why the
+  13 hangs above went unnoticed for so long — `docs/implementation/testing.md` and
+  `docs/summary/test-coverage.md` now state it (19, `cd example && flutter test`) alongside
+  the package count.
 - **Documented that `liveLatency` behaves differently on Android and iOS**, not just that both
   are "wired": Android's ExoPlayer actively maintains the target offset from the live edge via
   playback-speed adjustment, while iOS's `AVPlayerItem.configuredTimeOffsetFromLive` (this

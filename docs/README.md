@@ -130,8 +130,9 @@ are implemented but require on-device verification.
 - **Phase 4** - DRM & Polish (Complete)
 
 ### Key Metrics
-- **Tests:** 1089 automated tests passing (run `flutter test` for the current count);
-  strong Dart-layer coverage, **no automated native tests yet**
+- **Tests:** run `flutter test` for the current count (1104 as of this writing, and
+  growing) — strong Dart-layer coverage, **no automated native tests yet**. The
+  `example/` app has its own separate suite (19 tests, `cd example && flutter test`)
 - **Native verification:** DRM, casting, certificate pinning, and bandwidth metering
   are implemented but need on-device testing
 - **Documentation:** Comprehensive guides for all features

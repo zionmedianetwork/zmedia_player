@@ -153,7 +153,7 @@ ZMediaPlayerPlugin
 
 ## Testing Strategy
 
-### Unit Tests (Dart — 1089 passing; run `flutter test` for the live count)
+### Unit Tests (Dart — run `flutter test` for the live count, 1104 as of this writing)
 - Model validation
 - Serialization/deserialization
 - Configuration handling

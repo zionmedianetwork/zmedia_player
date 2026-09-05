@@ -764,7 +764,9 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 1089), and open a PR.
+`flutter analyze` clean and `flutter test` green (run it for the current count),
+and open a PR. If you touched `example/`, also keep `cd example && flutter test`
+green (19 tests as of this writing).
 
 ## License
 
@@ -781,7 +783,9 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 1089 automated tests — run `flutter test` for the current count.
+- **Tests:** run `flutter test` for the current count (1104 as of this writing, and
+  growing). The `example/` app has its own separate suite too (19 tests,
+  `cd example && flutter test`).
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth

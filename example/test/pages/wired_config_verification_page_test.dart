@@ -18,6 +18,19 @@
 //
 // Mirrors the mock-channel/warmup/pump conventions used across the example
 // app's other page tests.
+//
+// NOT pumpAndSettle anywhere in this file: this page's MediaController
+// calls initialize()/load() on a real (mocked-channel) player, which starts
+// BufferingService.startMonitoring's periodic 500ms Timer -- see
+// scroll_bandwidth_page_test.dart / live_offscreen_bandwidth_page_test.dart
+// for the same mechanism. That timer round-trips the mocked platform
+// buffer-status channel and schedules a new frame forever, so pumpAndSettle
+// can never observe zero pending frames on this page. Every wait below is a
+// bounded pump chain instead, sized to flush the specific async chain it
+// follows (initial init/load, or a reload triggered by updateConfig()+
+// load()) -- each queued through MediaController's operation queue
+// (Completer-chained, no real Timer of its own), so a handful of pumps is
+// enough to drain it.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -48,11 +61,25 @@ Future<void> _pumpOnDeviceScreen(WidgetTester tester) async {
   await tester.pumpWidget(
     const MaterialApp(home: WiredConfigVerificationPage()),
   );
-  await tester.pumpAndSettle();
+  // Drains _initAndLoad()'s full chain: controller.initialize(), the
+  // pipStatus/pipAction stream subscriptions, controller.load(), a
+  // checkPipAvailability() round trip and NotificationService.initialize()
+  // -- all mocked-channel calls that resolve within a few microtask hops,
+  // no real delay involved.
+  await _pumpBounded(tester);
+}
+
+/// Pumps a bounded, fixed number of short frames -- enough to drain the
+/// mocked-channel async chains this page's actions kick off, without ever
+/// waiting for the tree to go idle (it never does; see the file header).
+Future<void> _pumpBounded(WidgetTester tester, {int steps = 6}) async {
+  for (var i = 0; i < steps; i++) {
+    await tester.pump(const Duration(milliseconds: 20));
+  }
 }
 
 Future<void> _cleanUp(WidgetTester tester) async {
-  await tester.pumpAndSettle();
+  await _pumpBounded(tester);
   await tester.pumpWidget(const SizedBox.shrink());
   await tester.pump(const Duration(milliseconds: 260));
 }
@@ -152,7 +179,9 @@ void main() {
 
       await tester.ensureVisible(find.byKey(const Key('try_seek_button')));
       await tester.tap(find.byKey(const Key('try_seek_button')));
-      await tester.pumpAndSettle();
+      // Drains _trySeek(): a single seekTo() call that rejects synchronously
+      // (isLive && !dvrEnabled, no platform round trip involved).
+      await _pumpBounded(tester);
 
       final banner = find.byKey(const Key('seek_outcome_banner'));
       expect(banner, findsOneWidget);
@@ -175,7 +204,10 @@ void main() {
       await _pumpOnDeviceScreen(tester);
 
       await tester.tap(find.byKey(const Key('dvr_toggle')));
-      await tester.pumpAndSettle();
+      // Drains _reloadWithCurrentSettings(): controller.updateConfig() then
+      // controller.load(), both queued through MediaController's operation
+      // queue and both mocked-channel calls with no real timer of their own.
+      await _pumpBounded(tester);
 
       expect(
         find.descendant(
@@ -192,7 +224,9 @@ void main() {
 
       await tester.ensureVisible(find.byKey(const Key('try_seek_button')));
       await tester.tap(find.byKey(const Key('try_seek_button')));
-      await tester.pumpAndSettle();
+      // Drains _trySeek() -- succeeds this time (DVR on), a single mocked
+      // seekTo() platform call.
+      await _pumpBounded(tester);
 
       final banner = find.byKey(const Key('seek_outcome_banner'));
       expect(
@@ -210,7 +244,9 @@ void main() {
 
       // DVR stays off (default) -- only the source changes.
       await tester.tap(find.text('VOD MP4'));
-      await tester.pumpAndSettle();
+      // Drains _reloadWithCurrentSettings() again -- see the DVR toggle test
+      // above.
+      await _pumpBounded(tester);
 
       expect(
         find.descendant(
@@ -227,7 +263,8 @@ void main() {
 
       await tester.ensureVisible(find.byKey(const Key('try_seek_button')));
       await tester.tap(find.byKey(const Key('try_seek_button')));
-      await tester.pumpAndSettle();
+      // Drains _trySeek() -- succeeds on the VOD source regardless of DVR.
+      await _pumpBounded(tester);
 
       final banner = find.byKey(const Key('seek_outcome_banner'));
       expect(

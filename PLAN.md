@@ -10,7 +10,12 @@ iOS counterpart to #112/#109: `NetworkMonitor.swift`'s `estimateBandwidth(from:)
 reports `connectionType: "none"`/`downloadSpeed: 0` for a connected but unrecognized
 transport, plus documentation of two previously-undocumented iOS behaviors (`liveLatency` is
 join-time-only on iOS, and iOS `downloadSpeed` is a fixed per-transport constant, not a
-measurement) — landed since the `v0.4.0` tag.
+measurement); a fix for 13 of the example app's 19 widget tests hanging on `pumpAndSettle`
+against pages whose `MediaController` keeps real periodic timers (`BufferingService`/
+`NetworkResilienceService`) running forever, bringing the example suite back to 19/19; 11
+feature pages added to `example/README.md`'s previously-incomplete table; and corrections to
+several stale hardcoded Dart test-suite counts across the docs — landed since the `v0.4.0`
+tag.
 
 > This file is the authoritative implementation roadmap referenced by `CLAUDE.md`.
 > It tracks current state and the real backlog. For architecture, UI/UX specs, and
