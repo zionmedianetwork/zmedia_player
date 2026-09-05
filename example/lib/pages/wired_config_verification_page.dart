@@ -24,9 +24,15 @@ import '../widgets/player_scaffold.dart';
 ///    not just in a debug log.
 /// 2. **[HlsConfig.liveLatency]** — settable and reloadable; position /
 ///    duration / bufferedPosition are shown as the best available join-time
-///    proxy on this page (see the section's own disclaimer, which also
-///    covers `PlaybackState.liveEdgeOffset`/`isAtLiveEdge` — this page does
-///    not wire those in — and the Android/iOS divergence in whether the
+///    proxy, and `PlaybackState.liveEdgeOffset` / `.isAtLiveEdge` /
+///    `.positionBasis` (issue #88) are rendered directly as their own rows
+///    ([_PositionReadout]) so the Android fix for issue #109 — reject a
+///    `getCurrentLiveOffset()` value larger than the live window, fall back
+///    to the bounded computation — and the still-open manifest defect behind
+///    issue #110 are both visible on a real device, not just in `adb
+///    logcat` (see the section's own disclaimer for how to read the three
+///    cases: a rejected/bounded offset, a healthy live edge, and VOD's
+///    `null`/`absolute`, and the Android/iOS divergence in whether the
 ///    configured offset is *maintained* after the initial join).
 /// 3. **[NotificationConfig.customActions] / .priority / .dismissible**
 ///    (Android only — see those fields' dartdocs for why iOS cannot honour
@@ -725,8 +731,20 @@ class _PositionReadout extends StatelessWidget {
   final PlaybackState state;
   const _PositionReadout({required this.state});
 
+  /// Whether [PlaybackState.liveEdgeOffset] is within the currently known
+  /// live/DVR window (`duration`), i.e. the exact invariant issue #109's fix
+  /// restores. `null` when the question is not yet answerable: no offset
+  /// reported, or duration not yet known.
+  bool? get _offsetWithinWindow {
+    final offset = state.liveEdgeOffset;
+    if (offset == null) return null;
+    if (state.duration <= Duration.zero) return null;
+    return offset <= state.duration;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final withinWindow = _offsetWithinWindow;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -739,9 +757,122 @@ class _PositionReadout extends StatelessWidget {
             InfoRow(
                 label: 'bufferedPosition',
                 value: state.bufferedPosition.toString()),
+            const Divider(height: 16),
+            KeyedSubtree(
+              key: const Key('liveEdgeOffset_row'),
+              child: InfoRow(
+                label: 'liveEdgeOffset',
+                value: state.liveEdgeOffset == null
+                    ? 'null (VOD, or live edge not yet known)'
+                    : state.liveEdgeOffset.toString(),
+              ),
+            ),
+            KeyedSubtree(
+              key: const Key('offsetWithinWindow_row'),
+              child: InfoRow(
+                label: 'offset <= duration',
+                value: withinWindow == null
+                    ? 'n/a (no offset/duration yet)'
+                    : withinWindow
+                        ? 'true (issue #109 invariant holds)'
+                        : 'FALSE -- issue #109 defect signature',
+              ),
+            ),
+            KeyedSubtree(
+              key: const Key('isAtLiveEdge_row'),
+              child: InfoRow(
+                  label: 'isAtLiveEdge', value: state.isAtLiveEdge.toString()),
+            ),
+            KeyedSubtree(
+              key: const Key('positionBasis_row'),
+              child: InfoRow(
+                  label: 'positionBasis', value: state.positionBasis.name),
+            ),
+            const SizedBox(height: 8),
+            _LiveEdgeCaseBanner(state: state, withinWindow: withinWindow),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Summarizes which of the three verification cases the current
+/// [PlaybackState] represents, so a tester can tell them apart at a glance
+/// (color + one line) instead of cross-referencing four separate rows:
+///
+/// 1. **Defective manifest (issue #109)** -- would show as `offset <=
+///    duration` reading `FALSE` above; after the fix this must never be
+///    reached (native now substitutes the bounded fallback before this page
+///    ever sees the value), so this banner renders it as an anomaly if it
+///    ever does appear.
+/// 2. **Healthy live stream** -- `liveEdgeOffset` non-null, bounded, and
+///    within [PlaybackState.defaultLiveEdgeTolerance] of the edge.
+/// 3. **VOD** -- `liveEdgeOffset: null`, `positionBasis: absolute`.
+class _LiveEdgeCaseBanner extends StatelessWidget {
+  final PlaybackState state;
+  final bool? withinWindow;
+  const _LiveEdgeCaseBanner({required this.state, required this.withinWindow});
+
+  @override
+  Widget build(BuildContext context) {
+    final (String text, Color color) = _classify();
+    return Container(
+      key: const Key('live_edge_case_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+    );
+  }
+
+  (String, Color) _classify() {
+    final offset = state.liveEdgeOffset;
+
+    if (offset == null) {
+      if (state.positionBasis == PositionBasis.liveWindow) {
+        return (
+          'Live window basis but no liveEdgeOffset yet -- normal for a few '
+              'position updates right after a live load.',
+          Colors.blueGrey,
+        );
+      }
+      return (
+        'VOD case: liveEdgeOffset is null and positionBasis is absolute. '
+            'Expected for the VOD MP4 source (and briefly for a live source '
+            'before the first onPositionChanged event).',
+        Colors.blueGrey,
+      );
+    }
+
+    if (withinWindow == false) {
+      return (
+        'ANOMALY: liveEdgeOffset exceeds duration -- this is the issue #109 '
+            'defect signature. After the fix you should never see this row; '
+            'the bounded fallback should show above instead. Report it if '
+            'you do.',
+        Colors.red,
+      );
+    }
+
+    if (state.isAtLiveEdge) {
+      return (
+        'Healthy live stream: at the live edge, within the '
+            '${PlaybackState.defaultLiveEdgeTolerance.inSeconds}s tolerance.',
+        Colors.green,
+      );
+    }
+
+    return (
+      'Live, bounded within the window but beyond the '
+          '${PlaybackState.defaultLiveEdgeTolerance.inSeconds}s edge '
+          'tolerance -- expected right after a DVR scrub-back or a rebuffer. '
+          'Watch that it stays bounded rather than growing without bound '
+          '(see the disclaimer below for the issue #110 tell).',
+      Colors.orange,
     );
   }
 }
@@ -759,9 +890,19 @@ class _LiveLatencyDisclaimer extends StatelessWidget {
       ),
       child: Text(
         'position/duration/bufferedPosition above are the join-time proxies '
-        'this page shows; for the ongoing distance from the live edge, watch '
-        'controller.player.liveEdgeOffset / isAtLiveEdge instead (not wired '
-        'into this page\'s readout -- see PlaybackState.liveEdgeOffset).\n\n'
+        'for liveLatency itself; for the ongoing distance from the live '
+        'edge, read the liveEdgeOffset / offset <= duration / isAtLiveEdge / '
+        'positionBasis rows above instead (PlaybackState.liveEdgeOffset -- '
+        'issue #88) plus the colored banner underneath them, which names '
+        'which of three cases you are looking at:\n'
+        '- liveEdgeOffset non-null and NOT bounded by duration (banner red, '
+        '"offset <= duration" reads FALSE): the issue #109 defect signature '
+        '-- must not appear after the Android fix now on main; a bounded '
+        'fallback value should show instead.\n'
+        '- liveEdgeOffset non-null, bounded, isAtLiveEdge true (banner '
+        'green): a healthy live stream riding the edge.\n'
+        '- liveEdgeOffset null, positionBasis absolute (banner grey): VOD, '
+        'or a live source before the first position event arrives.\n\n'
         'The two platforms behave differently after the initial join, and '
         'that difference will not show up as an error, only as a drifting '
         'liveEdgeOffset over a long session:\n'

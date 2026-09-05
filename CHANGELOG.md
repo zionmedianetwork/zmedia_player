@@ -190,6 +190,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correct; the diagnostic exists solely to name it. See
   [Manifest time-anchor defect](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
   for the full worked example and detection guidance.
+- **On-device live-edge readout in the example app**, so issues #109/#110 can be verified by
+  eye on a real device instead of only via `adb logcat` — CI never builds native code and every
+  test in the suite mocks the `MethodChannel`, so an on-device check against a real stream was
+  otherwise the only verification path with no way to visually confirm it.
+  `example/lib/pages/wired_config_verification_page.dart`'s Live Latency section now renders
+  `PlaybackState.liveEdgeOffset`/`.isAtLiveEdge`/`.positionBasis` (issue #88) as their own rows
+  (previously only referenced, apologetically, in that section's disclaimer text) plus a
+  color-coded `_LiveEdgeCaseBanner` distinguishing the three cases a tester needs to tell apart
+  at a glance: a rejected/out-of-window offset (the issue #109 defect signature — must not
+  appear after the fix now on `main`), a healthy live edge, and VOD's
+  `null`/`absolute`. `example/README.md`'s row for the page documents the addition; the page's
+  own dartdoc and `_LiveLatencyDisclaimer` were rewritten to point at the new rows instead of
+  disclaiming that they were not wired in.
 
 ## [0.4.0] - 2026-09-02
 

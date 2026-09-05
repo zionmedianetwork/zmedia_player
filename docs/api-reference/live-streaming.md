@@ -511,6 +511,14 @@ watchdog.dispose();
   there — never use `isAtLiveEdge` as a proxy for "is this a live stream"; use
   `player.isLive` or `positionBasis` for that.
 
+**Seeing these fields on a real device.** The example app's
+`pages/wired_config_verification_page.dart` renders `liveEdgeOffset`,
+`isAtLiveEdge`, `positionBasis`, and whether the offset is bounded by
+`duration` as their own rows, plus a color-coded banner naming which case
+you're looking at (defect/anomaly, healthy live edge, or VOD) — the only way
+to confirm any of this by eye, since CI never builds native code and every
+test in the package/example suites mocks the `MethodChannel`.
+
 ---
 
 ## Manifest time-anchor defect (`liveEdgeOffset` and `liveLatency`)
@@ -567,6 +575,11 @@ never real — eroding whatever cushion a join or a corrective `seekTo` establis
   Android/DASH specifically, combined with chronic rebuffering, is the behavioral symptom (see
   [High latency behind live edge / frequent buffering](#high-latency-behind-live-edge--frequent-buffering)
   below).
+- On device, the example app's `pages/wired_config_verification_page.dart` renders
+  `liveEdgeOffset` and an explicit "offset <= duration" row against a real stream, so this
+  fix (and the still-open issue #110 diagnostic) can be confirmed by eye rather than only via
+  `adb logcat` — see the pointer in [Stall watchdog for live streams](#stall-watchdog-for-live-streams)
+  above.
 
 **What to do about it.** Nothing in this package can correct the target offset on an affected
 manifest — the join-position arithmetic belongs to Media3, and Media3's input is the

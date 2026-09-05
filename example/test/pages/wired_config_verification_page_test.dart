@@ -275,4 +275,78 @@ void main() {
       await _cleanUp(tester);
     });
   });
+
+  group('live-edge readout (issues #88/#109/#110)', () {
+    // The mock channel handler returns `null` for every call, so no
+    // `onPositionChanged` event is ever delivered -- `MediaController`'s
+    // `PlaybackState` never advances off its `PlayerState.idle` default
+    // (see `MediaController._currentState`'s initializer). That default has
+    // `liveEdgeOffset: null` and `positionBasis: PositionBasis.absolute`,
+    // which is genuinely the VOD case (case 3 in the page dartdoc), true
+    // regardless of `_useLiveSource` -- there is no mocked-channel path that
+    // reaches the "healthy live edge" or "issue #109 anomaly" cases, which
+    // require a real `liveEdgeOffset` value from native. Those two are only
+    // observable on-device against a real stream, which is exactly why this
+    // page exists.
+    testWidgets(
+        'default (unreachable-live) state renders liveEdgeOffset null, '
+        'isAtLiveEdge false, positionBasis absolute', (tester) async {
+      await _pumpOnDeviceScreen(tester);
+
+      expect(
+        find.descendant(
+            of: find.byKey(const Key('liveEdgeOffset_row')),
+            matching: find.textContaining('null')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+            of: find.byKey(const Key('isAtLiveEdge_row')),
+            matching: find.text('false')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+            of: find.byKey(const Key('positionBasis_row')),
+            matching: find.text('absolute')),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+            of: find.byKey(const Key('offsetWithinWindow_row')),
+            matching: find.textContaining('n/a')),
+        findsOneWidget,
+      );
+
+      final banner = find.byKey(const Key('live_edge_case_banner'));
+      expect(banner, findsOneWidget);
+      expect(
+        find.descendant(of: banner, matching: find.textContaining('VOD')),
+        findsOneWidget,
+      );
+
+      await _cleanUp(tester);
+    });
+
+    testWidgets('rows and banner render without overflow after a reload',
+        (tester) async {
+      await _pumpOnDeviceScreen(tester);
+
+      // Flip the DVR toggle to exercise the reload path the live-latency
+      // section relies on -- the readout must keep rendering cleanly, even
+      // though (per the mocked channel) the values themselves stay at their
+      // VOD-shaped defaults.
+      await tester.tap(find.byKey(const Key('dvr_toggle')));
+      await _pumpBounded(tester);
+
+      expect(tester.takeException(), isNull);
+      expect(find.byKey(const Key('liveEdgeOffset_row')), findsOneWidget);
+      expect(find.byKey(const Key('offsetWithinWindow_row')), findsOneWidget);
+      expect(find.byKey(const Key('isAtLiveEdge_row')), findsOneWidget);
+      expect(find.byKey(const Key('positionBasis_row')), findsOneWidget);
+      expect(find.byKey(const Key('live_edge_case_banner')), findsOneWidget);
+
+      await _cleanUp(tester);
+    });
+  });
 }
