@@ -16,6 +16,8 @@ For the architecture narrative and contributor workflow, see [`CLAUDE.md`](CLAUD
 
 **Versions:** Flutter SDK `>=3.19.0` (developed/verified on **3.44.3** / Dart **3.12**) · iOS **13.0+** · Android **minSdk 23**, **compileSdk 35**, AndroidX Media3 **1.11.0**. iOS builds with **Swift Package Manager or CocoaPods**.
 
+**Consuming apps must not declare ExoPlayer 2 themselves.** Media3 replaced ExoPlayer 2 in v0.3.0; with both on the classpath `androidx.media3.ui.PlayerView` can fail to construct with a `ClassCastException` on `AspectRatioFrameLayout`, which presents as audio playing with no video — latent and non-deterministic, since it depends on which class dependency resolution picks. Documented in [getting-started.md](docs/api-reference/getting-started.md#exoplayer-2-on-the-classpath) (issue #108).
+
 ---
 
 ## Minimal working example

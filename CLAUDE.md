@@ -774,6 +774,12 @@ The control overlay consists of three main zones:
 ### Android
 - Min SDK: 23 (Marshmallow)
 - Uses AndroidX Media3 (androidx.media3.exoplayer)
+- Consuming apps must **not** also declare ExoPlayer 2
+  (`com.google.android.exoplayer:exoplayer`). Both on the classpath can make
+  `androidx.media3.ui.PlayerView` fail to construct with a `ClassCastException` on
+  `AspectRatioFrameLayout` — presenting as audio playing with no video, latently and
+  non-deterministically. Documented for consumers in
+  `docs/api-reference/getting-started.md` and `README.md` (issue #108)
 - Requires INTERNET and ACCESS_NETWORK_STATE permissions
 - Chromecast requires Google Play Services
 
