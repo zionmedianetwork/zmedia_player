@@ -105,23 +105,35 @@ class PlaybackState {
   /// live stream — with **or without** `enableDvr` — once the platform can
   /// answer.
   ///
-  /// Sourced natively, not computed in Dart:
+  /// Sourced natively, not computed in Dart — and **the two platforms measure
+  /// different quantities under this one name** (issue #120):
   ///  - **Android** — `Player.getCurrentLiveOffset()`, falling back to
   ///    "window length minus window-relative position" when that returns
-  ///    `C.TIME_UNSET`.
+  ///    `C.TIME_UNSET`. This is distance from the *published* live edge as the
+  ///    manifest's own segment timeline describes it, and commonly reads
+  ///    15-30s during healthy playback of a standard (non-low-latency)
+  ///    stream — a *healthy* Android live player does not sit at an offset of
+  ///    zero.
   ///  - **iOS** — the end of `AVPlayerItem.seekableTimeRanges.last` (the live
-  ///    edge) minus `AVPlayerItem.currentTime()`.
+  ///    edge) minus `AVPlayerItem.currentTime()`. During live playback AVPlayer
+  ///    keeps the playhead pinned to that end, so this reads **under a second,
+  ///    by construction** — not because iOS plays measurably closer to the
+  ///    edge, but because both operands share the same loaded range. One
+  ///    consequence: [isAtLiveEdge] is effectively always `true` on iOS.
+  ///    Another: a `liveLatency` cushion configured on iOS is not observable
+  ///    through this field — the gap it maintains lives between the seekable
+  ///    range's end and the published edge, outside what this subtraction can
+  ///    see.
+  ///
+  /// The values are therefore **not comparable across platforms**. What does
+  /// hold on both: a genuinely frozen playhead in a sliding window grows this
+  /// value without bound, which is why it (not `position`) is the reliable
+  /// live-stall signal, and DVR scrub-back grows it correctly on both. See
+  /// `docs/api-reference/live-streaming.md`'s "Platform divergence" section
+  /// for the full explanation.
   ///
   /// Delivered on the existing `onPositionChanged` event under the
   /// `liveEdgeOffset` key (milliseconds); see `docs/api-reference/events.md`.
-  ///
-  /// Note that a *healthy* live player does not sit at an offset of zero — a
-  /// standard (non-low-latency) HLS/DASH player rides the edge several target
-  /// segment durations behind it. What distinguishes a healthy edge from a
-  /// frozen playhead is not the magnitude of this value but whether it stays
-  /// bounded: **against a frozen playhead in a sliding window this value grows
-  /// without bound**, which is the single most reliable live stall signal this
-  /// package exposes. See `docs/api-reference/live-streaming.md`.
   final Duration? liveEdgeOffset;
 
   /// Which timeline [position] is currently measured against — see
@@ -145,6 +157,11 @@ class PlaybackState {
   ///
   /// Low-latency streams should tighten this via [isAtLiveEdgeWithin];
   /// long-segment streams may need to widen it the same way.
+  ///
+  /// This reasoning is calibrated to Android's measurement of [liveEdgeOffset]
+  /// (distance from the *published* live edge). On iOS, where that field sits
+  /// under a second by construction during live playback, this tolerance is
+  /// not the discriminator doing the work — see [liveEdgeOffset]'s dartdoc.
   static const Duration defaultLiveEdgeTolerance = Duration(seconds: 15);
 
   const PlaybackState({
@@ -219,6 +236,12 @@ class PlaybackState {
   /// meaningful question for VOD, so it is answered `false` rather than
   /// thrown or `null`.
   ///
+  /// **Near-degenerate on iOS.** [liveEdgeOffset] sits under a second there by
+  /// construction during live playback (see its dartdoc), so this reads
+  /// effectively always `true` on iOS — a `false` reading is the informative
+  /// signal there, not a steady `true`. On Android, where the offset tracks
+  /// distance from the published live edge, this behaves as documented above.
+  ///
   /// Use [isAtLiveEdgeWithin] to apply a different tolerance.
   bool get isAtLiveEdge => isAtLiveEdgeWithin(defaultLiveEdgeTolerance);
 
@@ -228,6 +251,9 @@ class PlaybackState {
   /// momentarily reported slightly *ahead* of the last known edge, which
   /// happens transiently on both platforms as the edge advances between
   /// samples) counts as at the edge.
+  ///
+  /// See [liveEdgeOffset]'s dartdoc for why this is near-degenerately `true`
+  /// on iOS for any reasonable [tolerance].
   bool isAtLiveEdgeWithin(Duration tolerance) {
     final offset = liveEdgeOffset;
     if (offset == null) return false;

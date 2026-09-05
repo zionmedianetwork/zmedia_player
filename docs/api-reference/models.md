@@ -198,6 +198,19 @@ yet; it *is* reported for live streams both with and without `enableDvr`.
 `isAtLiveEdge` is `liveEdgeOffset <= defaultLiveEdgeTolerance` (15s), and `false`
 whenever the offset is `null`.
 
+**The two platforms measure different quantities under this one field name**
+(issue #120), and the values are not comparable. Android's computation measures
+distance from the *published* live edge (commonly 15-30s during healthy
+playback of a standard stream). iOS's "bounded by construction" phrasing above
+is doing real work: because AVPlayer keeps the playhead pinned to the end of
+the seekable range during live playback, the subtraction reads under a second
+there, essentially regardless of how the stream is actually behaving — which
+in turn makes `isAtLiveEdge` effectively always `true` on iOS, and means a
+`liveLatency` cushion configured on iOS cannot be observed through this field.
+See [live-streaming.md](live-streaming.md#platform-divergence-this-value-measures-different-things)
+for the full explanation, including what still works identically on both
+platforms (stall detection and DVR scrub-back).
+
 **`positionBasis` matters for stall detection.** On `PositionBasis.liveWindow` the
 window start slides forward with the playhead, so a *constant* `position` is what
 healthy playback looks like — not a stall. Branch on this rather than inferring the

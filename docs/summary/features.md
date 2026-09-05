@@ -74,7 +74,11 @@ Comprehensive list of all implemented features in the ZMedia Player package.
   [Manifest time-anchor defect](../api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)) —
   and `AVPlayerItem.seekableTimeRanges` on iOS, and delivered on the existing
   `onPositionChanged` event. Reported for live streams with and without DVR; `null`/`false` for
-  VOD
+  VOD. **The two platforms measure different quantities under this name and the values are not
+  comparable** — Android reports distance from the published edge (commonly 15-30s during
+  healthy playback), iOS is bounded near zero by construction, making `isAtLiveEdge`
+  effectively always `true` there. See
+  [Platform divergence](../api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things)
 - **Position Basis Reporting** - `PlaybackState.positionBasis` (`PositionBasis.absolute` |
   `.liveWindow`) tells a host which timeline `position` is measured against, so a stall
   detector does not mistake a healthy live edge (constant window-relative position) for a

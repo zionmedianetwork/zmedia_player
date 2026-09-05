@@ -1033,7 +1033,11 @@ class _PositionReadout extends StatelessWidget {
 ///    ever sees the value), so this banner renders it as an anomaly if it
 ///    ever does appear.
 /// 2. **Healthy live stream** -- `liveEdgeOffset` non-null, bounded, and
-///    within [PlaybackState.defaultLiveEdgeTolerance] of the edge.
+///    within [PlaybackState.defaultLiveEdgeTolerance] of the edge. On iOS
+///    this case is essentially the only one you will ever see while
+///    playing live: `liveEdgeOffset` sits under a second by construction
+///    there, so this banner reads green almost continuously regardless of
+///    stream health (issue #120) -- see [_LiveLatencyDisclaimer].
 /// 3. **VOD** -- `liveEdgeOffset: null`, `positionBasis: absolute`.
 class _LiveEdgeCaseBanner extends StatelessWidget {
   final PlaybackState state;
@@ -1086,8 +1090,11 @@ class _LiveEdgeCaseBanner extends StatelessWidget {
 
     if (state.isAtLiveEdge) {
       return (
-        'Healthy live stream: at the live edge, within the '
-            '${PlaybackState.defaultLiveEdgeTolerance.inSeconds}s tolerance.',
+        'Live stream, at the live edge (within the '
+            '${PlaybackState.defaultLiveEdgeTolerance.inSeconds}s tolerance). '
+            'On iOS this reads true almost continuously by construction, not '
+            'as evidence of a 15-30s Android-style ride behind the edge -- '
+            'see the disclaimer below (issue #120).',
         Colors.green,
       );
     }
@@ -1126,29 +1133,47 @@ class _LiveLatencyDisclaimer extends StatelessWidget {
         '-- must not appear after the Android fix now on main; a bounded '
         'fallback value should show instead.\n'
         '- liveEdgeOffset non-null, bounded, isAtLiveEdge true (banner '
-        'green): a healthy live stream riding the edge.\n'
+        'green): a healthy live stream riding the edge on Android; on iOS '
+        'this is also the near-permanent steady state during live playback '
+        '(see the platform-divergence paragraph below), not a special sign '
+        'of health there.\n'
         '- liveEdgeOffset null, positionBasis absolute (banner grey): VOD, '
         'or a live source before the first position event arrives.\n\n'
-        'Both platforms now maintain the configured cushion after the '
-        'initial join, but by different mechanisms with different visible '
-        'costs -- neither shows up as an error, so watch liveEdgeOffset '
-        'itself over a long session:\n'
+        'IMPORTANT -- liveEdgeOffset measures a different quantity on each '
+        'platform and the two are not comparable (issue #120), verified on '
+        'this same stream: Android reads a stable ~18s (distance from the '
+        'published live edge); iOS reads consistently under 1s. That is not '
+        'a bug on either side -- iOS computes seekableTimeRanges.last minus '
+        'currentTime(), and AVPlayer keeps the playhead pinned to that end '
+        'during live playback, so the subtraction is near-zero by '
+        'construction. Consequence: isAtLiveEdge (and this banner reading '
+        'green) is true almost continuously on iOS, so do not read a green '
+        'banner there as "riding 15-30s behind the edge" the way it would on '
+        'Android.\n\n'
+        'Both platforms now maintain the configured liveLatency cushion '
+        'after the initial join, but by different mechanisms with different '
+        'visible costs, and only one of them shows up in liveEdgeOffset:\n'
         '- Android (LiveConfiguration.targetOffsetMs) actively maintains the '
         'target via playback-speed adjustment -- a smooth correction, no '
-        'visible jump -- EXCEPT on a manifest whose unix-time anchor '
-        'disagrees with its own segment timeline, which silently defeats it '
-        'entirely (issue #110, still open). Tell for that case: adb logcat '
-        'for a one-time MediaPlayerInstance warning naming the observed '
-        'offset/window and that liveLatency will not take effect on this '
-        'stream.\n'
+        'visible jump, and visible in liveEdgeOffset over a long session -- '
+        'EXCEPT on a manifest whose unix-time anchor disagrees with its own '
+        'segment timeline, which silently defeats it entirely (issue #110, '
+        'still open). Tell for that case: adb logcat for a one-time '
+        'MediaPlayerInstance warning naming the observed offset/window and '
+        'that liveLatency will not take effect on this stream.\n'
         '- iOS 14+ (configuredTimeOffsetFromLive) also maintains the target '
         'now: this package sets automaticallyPreservesTimeOffsetFromLive = '
         'true, so AVPlayer skips forward after a rebuffer to restore the '
-        'cushion to what it was when buffering began -- expect a visible '
-        'forward jump in liveEdgeOffset right after a rebuffer, rather than '
-        'the unbounded drift this page used to describe. There is no way to '
-        'opt out of the skip and get the old drift-instead-of-skip '
-        'behavior.\n'
+        'cushion to what it was when buffering began. This cushion is NOT '
+        'observable through liveEdgeOffset on iOS -- that field stays '
+        'pinned near zero regardless of whether the cushion is held or '
+        'eroded, because the gap it maintains lives between the seekable '
+        'range\'s end and the published live edge, outside what '
+        'liveEdgeOffset can see. The only signal this page (or this '
+        'package\'s API) exposes for it is a visible forward jump in '
+        'position/duration right after a rebuffer, watched by eye -- there '
+        'is no way to opt out of the skip and get the old '
+        'drift-instead-of-skip behavior.\n'
         'Judge liveLatency\'s actual join-time effect by ear/eye against the '
         'real stream after reloading with each option -- this page does not '
         'assert it from a Dart-exposed field.',

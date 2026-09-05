@@ -40,10 +40,11 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
   support), quality switching via each native player's own defaults
 - Live HLS/DASH playback (`MediaItem.isLive`); `HlsConfig`/`DashConfig.enableDvr` gates seeking
   (and reports a DVR-window duration) on a live stream, `liveLatency` sets a target offset from
-  the live edge — Android maintains it over time, iOS (14+ only) honors it once at join/seek
-  and does not restore it after a rebuffer — and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate`
-  bound track selection — beyond that, remaining seek range and buffering behavior are still
-  governed by the native player's own defaults for the manifest (see the
+  the live edge — Android maintains it over time via playback-speed adjustment, iOS (14+ only)
+  maintains it too but via a visible forward skip after each rebuffer rather than a smooth
+  correction — and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track selection —
+  beyond that, remaining seek range and buffering behavior are still governed by the native
+  player's own defaults for the manifest (see the
   [Live Streaming guide](docs/api-reference/live-streaming.md) for the full field-by-field wiring
   table and platform caveats)
 - `MediaItem.streamingFormat` (`StreamingFormat.hls`/`.dash`/`.progressive`) states an item's
@@ -54,10 +55,16 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
   duration, falling back to a bounded computation when a manifest's time anchor disagrees with
   its segment timeline — and `AVPlayerItem.seekableTimeRanges` on iOS), `isAtLiveEdge`, and
   `positionBasis` — so a healthy live edge is distinguishable from a frozen playhead (on a
-  sliding window, `position` stays constant during *healthy* playback). See
+  sliding window, `position` stays constant during *healthy* playback). **Android and iOS
+  measure `liveEdgeOffset` differently and the values are not comparable** — Android reports
+  distance from the published edge (commonly 15-30s during healthy playback), iOS is bounded
+  near zero by construction, making `isAtLiveEdge` effectively always `true` there and the
+  `liveLatency` cushion invisible to this field on iOS; see
+  [Platform divergence](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things).
+  See also
   [Manifest time-anchor defect](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
-  for the failure mode this guards against, which also silently defeats `liveLatency` on an
-  affected manifest
+  for the failure mode this guards against on Android, which also silently defeats `liveLatency`
+  on an affected manifest
 - Subtitles: SRT, WebVTT, ASS/SSA, and embedded tracks with customizable styling
 - Manual and automatic quality/resolution selection; multiple audio tracks
 - Progressive download/caching; real-time bandwidth estimation
@@ -292,14 +299,20 @@ live-edge signal instead:
 
 ```dart
 final Duration? behind = controller.liveEdgeOffset; // null for VOD
-final bool atEdge = controller.isAtLiveEdge;        // within 15s of the edge
+final bool atEdge = controller.isAtLiveEdge;        // within 15s of the edge (Android)
 
-// A frozen playhead in a sliding window makes `liveEdgeOffset` grow without bound;
-// a healthy edge keeps it bounded, whatever `position` is doing.
+// A frozen playhead in a sliding window makes `liveEdgeOffset` grow without bound,
+// on both platforms; a healthy edge keeps it bounded, whatever `position` is doing.
 if (controller.positionBasis == PositionBasis.liveWindow && !atEdge) {
   // ... escalate
 }
 ```
+
+**Android and iOS measure `liveEdgeOffset` differently, and the values are not comparable**:
+Android reports distance from the published live edge (commonly 15-30s during healthy
+playback); iOS is pinned near zero by construction, which makes `isAtLiveEdge` effectively
+always `true` there. See
+[Platform divergence](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things).
 
 See [Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall-watchdog-for-live-streams)
 for a complete, copy-pasteable implementation covering VOD, live-without-DVR and live-with-DVR.

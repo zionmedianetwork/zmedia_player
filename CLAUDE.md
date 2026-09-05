@@ -480,7 +480,21 @@ A separate exported module — not to be confused with `CrashReporter` in core:
     `configuredTimeOffsetFromLive`/`recommendedTimeOffsetFromLive` — those are targets,
     constant by construction) — bounded by construction (both operands come from the
     `AVPlayerItem`'s own timeline, with no unix-time anchor involved), so it cannot exhibit
-    the Android defect below and needed no change.
+    the Android defect below and needed no change. **That same boundedness is why iOS reads
+    near-zero.** During live playback AVPlayer keeps the playhead pinned to the end of the
+    seekable range, so the subtraction is under a second, by construction — verified
+    on-device on the same stream: Android held a stable ~18s, iOS stayed consistently under
+    1s (issue #120). This is not a units/timeline bug on either side — both computations are
+    internally correct and measure different things (Android: distance from the *published*
+    edge; iOS: a value that is ~0 whenever the item is loaded and playing live, whatever its
+    actual health). Consequences: `isAtLiveEdge` is effectively always `true` on iOS (see
+    below); the two platforms' `liveEdgeOffset` values are not comparable; and a `liveLatency`
+    cushion held via `automaticallyPreservesTimeOffsetFromLive` on iOS is invisible to this
+    field — the gap it maintains sits between the seekable range's end and the *published*
+    edge, outside what `seekableTimeRanges.last - currentTime()` can see. What still works
+    identically on both platforms: a genuinely frozen playhead grows the value without bound,
+    and DVR scrub-back grows it correctly. See `docs/api-reference/live-streaming.md`'s
+    "Platform divergence" section for the full write-up.
   - **Manifest time-anchor defect (issue #109/#110).** `Player.getCurrentLiveOffset()` is
     `nowUnixTime - windowStartTime - position`, and for DASH, `windowStartTime` derives from
     `manifest.availabilityStartTimeMs`. If a packager anchors that to broadcast start while
@@ -501,7 +515,10 @@ A separate exported module — not to be confused with `CrashReporter` in core:
     this package; see `docs/api-reference/live-streaming.md` for the full worked example.
   - `isAtLiveEdge` / `isAtLiveEdgeWithin(tolerance)` / `PlaybackState.defaultLiveEdgeTolerance`
     (**15s**, matching video.js's `liveTolerance`; a healthy standard-HLS player rides 15-30s
-    behind the edge, so a tighter default would read `false` for healthy playback).
+    behind the edge, so a tighter default would read `false` for healthy playback). This
+    reasoning is Android-calibrated: since `liveEdgeOffset` is under a second by construction
+    on iOS during live playback, `isAtLiveEdge` reads effectively always `true` there — a
+    `false` reading is the informative signal on iOS, not a steady `true` (issue #120).
   - `positionBasis` (`PositionBasis.absolute` | `.liveWindow`) — which timeline `position` is
     on. `liveWindow` for any live item on Android; on iOS only when `enableDvr: true`. That
     divergence is deliberate: each platform reports the basis its values are actually on.
@@ -561,6 +578,16 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    always a fixed per-transport constant (see `docs/api-reference/models.md`'s Network
    section), unlike Android's system-hint-derived value. See
    `docs/api-reference/events.md#onnetworkstatuschanged`
+15. **`liveEdgeOffset`/`isAtLiveEdge` are not comparable across platforms** (issue #120) -
+   Android measures distance from the *published* live edge (commonly 15-30s during healthy
+   playback); iOS's computation is pinned under a second by construction during live playback
+   (AVPlayer keeps the playhead at the end of the seekable range, which is also the value's
+   own reference point). Consequently `isAtLiveEdge` is effectively always `true` on iOS, and
+   a `liveLatency` cushion held via `automaticallyPreservesTimeOffsetFromLive` is invisible to
+   `liveEdgeOffset` there. Both computations are internally correct; do not treat either as a
+   defect, and do not build cross-platform UI/alerting thresholds on the assumption the two
+   numbers mean the same thing. See "Live-edge signal (issue #88)" above and
+   `docs/api-reference/live-streaming.md`'s "Platform divergence" section
 
 ## UI/UX Design Specifications
 
