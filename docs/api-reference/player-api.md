@@ -302,7 +302,7 @@ event (see [Events](events.md#onpositionchanged)):
 
 | Getter | Type | Value |
 |---|---|---|
-| `liveEdgeOffset` | `Duration?` | Distance behind the live edge. `null` for VOD and while the platform cannot answer. Reported for live streams with **and without** `enableDvr`. Android: `Player.getCurrentLiveOffset()`. iOS: end of `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()`. |
+| `liveEdgeOffset` | `Duration?` | Distance behind the live edge. `null` for VOD and while the platform cannot answer. Reported for live streams with **and without** `enableDvr`. Android: `Player.getCurrentLiveOffset()`, sanity-checked against the live window's own duration and falling back to a bounded computation when a manifest's time anchor disagrees with its segment timeline (see [Manifest time-anchor defect](live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)). iOS: end of `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()`, bounded by construction. |
 | `isAtLiveEdge` | `bool` | `liveEdgeOffset <= PlaybackState.defaultLiveEdgeTolerance` (15s). `false` whenever the offset is `null`. Use `currentState.isAtLiveEdgeWithin(tolerance)` for a different threshold. |
 | `positionBasis` | `PositionBasis` | Which timeline `currentState.position` is on. `liveWindow` means a **constant `position` is not a stall** — see [Live Streaming](live-streaming.md#knowing-which-timeline-position-is-on). |
 

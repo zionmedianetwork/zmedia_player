@@ -641,7 +641,7 @@ Where each value comes from natively:
 
 | | Android (ExoPlayer / Media3) | iOS (AVFoundation) |
 |---|---|---|
-| `liveEdgeOffset` | `Player.getCurrentLiveOffset()`; when that returns `C.TIME_UNSET`, falls back to `Timeline.Window.durationMs - Player.getCurrentPosition()` (both window-relative, so the difference is the distance to the live edge) | End of `AVPlayerItem.seekableTimeRanges.last` (`start + duration`) minus `AVPlayerItem.currentTime()`, clamped to >= 0 |
+| `liveEdgeOffset` | `Player.getCurrentLiveOffset()`, **sanity-checked against the live window first** (issue #109): used only when it is `C.TIME_UNSET` or `<= Timeline.Window.durationMs`. Falls back to `Timeline.Window.durationMs - Player.getCurrentPosition()` (both window-relative, so the difference is the distance to the live edge) both when the platform value is `C.TIME_UNSET` **and** when it exceeds the window's own duration — the latter is provably wrong (a manifest whose unix-time anchor disagrees with its segment timeline; see `docs/api-reference/live-streaming.md`'s "Manifest time-anchor defect" section) rather than trusted | End of `AVPlayerItem.seekableTimeRanges.last` (`start + duration`) minus `AVPlayerItem.currentTime()`, clamped to >= 0 — bounded by construction (no unix-time anchor involved), so it needed no equivalent check |
 | `positionBasis` | `"liveWindow"` whenever `Timeline.Window.isLive()` — ExoPlayer's `getCurrentPosition()` is window-relative for **any** live item, DVR or not | `"liveWindow"` only when the live **DVR** window translation is applied; a live item without `enableDvr` reports `"absolute"`, because there `position` is the `AVPlayerItem`'s own absolute timeline |
 
 The `positionBasis` divergence between platforms for *live-without-DVR* is
