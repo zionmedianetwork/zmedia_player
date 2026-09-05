@@ -23,9 +23,11 @@ import '../widgets/player_scaffold.dart';
 ///    rejected, live-with-DVR and VOD are unaffected — is visible on screen,
 ///    not just in a debug log.
 /// 2. **[HlsConfig.liveLatency]** — settable and reloadable; position /
-///    duration / bufferedPosition are shown as the best available proxy
-///    (see the section's own disclaimer for why nothing more precise than
-///    that is exposed).
+///    duration / bufferedPosition are shown as the best available join-time
+///    proxy on this page (see the section's own disclaimer, which also
+///    covers `PlaybackState.liveEdgeOffset`/`isAtLiveEdge` — this page does
+///    not wire those in — and the Android/iOS divergence in whether the
+///    configured offset is *maintained* after the initial join).
 /// 3. **[NotificationConfig.customActions] / .priority / .dismissible**
 ///    (Android only — see those fields' dartdocs for why iOS cannot honour
 ///    them). The notification is posted automatically the first time
@@ -756,13 +758,29 @@ class _LiveLatencyDisclaimer extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        'This package exposes no explicit "distance from live edge" value. '
-        'position/duration/bufferedPosition above are the only observable '
-        'proxies -- liveLatency\'s actual effect (how close to the live '
-        'edge playback starts, Android: LiveConfiguration.targetOffsetMs, '
-        'iOS 14+: configuredTimeOffsetFromLive) must be judged by ear/eye '
-        'against the real stream after reloading with each option, not '
-        'asserted from a Dart-exposed field.',
+        'position/duration/bufferedPosition above are the join-time proxies '
+        'this page shows; for the ongoing distance from the live edge, watch '
+        'controller.player.liveEdgeOffset / isAtLiveEdge instead (not wired '
+        'into this page\'s readout -- see PlaybackState.liveEdgeOffset).\n\n'
+        'The two platforms behave differently after the initial join, and '
+        'that difference will not show up as an error, only as a drifting '
+        'liveEdgeOffset over a long session:\n'
+        '- Android (LiveConfiguration.targetOffsetMs) actively maintains the '
+        'target via playback-speed adjustment -- EXCEPT on a manifest whose '
+        'unix-time anchor disagrees with its own segment timeline, which '
+        'silently defeats it entirely (issue #110, still open). Tell for '
+        'that case: adb logcat for a one-time MediaPlayerInstance warning '
+        'naming the observed offset/window and that liveLatency will not '
+        'take effect on this stream.\n'
+        '- iOS 14+ (configuredTimeOffsetFromLive) only applies once, at '
+        'join/seek time. This package sets '
+        'automaticallyPreservesTimeOffsetFromLive = false, so AVPlayer never '
+        'skips forward to restore the cushion after a rebuffer -- expect '
+        'the playhead to drift further from the live edge, monotonically, '
+        'the longer this page stays open and rebuffers.\n'
+        'Judge liveLatency\'s actual join-time effect by ear/eye against the '
+        'real stream after reloading with each option -- this page does not '
+        'assert it from a Dart-exposed field.',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     );

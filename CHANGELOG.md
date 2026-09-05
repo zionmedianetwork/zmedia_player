@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **iOS `NetworkMonitor.estimateBandwidth(from:)` reported `connectionType: "none"` and
+  `downloadSpeed: 0` for a *connected* `NWPath`, the iOS counterpart to issue #112's Android
+  fix.** Its final fallthrough — reached for a satisfied path whose interface matched none of
+  `.wiredEthernet`/`.wifi`/`.cellular`/`.loopback`/`.other` — returned `(0.0, "none")`, the same
+  shape `offlineStatus()` uses for a genuine disconnection. `"none"` is meant to be a reliable
+  reachability discriminator independent of `quality`/`isAvailable` (see the `onNetworkStatusChanged`
+  discussion added for #112); this fallthrough silently broke that promise on iOS. It now returns
+  `(1.0, "unknown")`, mirroring `NetworkMonitor.kt`'s own unrecognized-transport fallthrough
+  (`estimateBandwidthFromType`'s `else -> 1000` Kbps / `connectionType`'s `else -> "unknown"`).
+  Both genuine offline paths (`offlineStatus()` and the `guard path.status == .satisfied` early
+  return in `getNetworkStatus(from:)`) are unchanged and still report `"none"`/`0`/`"offline"`.
+  `test/models/network_status_vocabulary_test.dart`'s drift guard already covers the new literal
+  (`"unknown"` was already an accepted intentional-fallback value) — no test change was needed.
+
+### Changed
+- **Documented that `liveLatency` behaves differently on Android and iOS**, not just that both
+  are "wired": Android's ExoPlayer actively maintains the target offset from the live edge via
+  playback-speed adjustment, while iOS's `AVPlayerItem.configuredTimeOffsetFromLive` (this
+  package sets `automaticallyPreservesTimeOffsetFromLive = false`) is honored only once, at
+  join/seek time, and is never restored after a rebuffer — so the iOS playhead drifts further
+  from the live edge as rebuffers accumulate, the opposite direction from Android's manifest
+  time-anchor defect (issue #110), which drifts *toward* a stale target. No behavior changed;
+  `automaticallyPreservesTimeOffsetFromLive` remains `false`. See `HlsConfig`/`DashConfig
+  .liveLatency`'s dartdoc and the [Live Streaming guide](docs/api-reference/live-streaming.md)
+  for the full trade-off — whether to flip it to `true` (trading the drift for a visible forward
+  skip after each rebuffer) is left as an open question for a future, deliberate change.
+- **Documented that iOS `NetworkStatus.downloadSpeed` is a fabricated constant, not a
+  measurement.** `NetworkMonitor.swift`'s `estimateBandwidth(from:)` returns a fixed
+  per-transport value (ethernet 50, wifi 5–10, cellular 2, loopback 1000, other/unknown 1 Mbps)
+  chosen purely from interface type — it never reads any system throughput signal. Android's
+  equivalent is at least link-derived (`NetworkCapabilities.linkDownstreamBandwidthKbps`, a
+  system hint, floored to a similar transport-based estimate only when that hint is degenerate).
+  A consumer using `downloadSpeed` for adaptive-streaming decisions should treat it as a rough
+  per-platform floor on iOS, not an actual bandwidth measurement. See
+  `docs/api-reference/models.md`'s Network section and
+  `docs/api-reference/events.md#onnetworkstatuschanged`.
 - **Documented that a consuming app must remove its own ExoPlayer 2 dependency (issue
   #108).** v0.3.0's breaking-changes note announced the move to AndroidX Media3 1.11.0
   (replacing ExoPlayer 2.19.1), but its Upgrading section only covered bumping the pinned

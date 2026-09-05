@@ -339,9 +339,31 @@ class HlsConfig extends StreamingConfig {
   /// Live stream latency target.
   ///
   /// **Android:** `MediaItem.LiveConfiguration.Builder.setTargetOffsetMs`.
-  /// **iOS:** `AVPlayerItem.configuredTimeOffsetFromLive` (with
-  /// `automaticallyPreservesTimeOffsetFromLive = false`) — iOS 14+ only;
-  /// silently has no effect on iOS 13, where the API does not exist.
+  /// ExoPlayer actively maintains this cushion via playback-speed
+  /// adjustment, so it drifts *toward* the target over time (subject to the
+  /// manifest's own live/DVR window — see issue #110, still open, for a
+  /// case where the manifest itself defeats this).
+  ///
+  /// **iOS:** `AVPlayerItem.configuredTimeOffsetFromLive` — iOS 14+ only;
+  /// silently has no effect on iOS 13, where the API does not exist. This is
+  /// a **join-time** setting, not a maintained target: per the AVFoundation
+  /// header, it "indicates how close to the latest content in a live stream
+  /// playback will begin after a live start or a seek to
+  /// `kCMTimePositiveInfinity`". This package additionally sets
+  /// `automaticallyPreservesTimeOffsetFromLive = false`, which per the same
+  /// header controls a *different, independent* behavior — whether the
+  /// player "skip[s] forward if necessary to restore the playhead's
+  /// distance from the live edge" after a rebuffer. `false` does not
+  /// disable `configuredTimeOffsetFromLive`; it only means the cushion is
+  /// honoured once at join/seek and then is never restored, so the playhead
+  /// drifts *away* from the live edge after every rebuffer (the opposite
+  /// direction from Android's ExoPlayer, which drifts *toward* its target).
+  /// `true` would trade that drift for a visible forward skip after each
+  /// rebuffer; this package currently chooses `false` (steady, no skip) but
+  /// that is a revisitable trade-off, not a settled one — track
+  /// `liveEdgeOffset`/`isAtLiveEdge` (see `docs/api-reference/live-streaming.md`,
+  /// "Stall watchdog for live streams") if a consumer needs to detect the
+  /// drift this causes.
   final Duration? liveLatency;
 
   const HlsConfig({

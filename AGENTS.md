@@ -179,8 +179,17 @@ documents as possibly `0` on a live, connected network — `fromBandwidth(0)` wo
 against `estimateBandwidthFromType` when non-positive on a network with real capabilities in
 hand; `offlineStatus()` (the canonical no-connection map on both platforms) is unaffected.
 `connectionType == "none"`, set only by `offlineStatus()`, remains the reliable reachability
-signal independent of `quality`/`isAvailable`. See
-`docs/api-reference/events.md#onnetworkstatuschanged`.
+signal independent of `quality`/`isAvailable`. `NetworkMonitor.swift`'s
+`estimateBandwidth(from:)` had its own instance of this bug in its final fallthrough branch
+(reached only for a satisfied `NWPath` whose interface matched none of the recognized types):
+it used to return `(0.0, "none")`, i.e. a *connected* path emitting the same shape as a genuine
+disconnection. It now returns `(1.0, "unknown")`, mirroring Android's `else -> 1000`
+(`estimateBandwidthFromType`) / `else -> "unknown"` (`connectionType`) fallthrough. Unlike
+Android, iOS's `downloadSpeed` is never link-derived at all — every branch of
+`estimateBandwidth(from:)` is a fixed per-transport constant chosen from interface type alone
+(ethernet 50, wifi 5–10, cellular 2, loopback 1000, other/unknown 1 Mbps), not a measurement.
+See `docs/api-reference/events.md#onnetworkstatuschanged` and
+`docs/api-reference/models.md`'s Network section.
 
 **Error categories.** `onError` carries a `category` in its details, drawn from a vocabulary both
 platforms share: `NETWORK`, `HTTP`, `DRM`, `DECODER`, `SOURCE`, `UNKNOWN`. Dart maps these onto the

@@ -687,8 +687,28 @@ every genuine offline path) is unaffected and still reports `quality: "offline"`
 
 iOS's `estimateBandwidth(from:)` derives its estimate from the transport/interface type rather
 than from a system bandwidth hint (fixed per-transport constants: ethernet 50 Mbps, wifi 5-10
-Mbps, cellular 2 Mbps, loopback 1000 Mbps, other 1 Mbps), so it has no equivalent degenerate-hint
-path and needed no analogous floor.
+Mbps, cellular 2 Mbps, loopback 1000 Mbps, other/unrecognized 1 Mbps) — it never reads a system
+bandwidth hint at all, so it has no direct equivalent of Android's `linkDownstreamBandwidthKbps`
+degeneracy. **`downloadSpeed` on iOS is therefore not a measurement in any sense** — it is
+always one of those fixed constants, chosen purely from interface type, whereas Android's is at
+least link-derived (a system hint, floored to the same transport estimate only when the hint
+itself is degenerate). A consumer relying on `downloadSpeed` for adaptive-streaming decisions
+should treat it as a rough per-platform floor, not a throughput measurement, and doubly so on
+iOS.
+
+iOS *did* have its own fallthrough defect, fixed alongside the `quality`-honouring change above:
+`estimateBandwidth(from:)`'s final fallthrough (a satisfied `NWPath` whose interface matched
+none of `.wiredEthernet`/`.wifi`/`.cellular`/`.loopback`/`.other`) used to return
+`(0.0, "none")` — a *connected* path reporting the same `downloadSpeed: 0`/`connectionType:
+"none"` shape as a genuine disconnection. It now returns `(1.0, "unknown")`, mirroring Android's
+own fallthrough (`estimateBandwidthFromType`'s `else -> 1000` Kbps / `connectionType`'s
+`else -> "unknown"`). This was a real instance of the bug the next paragraph's discriminator
+promise depends on: before this fix, `connectionType == "none"` could be emitted by iOS on a
+connected device, silently breaking any code relying on it as a reachability signal (see issue
+#112's discussion of that exact reliance). `offlineStatus()` and the `guard path.status ==
+.satisfied` early return in `getNetworkStatus(from:)` — the two genuine no-connection paths —
+are unaffected and still report `quality: "offline"`, `downloadSpeed: 0`, `connectionType:
+"none"`.
 
 Note that `isAvailable`/`quality` and `connectionType` remain two independent signals:
 `connectionType == "none"` is set only by each platform's `offlineStatus()`/no-connection map

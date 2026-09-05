@@ -40,9 +40,10 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
   support), quality switching via each native player's own defaults
 - Live HLS/DASH playback (`MediaItem.isLive`); `HlsConfig`/`DashConfig.enableDvr` gates seeking
   (and reports a DVR-window duration) on a live stream, `liveLatency` sets a target offset from
-  the live edge (iOS 14+), and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track
-  selection — beyond that, remaining seek range and buffering behavior are still governed by the
-  native player's own defaults for the manifest (see the
+  the live edge — Android maintains it over time, iOS (14+ only) honors it once at join/seek
+  and does not restore it after a rebuffer — and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate`
+  bound track selection — beyond that, remaining seek range and buffering behavior are still
+  governed by the native player's own defaults for the manifest (see the
   [Live Streaming guide](docs/api-reference/live-streaming.md) for the full field-by-field wiring
   table and platform caveats)
 - `MediaItem.streamingFormat` (`StreamingFormat.hls`/`.dash`/`.progressive`) states an item's

@@ -38,6 +38,19 @@ import 'package:zmedia_player/zmedia_player.dart';
 /// build on a physical device where `debugPrint` capture is not guaranteed)
 /// and printed to the console with the same `[NET]` prefix so they stay
 /// greppable when console capture *is* available.
+///
+/// ### `downloadKbps`/`Download speed` is not a throughput measurement
+/// Don't read this value as "how fast the network actually is right now".
+/// On Android it derives from `NetworkCapabilities.linkDownstreamBandwidthKbps`,
+/// a system-provided *hint* (itself falling back to a fixed per-transport
+/// estimate when that hint is absent or non-positive). On iOS it is
+/// *always* a fixed constant chosen purely from the active interface type —
+/// `NetworkMonitor.swift`'s `estimateBandwidth(from:)` never reads a system
+/// throughput signal at all (ethernet 50, Wi-Fi 5-10, cellular 2, loopback
+/// 1000, other/unrecognized 1 Mbps). Switching Wi-Fi networks or moving
+/// between rooms will never change this number on iOS; only the interface
+/// type switching (e.g. Wi-Fi -> cellular) will. See
+/// `docs/api-reference/models.md`'s Network section for the full caveat.
 class NetworkStatusPage extends StatefulWidget {
   const NetworkStatusPage({super.key});
 
@@ -220,7 +233,9 @@ class _IntroCard extends StatelessWidget {
         'transition (this page\'s player is not sent a snapshot merely by '
         'opening the page — see the page-level doc comment). Toggle '
         'airplane mode on/off, or switch WiFi ↔ cellular, to generate '
-        'events.',
+        'events. "Download speed" is not a throughput measurement — on '
+        'Android it is a system link hint, on iOS it is a fixed constant '
+        'chosen from interface type alone (see the page-level doc comment).',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     );
@@ -280,7 +295,10 @@ class _CurrentStatusCard extends StatelessWidget {
             _Row('Quality', s.quality.name),
             _Row('Connection type', s.connectionType.name),
             _Row('Metered', s.isMetered ? 'Yes' : 'No'),
-            _Row('Download speed', '${downloadKbps.toStringAsFixed(0)} Kbps'),
+            _Row(
+              'Download speed (estimate, not measured)',
+              '${downloadKbps.toStringAsFixed(0)} Kbps',
+            ),
             if (s.uploadSpeed != null)
               _Row('Upload speed',
                   '${((s.uploadSpeed! * 8) / 1000).toStringAsFixed(0)} Kbps'),
