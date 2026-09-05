@@ -631,6 +631,31 @@ Add to `android/app/src/main/AndroidManifest.xml`:
 Picture-in-Picture requires API 26+. Chromecast requires Google Play Services. For
 notifications on Android 13+, request the `POST_NOTIFICATIONS` runtime permission.
 
+**Remove any ExoPlayer 2 dependency of your own.** This package brings AndroidX Media3
+(`androidx.media3:media3-exoplayer`), which replaced ExoPlayer 2 in v0.3.0. If your app
+also declares the legacy library:
+
+```groovy
+// android/app/build.gradle — delete this
+implementation 'com.google.android.exoplayer:exoplayer:2.19.1'
+```
+
+both end up on the classpath, and `androidx.media3.ui.PlayerView` can fail to construct
+because the layout it inflates resolves `AspectRatioFrameLayout` to the legacy class:
+
+```
+java.lang.ClassCastException: com.google.android.exoplayer2.ui.AspectRatioFrameLayout
+  cannot be cast to androidx.media3.ui.AspectRatioFrameLayout
+    at androidx.media3.ui.PlayerView.<init>(PlayerView.java:437)
+```
+
+The symptom is **audio plays but no video**: decoding is fine, but the platform view never
+constructs, so nothing renders. Which class wins is a dependency-resolution accident, so
+this can lie dormant for weeks after the upgrade and then surface on a clean build, a
+Gradle sync, or a cache eviction — long after anything in your own history points at it.
+Unless your app has native player code of its own, this package's dependency is all you
+need.
+
 **Background audio.** Setting `allowBackgroundPlayback: true` makes the plugin hold an
 ExoPlayer wake lock (`WAKE_MODE_NETWORK`) so the decoder keeps running while the screen
 is off. Android will still reclaim the process unless your app keeps a **foreground

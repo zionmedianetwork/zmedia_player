@@ -187,7 +187,10 @@ See the [root README](../README.md) for the current released version.
 - **iOS:** minimum iOS 13.0; the plugin supports both Swift Package Manager
   (`ios/zmedia_player/Package.swift`) and CocoaPods. Enable SPM once with
   `flutter config --enable-swift-package-manager`.
-- **Android:** minimum SDK 23, compile SDK 35.
+- **Android:** minimum SDK 23, compile SDK 35. The package brings AndroidX Media3 1.11.0;
+  if your app declares ExoPlayer 2 itself, remove it — both on the classpath can break
+  video rendering. See
+  [ExoPlayer 2 on the classpath](api-reference/getting-started.md#exoplayer-2-on-the-classpath).
 
 ---
 

@@ -1,7 +1,7 @@
 # ZMedia Player - Roadmap
 
 **Version:** 0.3.0
-**Last Updated:** September 1, 2026
+**Last Updated:** September 5, 2026
 **Status:** Feature-complete for the 0.3.x line; distributed via GitHub releases.
 `CHANGELOG.md`'s `[Unreleased]` holds 4 `feat:` and 12 `fix:` commits landed since the
 `v0.3.0` tag (August 18, 2026) — a `feat:` present means the next release is a MINOR

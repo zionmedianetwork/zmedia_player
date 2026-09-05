@@ -26,6 +26,40 @@ dependencies:
 
 - Picture-in-Picture: API 26+ (relay `onPictureInPictureModeChanged` from your Activity).
 - Notifications on Android 13+: request the `POST_NOTIFICATIONS` runtime permission.
+- **Do not declare ExoPlayer 2 yourself.** This package brings AndroidX Media3, which
+  replaced ExoPlayer 2 in v0.3.0. Keeping
+  `implementation 'com.google.android.exoplayer:exoplayer:2.x'` in your
+  `android/app/build.gradle` puts both on the classpath and can make
+  `androidx.media3.ui.PlayerView` fail to construct — see
+  [ExoPlayer 2 on the classpath](#exoplayer-2-on-the-classpath) below.
+
+### ExoPlayer 2 on the classpath
+
+If your app declares ExoPlayer 2 (`com.google.android.exoplayer:exoplayer`) alongside this
+package, remove that declaration. With both libraries present,
+`androidx.media3.ui.PlayerView` inflates a layout whose `AspectRatioFrameLayout` can
+resolve to the legacy class:
+
+```
+java.lang.ClassCastException: com.google.android.exoplayer2.ui.AspectRatioFrameLayout
+  cannot be cast to androidx.media3.ui.AspectRatioFrameLayout
+    at androidx.media3.ui.PlayerView.<init>(PlayerView.java:437)
+    at ... ExpensiveAndroidViewController._sendCreateMessage
+```
+
+The symptom is **audio playing with no video**: the player decodes normally, but the
+platform view never constructs, so there is nothing to render into.
+
+This is worth checking even if video currently works. Which class wins is a
+dependency-resolution accident, so the breakage is latent and non-deterministic — it can
+appear weeks after the upgrade that caused it, the first time something forces a
+re-resolution (a clean, a Gradle sync, a cache eviction), with nothing in your own history
+to point at. Unless your app has native player code of its own, this package's
+`implementation` is sufficient.
+
+Verified against v0.4.0 on Android 11 (issue
+[#108](https://github.com/zionmedianetwork/zmedia_player/issues/108)); removing the
+app-side declaration fixes it.
 
 ### iOS
 

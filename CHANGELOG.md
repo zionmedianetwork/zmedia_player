@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Documented that a consuming app must remove its own ExoPlayer 2 dependency (issue
+  #108).** v0.3.0's breaking-changes note announced the move to AndroidX Media3 1.11.0
+  (replacing ExoPlayer 2.19.1), but its Upgrading section only covered bumping the pinned
+  ref and the `actionStream` → `actionEventStream` migration. It never said to delete an
+  app-side `implementation 'com.google.android.exoplayer:exoplayer:2.x'`. With both
+  libraries on the classpath, `androidx.media3.ui.PlayerView` inflates a layout whose
+  `AspectRatioFrameLayout` can resolve to the legacy class, throwing
+  `ClassCastException: com.google.android.exoplayer2.ui.AspectRatioFrameLayout cannot be
+  cast to androidx.media3.ui.AspectRatioFrameLayout` — which presents as **audio playing
+  with no video**, because the platform view never constructs while decoding continues
+  normally. The omission mattered because the failure is latent and non-deterministic:
+  which class wins is a dependency-resolution accident, so it can surface weeks after the
+  upgrade that caused it, on the first clean/Gradle sync/cache eviction, with nothing in
+  the app's own history pointing at it. Now covered in `README.md`'s Android platform
+  setup, a dedicated
+  [ExoPlayer 2 on the classpath](docs/api-reference/getting-started.md#exoplayer-2-on-the-classpath)
+  section in the getting-started guide, `docs/QUICK_START.md`'s platform notes, `AGENTS.md`
+  and `CLAUDE.md`. No code change — the package's own dependency was always correct.
+
 ## [0.4.0] - 2026-09-02
 
 ### Added
