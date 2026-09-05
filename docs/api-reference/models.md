@@ -300,6 +300,11 @@ const SubtitleConfig({
 
 - **Buffering:** `BufferingConfig`, `BufferHealth`, `BufferStatus` (healthy/warning/critical/underrun), `BufferStatistics`.
 - **Network:** `NetworkStatus`, `NetworkQuality`, `ConnectionType`, `NetworkChangeEvent`.
+  `NetworkStatus.fromPlatform` honours the platform's `quality` field when it parses to a
+  `NetworkQuality` member, falling back to `NetworkQuality.fromBandwidth(downloadSpeed)` only
+  when `quality` is absent or unparseable (issue #112 — see the
+  [`onNetworkStatusChanged` payload table](events.md#onnetworkstatuschanged) for the full
+  contract and why this matters). `toMap()`/`fromPlatform()` round-trip `quality` symmetrically.
 - **Analytics:** `QoEMetrics`, `PerformanceMetrics`, `EngagementMetrics`, `PlaybackEndReason`, `BufferEventType`.
 - **Notifications:** `NotificationConfig`, `NotificationAction`, `NotificationPriority` — pass a
   `NotificationConfig` to `NotificationService` directly (not `MediaConfig`) to drive media
