@@ -50,7 +50,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 
 | | |
 |---|---|
-| Package version | 0.3.0 |
+| Package version | see `pubspec.yaml` (also tracked in this file's own header above) |
 | Dart SDK | >=3.0.0 <4.0.0 |
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |

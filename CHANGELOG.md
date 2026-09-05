@@ -132,17 +132,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   13 hangs above went unnoticed for so long — `docs/implementation/testing.md` and
   `docs/summary/test-coverage.md` now state it (19, `cd example && flutter test`) alongside
   the package count.
-- **Documented that `liveLatency` behaves differently on Android and iOS**, not just that both
-  are "wired": Android's ExoPlayer actively maintains the target offset from the live edge via
-  playback-speed adjustment, while iOS's `AVPlayerItem.configuredTimeOffsetFromLive` (this
-  package sets `automaticallyPreservesTimeOffsetFromLive = false`) is honored only once, at
-  join/seek time, and is never restored after a rebuffer — so the iOS playhead drifts further
-  from the live edge as rebuffers accumulate, the opposite direction from Android's manifest
-  time-anchor defect (issue #110), which drifts *toward* a stale target. No behavior changed;
-  `automaticallyPreservesTimeOffsetFromLive` remains `false`. See `HlsConfig`/`DashConfig
-  .liveLatency`'s dartdoc and the [Live Streaming guide](docs/api-reference/live-streaming.md)
-  for the full trade-off — whether to flip it to `true` (trading the drift for a visible forward
-  skip after each rebuffer) is left as an open question for a future, deliberate change.
 - **Documented that iOS `NetworkStatus.downloadSpeed` is a fabricated constant, not a
   measurement.** `NetworkMonitor.swift`'s `estimateBandwidth(from:)` returns a fixed
   per-transport value (ethernet 50, wifi 5–10, cellular 2, loopback 1000, other/unknown 1 Mbps)
