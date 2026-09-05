@@ -18,12 +18,17 @@ import 'package:zmedia_player/zmedia_player.dart';
 /// values that are known to intentionally fall back to `.unknown` (see
 /// [intentionalUnknownFallbackLiterals] below).
 ///
-/// Deliberately NOT covering the `"quality"` field's vocabulary
-/// (excellent/good/fair/poor/offline/unknown): `NetworkStatus.fromPlatform`
-/// never reads it at all — it recomputes [NetworkQuality] itself from the
-/// `downloadSpeed` field via [NetworkQuality.fromBandwidth] — so a drift in
-/// native's `"quality"` string literal is unreachable dead data, not a bug a
-/// test could usefully guard against.
+/// Also covers the `"quality"` field's vocabulary
+/// (excellent/good/fair/poor/offline/unknown). Until issue #112,
+/// `NetworkStatus.fromPlatform` never read `"quality"` at all — it
+/// recomputed [NetworkQuality] itself from `downloadSpeed` via
+/// [NetworkQuality.fromBandwidth] — so a drift in native's string literal
+/// was unreachable dead data. Now `fromPlatform` honours `"quality"` when
+/// it parses (falling back to `fromBandwidth` only when the key is absent
+/// or unparseable, per [NetworkStatus.fromPlatform]'s doc comment), so a
+/// native typo/rename would silently degrade to the
+/// bandwidth-derived fallback instead of throwing — exactly the kind of
+/// drift this file exists to catch.
 void main() {
   const androidMonitorPath =
       'android/src/main/kotlin/com/zionmedianetwork/zmedia_player/NetworkMonitor.kt';
@@ -246,6 +251,125 @@ void main() {
               'type no native code can ever send is unreachable vocabulary '
               '— either wire it up natively or remove it from the Dart '
               'enum.',
+        );
+      }
+    });
+  });
+
+  /// Literal values `NetworkQuality._tryParse` (via `NetworkQuality.values`'
+  /// `.name`) recognizes. Unlike `ConnectionType.fromString`, there is no
+  /// aliasing (no "mobile" -> "cellular" equivalent) and no permissive
+  /// default: an unrecognized literal returns `null` from `_tryParse` and
+  /// `NetworkStatus.fromPlatform` falls back to `NetworkQuality
+  /// .fromBandwidth` instead — a silent behavior change, not a crash, which
+  /// is exactly why native's literals must stay an exact match for this
+  /// vocabulary.
+  final recognizedQualityLiterals =
+      NetworkQuality.values.map((q) => q.name).toSet();
+
+  group('NetworkQuality native/Dart drift guard (issue #112)', () {
+    void expectOnlyKnownQualities(Set<String> literals, String context) {
+      expect(literals, isNotEmpty,
+          reason: '$context yielded no quoted quality literals at all — '
+              'the extraction likely broke, not that there are none.');
+      for (final literal in literals) {
+        expect(
+          recognizedQualityLiterals.contains(literal),
+          isTrue,
+          reason: '$context emits quality "$literal", which '
+              'NetworkQuality._tryParse does not recognize '
+              '(${recognizedQualityLiterals.join(", ")}). '
+              'NetworkStatus.fromPlatform would silently fall back to '
+              'fromBandwidth for this value instead of throwing — fix the '
+              'native typo/rename, or add a matching NetworkQuality member '
+              'in lib/src/models/network_status.dart.',
+        );
+      }
+    }
+
+    test(
+        'Android getNetworkStatusFromCapabilities quality `when` block '
+        'only returns known literals', () {
+      final source = readRepoFile(androidMonitorPath);
+      final body = extractBlockBody(source, 'val quality = when {');
+      final literals = RegExp(r'"([a-z_]+)"')
+          .allMatches(body)
+          .map((m) => m.group(1)!)
+          .toSet();
+      expectOnlyKnownQualities(
+        literals,
+        'Android NetworkMonitor.getNetworkStatusFromCapabilities',
+      );
+    });
+
+    test('Android offlineStatus() only returns a known quality literal', () {
+      final source = readRepoFile(androidMonitorPath);
+      final body = extractParenBody(
+          source, 'private fun offlineStatus(): Map<String, Any> = mapOf(');
+      final match = RegExp(r'"quality" to "([a-z_]+)"').firstMatch(body);
+      expect(match, isNotNull,
+          reason: 'offlineStatus() should set a literal "quality" value '
+              'directly.');
+      expectOnlyKnownQualities(
+        {match!.group(1)!},
+        'Android NetworkMonitor.offlineStatus',
+      );
+    });
+
+    test(
+        'iOS getNetworkStatus(from:) quality switch only returns known '
+        'literals', () {
+      final source = readRepoFile(iosMonitorPath);
+      final body = extractBlockBody(source, 'switch estimatedMbps {');
+      final literals = RegExp(r'quality = "([a-z_]+)"')
+          .allMatches(body)
+          .map((m) => m.group(1)!)
+          .toSet();
+      expectOnlyKnownQualities(
+        literals,
+        'iOS NetworkMonitor.getNetworkStatus(from:)',
+      );
+    });
+
+    test('iOS offlineStatus() only returns a known quality literal', () {
+      final source = readRepoFile(iosMonitorPath);
+      final body = extractBlockBody(
+          source, 'private func offlineStatus() -> [String: Any] {');
+      final match = RegExp(r'"quality":\s*"([a-z_]+)"').firstMatch(body);
+      expect(match, isNotNull,
+          reason: 'offlineStatus() should set a literal "quality" value '
+              'directly.');
+      expectOnlyKnownQualities(
+        {match!.group(1)!},
+        'iOS NetworkMonitor.offlineStatus',
+      );
+    });
+
+    test(
+        'every NetworkQuality value with a real _tryParse match (other '
+        'than the unreachable .unknown) is reachable from at least one '
+        'native implementation', () {
+      final combined =
+          readRepoFile(androidMonitorPath) + readRepoFile(iosMonitorPath);
+
+      // Neither native monitor ever emits a literal "unknown" quality
+      // string (it's used only as a local sentinel default for
+      // lastNetworkQuality/lastQuality, to detect the first quality
+      // change, never written into a status map's "quality" key) — so
+      // .unknown is intentionally excluded, mirroring the ConnectionType
+      // guard above.
+      final qualitiesWithDedicatedLiteral =
+          NetworkQuality.values.where((q) => q != NetworkQuality.unknown);
+
+      for (final quality in qualitiesWithDedicatedLiteral) {
+        expect(
+          combined.contains('"${quality.name}"'),
+          isTrue,
+          reason: 'NetworkQuality.${quality.name} is never referenced as a '
+              'quoted literal by either native NetworkMonitor. A quality '
+              'value no native code can ever send is unreachable '
+              'vocabulary — either wire it up natively or remove it from '
+              'the Dart enum.',
         );
       }
     });

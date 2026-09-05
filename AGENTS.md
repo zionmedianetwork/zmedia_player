@@ -75,7 +75,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `StreamingConfig` / `BitrateSelectionStrategy` / `HlsConfig` / `DashConfig` | Adaptive-streaming config; `HlsConfig`/`DashConfig` wire `enableDvr` (seek gating + live duration reporting), `liveLatency`, and inherited `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` to native (see [live-streaming.md](docs/api-reference/live-streaming.md) for the per-field, per-platform table). Exactly one of the two applies per item, chosen by `MediaItem.resolvedStreamingFormat`; they are **never** cross-applied, so an HLS-on-iOS/DASH-on-Android app must set both. `enableLiveStream` is deprecated — use `MediaItem.isLive`. |
 | `DrmConfig` / `DrmScheme` / `EzdrmConfig` / `DrmSession` | DRM config + factories (`.widevine`, `.fairplay`, `.ezdrm`, `.token`); session state. `DrmConfig.minWidevineSecurityLevel` sets the floor for Android Widevine only (no effect on iOS FairPlay). |
 | `BufferingConfig` / `BufferHealth` / `BufferStatus` / `BufferStatistics` | Adaptive buffering config + health/stats. |
-| `NetworkStatus` / `NetworkQuality` / `ConnectionType` / `NetworkChangeEvent` | Network monitoring model. |
+| `NetworkStatus` / `NetworkQuality` / `ConnectionType` / `NetworkChangeEvent` | Network monitoring model. `NetworkStatus.fromPlatform` honours the platform's `quality` field when it parses, falling back to `NetworkQuality.fromBandwidth(downloadSpeed)` only when `quality` is absent or unparseable (issue #112 — see the `onNetworkStatusChanged` payload note below). |
 | `QoEMetrics` / `PerformanceMetrics` / `EngagementMetrics` / `PlaybackEndReason` / `BufferEventType` | Analytics/QoE models. |
 | `NotificationConfig` / `NotificationAction` / `NotificationPriority` | Lock-screen / Control Center notification config. `priority`, `dismissible`, and `customActions` are wired **Android only** — no faithful `MPRemoteCommandCenter` equivalent exists on iOS. `showSeekForward`/`showSeekBackward` are wired on **both** platforms with one contract: the control is offered iff `flag && MediaPlayer.isSeekable` (Android `ACTION_FAST_FORWARD`/`ACTION_REWIND` + a notification button; iOS `skipForwardCommand`/`skipBackwardCommand`). `seekInterval` is display-only on both — the host app performs the seek. |
 | `PipConfig` / `PipAction` / `PipState` / `PipStatus` / `PipActionEvent` | Picture-in-Picture config + state. `PipConfig.actions`/`showPlaybackControls` are wired **Android only** for custom actions (`showPlaybackControls` partially affects iOS via `requiresLinearPlayback`, iOS 14+); tapping a custom action delivers a `PipActionEvent` on `MediaPlayer.pipActionStream`. |
@@ -153,12 +153,34 @@ liveEdgeOffset: int(ms)?}`. `positionBasis` is `"absolute"` or `"liveWindow"` (a
 unrecognised -> `PositionBasis.absolute`). `liveEdgeOffset` is **omitted entirely** (never a
 sentinel) for VOD and whenever the platform cannot answer — a missing key clears
 `PlaybackState.liveEdgeOffset` to `null`. Both ride this existing ~500ms event rather than a
-new channel event. Sources: Android `Player.getCurrentLiveOffset()` (falling back to
-`Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET`) and
-`Timeline.Window.isLive()`; iOS end-of-`AVPlayerItem.seekableTimeRanges.last` minus
-`currentTime()`, with `"liveWindow"` only when the DVR window translation applies. The
-live-without-DVR basis therefore differs by platform (`liveWindow` on Android, `absolute` on
-iOS) **by design** — each reports the basis its values are actually on.
+new channel event. Sources: Android `Player.getCurrentLiveOffset()`, sanity-checked against
+`Timeline.Window.durationMs` before being trusted (issue #109 — a manifest whose unix-time
+anchor disagrees with its own segment timeline can make `getCurrentLiveOffset()` report
+broadcast age instead of live-edge distance, as a real, non-`C.TIME_UNSET` number), falling
+back to `Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET` **or** when the
+reported value exceeds the window duration; and `Timeline.Window.isLive()`. A rejected value
+also logs a one-time-per-item native warning pointing at issue #110 (same anchor defect
+silently defeats `liveLatency`). iOS end-of-`AVPlayerItem.seekableTimeRanges.last` minus
+`currentTime()` — bounded by construction, no equivalent check needed — with `"liveWindow"`
+only when the DVR window translation applies. The live-without-DVR basis therefore differs by
+platform (`liveWindow` on Android, `absolute` on iOS) **by design** — each reports the basis
+its values are actually on. See
+[live-streaming.md](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
+for the full diagnosis.
+
+**`onNetworkStatusChanged` payload.** `{playerId: String, quality: String?, downloadSpeed:
+int(bytes/sec)?, isMetered: bool?, connectionType: String?}`. `quality` is one of
+`excellent`/`good`/`fair`/`poor`/`offline`; as of issue #112, `NetworkStatus.fromPlatform`
+parses and uses it directly, falling back to `NetworkQuality.fromBandwidth(downloadSpeed)`
+only when `quality` is absent or unparseable. This matters because on Android API >= 23
+`downloadSpeed` derives from `NetworkCapabilities.linkDownstreamBandwidthKbps`, a hint Android
+documents as possibly `0` on a live, connected network — `fromBandwidth(0)` would misreport
+`NetworkQuality.offline` if `quality` were still ignored. `NetworkMonitor.kt` floors that hint
+against `estimateBandwidthFromType` when non-positive on a network with real capabilities in
+hand; `offlineStatus()` (the canonical no-connection map on both platforms) is unaffected.
+`connectionType == "none"`, set only by `offlineStatus()`, remains the reliable reachability
+signal independent of `quality`/`isAvailable`. See
+`docs/api-reference/events.md#onnetworkstatuschanged`.
 
 **Error categories.** `onError` carries a `category` in its details, drawn from a vocabulary both
 platforms share: `NETWORK`, `HTTP`, `DRM`, `DECODER`, `SOURCE`, `UNKNOWN`. Dart maps these onto the

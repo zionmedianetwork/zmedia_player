@@ -187,8 +187,13 @@ alongside it. Both new fields participate in `==`/`hashCode` and appear in
 
 **Live-edge fields.** `liveEdgeOffset` is how far behind the live edge the playhead
 is, native-sourced on every `onPositionChanged` event (Android:
-`Player.getCurrentLiveOffset()`; iOS: end of `AVPlayerItem.seekableTimeRanges.last`
-minus `currentTime()`). It is `null` for VOD and whenever the platform cannot answer
+`Player.getCurrentLiveOffset()`, sanity-checked against the live window's own
+duration and rejected in favor of a bounded fallback when it exceeds that duration
+— a manifest whose time anchor disagrees with its segment timeline can otherwise
+report broadcast age instead of live-edge distance, see
+[live-streaming.md](live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency);
+iOS: end of `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()`, bounded by
+construction). It is `null` for VOD and whenever the platform cannot answer
 yet; it *is* reported for live streams both with and without `enableDvr`.
 `isAtLiveEdge` is `liveEdgeOffset <= defaultLiveEdgeTolerance` (15s), and `false`
 whenever the offset is `null`.
@@ -300,6 +305,11 @@ const SubtitleConfig({
 
 - **Buffering:** `BufferingConfig`, `BufferHealth`, `BufferStatus` (healthy/warning/critical/underrun), `BufferStatistics`.
 - **Network:** `NetworkStatus`, `NetworkQuality`, `ConnectionType`, `NetworkChangeEvent`.
+  `NetworkStatus.fromPlatform` honours the platform's `quality` field when it parses to a
+  `NetworkQuality` member, falling back to `NetworkQuality.fromBandwidth(downloadSpeed)` only
+  when `quality` is absent or unparseable (issue #112 — see the
+  [`onNetworkStatusChanged` payload table](events.md#onnetworkstatuschanged) for the full
+  contract and why this matters). `toMap()`/`fromPlatform()` round-trip `quality` symmetrically.
 - **Analytics:** `QoEMetrics`, `PerformanceMetrics`, `EngagementMetrics`, `PlaybackEndReason`, `BufferEventType`.
 - **Notifications:** `NotificationConfig`, `NotificationAction`, `NotificationPriority` — pass a
   `NotificationConfig` to `NotificationService` directly (not `MediaConfig`) to drive media

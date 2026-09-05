@@ -198,9 +198,14 @@ class NetworkMonitor(
             return offlineStatus()
         }
 
-        // Get download bandwidth (in Kbps)
+        // Get download bandwidth (in Kbps). `linkDownstreamBandwidthKbps` is documented by
+        // Android as a *hint* that may be absent or inaccurate, and `0`/negative is a legal
+        // value on a live network (see issue #112) — fall back to the same transport-based
+        // estimate the pre-M branch already uses rather than letting a degenerate hint read
+        // as offline.
         val downloadKbps = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            capabilities.linkDownstreamBandwidthKbps
+            val hint = capabilities.linkDownstreamBandwidthKbps
+            if (hint > 0) hint else estimateBandwidthFromType(capabilities)
         } else {
             // Estimate based on connection type for older Android versions
             estimateBandwidthFromType(capabilities)

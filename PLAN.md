@@ -1,11 +1,12 @@
 # ZMedia Player - Roadmap
 
-**Version:** 0.3.0
+**Version:** 0.4.0
 **Last Updated:** September 5, 2026
-**Status:** Feature-complete for the 0.3.x line; distributed via GitHub releases.
-`CHANGELOG.md`'s `[Unreleased]` holds 4 `feat:` and 12 `fix:` commits landed since the
-`v0.3.0` tag (August 18, 2026) — a `feat:` present means the next release is a MINOR
-bump to 0.4.0.
+**Status:** Feature-complete for the 0.4.x line; distributed via GitHub releases.
+`CHANGELOG.md`'s `[Unreleased]` holds the ExoPlayer 2 classpath upgrade note (issue #108),
+the `NetworkStatus` platform-quality fix (issue #112), and the live-edge-offset
+window-sanity fix (issue #109) with its manifest-anchor diagnostic (issue #110), landed
+since the `v0.4.0` tag.
 
 > This file is the authoritative implementation roadmap referenced by `CLAUDE.md`.
 > It tracks current state and the real backlog. For architecture, UI/UX specs, and
@@ -30,7 +31,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |
 | Android | minSdk 23 |
-| Tests | 1089 passing (Dart layer; native has none) |
+| Tests | 1103 passing (Dart layer; native has none) |
 
 ---
 
@@ -62,7 +63,13 @@ platform is called out explicitly.
   `isAtLiveEdgeWithin(tolerance)` / `defaultLiveEdgeTolerance` (15s), and `positionBasis`
   (`PositionBasis.absolute` / `.liveWindow`) — all mirrored on `MediaPlayer` and
   `MediaController`. A live `position` is window-relative and stays ~constant at the edge,
-  so `liveEdgeOffset` is the signal a stall watchdog must use (issue #88).
+  so `liveEdgeOffset` is the signal a stall watchdog must use (issue #88). Android's
+  `liveEdgeOffset` is sanity-checked against the live window's own duration before being
+  trusted, falling back to a bounded computation when a manifest's unix-time anchor
+  disagrees with its own segment timeline (issue #109); the same anchor defect silently
+  defeats `liveLatency` on an affected manifest, which native now flags with a one-time
+  diagnostic (issue #110) — see
+  [live-streaming.md](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency).
 - Explicit format declaration: `MediaItem.streamingFormat` + the `StreamingFormat` enum
   (`hls` / `dash` / `progressive`), with `resolvedStreamingFormat`, `StreamingFormat.fromUrl`
   and `.fromName`. Decides which of `hlsConfig`/`dashConfig` applies (they are never
