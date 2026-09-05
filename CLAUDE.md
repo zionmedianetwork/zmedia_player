@@ -109,7 +109,8 @@ hit.
 
 ZMedia Player is a comprehensive Flutter media player package with advanced features for video and audio playback across Android and iOS platforms. It provides enterprise-grade capabilities including DRM support, adaptive streaming (HLS/DASH), Picture-in-Picture, casting (Chromecast/AirPlay), and live streaming.
 
-**Version:** 0.2.2
+**Version:** see `pubspec.yaml` (the release workflow updates it there and in
+`ios/zmedia_player.podspec` only, so a version hardcoded here would go stale at the next release)
 **Flutter SDK:** >=3.19.0
 **Dart SDK:** >=3.0.0 <4.0.0
 
