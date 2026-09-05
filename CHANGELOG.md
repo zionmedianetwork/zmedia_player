@@ -53,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test/models/network_status_vocabulary_test.dart`'s drift guard already covers the new literal
   (`"unknown"` was already an accepted intentional-fallback value) — no test change was needed.
 
+- **`cd example && flutter analyze` reported 2 warnings**, both in `example/pubspec.yaml`:
+  `invalid_dependency` (a publishable-looking package with a `path: ../` dependency and no
+  `publish_to` marker) and `asset_directory_does_not_exist` (a declared `assets/images/` with
+  no corresponding directory and no reference anywhere under `example/lib`). Added
+  `publish_to: none` — the example is never published — and removed the dead `assets/images/`
+  entry; the sibling `assets/videos/` entry is unchanged and still backs
+  `local_file_playback_page.dart`. `cd example && flutter analyze` now reports 0 issues,
+  which is what lets the new `example-tests` CI job (see the `Added` entry below) enforce a
+  clean analyze rather than tolerate pre-existing warnings.
+
 ### Changed
 - **`example/README.md`'s feature table was missing 11 of the app's 27 feature pages** —
   `local_file_playback_page.dart`, `cache_playback_page.dart`,
@@ -177,6 +187,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeline, with no unix-time anchor involved — and needed no change.
 
 ### Added
+- **CI now runs the example app's own test suite** (`example/test/`, 24 tests). Previously
+  nothing in `.github/workflows/ci.yml` ever executed it — which is how 13 of those tests sat
+  broken from v0.3.0 until a recent fix (see the `pumpAndSettle` entry under `Fixed` above),
+  and how v0.3.0's release notes could claim "19 example tests pass" while most were failing,
+  with no gate to catch either. A new `example-tests` job (`needs: lint-analyze-test`) resolves
+  dependencies for both the root package and `example/` (the example depends on `zmedia_player`
+  via a `path: ../` dependency), then runs `flutter analyze` and `flutter test` inside
+  `example/`. `ci-success` now depends on `example-tests` as well, in both its `needs:` list
+  and the shell condition that inspects each job's `result` — so a red example suite blocks
+  merges the same way a red package suite already does.
 - **One-time diagnostic for the manifest time-anchor defect above, making issue #110
   attributable.** The same poisoned anchor that broke `liveEdgeOffset` also silently defeats
   `HlsConfig`/`DashConfig.liveLatency` on an affected Android/DASH stream:

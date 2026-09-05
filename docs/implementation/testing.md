@@ -13,7 +13,11 @@ This guide covers testing strategies, test execution, and quality assurance for 
 > layout regressions (fixed headers squeezing content off-screen on a narrow-phone
 > viewport) and wired-behavior end-to-end checks (e.g. the DVR toggle actually
 > reloading and flipping the seek outcome) across its feature pages. Run it from
-> `example/`: `cd example && flutter test`.
+> `example/`: `cd example && flutter test`. `.github/workflows/ci.yml`'s `example-tests`
+> job runs both `flutter analyze` and `flutter test` for `example/` on every push and
+> pull request, gating merges the same way the package suite does — it used to run
+> nowhere in CI, which is how tests sat broken across a release without anything
+> catching it.
 
 ## Test Structure
 
@@ -383,6 +387,15 @@ group('Serialization Round-Trip', () {
 ```
 
 ## Continuous Integration
+
+The project's actual pipeline is `.github/workflows/ci.yml`, not the illustrative snippet
+below. It runs `lint-analyze-test` (format check, `flutter analyze lib/ test/`, `flutter
+test --coverage`) followed by `performance-tests` (`test/performance/`), `memory-tests`
+(`test/memory/`), and `example-tests` (`flutter analyze` and `flutter test` inside
+`example/`, after resolving dependencies for both the root package and `example/`) in
+parallel. A final `ci-success` job gates on all four; it fails if any one of them is not
+`success`, so a red `example-tests` run blocks a merge exactly like a red package suite
+does.
 
 ### GitHub Actions Example
 

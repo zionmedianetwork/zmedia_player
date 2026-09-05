@@ -765,8 +765,9 @@ architecture.
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
 `flutter analyze` clean and `flutter test` green (run it for the current count),
-and open a PR. If you touched `example/`, also keep `cd example && flutter test`
-green (24 tests as of this writing).
+and open a PR. If you touched `example/`, also keep `cd example && flutter analyze`
+clean and `cd example && flutter test` green (24 tests as of this writing) — CI
+runs both on every push and pull request via the `example-tests` job.
 
 ## License
 

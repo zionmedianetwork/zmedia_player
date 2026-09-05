@@ -406,7 +406,9 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - **Unit tests:** `test/core/`, `test/models/`, `test/services/`
 - **Performance tests:** `test/performance/` (with specific targets)
 - **Memory tests:** `test/memory/` (leak detection)
-- **Integration tests:** `example/` app for manual testing
+- **Example app tests:** `example/test/` — its own automated suite (widget/layout
+  regressions and wired-behavior end-to-end checks against real page composition), run via
+  `cd example && flutter test`; also used for manual testing (`cd example && flutter run`)
 
 ### Mock Strategy
 - Use mocks for native platform communication in unit tests
