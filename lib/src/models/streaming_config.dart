@@ -345,25 +345,23 @@ class HlsConfig extends StreamingConfig {
   /// case where the manifest itself defeats this).
   ///
   /// **iOS:** `AVPlayerItem.configuredTimeOffsetFromLive` — iOS 14+ only;
-  /// silently has no effect on iOS 13, where the API does not exist. This is
-  /// a **join-time** setting, not a maintained target: per the AVFoundation
-  /// header, it "indicates how close to the latest content in a live stream
-  /// playback will begin after a live start or a seek to
-  /// `kCMTimePositiveInfinity`". This package additionally sets
-  /// `automaticallyPreservesTimeOffsetFromLive = false`, which per the same
-  /// header controls a *different, independent* behavior — whether the
-  /// player "skip[s] forward if necessary to restore the playhead's
-  /// distance from the live edge" after a rebuffer. `false` does not
-  /// disable `configuredTimeOffsetFromLive`; it only means the cushion is
-  /// honoured once at join/seek and then is never restored, so the playhead
-  /// drifts *away* from the live edge after every rebuffer (the opposite
-  /// direction from Android's ExoPlayer, which drifts *toward* its target).
-  /// `true` would trade that drift for a visible forward skip after each
-  /// rebuffer; this package currently chooses `false` (steady, no skip) but
-  /// that is a revisitable trade-off, not a settled one — track
+  /// silently has no effect on iOS 13, where the API does not exist. Per the
+  /// AVFoundation header, it "indicates how close to the latest content in a
+  /// live stream playback will begin after a live start or a seek to
+  /// `kCMTimePositiveInfinity`" — it governs the join position. This package
+  /// additionally sets `automaticallyPreservesTimeOffsetFromLive = true`,
+  /// which per the same header controls a *different, independent*
+  /// behavior — whether the player "skip[s] forward if necessary to restore
+  /// the playhead's distance from the live edge" after a rebuffer. Setting a
+  /// target offset is a statement of intent to hold that cushion, so `true`
+  /// means the cushion honoured at join/seek is also restored after every
+  /// rebuffer, matching Android's ExoPlayer, which maintains its target the
+  /// same way (via playback-speed adjustment rather than a skip). The cost
+  /// is real: restoring the offset is a forward skip, so the playhead can
+  /// visibly jump right after a rebuffer. There is no way to opt out of the
+  /// skip and get the old drift-instead-of-skip behavior — track
   /// `liveEdgeOffset`/`isAtLiveEdge` (see `docs/api-reference/live-streaming.md`,
-  /// "Stall watchdog for live streams") if a consumer needs to detect the
-  /// drift this causes.
+  /// "Stall watchdog for live streams") if a consumer needs to observe it.
   final Duration? liveLatency;
 
   const HlsConfig({
