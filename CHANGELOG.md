@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-05
+
 ### Fixed
 - **13 of the example app's 19 widget tests hung and failed with `pumpAndSettle timed out`**,
   in `example/test/pages/wired_config_verification_page_test.dart` (all 6),
