@@ -68,9 +68,13 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 ### Live Streaming
 - **Live Edge Detection** - `PlaybackState.liveEdgeOffset` (distance behind the live edge) and
   `isAtLiveEdge` (within `defaultLiveEdgeTolerance`, 15s), native-sourced from
-  `Player.getCurrentLiveOffset()` on Android and `AVPlayerItem.seekableTimeRanges` on iOS, and
-  delivered on the existing `onPositionChanged` event. Reported for live streams with and
-  without DVR; `null`/`false` for VOD
+  `Player.getCurrentLiveOffset()` on Android — sanity-checked against the live window's own
+  duration, falling back to a bounded computation when a manifest's time anchor disagrees with
+  its segment timeline (see
+  [Manifest time-anchor defect](../api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)) —
+  and `AVPlayerItem.seekableTimeRanges` on iOS, and delivered on the existing
+  `onPositionChanged` event. Reported for live streams with and without DVR; `null`/`false` for
+  VOD
 - **Position Basis Reporting** - `PlaybackState.positionBasis` (`PositionBasis.absolute` |
   `.liveWindow`) tells a host which timeline `position` is measured against, so a stall
   detector does not mistake a healthy live edge (constant window-relative position) for a
@@ -84,7 +88,9 @@ Comprehensive list of all implemented features in the ZMedia Player package.
   `endsWith('.mpd')`). The two configs are never cross-applied, and a live item that resolves
   to a format with no config logs a debug-only warning
 - **Latency Configuration** - `liveLatency` sets a target offset from the live edge (Android;
-  iOS 14+ only)
+  iOS 14+ only). Has no effect on Android/DASH manifests with an inconsistent time anchor (same
+  root cause as the Live Edge Detection caveat above) — a manifest/packaging defect, not a
+  wiring gap; native logs a one-time diagnostic when it is detected
 - **Adaptive Segment Caching** - Transparent, read-through HLS/DASH segment cache during playback (**Android only**; caches what has been played for replay, not an offline download)
 
 **Total:** 21 features

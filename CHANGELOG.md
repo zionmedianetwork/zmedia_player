@@ -61,6 +61,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the `quality` vocabulary (previously only `connectionType` was guarded, on the reasoning
   that `quality` was unread dead data — no longer true) and an updated expectation in
   `test/core/media_player_network_status_test.dart`.
+- **`liveEdgeOffset` could report a value far larger than the live window itself, permanently
+  breaking `isAtLiveEdge` (Android, issue #109).** `currentLiveEdgeOffsetMs()` trusted
+  `Player.getCurrentLiveOffset()` unconditionally whenever it was not `C.TIME_UNSET` — but that
+  API computes `nowUnixTime - windowStartTime - position`, and for DASH `windowStartTime`
+  derives from `manifest.availabilityStartTimeMs`. A packager that anchors
+  `availabilityStartTime` to broadcast start while re-basing its segment timeline to a rolling
+  window produces a `getCurrentLiveOffset()` that reports broadcast age, not distance from the
+  edge — and it returns a real, finite number rather than `C.TIME_UNSET`, so the existing
+  `C.TIME_UNSET`-only fallback could never catch it. Observed on a real manifest:
+  `liveEdgeOffset=1973165ms` (~33 minutes) reported against a 61466ms DVR window, while the
+  playhead was genuinely ~3.7s from the edge — an offset larger than the window itself is
+  impossible by construction. `currentLiveEdgeOffsetMs()` now rejects a reported offset that
+  exceeds the live window's own known duration and uses the bounded fallback
+  (`window.durationMs - position`) instead — a genuinely independent computation unaffected by
+  the poisoned anchor, so it is preferred over clamping the invalid value to the window bound
+  (which would merely fabricate a different lie: "exactly at the window start"). When the
+  window's duration is not yet known, the reported value is trusted as before — there is
+  nothing to sanity-check it against. iOS's equivalent (`AVPlayerItem.seekableTimeRanges.last`
+  minus `currentTime()`) is bounded by construction — both operands share the item's own
+  timeline, with no unix-time anchor involved — and needed no change.
+
+### Added
+- **One-time diagnostic for the manifest time-anchor defect above, making issue #110
+  attributable.** The same poisoned anchor that broke `liveEdgeOffset` also silently defeats
+  `HlsConfig`/`DashConfig.liveLatency` on an affected Android/DASH stream:
+  `MediaItem.LiveConfiguration.targetOffsetMs` is computed from that identical anchor, so
+  Media3 clamps the live join to the real edge regardless of the configured target — previously
+  a silent, unattributable failure indistinguishable from a wiring bug. Android now logs a
+  `Log.w` (tag `MediaPlayerInstance`), at most once per loaded item, naming the observed
+  offset, the window duration, and the `liveLatency` consequence, with a pointer to issue #110.
+  Not emitted on the routine 500ms position tick — only the first time the mismatch is
+  observed for the current item. This is a manifest/packaging defect this package cannot
+  correct; the diagnostic exists solely to name it. See
+  [Manifest time-anchor defect](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
+  for the full worked example and detection guidance.
 
 ## [0.4.0] - 2026-09-02
 

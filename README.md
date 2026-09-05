@@ -49,9 +49,14 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
   format explicitly, deciding which of `hlsConfig`/`dashConfig` applies; leave it `null` to
   infer from the URL path (`endsWith('.m3u8')`/`endsWith('.mpd')`, query and fragment ignored)
 - Live-edge signal: `liveEdgeOffset` (how far behind the live edge the playhead is, sourced from
-  `Player.getCurrentLiveOffset()` on Android and `AVPlayerItem.seekableTimeRanges` on iOS),
-  `isAtLiveEdge`, and `positionBasis` — so a healthy live edge is distinguishable from a frozen
-  playhead (on a sliding window, `position` stays constant during *healthy* playback)
+  `Player.getCurrentLiveOffset()` on Android — sanity-checked against the live window's own
+  duration, falling back to a bounded computation when a manifest's time anchor disagrees with
+  its segment timeline — and `AVPlayerItem.seekableTimeRanges` on iOS), `isAtLiveEdge`, and
+  `positionBasis` — so a healthy live edge is distinguishable from a frozen playhead (on a
+  sliding window, `position` stays constant during *healthy* playback). See
+  [Manifest time-anchor defect](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
+  for the failure mode this guards against, which also silently defeats `liveLatency` on an
+  affected manifest
 - Subtitles: SRT, WebVTT, ASS/SSA, and embedded tracks with customizable styling
 - Manual and automatic quality/resolution selection; multiple audio tracks
 - Progressive download/caching; real-time bandwidth estimation

@@ -369,6 +369,50 @@ void main() {
       controller.dispose();
     });
 
+    test(
+        'an out-of-window liveEdgeOffset is still surfaced faithfully — '
+        'issue #109 (validation lives entirely in native)', () async {
+      // Issue #109: Android's currentLiveEdgeOffsetMs() now sanity-checks
+      // Player.getCurrentLiveOffset() against the live window's own
+      // duration before trusting it, rejecting (and falling back for) a
+      // reported offset larger than the window itself. That validation is
+      // native-only and MUST NOT be duplicated here: MediaPlayer is a pure
+      // pass-through for this event (see the class doc), so an event that
+      // still carries an out-of-window offset — e.g. from an older/
+      // unpatched native build, or any other future case a host needs to
+      // detect and handle itself — must reach the Dart layer unmodified
+      // rather than being silently clamped or dropped. This is the pinned
+      // contract: fix the value in native, don't paper over a bad one in
+      // Dart.
+      final player = MediaPlayer(playerId: 'le_out_of_window');
+      await player.initialize();
+      await player.load(_liveItem);
+
+      await _injectPlatformCall('onPositionChanged', {
+        'playerId': 'le_out_of_window',
+        'position': 57732,
+        'positionBasis': 'liveWindow',
+        // The exact numbers from issue #109's report: a 61466ms DVR window
+        // with a reported offset of ~33 minutes.
+        'liveEdgeOffset': 1973165,
+      });
+      await _injectPlatformCall('onDurationChanged', {
+        'playerId': 'le_out_of_window',
+        'duration': 61466,
+        'isLive': true,
+      });
+
+      expect(player.liveEdgeOffset, const Duration(milliseconds: 1973165),
+          reason: 'Dart neither validates nor clamps liveEdgeOffset against '
+              'duration — that correction is native-only (issue #109)');
+      expect(player.currentState.duration, const Duration(milliseconds: 61466));
+      expect(player.isAtLiveEdge, isFalse,
+          reason: 'an offset this large is correctly read as far from the '
+              'edge, whatever produced it');
+
+      player.dispose();
+    });
+
     test('a liveEdgeOffset sent as a double is accepted', () async {
       // StandardMessageCodec preserves int/double distinctly; be lenient.
       final player = MediaPlayer(playerId: 'le_double');

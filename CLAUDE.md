@@ -463,11 +463,32 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   - `liveEdgeOffset` (`Duration?`) — distance behind the live edge; `null` for VOD, reported
     for live **with and without** DVR. Grows without bound against a genuinely frozen
     playhead, which is what makes it the reliable signal. Android:
-    `Player.getCurrentLiveOffset()`, falling back to
-    `Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET`. iOS: end of
+    `Player.getCurrentLiveOffset()` when it agrees with the window — see below — falling back
+    to `Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET` **or** when the
+    reported value exceeds the window's own duration. iOS: end of
     `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()` (NOT
     `configuredTimeOffsetFromLive`/`recommendedTimeOffsetFromLive` — those are targets,
-    constant by construction).
+    constant by construction) — bounded by construction (both operands come from the
+    `AVPlayerItem`'s own timeline, with no unix-time anchor involved), so it cannot exhibit
+    the Android defect below and needed no change.
+  - **Manifest time-anchor defect (issue #109/#110).** `Player.getCurrentLiveOffset()` is
+    `nowUnixTime - windowStartTime - position`, and for DASH, `windowStartTime` derives from
+    `manifest.availabilityStartTimeMs`. If a packager anchors that to broadcast start while
+    re-basing the segment timeline to a rolling window, the two disagree: the method returns
+    broadcast age (a large, real number — not `C.TIME_UNSET`), which the old logic trusted
+    unconditionally. Observed: `liveEdgeOffset=1973165ms` (~33 min) against a `duration`
+    (window length) of `61466ms`, while the playhead was genuinely ~3.7s from the edge. Since
+    `MediaItem.LiveConfiguration.targetOffsetMs` (`liveLatency`) is computed from that same
+    poisoned anchor, this also silently defeats `liveLatency` on the affected stream — Media3
+    clamps the join to the real live edge regardless of the configured target (issue #110).
+    Android now rejects a reported offset larger than the known window duration and prefers
+    the bounded fallback instead (never clamps — clamping would fabricate "exactly at window
+    start", which is its own lie); when the window duration is unknown, `reported` is trusted
+    since there's nothing to check it against. A rejection also logs a one-time-per-item
+    `Log.w` naming the observed numbers and the `liveLatency` consequence, pointing at #110 —
+    see `currentLiveEdgeOffsetMs`/`warnLiveOffsetAnchorInconsistentOnce` in
+    `MediaPlayerManager.kt`. This is a manifest/packaging defect, not something fixable in
+    this package; see `docs/api-reference/live-streaming.md` for the full worked example.
   - `isAtLiveEdge` / `isAtLiveEdgeWithin(tolerance)` / `PlaybackState.defaultLiveEdgeTolerance`
     (**15s**, matching video.js's `liveTolerance`; a healthy standard-HLS player rides 15-30s
     behind the edge, so a tighter default would read `false` for healthy playback).

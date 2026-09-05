@@ -346,6 +346,15 @@ class MediaPlayerInstance(
     // DRM handler — non-null only when the current media item has a drmConfig.
     private var drmHandler: DrmHandler? = null
 
+    // Issue #110: whether [currentLiveEdgeOffsetMs] has already logged its
+    // one-time "manifest time anchor is inconsistent with its segment
+    // timeline" diagnostic for the item currently loaded. Reset alongside
+    // [currentMediaItem] in [loadMediaItem] so a new item (including a
+    // reload of a *different* item with the same defect) gets its own
+    // warning, while [notifyPositionChanged]'s 500ms tick does not spam the
+    // log for the item that's already been flagged.
+    private var liveOffsetAnchorWarningLogged: Boolean = false
+
     // H-01: reason for the most recent playWhenReady change, so that when
     // onIsPlayingChanged subsequently reports isPlaying == false we can tell
     // an explicit user/API pause apart from one the OS forced by revoking
@@ -532,6 +541,10 @@ class MediaPlayerInstance(
 
         // Store current media item (for live stream detection)
         currentMediaItem = mediaItem
+        // Issue #110: a new load gets its own chance to log the manifest-anchor
+        // diagnostic (see currentLiveEdgeOffsetMs) — this item may or may not
+        // share the previous one's defect.
+        liveOffsetAnchorWarningLogged = false
 
         android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
 
@@ -1644,22 +1657,130 @@ class MediaPlayerInstance(
      * that reasoning does not apply to a read-only health signal. A live
      * stream without DVR is exactly as prone to the frozen-playhead ambiguity
      * this value resolves, so it gets the value too.
+     *
+     * Issue #109 — [Player.getCurrentLiveOffset] is NOT trusted unconditionally
+     * any more; it is sanity-checked against the known window duration first.
+     * `BasePlayer.getCurrentLiveOffset()` (media3-common 1.11.0) computes
+     * `window.getCurrentUnixTimeMs() - window.windowStartTimeMs -
+     * getContentPosition()` — i.e. it derives the live edge from the
+     * manifest's unix-time anchor (`windowStartTimeMs`, which for DASH is
+     * `manifest.availabilityStartTimeMs` plus the window's offset into the
+     * period), not from the window's own segment timeline. Those two are
+     * *usually* consistent, but nothing enforces it: a packager that
+     * anchors `availabilityStartTimeMs` to broadcast start while re-basing
+     * the segment timeline to a rolling window produces a
+     * `getCurrentLiveOffset()` that reports broadcast age, not distance from
+     * the edge — and it is a real, finite number, not [C.TIME_UNSET], so the
+     * old "unconditional trust, `C.TIME_UNSET`-only fallback" logic below
+     * could never catch it. Observed on a real manifest (issue #109):
+     * `liveEdgeOffset=1973165ms` (~33 min) reported against a `duration`
+     * (window length) of `61466ms`, while the playhead (`position=57732ms`)
+     * was genuinely ~3.7s from the edge — the bounded fallback computes that
+     * correct value from the exact same window at the exact same instant.
+     *
+     * The gate: for a live window whose length is known
+     * (`window.durationUs != C.TIME_UNSET`), an offset *larger than the
+     * window itself* is impossible by construction — the live edge cannot be
+     * further from the playhead than the window is long — so a `reported`
+     * value that fails `reported <= window.durationMs` is provably wrong and
+     * the bounded fallback is used instead. When the window length is NOT
+     * known, `reported` is trusted as-is: there is no bound to check it
+     * against, and rejecting an answer we cannot actually disprove would
+     * throw away real signal (e.g. very early after a live item loads,
+     * before the window's duration has been established) for no evidence of
+     * a fault.
+     *
+     * Reject-and-fall-back rather than clamp-to-window: clamping an invalid
+     * `reported` to `window.durationMs` would report "playhead is exactly at
+     * the start of the window", which is its own fabrication — the fallback
+     * (`window.durationMs - player.currentPosition`) is a genuinely
+     * independent, correct computation of the same quantity from data that
+     * is not derived from the poisoned unix-time anchor, so preferring it
+     * costs nothing and is actually right rather than merely bounded.
+     *
+     * See [warnLiveOffsetAnchorInconsistentOnce] for the one-time diagnostic
+     * this rejection also triggers (issue #110): the same poisoned anchor is
+     * why `liveLatency` has no effect on affected streams, and that failure
+     * is otherwise silent and unattributable.
      */
     private fun currentLiveEdgeOffsetMs(player: ExoPlayer): Long? {
         return try {
-            val reported = player.currentLiveOffset
-            if (reported != C.TIME_UNSET) return reported.coerceAtLeast(0L)
-
             val timeline = player.currentTimeline
             if (timeline.isEmpty) return null
             val window = Timeline.Window()
             timeline.getWindow(player.currentMediaItemIndex, window)
-            if (!window.isLive() || window.durationUs == C.TIME_UNSET) return null
+
+            val reported = player.currentLiveOffset
+            val windowDurationKnown = window.durationUs != C.TIME_UNSET
+            if (reported != C.TIME_UNSET &&
+                (!windowDurationKnown || reported <= window.durationMs)
+            ) {
+                return reported.coerceAtLeast(0L)
+            }
+
+            if (reported != C.TIME_UNSET && windowDurationKnown) {
+                // reported > window.durationMs: provably wrong (issue #109) —
+                // fall through to the bounded fallback and flag it once for
+                // this item (issue #110).
+                warnLiveOffsetAnchorInconsistentOnce(reported, window.durationMs)
+            }
+
+            if (!window.isLive() || !windowDurationKnown) return null
             (window.durationMs - player.currentPosition).coerceAtLeast(0L)
         } catch (e: Exception) {
             android.util.Log.e("MediaPlayerInstance", "Error computing live edge offset", e)
             null
         }
+    }
+
+    /**
+     * Issue #110: one-time-per-item diagnostic logged when
+     * [currentLiveEdgeOffsetMs] rejects an out-of-window
+     * [Player.getCurrentLiveOffset] value (issue #109's fault). This method
+     * is called from [notifyPositionChanged]'s 500ms tick, so it is guarded
+     * by [liveOffsetAnchorWarningLogged] (reset per-item in [loadMediaItem])
+     * to log at most once per loaded item rather than twice a second for as
+     * long as the stream plays — mirroring the tone and once-per-key
+     * mechanism of the Dart-side
+     * `MediaPlayer._warnMissingStreamingConfig`/[MediaItem.resolvedStreamingFormat]
+     * diagnostic, adapted here to a plain (non-debug-gated) `Log.w`: unlike
+     * that diagnostic this is a native-only, production-relevant signal with
+     * no Dart-side equivalent to assert-gate it behind, and it is
+     * unconditionally cheap (one log line per item, not per tick).
+     *
+     * What this implies for the stream, spelled out in the message because
+     * it is not obvious from the numbers alone: [Player.getCurrentLiveOffset]
+     * derives the live edge from the manifest's unix-time anchor
+     * (`windowStartTimeMs`/`availabilityStartTimeMs`), and ExoPlayer's live
+     * *join* position (`MediaItem.LiveConfiguration.targetOffsetMs`, i.e.
+     * this package's `liveLatency` config) is computed from that exact same
+     * anchor (`windowDefaultStartPositionUs`, derived from the same
+     * `nowInWindowUs` this diagnostic proves is wrong). A manifest whose
+     * anchor disagrees with its own segment timeline therefore also breaks
+     * `liveLatency`: the requested join offset is computed against a live
+     * edge that is minutes away from where the segment timeline actually
+     * is, so ExoPlayer clamps the join to the real live edge regardless of
+     * the configured target — see issue #110, which this diagnostic exists
+     * to make attributable rather than silently ignored.
+     */
+    private fun warnLiveOffsetAnchorInconsistentOnce(reportedMs: Long, windowDurationMs: Long) {
+        if (liveOffsetAnchorWarningLogged) return
+        liveOffsetAnchorWarningLogged = true
+        android.util.Log.w(
+            "MediaPlayerInstance",
+            "Live stream's reported live-edge offset (${reportedMs}ms) exceeds its own " +
+                "DVR window duration (${windowDurationMs}ms) — impossible by construction, " +
+                "so it is being discarded in favor of a bounded fallback computation. This " +
+                "means the manifest's time anchor (availabilityStartTime for DASH) is " +
+                "inconsistent with its segment timeline: Player.getCurrentLiveOffset() is " +
+                "reporting broadcast age, not distance from the live edge. Consequence: " +
+                "MediaConfig's liveLatency (HlsConfig/DashConfig.liveLatency) will NOT take " +
+                "effect on this stream, because ExoPlayer derives the live join position from " +
+                "this same anchor and clamps it to the real live edge regardless of the " +
+                "configured target offset. This is a manifest/packaging defect, not something " +
+                "this package can correct — see " +
+                "https://github.com/zionmedianetwork/zmedia_player/issues/110."
+        )
     }
 
     /**
