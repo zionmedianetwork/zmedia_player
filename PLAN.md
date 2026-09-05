@@ -12,10 +12,17 @@ transport, plus documentation of two previously-undocumented iOS behaviors (`liv
 join-time-only on iOS, and iOS `downloadSpeed` is a fixed per-transport constant, not a
 measurement); a fix for 13 of the example app's 19 widget tests hanging on `pumpAndSettle`
 against pages whose `MediaController` keeps real periodic timers (`BufferingService`/
-`NetworkResilienceService`) running forever, bringing the example suite back to 19/19; 11
-feature pages added to `example/README.md`'s previously-incomplete table; and corrections to
-several stale hardcoded Dart test-suite counts across the docs — landed since the `v0.4.0`
-tag.
+`NetworkResilienceService`) running forever, bringing the example suite back to 19/19, then to
+21/21 with the `liveEdgeOffset`/`isAtLiveEdge`/`positionBasis` readout added to
+`wired_config_verification_page.dart`, then to 24/24 with a **Custom** stream-URL option added
+to that same page's Source selector — pointing the harness at a stream this repo cannot itself
+host (URL + `MediaItem.isLive` + an explicit `streamingFormat` override, since inference can
+silently resolve a CDN-rewritten/signed URL to `progressive`, under which neither `HlsConfig`
+nor `DashConfig` applies + one optional HTTP header) so the #109-shaped defect stream from a
+device bug report, unreachable from the app's own bundled fixtures, can be verified the same
+way without a rebuild; 11 feature pages added to `example/README.md`'s previously-incomplete
+table; and corrections to several stale hardcoded Dart test-suite counts across the docs —
+landed since the `v0.4.0` tag.
 
 > This file is the authoritative implementation roadmap referenced by `CLAUDE.md`.
 > It tracks current state and the real backlog. For architecture, UI/UX specs, and

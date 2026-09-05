@@ -579,7 +579,12 @@ never real — eroding whatever cushion a join or a corrective `seekTo` establis
   `liveEdgeOffset` and an explicit "offset <= duration" row against a real stream, so this
   fix (and the still-open issue #110 diagnostic) can be confirmed by eye rather than only via
   `adb logcat` — see the pointer in [Stall watchdog for live streams](#stall-watchdog-for-live-streams)
-  above.
+  above. That page's Source selector has a **Custom** option specifically for this: paste in
+  the URL of a stream suspected of this defect (with an explicit `streamingFormat` override if
+  the URL doesn't end in `.mpd`/`.m3u8` — see
+  [Choosing which streaming config applies](#choosing-which-streaming-config-applies-streamingformat)
+  — and an optional HTTP header for a signed/token-gated origin) and reload, rather than being
+  limited to the app's own bundled fixtures.
 
 **What to do about it.** Nothing in this package can correct the target offset on an affected
 manifest — the join-position arithmetic belongs to Media3, and Media3's input is the

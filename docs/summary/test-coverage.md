@@ -14,7 +14,7 @@
 > --coverage`, `test/performance/`, `test/memory/` on every push/PR) — both now exist.
 > See the [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
 >
-> **The `example/` app has its own, separate suite** — 19 tests passing, run via
+> **The `example/` app has its own, separate suite** — 24 tests passing, run via
 > `cd example && flutter test` — covering per-page layout regressions and
 > wired-behavior end-to-end checks that the package's own mocked-channel suite
 > cannot see (real page composition, real widget trees). It is not included in

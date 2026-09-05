@@ -9,7 +9,7 @@ This guide covers testing strategies, test execution, and quality assurance for 
 > number rather than trusting this one. Native Kotlin/Swift code still has **no
 > automated tests** — those paths require on-device verification.
 >
-> The `example/` app has its own, separate suite — **19 tests passing** — covering
+> The `example/` app has its own, separate suite — **24 tests passing** — covering
 > layout regressions (fixed headers squeezing content off-screen on a narrow-phone
 > viewport) and wired-behavior end-to-end checks (e.g. the DVR toggle actually
 > reloading and flipping the seek outcome) across its feature pages. Run it from
@@ -589,7 +589,7 @@ For questions about testing:
 ---
 
 **Test Coverage:** run `flutter test` for the current package count (1104 as of this
-writing) plus `cd example && flutter test` for the example app's own 19; **no automated
+writing) plus `cd example && flutter test` for the example app's own 24; **no automated
 native tests yet**
 **Status:** Active development — native layers need on-device verification
 **Last Updated:** September 5, 2026

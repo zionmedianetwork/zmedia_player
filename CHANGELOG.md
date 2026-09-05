@@ -203,6 +203,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `null`/`absolute`. `example/README.md`'s row for the page documents the addition; the page's
   own dartdoc and `_LiveLatencyDisclaimer` were rewritten to point at the new rows instead of
   disclaiming that they were not wired in.
+- **Custom stream URL support in the example app's verification harness**, so a stream this
+  repo cannot itself host — most pointedly the specific manifest behind an #109-shaped defect
+  report, whose unix-time anchor disagrees with its own segment timeline — can be pointed at
+  `example/lib/pages/wired_config_verification_page.dart` and re-checked against the
+  `enableDvr`/`liveLatency` and `liveEdgeOffset`/`isAtLiveEdge`/`positionBasis` readouts already
+  on that page, without a rebuild. The Source `SegmentedButton` gained a third **Custom**
+  option alongside the existing Live HLS / VOD MP4 built-ins (unchanged); selecting it reveals a
+  URL field, a `MediaItem.isLive` toggle (default `true`), an explicit
+  `MediaItem.streamingFormat` override (`auto`/`hls`/`dash`/`progressive`, with the *resolved*
+  format shown live) and one optional HTTP header/value pair for a signed-cookie or
+  token-gated origin, then a "Load custom stream" button that reloads through the page's
+  existing `_reloadWithCurrentSettings` path — the same one the built-in sources use — so it
+  picks up the current `enableDvr`/`liveLatency` settings exactly as they do. The format
+  override matters specifically because of how `MediaItem.resolvedStreamingFormat` infers from
+  a URL (see `MediaItem.streamingFormat`'s dartdoc): a CDN-rewritten, signed, or
+  extension-less URL can silently resolve to `StreamingFormat.progressive`, under which
+  neither `HlsConfig` nor `DashConfig` ever applies — making `enableDvr`/`liveLatency` look
+  broken when they are simply not being consulted for that item at all.
+  `_reloadWithCurrentSettings` now also sends the current settings as a `DashConfig` alongside
+  the existing `HlsConfig` (previously `HlsConfig` only), since a pasted-in custom URL may
+  resolve to either format and the two are never cross-applied — this has no effect on the two
+  existing built-in sources (Live HLS resolves to `hls`, VOD MP4 to `progressive`, so the added
+  `DashConfig` never applies to either). An empty URL is rejected inline (no load attempted) via
+  a `_customUrlError` message rather than a wasted round trip. `example/README.md`'s row for the
+  page documents the addition; 3 new widget tests cover revealing the Custom fields, the
+  empty-URL rejection, and a valid URL producing the expected `MediaItem` (24 example tests
+  total, up from 21).
 
 ## [0.4.0] - 2026-09-02
 
