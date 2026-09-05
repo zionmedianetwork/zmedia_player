@@ -64,6 +64,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clean analyze rather than tolerate pre-existing warnings.
 
 ### Changed
+- **iOS now maintains the `liveLatency` cushion after a rebuffer, not just at join/seek time.**
+  `AVPlayerItem.automaticallyPreservesTimeOffsetFromLive` is now set to `true` (was `false`)
+  alongside `configuredTimeOffsetFromLive`, in `MediaPlayerManager.swift`'s `loadMediaItem` —
+  the only site on either platform that sets either property. The two AVFoundation properties
+  are independent: `configuredTimeOffsetFromLive` governs the join position regardless of the
+  other flag, and setting a target offset is a statement of intent to hold it, so this package
+  now honors that intent instead of letting the cushion drift away, unbounded, after every
+  rebuffer (the behavior the prior `Changed` entry above documented as an open question).
+  Consumers who set `HlsConfig`/`DashConfig.liveLatency` on iOS 14+ will now see the playhead
+  restored toward the configured cushion after a rebuffer instead of drifting further from the
+  live edge indefinitely — this now matches Android's ExoPlayer in intent (both maintain the
+  target), though not in mechanism (ExoPlayer drifts smoothly via playback-speed adjustment;
+  AVPlayer restores via a discrete forward skip). **The cost is real: the playhead can visibly
+  jump forward right after a rebuffer, and there is no configuration option to opt back into
+  the old drift-instead-of-skip behavior.** No API surface changed — `liveLatency`'s type,
+  wiring, and payload key are unaffected; only the AVFoundation configuration it produces on
+  iOS changed. See `HlsConfig.liveLatency`'s dartdoc and the
+  [Live Streaming guide](docs/api-reference/live-streaming.md) for the full trade-off.
 - **`example/README.md`'s feature table was missing 11 of the app's 27 feature pages** —
   `local_file_playback_page.dart`, `cache_playback_page.dart`,
   `adaptive_cache_playback_page.dart`, `secure_output_page.dart`, `multi_player_page.dart`,

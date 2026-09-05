@@ -1052,10 +1052,16 @@ class MediaPlayerInstance: NSObject {
         // liveLatency -> configuredTimeOffsetFromLive. iOS 14+ only; on
         // earlier iOS this API does not exist, so liveLatency silently has
         // no effect there (the package's minimum is iOS 13 — see
-        // HlsConfig.liveLatency's dartdoc).
+        // HlsConfig.liveLatency's dartdoc). automaticallyPreservesTimeOffsetFromLive
+        // is set to true so the configured cushion is maintained after a
+        // rebuffer, not just honored at join/seek time -- the two properties
+        // are independent per the AVFoundation header, and setting a target
+        // offset is a statement of intent to hold it. The cost is a forward
+        // skip when the player restores the cushion post-rebuffer; there is
+        // no way to opt into the old drift-instead-of-skip behavior.
         if let liveLatencyMs = (streamingConfig?["liveLatencyMs"] as? NSNumber)?.doubleValue {
             if #available(iOS 14.0, *) {
-                playerItem.automaticallyPreservesTimeOffsetFromLive = false
+                playerItem.automaticallyPreservesTimeOffsetFromLive = true
                 playerItem.configuredTimeOffsetFromLive = CMTime(
                     seconds: liveLatencyMs / 1000.0,
                     preferredTimescale: CMTimeScale(NSEC_PER_SEC)

@@ -267,9 +267,10 @@ cross-applied, so an app that serves HLS on one platform and DASH on the other m
 specific subset of fields — `enableDvr` (Dart-side seek gate for
 `MediaPlayer.isSeekable`/`seekTo`; also gates whether native reports a duration for the live
 item at all — see below), `liveLatency` (`MediaItem.LiveConfiguration` on Android, *maintained*
-via playback-speed adjustment; `AVPlayerItem.configuredTimeOffsetFromLive` on iOS 14+, but
-**join-time only** — honored once at start/seek, never restored after a rebuffer since this
-package sets `automaticallyPreservesTimeOffsetFromLive = false` — see
+via playback-speed adjustment; `AVPlayerItem.configuredTimeOffsetFromLive` on iOS 14+ for the
+join position, also **maintained** after a rebuffer since this package sets
+`automaticallyPreservesTimeOffsetFromLive = true` — at the cost of a visible forward skip
+right after the rebuffer, with no opt-out — see
 [`HlsConfig.liveLatency`'s dartdoc](../../lib/src/models/streaming_config.dart) and the
 [Live Streaming guide](live-streaming.md) for the full trade-off), and the inherited
 `enableAdaptiveBitrate`/

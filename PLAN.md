@@ -8,9 +8,12 @@ the `NetworkStatus` platform-quality fix (issue #112), the live-edge-offset
 window-sanity fix (issue #109) with its manifest-anchor diagnostic (issue #110), and the
 iOS counterpart to #112/#109: `NetworkMonitor.swift`'s `estimateBandwidth(from:)` no longer
 reports `connectionType: "none"`/`downloadSpeed: 0` for a connected but unrecognized
-transport, plus documentation of two previously-undocumented iOS behaviors (`liveLatency` is
-join-time-only on iOS, and iOS `downloadSpeed` is a fixed per-transport constant, not a
-measurement); a fix for 13 of the example app's 19 widget tests hanging on `pumpAndSettle`
+transport, plus documentation of a previously-undocumented iOS behavior (iOS `downloadSpeed`
+is a fixed per-transport constant, not a measurement); a behavior change so iOS's `liveLatency`
+cushion is maintained after a rebuffer instead of drifting away from it indefinitely
+(`AVPlayerItem.automaticallyPreservesTimeOffsetFromLive` flipped to `true`, at the cost of a
+visible forward skip after each rebuffer, with no opt-out); a fix for 13 of the example app's
+19 widget tests hanging on `pumpAndSettle`
 against pages whose `MediaController` keeps real periodic timers (`BufferingService`/
 `NetworkResilienceService`) running forever, bringing the example suite back to 19/19, then to
 21/21 with the `liveEdgeOffset`/`isAtLiveEdge`/`positionBasis` readout added to
@@ -73,9 +76,10 @@ platform is called out explicitly.
 - Adaptive bitrate / bandwidth estimation (`StreamingService` + native `NetworkMonitor`).
 - Quality and audio-track selection.
 - Live + DVR: `enableDvr` (seek gating + DVR-window duration reporting), `liveLatency`
-  (target offset from live edge; iOS 14+ only — Android *maintains* the target via
-  playback-speed adjustment, iOS only honors it once at join/seek and never restores it
-  after a rebuffer, since `automaticallyPreservesTimeOffsetFromLive = false`),
+  (target offset from live edge; iOS 14+ only — both platforms now *maintain* the target
+  after a rebuffer, but by different mechanisms: Android's ExoPlayer drifts playback speed
+  toward it smoothly, iOS restores it via a visible forward skip, since
+  `automaticallyPreservesTimeOffsetFromLive = true`, with no opt-out),
   `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` (track-selection bounds; iOS honors
   only `maxBitrate`).
 - Live-edge signal: `PlaybackState.liveEdgeOffset`, `isAtLiveEdge` /
