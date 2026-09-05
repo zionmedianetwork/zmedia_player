@@ -513,6 +513,16 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    `PlaybackState.positionBasis == PositionBasis.liveWindow`, a *constant* `position` is
    healthy playback in a sliding window, not a stall. Use `liveEdgeOffset`/`isAtLiveEdge`
    (see "Live Streaming DVR" above and `docs/api-reference/live-streaming.md`)
+14. **`NetworkStatus.quality`/`.isAvailable` and `.connectionType` are two independent
+   signals** - `NetworkStatus.fromPlatform` honours the platform's `quality` field (falling
+   back to `NetworkQuality.fromBandwidth(downloadSpeed)` only when `quality` is absent or
+   unparseable), and `NetworkMonitor.kt`'s Android API >= 23 branch floors a non-positive
+   `linkDownstreamBandwidthKbps` hint against `estimateBandwidthFromType` (issue #112), but a
+   degraded/zero bandwidth reading is still possible in principle and describes *link
+   quality*, not reachability. `connectionType == ConnectionType.none` (set only by each
+   platform's canonical `offlineStatus()`/no-connection map) is the reliable reachability
+   discriminator; don't assume `!isAvailable` means disconnected. See
+   `docs/api-reference/events.md#onnetworkstatuschanged`
 
 ## UI/UX Design Specifications
 

@@ -56,10 +56,12 @@ void main() {
       expect(status.connectionType, ConnectionType.wifi);
       expect(status.isMetered, isFalse);
       expect(status.downloadSpeed, 1250000);
-      // NetworkStatus.fromPlatform recomputes quality from bandwidth rather
-      // than trusting native's own "quality" string (see network_status.dart)
-      // — 1.25MB/s == 10Mbps, comfortably in the "excellent" (>5Mbps) bucket.
-      expect(status.quality, NetworkQuality.excellent);
+      // NetworkStatus.fromPlatform honours native's own "quality" string
+      // when present (issue #112) rather than recomputing it from
+      // downloadSpeed — 1.25MB/s == 10Mbps would fall in the "excellent"
+      // bucket via NetworkQuality.fromBandwidth, but the platform sent
+      // "good" and that must win.
+      expect(status.quality, NetworkQuality.good);
 
       player.dispose();
     });

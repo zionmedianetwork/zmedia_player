@@ -30,7 +30,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |
 | Android | minSdk 23 |
-| Tests | 1089 passing (Dart layer; native has none) |
+| Tests | 1103 passing (Dart layer; native has none) |
 
 ---
 

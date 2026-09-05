@@ -26,6 +26,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   [ExoPlayer 2 on the classpath](docs/api-reference/getting-started.md#exoplayer-2-on-the-classpath)
   section in the getting-started guide, `docs/QUICK_START.md`'s platform notes, `AGENTS.md`
   and `CLAUDE.md`. No code change — the package's own dependency was always correct.
+- **`NetworkStatus.fromPlatform` no longer discards the platform's `quality`, so a `0`
+  bandwidth hint on a connected device no longer reports offline** (closes
+  [#112](https://github.com/zionmedianetwork/zmedia_player/issues/112)). Both natives
+  compute and transmit a `quality` string alongside `downloadSpeed` — see the header
+  comments of `NetworkMonitor.kt`/`NetworkMonitor.swift`, which document the payload as
+  `(quality, downloadSpeed, isMetered, connectionType)` — but `fromPlatform` ignored it and
+  always recomputed quality from `downloadSpeed` via `NetworkQuality.fromBandwidth`. On
+  Android API >= 23, `downloadSpeed` derives from `NetworkCapabilities
+  .linkDownstreamBandwidthKbps`, which Android documents as a hint that may be absent or
+  inaccurate — `0` is a legal value on a live, connected network. `fromBandwidth(0)` falls
+  through every branch to `NetworkQuality.offline`, so a zero-bandwidth hint on an
+  otherwise-connected wifi/cellular link made `NetworkStatus.isAvailable` report `false`
+  while the device was online — silently, since no analyzer error or test failure can catch
+  a `Map<String, dynamic>` payload key that's transmitted but never read. `fromPlatform` now
+  parses `data['quality']` into a `NetworkQuality` and uses it directly, falling back to
+  `fromBandwidth` only when the key is absent or unparseable (an older native build, or a
+  hand-built map, keeps working exactly as before). `NetworkMonitor.kt`'s API >= 23 branch
+  is also floored: when `linkDownstreamBandwidthKbps` yields a non-positive value on a
+  network with real capabilities in hand, it now falls back to the same
+  `estimateBandwidthFromType` transport-based estimate the pre-Android-M branch already
+  used, so `downloadSpeed` itself — which is public and consumed for adaptive-streaming
+  decisions — no longer degenerates to `0` on a connected link either;
+  `offlineStatus()` (the canonical no-connection map) is unaffected. iOS's
+  `estimateBandwidth(from:)` derives its estimate from the transport/interface type rather
+  than from a system bandwidth hint, so it has no equivalent degenerate-hint path and needed
+  no analogous floor. Deriving `isAvailable` from `connectionType` instead of `quality` (one
+  of the three fixes the issue offered) was deliberately **not** done here — it's the more
+  principled separation of reachability from link quality, but it changes the meaning of a
+  widely-consumed public getter and belongs in its own change with its own deprecation
+  story. See the [`onNetworkStatusChanged` payload table](docs/api-reference/events.md#onnetworkstatuschanged)
+  for the full contract. Regression coverage: `test/models/network_status_test.dart`
+  (new), plus an extended `test/models/network_status_vocabulary_test.dart` drift guard for
+  the `quality` vocabulary (previously only `connectionType` was guarded, on the reasoning
+  that `quality` was unread dead data — no longer true) and an updated expectation in
+  `test/core/media_player_network_status_test.dart`.
 
 ## [0.4.0] - 2026-09-02
 

@@ -655,6 +655,48 @@ were considered and rejected as the iOS source: both are *target* offsets (what
 the app asked for / what the server recommends), so they are constant by
 construction and useless as a liveness signal.
 
+### `onNetworkStatusChanged`
+
+Backs `NetworkStatus.fromPlatform` (`lib/src/models/network_status.dart`), and in turn
+`MediaPlayer.networkStatus`/`.networkStatusStream`/`.networkChangeStream` and
+`NetworkResilienceService`. Both natives compute and send this shape — see the header
+comments of `NetworkMonitor.kt` (Android) and `NetworkMonitor.swift` (iOS), which document
+the same `(quality, downloadSpeed, isMetered, connectionType)` contract.
+
+| Key | Type | Required | Meaning |
+|-----|------|----------|---------|
+| `playerId` | String | yes | Routes the event to a `MediaPlayer` instance |
+| `quality` | String | no | One of `excellent`/`good`/`fair`/`poor`/`offline` (`NetworkQuality.values.name`). **As of issue #112, this is honoured** — `fromPlatform` parses it into a `NetworkQuality` and uses it directly. Absent or unparseable falls back to `NetworkQuality.fromBandwidth(downloadSpeed)`, which is the only behavior an older native build (or a hand-built map) ever exercised |
+| `downloadSpeed` | int (bytes/sec) | no (defaults `0`) | Estimated download bandwidth. Consumed directly for adaptive-streaming decisions, and as the `fromBandwidth` fallback input when `quality` is absent/unparseable |
+| `isMetered` | bool | no (defaults `false`) | Whether the connection is metered (e.g. cellular) |
+| `connectionType` | String | no (defaults `"unknown"`) | One of `wifi`/`cellular`/`mobile`/`ethernet`/`bluetooth`/`vpn`/`none`; parsed case-insensitively by `ConnectionType.fromString`, unrecognised values fall back to `ConnectionType.unknown` |
+
+**Why honouring `quality` matters (issue #112).** Before this fix, `fromPlatform` always
+recomputed quality from `downloadSpeed`, discarding the platform's own classification. On
+Android API >= 23, `downloadSpeed` derives from `NetworkCapabilities
+.linkDownstreamBandwidthKbps`, which Android documents as a hint that may legitimately be `0`
+on a live, connected network. `NetworkQuality.fromBandwidth(0)` returns `NetworkQuality
+.offline`, so a `0` bandwidth hint on an otherwise-connected device made `NetworkStatus
+.isAvailable` report `false` while the device was online. `NetworkMonitor.kt` now also floors
+that branch — when the `linkDownstreamBandwidthKbps` hint is non-positive on a network with
+real capabilities in hand, it falls back to the same transport-based `estimateBandwidthFromType`
+estimate the pre-Android-M branch already used — so `downloadSpeed` itself no longer degenerates
+to `0` on a connected link either; `offlineStatus()` (the canonical no-connection map, shared by
+every genuine offline path) is unaffected and still reports `quality: "offline"`, `downloadSpeed:
+0`, `connectionType: "none"`.
+
+iOS's `estimateBandwidth(from:)` derives its estimate from the transport/interface type rather
+than from a system bandwidth hint (fixed per-transport constants: ethernet 50 Mbps, wifi 5-10
+Mbps, cellular 2 Mbps, loopback 1000 Mbps, other 1 Mbps), so it has no equivalent degenerate-hint
+path and needed no analogous floor.
+
+Note that `isAvailable`/`quality` and `connectionType` remain two independent signals:
+`connectionType == "none"` is set only by each platform's `offlineStatus()`/no-connection map
+and is a reliable reachability discriminator on its own, whereas `quality`/`isAvailable` describe
+link quality and can (rarely) be degraded on a connected link. Deriving `isAvailable` from
+`connectionType` instead was considered and deliberately deferred — it changes the meaning of a
+widely-consumed public getter and needs its own deprecation story, not a bug-fix side effect.
+
 ---
 
 ## Performance Considerations
