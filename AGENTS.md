@@ -168,6 +168,16 @@ its values are actually on. See
 [live-streaming.md](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
 for the full diagnosis.
 
+**`liveEdgeOffset` itself measures a different quantity on each platform** (issue #120), not
+just a units/timeline detail: Android reports distance from the *published* live edge
+(commonly 15-30s during healthy playback); iOS's "bounded by construction" computation above
+means AVPlayer keeps the playhead pinned to the seekable range's end during live playback, so
+the value reads under a second there regardless of stream health. `isAtLiveEdge` is
+consequently effectively always `true` on iOS, and a `liveLatency` cushion maintained on iOS is
+not observable through `liveEdgeOffset` at all. See
+[live-streaming.md](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things)
+for the full explanation.
+
 **`onNetworkStatusChanged` payload.** `{playerId: String, quality: String?, downloadSpeed:
 int(bytes/sec)?, isMetered: bool?, connectionType: String?}`. `quality` is one of
 `excellent`/`good`/`fair`/`poor`/`offline`; as of issue #112, `NetworkStatus.fromPlatform`
@@ -413,8 +423,11 @@ controller.isAtLiveEdge;    // offset <= PlaybackState.defaultLiveEdgeTolerance 
 On `PositionBasis.liveWindow` the window start slides forward with the playhead, so a
 **constant `position` is healthy playback, not a stall** — a naive position-sampling watchdog
 escalates forever. `liveEdgeOffset` is the reliable signal: it grows without bound against a
-genuinely frozen playhead. Reported for live streams with **and without** `enableDvr`. See
-[Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall-watchdog-for-live-streams).
+genuinely frozen playhead, on both platforms. Reported for live streams with **and without**
+`enableDvr`. **Android and iOS measure `liveEdgeOffset` itself differently and the values are
+not comparable — `isAtLiveEdge` is effectively always `true` on iOS.** See
+[Platform divergence](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things)
+and [Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall-watchdog-for-live-streams).
 
 ---
 

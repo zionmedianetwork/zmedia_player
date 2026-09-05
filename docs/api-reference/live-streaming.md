@@ -291,6 +291,58 @@ final bool atEdge = controller.isAtLiveEdge;         // false for VOD
 | `state.isAtLiveEdgeWithin(tolerance)` | `bool` | Same test with a caller-supplied tolerance. |
 | `PlaybackState.defaultLiveEdgeTolerance` | `Duration` | **15 seconds.** |
 
+### Platform divergence: this value measures different things
+
+`liveEdgeOffset` is one field name with two different measurement strategies
+underneath, and **the two are not comparable** (issue #120):
+
+- **Android** — `Player.getCurrentLiveOffset()` measures distance from the
+  *published* live edge, as the manifest's own segment timeline describes it.
+  On a standard (non-low-latency) HLS/DASH stream this commonly reads 15-30s
+  during perfectly healthy playback, which is exactly why the 15s
+  `defaultLiveEdgeTolerance` above is calibrated the way it is.
+- **iOS** — end of `AVPlayerItem.seekableTimeRanges.last` minus
+  `currentTime()`. During live playback AVPlayer keeps the playhead pinned to
+  that end, so the subtraction reads **under one second, with sub-second
+  jitter, by construction** — not because iOS plays measurably closer to the
+  edge, but because both operands are defined by the same loaded range.
+
+Verified on-device against the same stream (the built-in Unified Streaming
+demo channel), Android and iOS side by side: Android held a stable ~18s;
+iOS stayed consistently under 1s. Both readings are internally correct for
+what each platform's computation actually measures — the defect is that one
+name and one tolerance were documented as covering both.
+
+Practical consequences:
+
+1. **`isAtLiveEdge` is effectively always `true` on iOS.** A value pinned near
+   zero can never exceed a 15-second tolerance, so `defaultLiveEdgeTolerance`
+   and `isAtLiveEdgeWithin(...)` are Android-meaningful and near-degenerate on
+   iOS. Treat a `false` reading on iOS as the informative signal — a steady
+   `true` there does not mean "riding 15-30s behind the edge" the way it does
+   on Android.
+2. **Readings are not comparable across platforms.** A host that surfaces
+   `liveEdgeOffset` as one number regardless of platform will show wildly
+   different figures for identical playback health, and any threshold tuned
+   against one platform's numbers will not transfer to the other.
+3. **A configured `liveLatency` cushion is invisible to `liveEdgeOffset` on
+   iOS.** With `configuredTimeOffsetFromLive` set, the gap AVPlayer maintains
+   lives between the seekable range's end and the *published* live edge — a
+   quantity outside what `seekableTimeRanges.last - currentTime()` can see.
+   Watching `liveEdgeOffset` on iOS will not show that cushion being held or
+   eroded; see
+   [High latency behind live edge / frequent buffering](#high-latency-behind-live-edge--frequent-buffering)
+   for what is actually observable there.
+
+What still works identically on both platforms: a genuinely **frozen playhead**
+in a sliding window grows `liveEdgeOffset` without bound on both — on iOS
+because the seekable range's end keeps advancing while `currentTime()` does
+not, on Android because distance from the published edge keeps widening.
+**DVR scrub-back** also behaves the same way on both: seeking backward grows
+the offset because the playhead moves while the reference point (seekable end
+/ published edge) does not. See
+[Stall watchdog for live streams](#stall-watchdog-for-live-streams) below.
+
 **Why 15 seconds, and when to change it.** A healthy live player does *not* sit
 at an offset of zero. A standard (non-low-latency) HLS or DASH player
 deliberately rides roughly three target segment durations behind the edge —
@@ -319,8 +371,12 @@ manifest defect — see
 below). On iOS it is the end of `AVPlayerItem.seekableTimeRanges.last` minus
 `AVPlayerItem.currentTime()`, which is bounded by construction (both operands
 share the item's own timeline, with no unix-time anchor involved) and needs no
-such check. It arrives on the existing `onPositionChanged` event under the
-`liveEdgeOffset` key — see [Events](events.md#onpositionchanged).
+such check — which is also exactly why it reads under a second during live
+playback on iOS; see
+[Platform divergence](#platform-divergence-this-value-measures-different-things)
+above for what that means in practice. It arrives on the existing
+`onPositionChanged` event under the `liveEdgeOffset` key — see
+[Events](events.md#onpositionchanged).
 
 ```dart
 // LIVE badge / "jump to live" affordance
@@ -379,8 +435,12 @@ watchdog escalates forever (reload -> re-auth -> hard reopen, minting a new
 native player every lap).
 
 The reliable signal is `liveEdgeOffset`. Against a genuinely frozen playhead in
-a sliding window it **grows without bound**; at a healthy edge it stays bounded
-and jitters around the target latency.
+a sliding window it **grows without bound on both platforms**; at a healthy
+edge it stays bounded — on Android jittering around the stream's target
+latency (commonly 15-30s), on iOS pinned near zero by construction (see
+[Platform divergence](#platform-divergence-this-value-measures-different-things)).
+The watchdog below only cares that the value stays bounded, not what the bound
+is, so it works unmodified on both.
 
 ```dart
 import 'dart:async';
@@ -510,6 +570,14 @@ watchdog.dispose();
 - `liveEdgeOffset` is `null` for VOD, so `isAtLiveEdge` is always `false`
   there — never use `isAtLiveEdge` as a proxy for "is this a live stream"; use
   `player.isLive` or `positionBasis` for that.
+- **On iOS, `isAtLiveEdge` is effectively always `true` during live playback**
+  (see [Platform divergence](#platform-divergence-this-value-measures-different-things)),
+  so the `if (controller.isAtLiveEdge) return false;` short-circuit above will
+  fire on nearly every iOS sample. That is harmless for this watchdog — it
+  just means the `offset > _liveEdgeStallThreshold` branch is effectively the
+  only one that ever escalates on iOS — but do not read a steady `true` there
+  as evidence the stream is healthily riding 15-30s behind the edge the way it
+  would on Android.
 
 **Seeing these fields on a real device.** The example app's
 `pages/wired_config_verification_page.dart` renders `liveEdgeOffset`,
@@ -804,6 +872,10 @@ duration / switch to low-latency HLS if you actually want to be closer to the ed
 `isAtLiveEdge` is also always `false` for VOD (`liveEdgeOffset` is `null` there) — use
 `player.isLive` to ask "is this live", not `isAtLiveEdge`.
 
+**Note:** the tolerance reasoning above is calibrated to Android, where `liveEdgeOffset`
+measures distance from the *published* live edge. On iOS it measures something else — see
+the next entry.
+
 If `liveEdgeOffset` instead reads as an implausibly large value — minutes, when `duration`
 (the DVR window) is under a minute — that is not a tolerance problem; it is the manifest
 time-anchor defect covered in
@@ -811,6 +883,25 @@ time-anchor defect covered in
 below. As of this fix, Android's `liveEdgeOffset` already falls back to a bounded computation
 when it detects this, so a value larger than `duration` should not reach Dart any more; if you
 still observe one, please file an issue with the manifest details.
+
+### `isAtLiveEdge` reads `true` no matter what on iOS
+
+This is expected, not a bug (issue #120). On iOS, `liveEdgeOffset` is the end of
+`AVPlayerItem.seekableTimeRanges.last` minus `currentTime()`, and AVPlayer keeps the playhead
+pinned to that end during live playback — so the value sits under a second by construction, and
+a 15-second (or wider) tolerance can essentially never exceed it. See
+[Platform divergence](#platform-divergence-this-value-measures-different-things) for the full
+explanation. Practically:
+
+- Do not use `isAtLiveEdge` on iOS to distinguish "riding the edge normally" from "riding it
+  unusually close" — both look identical (`true`) there.
+- A `false` reading on iOS is the informative one — it means `liveEdgeOffset` was `null`
+  (platform can't answer yet, or VOD) rather than a stream genuinely far from the edge.
+- If you need an Android-comparable "how far behind the published edge" number on iOS, this
+  package does not currently compute one; see the issue for the trade-offs of adding an
+  `AVPlayerItem.currentDate()`-against-wall-clock approach, which was considered and deferred
+  because it reintroduces the manifest-clock-trust problem covered in
+  [Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency).
 
 ### High latency behind live edge / frequent buffering
 
@@ -826,12 +917,18 @@ afterward: this package sets `automaticallyPreservesTimeOffsetFromLive = true`, 
 skips forward to restore the configured cushion after a rebuffer, matching (in intent, not
 mechanism) Android's ExoPlayer, which drifts smoothly toward its target via playback-speed
 adjustment instead. The cost of the iOS approach is a visible forward jump in the playhead
-right after a rebuffer, rather than a smooth correction — expect `liveEdgeOffset` to step back
-down toward the target immediately after a rebuffer instead of drifting away from it (see the
-wiring table and `HlsConfig.liveLatency`'s dartdoc for the full trade-off). There is no way to
-opt out of the skip and get the old drift-instead-of-skip behavior; track `liveEdgeOffset`/
-`isAtLiveEdge` (see [Stall watchdog for live streams](#stall-watchdog-for-live-streams)) if your
-app needs to observe or react to it.
+right after a rebuffer, rather than a smooth correction (see the wiring table and
+`HlsConfig.liveLatency`'s dartdoc for the full trade-off). There is no way to opt out of the
+skip and get the old drift-instead-of-skip behavior.
+
+**This cushion is not observable through `liveEdgeOffset` on iOS** (issue #120): the gap
+`automaticallyPreservesTimeOffsetFromLive` maintains lives between the seekable range's end and
+the *published* live edge, which is outside what `seekableTimeRanges.last - currentTime()` can
+see — `liveEdgeOffset` stays pinned near zero on iOS whether or not the cushion is actually
+being held. If you need to confirm the skip is happening, the visible forward jump in
+`controller.position` right after a rebuffer is the only signal this package's API currently
+exposes; there is no dedicated event for it. (On Android, `liveEdgeOffset` does reflect the
+maintained target — see [Stall watchdog for live streams](#stall-watchdog-for-live-streams).)
 
 If `liveLatency` reaches native correctly (confirm via `controller.config`) but changing its
 value has **no observable effect** on Android/DASH — join position and steady-state cushion stay

@@ -848,6 +848,9 @@ class MediaPlayer {
   /// window it grows without bound. See
   /// `docs/api-reference/live-streaming.md` for the worked stall-watchdog
   /// pattern.
+  ///
+  /// **Android and iOS measure this differently and the values are not
+  /// comparable** — see [PlaybackState.liveEdgeOffset]'s dartdoc.
   Duration? get liveEdgeOffset {
     _throwIfDisposed();
     return _currentState.liveEdgeOffset;
@@ -858,7 +861,8 @@ class MediaPlayer {
   ///
   /// Always `false` for VOD and while [liveEdgeOffset] is `null`. Use
   /// [PlaybackState.isAtLiveEdgeWithin] on [currentState] for a different
-  /// tolerance.
+  /// tolerance. Effectively always `true` on iOS during live playback — see
+  /// [PlaybackState.isAtLiveEdge]'s dartdoc.
   bool get isAtLiveEdge {
     _throwIfDisposed();
     return _currentState.isAtLiveEdge;

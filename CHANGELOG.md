@@ -64,6 +64,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clean analyze rather than tolerate pre-existing warnings.
 
 ### Changed
+- **Documented that `PlaybackState.liveEdgeOffset` measures a different quantity on Android
+  than on iOS, and that the values are not comparable (issue #120).** Found during on-device
+  verification of the `liveLatency`-restoration change above: on the same stream (the built-in
+  Unified Streaming demo channel), Android held a stable ~18s while iOS read consistently under
+  1s. Both are internally correct for what each platform's computation actually measures —
+  Android's `Player.getCurrentLiveOffset()` is distance from the *published* live edge as the
+  manifest's segment timeline describes it, while iOS's `seekableTimeRanges.last -
+  currentTime()` is bounded near zero by construction, because AVPlayer keeps the playhead
+  pinned to the seekable range's end during live playback. This was previously documented as
+  one field with one meaning and one 15s tolerance
+  (`PlaybackState.defaultLiveEdgeTolerance`/`isAtLiveEdge`), which is wrong for iOS in practice:
+  `isAtLiveEdge` is effectively always `true` there, and a `liveLatency` cushion held via
+  `automaticallyPreservesTimeOffsetFromLive` on iOS is not observable through `liveEdgeOffset`
+  at all — including via the entry directly below, whose "watch `liveEdgeOffset` step back down
+  toward the target after a rebuffer" instruction does not work on iOS and has been corrected.
+  What still holds on both platforms, unchanged: a genuinely frozen playhead in a sliding window
+  grows `liveEdgeOffset` without bound, and DVR scrub-back grows it correctly — this remains the
+  reliable live-stall signal on both. No code changed; this is a documentation-only correction.
+  See `docs/api-reference/live-streaming.md`'s new "Platform divergence" section for the full
+  explanation, `lib/src/models/player_state.dart`'s updated dartdocs, and the corresponding
+  updates to `docs/api-reference/models.md`, `docs/api-reference/player-api.md`,
+  `docs/api-reference/events.md`, `docs/summary/features.md`, `README.md`, `AGENTS.md`, and
+  `CLAUDE.md`.
 - **iOS now maintains the `liveLatency` cushion after a rebuffer, not just at join/seek time.**
   `AVPlayerItem.automaticallyPreservesTimeOffsetFromLive` is now set to `true` (was `false`)
   alongside `configuredTimeOffsetFromLive`, in `MediaPlayerManager.swift`'s `loadMediaItem` —

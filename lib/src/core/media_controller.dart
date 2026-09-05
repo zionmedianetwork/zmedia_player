@@ -207,12 +207,15 @@ class MediaController extends ChangeNotifier {
   PositionBasis get positionBasis => _currentState.positionBasis;
 
   /// How far behind the live edge the playhead is, or `null` for VOD / when
-  /// the platform cannot answer yet. See [PlaybackState.liveEdgeOffset].
+  /// the platform cannot answer yet. See [PlaybackState.liveEdgeOffset],
+  /// including why Android and iOS measure this differently and the values
+  /// are not comparable.
   Duration? get liveEdgeOffset => _currentState.liveEdgeOffset;
 
   /// Whether the playhead is riding the live edge, within
   /// [PlaybackState.defaultLiveEdgeTolerance] (15 seconds). Always `false`
-  /// for VOD.
+  /// for VOD. Effectively always `true` on iOS during live playback — see
+  /// [PlaybackState.isAtLiveEdge].
   ///
   /// Drive a LIVE badge or a "jump to live" affordance from this, and see
   /// `docs/api-reference/live-streaming.md` for the stall-watchdog pattern

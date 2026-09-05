@@ -195,7 +195,10 @@ Live: `positionBasis` (`PositionBasis.absolute` | `.liveWindow` — which timeli
 measured against), `liveEdgeOffset` (`Duration?`, distance behind the live edge; `null` for
 VOD), `isAtLiveEdge` (within `PlaybackState.defaultLiveEdgeTolerance`, 15s; always `false` for
 VOD). See [Live Streaming](live-streaming.md#stall-watchdog-for-live-streams) — do **not** build
-a stall detector on `position` for a live stream.
+a stall detector on `position` for a live stream. **Android and iOS measure `liveEdgeOffset`
+differently and the values are not comparable** — see
+[Platform divergence](live-streaming.md#platform-divergence-this-value-measures-different-things);
+on iOS, `isAtLiveEdge` is effectively always `true` during live playback.
 Audio: `volume`, `isMuted`, `speed`.
 Content: `currentItem`, `currentPlaylist`, `hasNext`, `hasPrevious`.
 Tracks: `qualityTracks`, `selectedQualityTrack`, `subtitleTracks`, `selectedSubtitleTrack`,
@@ -302,8 +305,8 @@ event (see [Events](events.md#onpositionchanged)):
 
 | Getter | Type | Value |
 |---|---|---|
-| `liveEdgeOffset` | `Duration?` | Distance behind the live edge. `null` for VOD and while the platform cannot answer. Reported for live streams with **and without** `enableDvr`. Android: `Player.getCurrentLiveOffset()`, sanity-checked against the live window's own duration and falling back to a bounded computation when a manifest's time anchor disagrees with its segment timeline (see [Manifest time-anchor defect](live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)). iOS: end of `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()`, bounded by construction. |
-| `isAtLiveEdge` | `bool` | `liveEdgeOffset <= PlaybackState.defaultLiveEdgeTolerance` (15s). `false` whenever the offset is `null`. Use `currentState.isAtLiveEdgeWithin(tolerance)` for a different threshold. |
+| `liveEdgeOffset` | `Duration?` | Distance behind the live edge. `null` for VOD and while the platform cannot answer. Reported for live streams with **and without** `enableDvr`. Android: `Player.getCurrentLiveOffset()`, sanity-checked against the live window's own duration and falling back to a bounded computation when a manifest's time anchor disagrees with its segment timeline (see [Manifest time-anchor defect](live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)) — commonly 15-30s during healthy playback. iOS: end of `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()`, bounded by construction — which also means it reads under a second during live playback, by construction, not because the stream is closer to the edge. **These are different quantities and not comparable across platforms** — see [Platform divergence](live-streaming.md#platform-divergence-this-value-measures-different-things). |
+| `isAtLiveEdge` | `bool` | `liveEdgeOffset <= PlaybackState.defaultLiveEdgeTolerance` (15s). `false` whenever the offset is `null`. Use `currentState.isAtLiveEdgeWithin(tolerance)` for a different threshold. **Effectively always `true` on iOS** during live playback, for the reason above; Android-meaningful. |
 | `positionBasis` | `PositionBasis` | Which timeline `currentState.position` is on. `liveWindow` means a **constant `position` is not a stall** — see [Live Streaming](live-streaming.md#knowing-which-timeline-position-is-on). |
 
 ## Errors

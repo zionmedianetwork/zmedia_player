@@ -61,8 +61,13 @@ enum PositionBasis {
 > `position` stays roughly constant during perfectly healthy playback, because
 > the window start advances at the same rate as the playhead. Use
 > `liveEdgeOffset` (which grows without bound against a genuinely frozen
-> playhead) rather than `position` to detect a live stall. See
-> [Live Streaming](live-streaming.md#stall-watchdog-for-live-streams).
+> playhead, on both platforms) rather than `position` to detect a live stall.
+> See [Live Streaming](live-streaming.md#stall-watchdog-for-live-streams).
+>
+> **Android and iOS measure `liveEdgeOffset` itself differently, and the
+> values are not comparable** — see
+> [Platform divergence](live-streaming.md#platform-divergence-this-value-measures-different-things).
+> `isAtLiveEdge` is effectively always `true` on iOS as a result.
 
 #### PlayerState Enum:
 ```dart
@@ -649,6 +654,19 @@ real, not a bug: each platform reports the basis its position values are
 actually on. Reporting a normalised lie on one platform would defeat the
 purpose of the flag. `liveEdgeOffset` is reported for live streams **with and
 without** DVR on both platforms.
+
+**`liveEdgeOffset` itself diverges between platforms too, and more
+fundamentally** (issue #120): Android's computation measures distance from
+the *published* live edge (the manifest's own segment timeline), commonly
+15-30s during healthy playback, while iOS's computation is bounded by the two
+operands sharing the same loaded range — which means it reads under a second
+during live playback there, essentially by construction rather than as a
+reflection of stream health. The values are not comparable across platforms,
+and `isAtLiveEdge`/`defaultLiveEdgeTolerance` are consequently near-degenerate
+on iOS (effectively always `true`). See
+[Platform divergence](live-streaming.md#platform-divergence-this-value-measures-different-things)
+for the full explanation, including what still works identically on both
+(frozen-playhead stall growth and DVR scrub-back).
 
 `AVPlayerItem.configuredTimeOffsetFromLive` and `recommendedTimeOffsetFromLive`
 were considered and rejected as the iOS source: both are *target* offsets (what

@@ -359,9 +359,19 @@ class HlsConfig extends StreamingConfig {
   /// same way (via playback-speed adjustment rather than a skip). The cost
   /// is real: restoring the offset is a forward skip, so the playhead can
   /// visibly jump right after a rebuffer. There is no way to opt out of the
-  /// skip and get the old drift-instead-of-skip behavior — track
-  /// `liveEdgeOffset`/`isAtLiveEdge` (see `docs/api-reference/live-streaming.md`,
-  /// "Stall watchdog for live streams") if a consumer needs to observe it.
+  /// skip and get the old drift-instead-of-skip behavior.
+  ///
+  /// **This cushion is not observable through `liveEdgeOffset` on iOS**
+  /// (issue #120). `PlaybackState.liveEdgeOffset` there is the end of
+  /// `AVPlayerItem.seekableTimeRanges.last` minus `currentTime()`, which stays
+  /// under a second by construction during live playback regardless of
+  /// whether the cushion is being held or eroded — the gap this property
+  /// maintains lives between the seekable range's end and the *published*
+  /// live edge, a quantity outside what that subtraction can see. On Android,
+  /// `liveEdgeOffset` does reflect the maintained target. See
+  /// `docs/api-reference/live-streaming.md`'s "Platform divergence" section
+  /// for the full explanation of why the two platforms' `liveEdgeOffset`
+  /// values are not comparable.
   final Duration? liveLatency;
 
   const HlsConfig({

@@ -24,8 +24,13 @@ silently resolve a CDN-rewritten/signed URL to `progressive`, under which neithe
 nor `DashConfig` applies + one optional HTTP header) so the #109-shaped defect stream from a
 device bug report, unreachable from the app's own bundled fixtures, can be verified the same
 way without a rebuild; 11 feature pages added to `example/README.md`'s previously-incomplete
-table; and corrections to several stale hardcoded Dart test-suite counts across the docs —
-landed since the `v0.4.0` tag.
+table; corrections to several stale hardcoded Dart test-suite counts across the docs; and a
+documentation-only correction (issue #120) stating that `PlaybackState.liveEdgeOffset` measures
+a different quantity on Android (distance from the published live edge, ~18s on a verification
+stream) than on iOS (bounded near zero by construction during live playback, verified <1s on
+the same stream) — making `isAtLiveEdge`/`defaultLiveEdgeTolerance` near-degenerate on iOS and
+a configured `liveLatency` cushion unobservable through that field there — landed since the
+`v0.4.0` tag.
 
 > This file is the authoritative implementation roadmap referenced by `CLAUDE.md`.
 > It tracks current state and the real backlog. For architecture, UI/UX specs, and
@@ -93,6 +98,12 @@ platform is called out explicitly.
   defeats `liveLatency` on an affected manifest, which native now flags with a one-time
   diagnostic (issue #110) — see
   [live-streaming.md](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency).
+  **Android and iOS measure `liveEdgeOffset` itself differently and the values are not
+  comparable** (issue #120): Android reports distance from the published live edge (~18s
+  verified on-device); iOS is bounded near zero by construction (<1s verified on the same
+  stream), making `isAtLiveEdge`/`defaultLiveEdgeTolerance` near-degenerate on iOS and a
+  `liveLatency` cushion held there unobservable through this field — see
+  [Platform divergence](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things).
 - Explicit format declaration: `MediaItem.streamingFormat` + the `StreamingFormat` enum
   (`hls` / `dash` / `progressive`), with `resolvedStreamingFormat`, `StreamingFormat.fromUrl`
   and `.fromName`. Decides which of `hlsConfig`/`dashConfig` applies (they are never
