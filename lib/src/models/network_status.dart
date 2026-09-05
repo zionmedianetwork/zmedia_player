@@ -37,6 +37,24 @@ enum NetworkQuality {
     return NetworkQuality.offline;
   }
 
+  /// Attempts to parse a platform-provided `quality` string (as sent by
+  /// `NetworkMonitor.kt`/`NetworkMonitor.swift`, and as written by
+  /// [NetworkStatus.toMap] via `quality.name`) into a [NetworkQuality].
+  ///
+  /// Returns `null` for `null`, a non-string value, or a string that
+  /// doesn't match any enum name — deliberately, so callers (see
+  /// [NetworkStatus.fromPlatform]) can fall back to [fromBandwidth] instead
+  /// of an unparseable value silently masquerading as a real
+  /// classification.
+  static NetworkQuality? _tryParse(dynamic value) {
+    if (value is! String) return null;
+    final normalized = value.toLowerCase();
+    for (final q in NetworkQuality.values) {
+      if (q.name == normalized) return q;
+    }
+    return null;
+  }
+
   /// Checks if network is available
   bool get isAvailable => this != NetworkQuality.offline;
 
@@ -117,9 +135,23 @@ class NetworkStatus {
   });
 
   /// Creates NetworkStatus from platform data
+  ///
+  /// Both natives compute and transmit a `quality` string alongside
+  /// `downloadSpeed` (see `NetworkMonitor.kt`/`NetworkMonitor.swift`'s
+  /// header comments for the documented payload contract). That value is
+  /// honoured here when present and parseable, because `downloadSpeed` on
+  /// its own is not a reliable reachability signal: on Android API >= 23 it
+  /// derives from `NetworkCapabilities.linkDownstreamBandwidthKbps`, which
+  /// Android documents as a hint that may legitimately be `0` on a live,
+  /// connected network (issue #112). Recomputing quality from a `0`
+  /// bandwidth hint via [NetworkQuality.fromBandwidth] would misreport an
+  /// online device as offline. The fallback to `fromBandwidth` is kept for
+  /// an older native build that doesn't send `quality`, or for a caller
+  /// constructing the map by hand.
   factory NetworkStatus.fromPlatform(Map<String, dynamic> data) {
     final downloadSpeed = data['downloadSpeed'] as int? ?? 0;
-    final quality = NetworkQuality.fromBandwidth(downloadSpeed);
+    final quality = NetworkQuality._tryParse(data['quality']) ??
+        NetworkQuality.fromBandwidth(downloadSpeed);
 
     return NetworkStatus(
       quality: quality,
