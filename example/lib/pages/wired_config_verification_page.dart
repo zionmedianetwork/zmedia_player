@@ -8,6 +8,11 @@ import 'package:zmedia_player/zmedia_player.dart';
 import '../data/sample_media.dart';
 import '../widgets/player_scaffold.dart';
 
+/// Which fixture (or user-supplied stream) the page is currently loaded
+/// with. See [WiredConfigVerificationPage]'s "Custom" paragraph for
+/// [_StreamSource.custom].
+enum _StreamSource { liveHls, vodMp4, custom }
+
 /// On-device verification harness for four previously-inert config
 /// parameters that a recent branch wired up. Nothing else in the example
 /// app exercises any of these, so without this page every one of them would
@@ -23,9 +28,17 @@ import '../widgets/player_scaffold.dart';
 ///    rejected, live-with-DVR and VOD are unaffected — is visible on screen,
 ///    not just in a debug log.
 /// 2. **[HlsConfig.liveLatency]** — settable and reloadable; position /
-///    duration / bufferedPosition are shown as the best available proxy
-///    (see the section's own disclaimer for why nothing more precise than
-///    that is exposed).
+///    duration / bufferedPosition are shown as the best available join-time
+///    proxy, and `PlaybackState.liveEdgeOffset` / `.isAtLiveEdge` /
+///    `.positionBasis` (issue #88) are rendered directly as their own rows
+///    ([_PositionReadout]) so the Android fix for issue #109 — reject a
+///    `getCurrentLiveOffset()` value larger than the live window, fall back
+///    to the bounded computation — and the still-open manifest defect behind
+///    issue #110 are both visible on a real device, not just in `adb
+///    logcat` (see the section's own disclaimer for how to read the three
+///    cases: a rejected/bounded offset, a healthy live edge, and VOD's
+///    `null`/`absolute`, and the Android/iOS divergence in whether the
+///    configured offset is *maintained* after the initial join).
 /// 3. **[NotificationConfig.customActions] / .priority / .dismissible**
 ///    (Android only — see those fields' dartdocs for why iOS cannot honour
 ///    them). The notification is posted automatically the first time
@@ -47,6 +60,22 @@ import '../widgets/player_scaffold.dart';
 /// re-confirmed by hand: master 200, child 200 with real `#EXTINF` segment
 /// lines, no `#EXT-X-ENDLIST`, and `#EXT-X-MEDIA-SEQUENCE` advancing on a
 /// re-fetch ~15s later.
+///
+/// The Source control (top of section 1) also has a **Custom** option, so a
+/// stream this app cannot itself host — e.g. the specific manifest behind an
+/// #109-shaped defect report, whose unix-time anchor disagrees with its own
+/// segment timeline — can be pointed at this harness without a rebuild. It
+/// takes a raw URL, [MediaItem.isLive], an explicit [MediaItem.streamingFormat]
+/// override (`auto`/`hls`/`dash`/`progressive` — see that field's dartdoc:
+/// leaving this as `auto` on a CDN-rewritten or extension-less URL can
+/// silently resolve to [StreamingFormat.progressive], under which neither
+/// `HlsConfig` nor `DashConfig` ever applies, so `enableDvr`/`liveLatency`
+/// above would look broken when they are simply not being consulted at all),
+/// and one optional HTTP header/value pair for a signed-cookie or
+/// token-gated origin. Applying it reloads through the same
+/// [_reloadWithCurrentSettings] path the built-in sources use, so it honours
+/// whatever `enableDvr`/`liveLatency` are currently set to; unlike the two
+/// built-ins, an empty URL is rejected inline rather than attempting a load.
 class WiredConfigVerificationPage extends StatefulWidget {
   const WiredConfigVerificationPage({super.key});
 
@@ -68,11 +97,20 @@ class _WiredConfigVerificationPageState
   String? _error;
 
   // --- Section 1/2: live seek gating + liveLatency -------------------------
-  bool _useLiveSource = true;
+  _StreamSource _source = _StreamSource.liveHls;
   bool _dvrEnabled = false;
   Duration? _liveLatency; // null = off
   String? _seekOutcome;
   bool _reloading = false;
+
+  // --- Custom stream source (any stream, without a rebuild) -----------------
+  final _customUrlController = TextEditingController();
+  final _customHeaderNameController = TextEditingController();
+  final _customHeaderValueController = TextEditingController();
+  bool _customIsLive = true;
+  // null = "auto" -- let MediaItem.resolvedStreamingFormat infer from the URL.
+  StreamingFormat? _customStreamingFormat;
+  String? _customUrlError;
 
   // --- Section 3: notifications (Android only) ------------------------------
   bool _notifShowing = false;
@@ -115,7 +153,34 @@ class _WiredConfigVerificationPageState
   // have zero effect here.
   MediaItem get _vodItem => SampleMedia.forBiggerFun;
 
-  MediaItem get _currentSourceItem => _useLiveSource ? _liveItem : _vodItem;
+  /// Built from the Custom source fields, or `null` when the URL field is
+  /// blank -- the caller (`_reloadWithCurrentSettings`) treats `null` as "do
+  /// not attempt a load".
+  MediaItem? get _customItem {
+    final url = _customUrlController.text.trim();
+    if (url.isEmpty) return null;
+    final headerName = _customHeaderNameController.text.trim();
+    final headerValue = _customHeaderValueController.text.trim();
+    return MediaItem(
+      id: 'custom_verification_stream',
+      title: 'Custom stream',
+      url: url,
+      isLive: _customIsLive,
+      streamingFormat: _customStreamingFormat,
+      httpHeaders: headerName.isEmpty ? null : {headerName: headerValue},
+    );
+  }
+
+  MediaItem? get _currentSourceItem {
+    switch (_source) {
+      case _StreamSource.liveHls:
+        return _liveItem;
+      case _StreamSource.vodMp4:
+        return _vodItem;
+      case _StreamSource.custom:
+        return _customItem;
+    }
+  }
 
   @override
   void initState() {
@@ -175,7 +240,9 @@ class _WiredConfigVerificationPageState
         }
       });
 
-      await _controller.load(_currentSourceItem);
+      // The default source is _StreamSource.liveHls, never .custom, so this
+      // is never null on the initial load.
+      await _controller.load(_currentSourceItem!);
 
       _pipAvailable = await _controller.checkPipAvailability();
 
@@ -197,15 +264,31 @@ class _WiredConfigVerificationPageState
   // Section 1/2: live seek gating + liveLatency
   // ---------------------------------------------------------------------
 
-  /// Rebuilds [MediaConfig.hlsConfig] from [_dvrEnabled]/[_liveLatency] and
-  /// reloads the current source. `enableDvr`/`liveLatency` are only read by
-  /// `MediaPlayer.load()` (see `_applyStreamingConfigForLoad`), so changing
-  /// either without a reload would have no observable effect — this is the
-  /// exact mechanism the task calls out as easy to get wrong.
+  /// Rebuilds [MediaConfig.hlsConfig]/[MediaConfig.dashConfig] from
+  /// [_dvrEnabled]/[_liveLatency] and reloads the current source.
+  /// `enableDvr`/`liveLatency` are only read by `MediaPlayer.load()` (see
+  /// `_applyStreamingConfigForLoad`), so changing either without a reload
+  /// would have no observable effect — this is the exact mechanism the task
+  /// calls out as easy to get wrong. Both configs carry the same values
+  /// (not just `hlsConfig`) because the Custom source's
+  /// [MediaItem.streamingFormat] can resolve to either — see
+  /// [MediaItem.resolvedStreamingFormat] and the class dartdoc: whichever one
+  /// applies now gets the current settings, without the tester having to
+  /// know in advance which format the pasted-in URL will resolve to.
+  ///
+  /// For the Custom source, [_currentSourceItem] is `null` when the URL
+  /// field is blank -- in that case this surfaces [_customUrlError] inline
+  /// and returns without calling [MediaController.load] at all.
   Future<void> _reloadWithCurrentSettings() async {
+    final item = _currentSourceItem;
+    if (item == null) {
+      setState(() => _customUrlError = 'Enter a stream URL before loading.');
+      return;
+    }
     setState(() {
       _reloading = true;
       _seekOutcome = null;
+      _customUrlError = null;
     });
     try {
       await _controller.updateConfig(
@@ -214,9 +297,13 @@ class _WiredConfigVerificationPageState
             enableDvr: _dvrEnabled,
             liveLatency: _liveLatency,
           ),
+          dashConfig: DashConfig(
+            enableDvr: _dvrEnabled,
+            liveLatency: _liveLatency,
+          ),
         ),
       );
-      await _controller.load(_currentSourceItem);
+      await _controller.load(item);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -386,6 +473,9 @@ class _WiredConfigVerificationPageState
     _pipActionSub?.cancel();
     _notifActionSub?.cancel();
     _notificationService?.dispose();
+    _customUrlController.dispose();
+    _customHeaderNameController.dispose();
+    _customHeaderValueController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -478,20 +568,37 @@ class _WiredConfigVerificationPageState
       children: [
         Text('Source', style: Theme.of(context).textTheme.labelLarge),
         const SizedBox(height: 4),
-        SegmentedButton<bool>(
+        SegmentedButton<_StreamSource>(
           showSelectedIcon: false,
           segments: const [
-            ButtonSegment(value: true, label: Text('Live HLS')),
-            ButtonSegment(value: false, label: Text('VOD MP4')),
+            ButtonSegment(
+                value: _StreamSource.liveHls, label: Text('Live HLS')),
+            ButtonSegment(value: _StreamSource.vodMp4, label: Text('VOD MP4')),
+            ButtonSegment(value: _StreamSource.custom, label: Text('Custom')),
           ],
-          selected: {_useLiveSource},
+          selected: {_source},
           onSelectionChanged: _reloading
               ? null
               : (selected) {
-                  setState(() => _useLiveSource = selected.first);
-                  _reloadWithCurrentSettings();
+                  final next = selected.first;
+                  setState(() {
+                    _source = next;
+                    _customUrlError = null;
+                  });
+                  // Selecting the built-in sources reloads immediately, same
+                  // as before. Selecting Custom only reveals its fields --
+                  // there is nothing to load until a URL is entered and
+                  // "Load custom stream" is tapped explicitly (see
+                  // _reloadWithCurrentSettings's null-item guard).
+                  if (next != _StreamSource.custom) {
+                    _reloadWithCurrentSettings();
+                  }
                 },
         ),
+        if (_source == _StreamSource.custom) ...[
+          const SizedBox(height: 12),
+          _buildCustomSourceControls(),
+        ],
         const SizedBox(height: 12),
         SwitchListTile(
           key: const Key('dvr_toggle'),
@@ -514,6 +621,133 @@ class _WiredConfigVerificationPageState
           const LinearProgressIndicator(),
         ],
       ],
+    );
+  }
+
+  /// Fields for the Custom source (see the class dartdoc). Only mounted
+  /// while [_source] is [_StreamSource.custom], so it costs nothing on the
+  /// two built-in sources.
+  Widget _buildCustomSourceControls() {
+    final resolvedFormat = _customItem?.resolvedStreamingFormat;
+    // Card (not a plain colored Container) deliberately: it supplies its own
+    // Material ancestor, which SwitchListTile below needs to paint its ink
+    // response -- a colored Container with no intervening Material trips
+    // Flutter's "ListTile background color or ink splashes may be
+    // invisible" debug assertion.
+    return Card(
+      key: const Key('custom_source_controls'),
+      margin: EdgeInsets.zero,
+      color: Theme.of(context)
+          .colorScheme
+          .secondaryContainer
+          .withValues(alpha: 0.25),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Stream URL', style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            TextField(
+              key: const Key('custom_url_field'),
+              controller: _customUrlController,
+              enabled: !_reloading,
+              decoration: InputDecoration(
+                isDense: true,
+                border: const OutlineInputBorder(),
+                hintText: 'https://example.com/manifest.m3u8',
+                errorText: _customUrlError,
+              ),
+              onTapOutside: (_) =>
+                  FocusManager.instance.primaryFocus?.unfocus(),
+              // Refreshes the "Resolved" row below as the URL is typed.
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              key: const Key('custom_is_live_toggle'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('MediaItem.isLive'),
+              value: _customIsLive,
+              onChanged:
+                  _reloading ? null : (v) => setState(() => _customIsLive = v),
+            ),
+            const SizedBox(height: 4),
+            Text('MediaItem.streamingFormat',
+                style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            SegmentedButton<StreamingFormat?>(
+              key: const Key('custom_format_selector'),
+              showSelectedIcon: false,
+              segments: const [
+                ButtonSegment(value: null, label: Text('auto')),
+                ButtonSegment(value: StreamingFormat.hls, label: Text('hls')),
+                ButtonSegment(value: StreamingFormat.dash, label: Text('dash')),
+                ButtonSegment(
+                    value: StreamingFormat.progressive,
+                    label: Text('progressive')),
+              ],
+              selected: {_customStreamingFormat},
+              onSelectionChanged: _reloading
+                  ? null
+                  : (selected) =>
+                      setState(() => _customStreamingFormat = selected.first),
+            ),
+            const SizedBox(height: 4),
+            KeyedSubtree(
+              key: const Key('custom_resolved_format_row'),
+              child: InfoRow(
+                label: 'Resolved',
+                value: resolvedFormat?.name ?? '(enter a URL above)',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text('Optional HTTP header (blank = none)',
+                style: Theme.of(context).textTheme.labelLarge),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const Key('custom_header_name_field'),
+                    controller: _customHeaderNameController,
+                    enabled: !_reloading,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      hintText: 'Header name',
+                    ),
+                    onTapOutside: (_) =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    key: const Key('custom_header_value_field'),
+                    controller: _customHeaderValueController,
+                    enabled: !_reloading,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                      hintText: 'Value',
+                    ),
+                    onTapOutside: (_) =>
+                        FocusManager.instance.primaryFocus?.unfocus(),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              key: const Key('load_custom_stream_button'),
+              icon: const Icon(Icons.cloud_download),
+              label: const Text('Load custom stream'),
+              onPressed: _reloading ? null : _reloadWithCurrentSettings,
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -723,8 +957,20 @@ class _PositionReadout extends StatelessWidget {
   final PlaybackState state;
   const _PositionReadout({required this.state});
 
+  /// Whether [PlaybackState.liveEdgeOffset] is within the currently known
+  /// live/DVR window (`duration`), i.e. the exact invariant issue #109's fix
+  /// restores. `null` when the question is not yet answerable: no offset
+  /// reported, or duration not yet known.
+  bool? get _offsetWithinWindow {
+    final offset = state.liveEdgeOffset;
+    if (offset == null) return null;
+    if (state.duration <= Duration.zero) return null;
+    return offset <= state.duration;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final withinWindow = _offsetWithinWindow;
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
@@ -737,9 +983,122 @@ class _PositionReadout extends StatelessWidget {
             InfoRow(
                 label: 'bufferedPosition',
                 value: state.bufferedPosition.toString()),
+            const Divider(height: 16),
+            KeyedSubtree(
+              key: const Key('liveEdgeOffset_row'),
+              child: InfoRow(
+                label: 'liveEdgeOffset',
+                value: state.liveEdgeOffset == null
+                    ? 'null (VOD, or live edge not yet known)'
+                    : state.liveEdgeOffset.toString(),
+              ),
+            ),
+            KeyedSubtree(
+              key: const Key('offsetWithinWindow_row'),
+              child: InfoRow(
+                label: 'offset <= duration',
+                value: withinWindow == null
+                    ? 'n/a (no offset/duration yet)'
+                    : withinWindow
+                        ? 'true (issue #109 invariant holds)'
+                        : 'FALSE -- issue #109 defect signature',
+              ),
+            ),
+            KeyedSubtree(
+              key: const Key('isAtLiveEdge_row'),
+              child: InfoRow(
+                  label: 'isAtLiveEdge', value: state.isAtLiveEdge.toString()),
+            ),
+            KeyedSubtree(
+              key: const Key('positionBasis_row'),
+              child: InfoRow(
+                  label: 'positionBasis', value: state.positionBasis.name),
+            ),
+            const SizedBox(height: 8),
+            _LiveEdgeCaseBanner(state: state, withinWindow: withinWindow),
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Summarizes which of the three verification cases the current
+/// [PlaybackState] represents, so a tester can tell them apart at a glance
+/// (color + one line) instead of cross-referencing four separate rows:
+///
+/// 1. **Defective manifest (issue #109)** -- would show as `offset <=
+///    duration` reading `FALSE` above; after the fix this must never be
+///    reached (native now substitutes the bounded fallback before this page
+///    ever sees the value), so this banner renders it as an anomaly if it
+///    ever does appear.
+/// 2. **Healthy live stream** -- `liveEdgeOffset` non-null, bounded, and
+///    within [PlaybackState.defaultLiveEdgeTolerance] of the edge.
+/// 3. **VOD** -- `liveEdgeOffset: null`, `positionBasis: absolute`.
+class _LiveEdgeCaseBanner extends StatelessWidget {
+  final PlaybackState state;
+  final bool? withinWindow;
+  const _LiveEdgeCaseBanner({required this.state, required this.withinWindow});
+
+  @override
+  Widget build(BuildContext context) {
+    final (String text, Color color) = _classify();
+    return Container(
+      key: const Key('live_edge_case_banner'),
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.25),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(text, style: Theme.of(context).textTheme.bodySmall),
+    );
+  }
+
+  (String, Color) _classify() {
+    final offset = state.liveEdgeOffset;
+
+    if (offset == null) {
+      if (state.positionBasis == PositionBasis.liveWindow) {
+        return (
+          'Live window basis but no liveEdgeOffset yet -- normal for a few '
+              'position updates right after a live load.',
+          Colors.blueGrey,
+        );
+      }
+      return (
+        'VOD case: liveEdgeOffset is null and positionBasis is absolute. '
+            'Expected for the VOD MP4 source (and briefly for a live source '
+            'before the first onPositionChanged event).',
+        Colors.blueGrey,
+      );
+    }
+
+    if (withinWindow == false) {
+      return (
+        'ANOMALY: liveEdgeOffset exceeds duration -- this is the issue #109 '
+            'defect signature. After the fix you should never see this row; '
+            'the bounded fallback should show above instead. Report it if '
+            'you do.',
+        Colors.red,
+      );
+    }
+
+    if (state.isAtLiveEdge) {
+      return (
+        'Healthy live stream: at the live edge, within the '
+            '${PlaybackState.defaultLiveEdgeTolerance.inSeconds}s tolerance.',
+        Colors.green,
+      );
+    }
+
+    return (
+      'Live, bounded within the window but beyond the '
+          '${PlaybackState.defaultLiveEdgeTolerance.inSeconds}s edge '
+          'tolerance -- expected right after a DVR scrub-back or a rebuffer. '
+          'Watch that it stays bounded rather than growing without bound '
+          '(see the disclaimer below for the issue #110 tell).',
+      Colors.orange,
     );
   }
 }
@@ -756,13 +1115,39 @@ class _LiveLatencyDisclaimer extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(
-        'This package exposes no explicit "distance from live edge" value. '
-        'position/duration/bufferedPosition above are the only observable '
-        'proxies -- liveLatency\'s actual effect (how close to the live '
-        'edge playback starts, Android: LiveConfiguration.targetOffsetMs, '
-        'iOS 14+: configuredTimeOffsetFromLive) must be judged by ear/eye '
-        'against the real stream after reloading with each option, not '
-        'asserted from a Dart-exposed field.',
+        'position/duration/bufferedPosition above are the join-time proxies '
+        'for liveLatency itself; for the ongoing distance from the live '
+        'edge, read the liveEdgeOffset / offset <= duration / isAtLiveEdge / '
+        'positionBasis rows above instead (PlaybackState.liveEdgeOffset -- '
+        'issue #88) plus the colored banner underneath them, which names '
+        'which of three cases you are looking at:\n'
+        '- liveEdgeOffset non-null and NOT bounded by duration (banner red, '
+        '"offset <= duration" reads FALSE): the issue #109 defect signature '
+        '-- must not appear after the Android fix now on main; a bounded '
+        'fallback value should show instead.\n'
+        '- liveEdgeOffset non-null, bounded, isAtLiveEdge true (banner '
+        'green): a healthy live stream riding the edge.\n'
+        '- liveEdgeOffset null, positionBasis absolute (banner grey): VOD, '
+        'or a live source before the first position event arrives.\n\n'
+        'The two platforms behave differently after the initial join, and '
+        'that difference will not show up as an error, only as a drifting '
+        'liveEdgeOffset over a long session:\n'
+        '- Android (LiveConfiguration.targetOffsetMs) actively maintains the '
+        'target via playback-speed adjustment -- EXCEPT on a manifest whose '
+        'unix-time anchor disagrees with its own segment timeline, which '
+        'silently defeats it entirely (issue #110, still open). Tell for '
+        'that case: adb logcat for a one-time MediaPlayerInstance warning '
+        'naming the observed offset/window and that liveLatency will not '
+        'take effect on this stream.\n'
+        '- iOS 14+ (configuredTimeOffsetFromLive) only applies once, at '
+        'join/seek time. This package sets '
+        'automaticallyPreservesTimeOffsetFromLive = false, so AVPlayer never '
+        'skips forward to restore the cushion after a rebuffer -- expect '
+        'the playhead to drift further from the live edge, monotonically, '
+        'the longer this page stays open and rebuffers.\n'
+        'Judge liveLatency\'s actual join-time effect by ear/eye against the '
+        'real stream after reloading with each option -- this page does not '
+        'assert it from a Dart-exposed field.',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     );

@@ -88,9 +88,13 @@ Comprehensive list of all implemented features in the ZMedia Player package.
   `endsWith('.mpd')`). The two configs are never cross-applied, and a live item that resolves
   to a format with no config logs a debug-only warning
 - **Latency Configuration** - `liveLatency` sets a target offset from the live edge (Android;
-  iOS 14+ only). Has no effect on Android/DASH manifests with an inconsistent time anchor (same
-  root cause as the Live Edge Detection caveat above) — a manifest/packaging defect, not a
-  wiring gap; native logs a one-time diagnostic when it is detected
+  iOS 14+ only). The two platforms differ in kind, not just availability: Android's ExoPlayer
+  *maintains* the target via playback-speed adjustment, while iOS honors it only once at
+  join/seek time and never restores it after a rebuffer (`automaticallyPreservesTimeOffsetFromLive
+  = false`), so the iOS playhead drifts further from the edge as rebuffers accumulate. Has no
+  effect on Android/DASH manifests with an inconsistent time anchor (same root cause as the Live
+  Edge Detection caveat above) — a manifest/packaging defect, not a wiring gap; native logs a
+  one-time diagnostic when it is detected
 - **Adaptive Segment Caching** - Transparent, read-through HLS/DASH segment cache during playback (**Android only**; caches what has been played for replay, not an offline download)
 
 **Total:** 21 features

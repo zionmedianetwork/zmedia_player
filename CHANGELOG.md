@@ -8,6 +8,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **13 of the example app's 19 widget tests hung and failed with `pumpAndSettle timed out`**,
+  in `example/test/pages/wired_config_verification_page_test.dart` (all 6),
+  `example/test/pages/measurement/scroll_bandwidth_page_test.dart` (5 of 5) and
+  `example/test/pages/measurement/live_offscreen_bandwidth_page_test.dart` (2 of 3) — a
+  pre-existing regression, reproduced identically against a clean `origin/main` worktree, not
+  introduced by this branch. All three pages mount a real (mocked-channel) `MediaController`
+  that calls `initialize()`/`load()`, which starts `BufferingService.startMonitoring`'s
+  periodic 500ms `Timer` (and, on `wired_config_verification_page_test.dart`,
+  `NetworkResilienceService`'s 5s one too); each tick round-trips the mocked platform
+  buffer-status channel and schedules a new frame, so `pumpAndSettle` — which waits for zero
+  scheduled frames — could never converge on these pages and always burned its full retry
+  budget before throwing. `example/test/pages/media_feed_pool_page_test.dart` had already hit
+  and solved the identical problem (see its `_pumpOnDeviceScreen`/`_cleanUp` doc comments);
+  the three fixed files now follow the same established pattern — bounded, explicitly-sized
+  `pump()` sequences instead of `pumpAndSettle`, each sized to the specific async chain it
+  follows (initial `initialize()`/`load()`, a reload via `updateConfig()`+`load()`, or a
+  single mocked platform round trip) — rather than waiting for a tree that never settles. No
+  assertion was weakened or removed: the DVR-toggle-reloads-and-flips-the-seek-outcome
+  end-to-end coverage in `wired_config_verification_page_test.dart` and the narrow-viewport
+  layout regression coverage in all three files still run, and still pass for the reason they
+  were written to check. One additional latent issue surfaced and was fixed while bounding
+  `scroll_bandwidth_page_test.dart`'s teardown: a `MediaListPlayer` visibility-driven
+  autoplay/pause `Future.delayed(300ms)` could still be pending when a test ended right after
+  dragging the feed, tripping flutter_test's "Timer is still pending" invariant — its
+  `_cleanUp` now flushes a bounded window sized past that debounce. The v0.3.0 GitHub release
+  body claimed "871 package tests and 19 example tests pass" — that published artifact is
+  unchanged (it is a historical record), but it is the origin of the "19 example tests pass"
+  claim that has been false since whichever change introduced these hangs, undetected because
+  no in-repo doc asserted the example suite's count at all (see the `Changed` entry below).
+  Result: 19/19 example tests passing; the package suite is unaffected.
+
+- **iOS `NetworkMonitor.estimateBandwidth(from:)` reported `connectionType: "none"` and
+  `downloadSpeed: 0` for a *connected* `NWPath`, the iOS counterpart to issue #112's Android
+  fix.** Its final fallthrough — reached for a satisfied path whose interface matched none of
+  `.wiredEthernet`/`.wifi`/`.cellular`/`.loopback`/`.other` — returned `(0.0, "none")`, the same
+  shape `offlineStatus()` uses for a genuine disconnection. `"none"` is meant to be a reliable
+  reachability discriminator independent of `quality`/`isAvailable` (see the `onNetworkStatusChanged`
+  discussion added for #112); this fallthrough silently broke that promise on iOS. It now returns
+  `(1.0, "unknown")`, mirroring `NetworkMonitor.kt`'s own unrecognized-transport fallthrough
+  (`estimateBandwidthFromType`'s `else -> 1000` Kbps / `connectionType`'s `else -> "unknown"`).
+  Both genuine offline paths (`offlineStatus()` and the `guard path.status == .satisfied` early
+  return in `getNetworkStatus(from:)`) are unchanged and still report `"none"`/`0`/`"offline"`.
+  `test/models/network_status_vocabulary_test.dart`'s drift guard already covers the new literal
+  (`"unknown"` was already an accepted intentional-fallback value) — no test change was needed.
+
+### Changed
+- **`example/README.md`'s feature table was missing 11 of the app's 27 feature pages** —
+  `local_file_playback_page.dart`, `cache_playback_page.dart`,
+  `adaptive_cache_playback_page.dart`, `secure_output_page.dart`, `multi_player_page.dart`,
+  and all six pages under `pages/measurement/`. Each added row names the specific public API
+  the page demonstrates (derived from the page's own dartdoc and code, not its filename); the
+  six `measurement/` pages are on-device measurement *harnesses* for this package's own
+  pool/prewarm/prefetch defaults, not general usage demos, so they now live in their own
+  "Measurement harnesses (Stage 7a)" section rather than the main gallery table, with that
+  distinction called out explicitly. The "Project structure" tree (previously missing several
+  already-existing pages, predating this change) was brought up to date to match. No stale API
+  names were found in the previously-existing rows.
+- **Corrected stale hardcoded Dart test-suite counts across the docs** (`AGENTS.md`,
+  `README.md`, `docs/README.md`, `docs/implementation/README.md`,
+  `docs/implementation/testing.md`, `docs/summary/README.md`, `docs/summary/phases.md`,
+  `docs/summary/test-coverage.md`): several asserted a stale **1089**, when `flutter test`
+  currently reports **1104** — the count drifts on every commit that adds a test, which is
+  exactly how it went stale by 15. Every live (non-historical) count now explicitly hedges
+  with "run `flutter test` for the current count" rather than asserting a number that will go
+  stale on the next commit; a couple were simplified to drop the number entirely in favor of
+  just that instruction. Historical snapshots (the v0.1.0 `113/113`/`179/179` figures, the
+  DRM `47 tests` figure in `docs/summary/production-readiness.md`, and
+  `docs/implementation/codebase-audit.md`'s references to the original findings) are
+  unaffected — they are explicitly-marked historical records, not current-state claims.
+  Separately, **no doc stated the `example/` app's own test count anywhere**, part of why the
+  13 hangs above went unnoticed for so long — `docs/implementation/testing.md` and
+  `docs/summary/test-coverage.md` now state it (19, `cd example && flutter test`) alongside
+  the package count.
+- **Documented that `liveLatency` behaves differently on Android and iOS**, not just that both
+  are "wired": Android's ExoPlayer actively maintains the target offset from the live edge via
+  playback-speed adjustment, while iOS's `AVPlayerItem.configuredTimeOffsetFromLive` (this
+  package sets `automaticallyPreservesTimeOffsetFromLive = false`) is honored only once, at
+  join/seek time, and is never restored after a rebuffer — so the iOS playhead drifts further
+  from the live edge as rebuffers accumulate, the opposite direction from Android's manifest
+  time-anchor defect (issue #110), which drifts *toward* a stale target. No behavior changed;
+  `automaticallyPreservesTimeOffsetFromLive` remains `false`. See `HlsConfig`/`DashConfig
+  .liveLatency`'s dartdoc and the [Live Streaming guide](docs/api-reference/live-streaming.md)
+  for the full trade-off — whether to flip it to `true` (trading the drift for a visible forward
+  skip after each rebuffer) is left as an open question for a future, deliberate change.
+- **Documented that iOS `NetworkStatus.downloadSpeed` is a fabricated constant, not a
+  measurement.** `NetworkMonitor.swift`'s `estimateBandwidth(from:)` returns a fixed
+  per-transport value (ethernet 50, wifi 5–10, cellular 2, loopback 1000, other/unknown 1 Mbps)
+  chosen purely from interface type — it never reads any system throughput signal. Android's
+  equivalent is at least link-derived (`NetworkCapabilities.linkDownstreamBandwidthKbps`, a
+  system hint, floored to a similar transport-based estimate only when that hint is degenerate).
+  A consumer using `downloadSpeed` for adaptive-streaming decisions should treat it as a rough
+  per-platform floor on iOS, not an actual bandwidth measurement. See
+  `docs/api-reference/models.md`'s Network section and
+  `docs/api-reference/events.md#onnetworkstatuschanged`.
 - **Documented that a consuming app must remove its own ExoPlayer 2 dependency (issue
   #108).** v0.3.0's breaking-changes note announced the move to AndroidX Media3 1.11.0
   (replacing ExoPlayer 2.19.1), but its Upgrading section only covered bumping the pinned
@@ -96,6 +190,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   correct; the diagnostic exists solely to name it. See
   [Manifest time-anchor defect](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
   for the full worked example and detection guidance.
+- **On-device live-edge readout in the example app**, so issues #109/#110 can be verified by
+  eye on a real device instead of only via `adb logcat` — CI never builds native code and every
+  test in the suite mocks the `MethodChannel`, so an on-device check against a real stream was
+  otherwise the only verification path with no way to visually confirm it.
+  `example/lib/pages/wired_config_verification_page.dart`'s Live Latency section now renders
+  `PlaybackState.liveEdgeOffset`/`.isAtLiveEdge`/`.positionBasis` (issue #88) as their own rows
+  (previously only referenced, apologetically, in that section's disclaimer text) plus a
+  color-coded `_LiveEdgeCaseBanner` distinguishing the three cases a tester needs to tell apart
+  at a glance: a rejected/out-of-window offset (the issue #109 defect signature — must not
+  appear after the fix now on `main`), a healthy live edge, and VOD's
+  `null`/`absolute`. `example/README.md`'s row for the page documents the addition; the page's
+  own dartdoc and `_LiveLatencyDisclaimer` were rewritten to point at the new rows instead of
+  disclaiming that they were not wired in.
+- **Custom stream URL support in the example app's verification harness**, so a stream this
+  repo cannot itself host — most pointedly the specific manifest behind an #109-shaped defect
+  report, whose unix-time anchor disagrees with its own segment timeline — can be pointed at
+  `example/lib/pages/wired_config_verification_page.dart` and re-checked against the
+  `enableDvr`/`liveLatency` and `liveEdgeOffset`/`isAtLiveEdge`/`positionBasis` readouts already
+  on that page, without a rebuild. The Source `SegmentedButton` gained a third **Custom**
+  option alongside the existing Live HLS / VOD MP4 built-ins (unchanged); selecting it reveals a
+  URL field, a `MediaItem.isLive` toggle (default `true`), an explicit
+  `MediaItem.streamingFormat` override (`auto`/`hls`/`dash`/`progressive`, with the *resolved*
+  format shown live) and one optional HTTP header/value pair for a signed-cookie or
+  token-gated origin, then a "Load custom stream" button that reloads through the page's
+  existing `_reloadWithCurrentSettings` path — the same one the built-in sources use — so it
+  picks up the current `enableDvr`/`liveLatency` settings exactly as they do. The format
+  override matters specifically because of how `MediaItem.resolvedStreamingFormat` infers from
+  a URL (see `MediaItem.streamingFormat`'s dartdoc): a CDN-rewritten, signed, or
+  extension-less URL can silently resolve to `StreamingFormat.progressive`, under which
+  neither `HlsConfig` nor `DashConfig` ever applies — making `enableDvr`/`liveLatency` look
+  broken when they are simply not being consulted for that item at all.
+  `_reloadWithCurrentSettings` now also sends the current settings as a `DashConfig` alongside
+  the existing `HlsConfig` (previously `HlsConfig` only), since a pasted-in custom URL may
+  resolve to either format and the two are never cross-applied — this has no effect on the two
+  existing built-in sources (Live HLS resolves to `hls`, VOD MP4 to `progressive`, so the added
+  `DashConfig` never applies to either). An empty URL is rejected inline (no load attempted) via
+  a `_customUrlError` message rather than a wasted round trip. `example/README.md`'s row for the
+  page documents the addition; 3 new widget tests cover revealing the Custom fields, the
+  empty-URL rejection, and a valid URL producing the expected `MediaItem` (24 example tests
+  total, up from 21).
 
 ## [0.4.0] - 2026-09-02
 

@@ -439,7 +439,16 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - `liveLatency` (a `Duration?`, no default — unset means native's own default live-edge
   behavior applies) configures the target offset from the live edge:
   `MediaItem.LiveConfiguration.setTargetOffsetMs` on Android,
-  `AVPlayerItem.configuredTimeOffsetFromLive` on iOS (14+ only)
+  `AVPlayerItem.configuredTimeOffsetFromLive` on iOS (14+ only). The two platforms diverge in
+  whether the target is *maintained*: Android's ExoPlayer actively drifts playback speed
+  toward it over time (see the manifest time-anchor defect below for a case where the
+  manifest itself defeats this), while iOS only honors it once, at join/seek time —
+  `automaticallyPreservesTimeOffsetFromLive = false` means AVPlayer never skips forward to
+  restore the cushion after a rebuffer, so the playhead drifts *away* from the target
+  monotonically as rebuffers accumulate. `false` vs `true` is a deliberate but revisitable
+  trade-off (steady playback vs. a visible forward skip after each rebuffer), not a settled
+  decision — see `HlsConfig.liveLatency`'s dartdoc and
+  `docs/api-reference/live-streaming.md`'s wiring table for the full rationale.
 - `MediaItem.isLive` is the canonical live flag; `HlsConfig`/`DashConfig.enableLiveStream` is
   deprecated in its favor
 - `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track selection (Android via
@@ -542,7 +551,14 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    degraded/zero bandwidth reading is still possible in principle and describes *link
    quality*, not reachability. `connectionType == ConnectionType.none` (set only by each
    platform's canonical `offlineStatus()`/no-connection map) is the reliable reachability
-   discriminator; don't assume `!isAvailable` means disconnected. See
+   discriminator; don't assume `!isAvailable` means disconnected. This promise used to be
+   silently broken on iOS: `NetworkMonitor.swift`'s `estimateBandwidth(from:)` had its own
+   fallthrough (a connected path whose interface matched none of the recognized transports)
+   that also returned `"none"`, so a connected device could hit it too — fixed, that
+   fallthrough now returns `"unknown"`/a ~1 Mbps floor, mirroring Android's own
+   unrecognized-transport fallback. `downloadSpeed` on iOS is never link-derived at all — it's
+   always a fixed per-transport constant (see `docs/api-reference/models.md`'s Network
+   section), unlike Android's system-hint-derived value. See
    `docs/api-reference/events.md#onnetworkstatuschanged`
 
 ## UI/UX Design Specifications

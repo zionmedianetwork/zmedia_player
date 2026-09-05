@@ -558,6 +558,13 @@ class _StatusBar extends StatelessWidget {
 /// this page currently considers "most recently active" (see
 /// `_MediaFeedPoolPageState.build`'s `activeNetworkController` argument) --
 /// context for the autoplay-policy control in [_FeedSettingsSheet].
+///
+/// `connectionType == none` (never `quality`/`isMetered` alone) is the
+/// reliable "genuinely offline" signal on both platforms — see
+/// `NetworkStatus.connectionType`'s dartdoc. It is emitted only by each
+/// native `NetworkMonitor`'s canonical no-connection map, never for a
+/// connected-but-unrecognized transport (that used to be a live bug on iOS;
+/// see `NetworkMonitor.swift`'s `estimateBandwidth(from:)`, now fixed).
 class _NetworkStatusLine extends StatelessWidget {
   final MediaController? controller;
 

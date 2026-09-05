@@ -40,9 +40,10 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
   support), quality switching via each native player's own defaults
 - Live HLS/DASH playback (`MediaItem.isLive`); `HlsConfig`/`DashConfig.enableDvr` gates seeking
   (and reports a DVR-window duration) on a live stream, `liveLatency` sets a target offset from
-  the live edge (iOS 14+), and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track
-  selection — beyond that, remaining seek range and buffering behavior are still governed by the
-  native player's own defaults for the manifest (see the
+  the live edge — Android maintains it over time, iOS (14+ only) honors it once at join/seek
+  and does not restore it after a rebuffer — and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate`
+  bound track selection — beyond that, remaining seek range and buffering behavior are still
+  governed by the native player's own defaults for the manifest (see the
   [Live Streaming guide](docs/api-reference/live-streaming.md) for the full field-by-field wiring
   table and platform caveats)
 - `MediaItem.streamingFormat` (`StreamingFormat.hls`/`.dash`/`.progressive`) states an item's
@@ -763,7 +764,9 @@ architecture.
 ## Contributing
 
 Contributions are welcome. Branch off `main` as `feat/…` or `fix/…`, keep
-`flutter analyze` clean and `flutter test` green (currently 1089), and open a PR.
+`flutter analyze` clean and `flutter test` green (run it for the current count),
+and open a PR. If you touched `example/`, also keep `cd example && flutter test`
+green (24 tests as of this writing).
 
 ## License
 
@@ -780,7 +783,9 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** 1089 automated tests — run `flutter test` for the current count.
+- **Tests:** run `flutter test` for the current count (1104 as of this writing, and
+  growing). The `example/` app has its own separate suite too (24 tests,
+  `cd example && flutter test`).
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
   tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth

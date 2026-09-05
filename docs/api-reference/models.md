@@ -266,8 +266,13 @@ cross-applied, so an app that serves HLS on one platform and DASH on the other m
 `HlsConfig`/`DashConfig` are serialized to the platform channel and read by native for a
 specific subset of fields — `enableDvr` (Dart-side seek gate for
 `MediaPlayer.isSeekable`/`seekTo`; also gates whether native reports a duration for the live
-item at all — see below), `liveLatency` (`MediaItem.LiveConfiguration` on Android, `AVPlayerItem
-.configuredTimeOffsetFromLive` on iOS 14+), and the inherited `enableAdaptiveBitrate`/
+item at all — see below), `liveLatency` (`MediaItem.LiveConfiguration` on Android, *maintained*
+via playback-speed adjustment; `AVPlayerItem.configuredTimeOffsetFromLive` on iOS 14+, but
+**join-time only** — honored once at start/seek, never restored after a rebuffer since this
+package sets `automaticallyPreservesTimeOffsetFromLive = false` — see
+[`HlsConfig.liveLatency`'s dartdoc](../../lib/src/models/streaming_config.dart) and the
+[Live Streaming guide](live-streaming.md) for the full trade-off), and the inherited
+`enableAdaptiveBitrate`/
 `maxBitrate`/`minBitrate` (`DefaultTrackSelector` on Android; iOS honors only `maxBitrate` via
 `preferredPeakBitRate` — no faithful `minBitrate`/force-non-adaptive equivalent exists on
 AVPlayer). `bitrateStrategy`, `enableAutoQualitySwitch`, `qualitySwitchThreshold`, and
@@ -310,6 +315,18 @@ const SubtitleConfig({
   when `quality` is absent or unparseable (issue #112 — see the
   [`onNetworkStatusChanged` payload table](events.md#onnetworkstatuschanged) for the full
   contract and why this matters). `toMap()`/`fromPlatform()` round-trip `quality` symmetrically.
+  **`downloadSpeed` is not a measurement on iOS.** Android's value derives from
+  `NetworkCapabilities.linkDownstreamBandwidthKbps` (a system-provided hint, falling back to a
+  fixed per-transport estimate only when that hint is absent or non-positive). iOS has no
+  equivalent API on `NWPath`/`Network.framework` and *always* returns a fixed constant chosen
+  purely from the active interface type (ethernet 50 Mbps, Wi-Fi 10 or 5 Mbps, cellular 2 Mbps,
+  loopback 1000 Mbps, any other/unrecognized transport 1 Mbps) — it never reflects actual
+  throughput. A consumer using `downloadSpeed` for adaptive-streaming or quality-selection
+  decisions should treat it as a rough, interface-derived floor on iOS, not a bandwidth
+  measurement. `connectionType` on iOS reports `"unknown"` (not `"none"`) for a *connected* path
+  whose interface matched none of the recognized types — `"none"` is reserved for the two
+  genuine offline paths — mirroring Android's `"unknown"` fallback in its own `connectionType`
+  `when` block.
 - **Analytics:** `QoEMetrics`, `PerformanceMetrics`, `EngagementMetrics`, `PlaybackEndReason`, `BufferEventType`.
 - **Notifications:** `NotificationConfig`, `NotificationAction`, `NotificationPriority` — pass a
   `NotificationConfig` to `NotificationService` directly (not `MediaConfig`) to drive media

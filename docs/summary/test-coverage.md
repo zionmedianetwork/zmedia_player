@@ -1,19 +1,26 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1089 tests passing** (run
-> `flutter test` for the live count) as audit-remediation work added regression
-> coverage. **Important caveat the original summary omitted:** these are all **Dart**
-> unit tests. There are **no automated native (Kotlin/Swift) tests**, and several
-> native features (DRM decryption, certificate pinning, casting, bandwidth metering)
-> still require on-device verification. Two more sections below are also stale as of
-> this update: "Next Steps to Complete Testing" and "Test Infrastructure → Not
+> the original release. The suite has since grown to **1104 tests passing** as of
+> this writing (run `flutter test` for the live count, since it grows with every
+> change) as audit-remediation work added regression coverage. **Important caveat
+> the original summary omitted:** these are all **Dart** unit tests. There are
+> **no automated native (Kotlin/Swift) tests**, and several native features (DRM
+> decryption, certificate pinning, casting, bandwidth metering) still require
+> on-device verification. Two more sections below are also stale as of this
+> update: "Next Steps to Complete Testing" and "Test Infrastructure → Not
 > Started" both predate the current `test/widgets/` suite (12 widget-test files) and
 > the `.github/workflows/ci.yml` pipeline (runs `flutter analyze`, `flutter test
 > --coverage`, `test/performance/`, `test/memory/` on every push/PR) — both now exist.
 > See the [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
 >
-> **Last Updated:** August 31, 2026
+> **The `example/` app has its own, separate suite** — 24 tests passing, run via
+> `cd example && flutter test` — covering per-page layout regressions and
+> wired-behavior end-to-end checks that the package's own mocked-channel suite
+> cannot see (real page composition, real widget trees). It is not included in
+> the count above.
+>
+> **Last Updated:** September 5, 2026
 >
 > **Playlist regression coverage (issue #79):** `test/core/playlist_extension_test.dart`
 > (15 tests) covers the Dart-observable half of the "`setPlaylist` must not restart the

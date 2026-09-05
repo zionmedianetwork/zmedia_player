@@ -34,15 +34,27 @@ Future<void> _pumpOnNarrowScreen(WidgetTester tester) async {
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
 
-  await tester.pumpWidget(const MaterialApp(home: LiveOffscreenBandwidthPage()));
+  await tester
+      .pumpWidget(const MaterialApp(home: LiveOffscreenBandwidthPage()));
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 400));
 }
 
 Future<void> _cleanUp(WidgetTester tester) async {
-  await tester.pumpAndSettle();
+  // This page's own MediaController starts BufferingService's periodic
+  // 500ms monitoring Timer once load() resolves (see
+  // scroll_bandwidth_page_test.dart's _cleanUp for the same mechanism, in
+  // its per-item form). That timer keeps invoking the mocked platform
+  // buffer-status channel and scheduling a new frame forever, so
+  // pumpAndSettle can never observe zero pending frames here. Pump a
+  // bounded window to flush the async initialize()/load() chain's own
+  // microtasks, then unmount (disposing the controller/BufferingService and
+  // cancelling its timer) before a final short flush covers any
+  // MediaListPlayer visibility-debounce Future.delayed(300ms) left pending
+  // by a visibility change just before teardown.
+  await tester.pump(const Duration(milliseconds: 60));
   await tester.pumpWidget(const SizedBox.shrink());
-  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 350));
 }
 
 void main() {

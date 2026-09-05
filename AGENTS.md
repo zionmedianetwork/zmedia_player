@@ -179,8 +179,17 @@ documents as possibly `0` on a live, connected network — `fromBandwidth(0)` wo
 against `estimateBandwidthFromType` when non-positive on a network with real capabilities in
 hand; `offlineStatus()` (the canonical no-connection map on both platforms) is unaffected.
 `connectionType == "none"`, set only by `offlineStatus()`, remains the reliable reachability
-signal independent of `quality`/`isAvailable`. See
-`docs/api-reference/events.md#onnetworkstatuschanged`.
+signal independent of `quality`/`isAvailable`. `NetworkMonitor.swift`'s
+`estimateBandwidth(from:)` had its own instance of this bug in its final fallthrough branch
+(reached only for a satisfied `NWPath` whose interface matched none of the recognized types):
+it used to return `(0.0, "none")`, i.e. a *connected* path emitting the same shape as a genuine
+disconnection. It now returns `(1.0, "unknown")`, mirroring Android's `else -> 1000`
+(`estimateBandwidthFromType`) / `else -> "unknown"` (`connectionType`) fallthrough. Unlike
+Android, iOS's `downloadSpeed` is never link-derived at all — every branch of
+`estimateBandwidth(from:)` is a fixed per-transport constant chosen from interface type alone
+(ethernet 50, wifi 5–10, cellular 2, loopback 1000, other/unknown 1 Mbps), not a measurement.
+See `docs/api-reference/events.md#onnetworkstatuschanged` and
+`docs/api-reference/models.md`'s Network section.
 
 **Error categories.** `onError` carries a `category` in its details, drawn from a vocabulary both
 platforms share: `NETWORK`, `HTTP`, `DRM`, `DECODER`, `SOURCE`, `UNKNOWN`. Dart maps these onto the
@@ -465,8 +474,8 @@ lib/src/security/                 # CertificatePinning, SecureStorage, InputVali
 android/src/main/kotlin/com/zionmedianetwork/zmedia_player/   # Kotlin: MediaPlayerManager + per-feature handlers
 ios/zmedia_player/Sources/zmedia_player/                      # Swift: MediaPlayerManager + per-feature handlers (SPM layout)
 ios/zmedia_player.podspec · ios/zmedia_player/Package.swift   # CocoaPods + SPM
-test/                             # 1089 Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting)
-example/                         # Feature-per-page gallery app (verified on a physical iPhone)
+test/                             # Dart tests (core, models, services, widgets, memory, performance, exceptions, security, crash_reporting) — run `flutter test` for the current count
+example/                         # Feature-per-page gallery app (verified on a physical iPhone); has its own test/ suite too
 docs/                             # api-reference/, implementation/, summary/ + QUICK_START
 PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
 ```
@@ -481,7 +490,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 ## If you change code
 
 - **Delegate Flutter/Dart/native work to the `flutter-expert` subagent** (mandatory per `CLAUDE.md`) for anything under `lib/`, `test/`, `example/`, `android/`, `ios/`.
-- Run `flutter analyze` (clean) and `flutter test` (currently **1089**, keep green) before proposing changes.
+- Run `flutter analyze` (clean) and `flutter test` (keep green — run it for the current count) before proposing changes; if you touched `example/`, also run `cd example && flutter test` (24 tests as of this writing).
 - **Every change ships its documentation in the same change** — any code change under `lib/`, `android/`, `ios/`, or `example/` that alters observable behavior, capability, defaults, or usage, plus every API change, data-contract change, feature addition/removal, example change, and build/platform/dependency change. Update the root `README.md`, this file, every affected file under `docs/`, `CHANGELOG.md` (under `[Unreleased]`), and `example/README.md` where the wiring changed. Only a pure internal refactor with no consumer-visible effect is exempt; when in doubt, treat it as qualifying. See `CLAUDE.md`'s **Required Documentation Updates** for the doc map, the verification greps, and why (a MethodChannel payload change, in particular, is invisible to `flutter analyze` and to the test suite, since every test mocks the channel — documentation is the only place it's recorded).
 - **Verify, don't assume**: `grep -rn "<symbol>" README.md AGENTS.md CLAUDE.md docs/ example/` for every identifier you added, renamed, or removed, and fix every stale hit.
 - Branch off `main` as `feat/…`/`fix/…`; PR required (no direct push to `main`); commits authored by the repo owner (no `Co-Authored-By` except the release workflow).
@@ -494,7 +503,8 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested (1089 tests)**; **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested** (1104 tests as of this writing — run `flutter test`
+for the live count); **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Media notifications —

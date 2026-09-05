@@ -102,7 +102,17 @@ class NetworkStatus {
   /// Network quality level
   final NetworkQuality quality;
 
-  /// Download speed in bytes per second
+  /// Download speed in bytes per second.
+  ///
+  /// **Not a real measurement on either platform, and doubly not on iOS.**
+  /// Android derives it from `NetworkCapabilities.linkDownstreamBandwidthKbps`, a
+  /// system-provided *hint* (falling back to a fixed per-transport estimate only when that
+  /// hint is absent or non-positive). iOS's `NetworkMonitor.swift` has no equivalent system
+  /// hint at all and *always* returns a fixed constant chosen purely from the active
+  /// interface type (ethernet 50 Mbps, Wi-Fi 5–10 Mbps, cellular 2 Mbps, loopback 1000 Mbps,
+  /// any other/unrecognized transport 1 Mbps) — it never reflects actual throughput. Treat
+  /// this as a rough, interface-derived floor for adaptive-streaming decisions, not a
+  /// bandwidth measurement — most of all on iOS.
   final int downloadSpeed;
 
   /// Upload speed in bytes per second (if available)

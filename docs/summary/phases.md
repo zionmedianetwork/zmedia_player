@@ -363,7 +363,9 @@ The ZMedia Player project successfully completed all four phases, delivering a p
 
 - **Complete Feature Set** - All planned features implemented
 - **Excellent Performance** - 94-99% faster than targets
-- **Robust Testing** - 1089 tests passing (Dart layer; run `flutter test` for the live count)
+- **Robust Testing** - run `flutter test` for the current Dart-layer count (1104 as of
+  this writing); the `example/` app has its own separate suite (24 tests,
+  `cd example && flutter test`)
 - **Comprehensive Docs** - Complete API and implementation guides
 - **Platform Parity** - Equal support for Android and iOS
 

@@ -4,9 +4,25 @@
 **Last Updated:** September 5, 2026
 **Status:** Feature-complete for the 0.4.x line; distributed via GitHub releases.
 `CHANGELOG.md`'s `[Unreleased]` holds the ExoPlayer 2 classpath upgrade note (issue #108),
-the `NetworkStatus` platform-quality fix (issue #112), and the live-edge-offset
-window-sanity fix (issue #109) with its manifest-anchor diagnostic (issue #110), landed
-since the `v0.4.0` tag.
+the `NetworkStatus` platform-quality fix (issue #112), the live-edge-offset
+window-sanity fix (issue #109) with its manifest-anchor diagnostic (issue #110), and the
+iOS counterpart to #112/#109: `NetworkMonitor.swift`'s `estimateBandwidth(from:)` no longer
+reports `connectionType: "none"`/`downloadSpeed: 0` for a connected but unrecognized
+transport, plus documentation of two previously-undocumented iOS behaviors (`liveLatency` is
+join-time-only on iOS, and iOS `downloadSpeed` is a fixed per-transport constant, not a
+measurement); a fix for 13 of the example app's 19 widget tests hanging on `pumpAndSettle`
+against pages whose `MediaController` keeps real periodic timers (`BufferingService`/
+`NetworkResilienceService`) running forever, bringing the example suite back to 19/19, then to
+21/21 with the `liveEdgeOffset`/`isAtLiveEdge`/`positionBasis` readout added to
+`wired_config_verification_page.dart`, then to 24/24 with a **Custom** stream-URL option added
+to that same page's Source selector — pointing the harness at a stream this repo cannot itself
+host (URL + `MediaItem.isLive` + an explicit `streamingFormat` override, since inference can
+silently resolve a CDN-rewritten/signed URL to `progressive`, under which neither `HlsConfig`
+nor `DashConfig` applies + one optional HTTP header) so the #109-shaped defect stream from a
+device bug report, unreachable from the app's own bundled fixtures, can be verified the same
+way without a rebuild; 11 feature pages added to `example/README.md`'s previously-incomplete
+table; and corrections to several stale hardcoded Dart test-suite counts across the docs —
+landed since the `v0.4.0` tag.
 
 > This file is the authoritative implementation roadmap referenced by `CLAUDE.md`.
 > It tracks current state and the real backlog. For architecture, UI/UX specs, and
@@ -31,7 +47,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |
 | Android | minSdk 23 |
-| Tests | 1103 passing (Dart layer; native has none) |
+| Tests | 1104 passing (Dart layer; native has none) |
 
 ---
 
@@ -57,8 +73,11 @@ platform is called out explicitly.
 - Adaptive bitrate / bandwidth estimation (`StreamingService` + native `NetworkMonitor`).
 - Quality and audio-track selection.
 - Live + DVR: `enableDvr` (seek gating + DVR-window duration reporting), `liveLatency`
-  (target offset from live edge; iOS 14+ only), `maxBitrate`/`minBitrate`/
-  `enableAdaptiveBitrate` (track-selection bounds; iOS honors only `maxBitrate`).
+  (target offset from live edge; iOS 14+ only — Android *maintains* the target via
+  playback-speed adjustment, iOS only honors it once at join/seek and never restores it
+  after a rebuffer, since `automaticallyPreservesTimeOffsetFromLive = false`),
+  `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` (track-selection bounds; iOS honors
+  only `maxBitrate`).
 - Live-edge signal: `PlaybackState.liveEdgeOffset`, `isAtLiveEdge` /
   `isAtLiveEdgeWithin(tolerance)` / `defaultLiveEdgeTolerance` (15s), and `positionBasis`
   (`PositionBasis.absolute` / `.liveWindow`) — all mirrored on `MediaPlayer` and

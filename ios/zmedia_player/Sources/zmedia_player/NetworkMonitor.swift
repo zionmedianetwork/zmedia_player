@@ -171,6 +171,16 @@ class NetworkMonitor {
         let downloadSpeed = Int(estimatedMbps * 1000000 / 8)
 
         // Determine quality
+        //
+        // NOTE: `default` below is unreachable for any value this switch is actually fed.
+        // `estimateBandwidth(from:)` never returns a negative Mbps (its fallthrough floor is
+        // now 1.0, see that function), and `case 0..<fairThreshold` already covers the zero
+        // boundary, so every non-negative Double matches one of the four explicit cases.
+        // Left in as defensive code (matches the shape of the equivalent `when` in
+        // `NetworkMonitor.kt`, which is exhaustive over `downloadKbps > 0` for the same
+        // reason) rather than restructured to a non-exhaustive `if`/`else if` chain, so a
+        // future change to `estimateBandwidth(from:)` that reintroduces a negative or NaN
+        // value fails safe as "offline" instead of crashing on a non-exhaustive switch.
         let quality: String
         switch estimatedMbps {
         case NetworkMonitor.excellentThreshold...:
@@ -226,7 +236,17 @@ class NetworkMonitor {
             return (1.0, "unknown") // Conservative for unknown types
         }
 
-        return (0.0, "none")
+        // `path.status == .satisfied` here (callers only reach this after that guard in
+        // `getNetworkStatus(from:)`), so this is a satisfied path whose interface matched none
+        // of the `NWInterface.InterfaceType` cases checked above — not a disconnection. Must
+        // NOT report `"none"`/`0`: `"none"` is reserved for the two genuine offline paths
+        // (`offlineStatus()` and the `guard path.status == .satisfied` early return in
+        // `getNetworkStatus(from:)`), which `ConnectionType.fromString` on the Dart side
+        // treats as the canonical no-connection signal (see issue #112). Mirrors
+        // `NetworkMonitor.kt`'s `estimateBandwidthFromType` `else -> 1000` (1 Mbps) /
+        // `connectionType`'s `else -> "unknown"` fallthrough for the same "connected but
+        // unrecognized transport" case.
+        return (1.0, "unknown")
     }
 }
 

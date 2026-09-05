@@ -47,9 +47,24 @@ Future<void> _pumpOnNarrowScreen(WidgetTester tester) async {
 }
 
 Future<void> _cleanUp(WidgetTester tester) async {
-  await tester.pumpAndSettle();
+  // Each on-screen _ScrollFeedItem creates its own MediaController and calls
+  // initialize()/load() in initState, which starts that player's
+  // BufferingService.startMonitoring 500ms periodic Timer once load()
+  // resolves. That timer keeps invoking the mocked platform buffer-status
+  // channel and scheduling a new frame forever -- pumpAndSettle can never
+  // observe zero pending frames on this page, for as long as any item stays
+  // mounted. Pump a bounded window to flush the async init/load chains'
+  // microtasks, then unmount (which disposes every mounted item's
+  // MediaController/BufferingService and cancels their timers) before a
+  // final short flush.
+  await tester.pump(const Duration(milliseconds: 60));
   await tester.pumpWidget(const SizedBox.shrink());
-  await tester.pump();
+  // MediaListPlayer's own visibility-driven autoplay/pause debounce
+  // (Future.delayed(300ms) in media_list_player.dart) can still be pending
+  // for an item that changed visibility right before teardown (this test
+  // drags the feed, which triggers exactly that) -- 350ms clears it with
+  // margin, or flutter_test's "Timer is still pending" invariant trips.
+  await tester.pump(const Duration(milliseconds: 350));
 }
 
 void main() {
@@ -204,7 +219,13 @@ void main() {
       for (var i = 0; i < 30; i++) {
         await tester.pump(const Duration(milliseconds: 100));
       }
-      await tester.pumpAndSettle(const Duration(milliseconds: 100));
+      // The 2500ms animateTo has already completed by now (30 x 100ms above
+      // == 3000ms), so a couple more bounded pumps are enough for the
+      // `finally` block's `end:` marker to render -- not pumpAndSettle,
+      // which would hang forever on the mounted items' BufferingService
+      // timers (see `_cleanUp` above).
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
 
       expect(
         find.textContaining('end:scroll-bandwidth-50', skipOffstage: false),

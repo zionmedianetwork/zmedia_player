@@ -20,7 +20,7 @@ on top.
 > | Field | Wired? | Android | iOS |
 > |---|---|---|---|
 > | `enableDvr` | **Yes** | Dart-side gate: `MediaPlayer.isSeekable`/`seekTo` reject seeking on a live item unless set (see [Seeking and live-edge detection](#seeking-and-live-edge-detection)). Native-side: once set, the current `Timeline.Window.durationMs` (the DVR window length) is reported as `PlaybackState.duration`, re-derived on every `onTimelineChanged` since a live window grows over time. Does not change what ExoPlayer itself does with the live window otherwise. | Same Dart-side gate; native derives the same window-length duration from `AVPlayerItem.seekableTimeRanges` (re-checked on every position tick, since `AVPlayerItem.duration` is indefinite for a live item and never fires the usual duration KVO) |
-> | `liveLatency` | **Yes** | `MediaItem.LiveConfiguration.setTargetOffsetMs` — but see [Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency) below: a manifest whose unix-time anchor disagrees with its own segment timeline silently defeats this target on Android | `AVPlayerItem.configuredTimeOffsetFromLive` (iOS 14+ only — no effect on iOS 13) |
+> | `liveLatency` | **Yes** | `MediaItem.LiveConfiguration.setTargetOffsetMs` — a *maintained* target: ExoPlayer adjusts playback speed to drift toward it over time. But see [Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency) below: a manifest whose unix-time anchor disagrees with its own segment timeline silently defeats this target on Android | `AVPlayerItem.configuredTimeOffsetFromLive` (iOS 14+ only — no effect on iOS 13) — a **join-time only** setting: honored once when playback starts (or on a seek to the live edge), never re-applied afterward. This package also sets `automaticallyPreservesTimeOffsetFromLive = false`, an independent AVFoundation setting that controls whether the player skips forward to restore the cushion after a rebuffer; `false` means it does not, so the playhead drifts **away** from the configured cushion after every rebuffer instead of holding it (see [dartdoc on `HlsConfig.liveLatency`](../../lib/src/models/streaming_config.dart) for the full trade-off — `true` would trade this drift for a visible forward skip after each rebuffer, and revisiting that choice is an open question, not a settled one) |
 > | `enableAdaptiveBitrate` | **Yes (Android only)** | `DefaultTrackSelector` — `false` forces a single fixed track instead of ABR | Not honored — AVPlayer has no API to disable ABR |
 > | `maxBitrate` | **Yes** | `DefaultTrackSelector.setMaxVideoBitrate` | `AVPlayerItem.preferredPeakBitRate` |
 > | `minBitrate` | **Yes (Android only)** | `DefaultTrackSelector.setMinVideoBitrate` | Not honored — no faithful AVPlayer equivalent |
@@ -88,7 +88,7 @@ actually requires.
 | Seeking within the live window | Whatever the manifest itself allows (its sliding window / `EXT-X-PLAYLIST-TYPE`) | Same |
 | `enableDvr` (this package's own seek gate) | `MediaPlayer.isSeekable`/`seekTo` reject seeking on a live item unless `enableDvr: true` | Same |
 | DVR window duration (`controller.duration` for a live item) | Reported once `enableDvr: true` — the live window's current known length, re-derived as it grows; `0`/unknown when DVR is off | Same, derived from `seekableTimeRanges` |
-| `liveLatency` target | Wired — `MediaItem.LiveConfiguration` (no effect on a manifest with an inconsistent time anchor — see [below](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)) | Wired on iOS 14+ — `configuredTimeOffsetFromLive` |
+| `liveLatency` target | Wired, and *maintained* — ExoPlayer drifts playback speed toward it over time (no effect on a manifest with an inconsistent time anchor — see [below](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)) | Wired on iOS 14+ — `configuredTimeOffsetFromLive`, but **join-time only**: honored once at start/seek, then never restored — the playhead drifts *away* from it after every rebuffer (`automaticallyPreservesTimeOffsetFromLive` is deliberately `false`; see the wiring table above) |
 | `maxBitrate` cap | Wired — `DefaultTrackSelector` | Wired — `preferredPeakBitRate` |
 | `enableAdaptiveBitrate: false` / `minBitrate` | Wired — `DefaultTrackSelector` | Not honored — no faithful AVPlayer API |
 | Adaptive bitrate for HLS | ExoPlayer's own track selection, constrained by `maxBitrate`/`minBitrate` when set | AVPlayer's own track selection, capped by `maxBitrate` when set |
@@ -511,6 +511,14 @@ watchdog.dispose();
   there — never use `isAtLiveEdge` as a proxy for "is this a live stream"; use
   `player.isLive` or `positionBasis` for that.
 
+**Seeing these fields on a real device.** The example app's
+`pages/wired_config_verification_page.dart` renders `liveEdgeOffset`,
+`isAtLiveEdge`, `positionBasis`, and whether the offset is bounded by
+`duration` as their own rows, plus a color-coded banner naming which case
+you're looking at (defect/anomaly, healthy live edge, or VOD) — the only way
+to confirm any of this by eye, since CI never builds native code and every
+test in the package/example suites mocks the `MethodChannel`.
+
 ---
 
 ## Manifest time-anchor defect (`liveEdgeOffset` and `liveLatency`)
@@ -567,6 +575,16 @@ never real — eroding whatever cushion a join or a corrective `seekTo` establis
   Android/DASH specifically, combined with chronic rebuffering, is the behavioral symptom (see
   [High latency behind live edge / frequent buffering](#high-latency-behind-live-edge--frequent-buffering)
   below).
+- On device, the example app's `pages/wired_config_verification_page.dart` renders
+  `liveEdgeOffset` and an explicit "offset <= duration" row against a real stream, so this
+  fix (and the still-open issue #110 diagnostic) can be confirmed by eye rather than only via
+  `adb logcat` — see the pointer in [Stall watchdog for live streams](#stall-watchdog-for-live-streams)
+  above. That page's Source selector has a **Custom** option specifically for this: paste in
+  the URL of a stream suspected of this defect (with an explicit `streamingFormat` override if
+  the URL doesn't end in `.mpd`/`.m3u8` — see
+  [Choosing which streaming config applies](#choosing-which-streaming-config-applies-streamingformat)
+  — and an optional HTTP header for a signed/token-gated origin) and reload, rather than being
+  limited to the app's own bundled fixtures.
 
 **What to do about it.** Nothing in this package can correct the target offset on an affected
 manifest — the join-position arithmetic belongs to Media3, and Media3's input is the
@@ -802,6 +820,17 @@ from the live edge (`MediaItem.LiveConfiguration` on Android; `AVPlayerItem
 latency and buffering are still governed by ExoPlayer's/AVPlayer's own adaptive behavior for
 the manifest. Reducing your CDN's segment duration at the encoder/packager level, and using an
 LL-HLS-compliant manifest, are the other levers that affect this.
+
+**On iOS specifically**, `liveLatency` only applies at join/seek time — it is not a maintained
+target the way Android's is. This package sets `automaticallyPreservesTimeOffsetFromLive =
+false`, so AVPlayer never skips forward to restore the configured cushion after a rebuffer; the
+playhead is expected to drift further from the live edge, monotonically, as rebuffers
+accumulate over a long session. This is not a bug to fix by retrying — it is the documented
+behavior of the current configuration (see the wiring table and `HlsConfig.liveLatency`'s
+dartdoc). If your app needs the cushion actively restored, track `liveEdgeOffset`/
+`isAtLiveEdge` (see [Stall watchdog for live streams](#stall-watchdog-for-live-streams)) and
+issue a corrective seek yourself; `automaticallyPreservesTimeOffsetFromLive` is not currently
+exposed as a configuration option.
 
 If `liveLatency` reaches native correctly (confirm via `controller.config`) but changing its
 value has **no observable effect** on Android/DASH — join position and steady-state cushion stay
