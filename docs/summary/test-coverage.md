@@ -18,7 +18,10 @@
 > `cd example && flutter test` — covering per-page layout regressions and
 > wired-behavior end-to-end checks that the package's own mocked-channel suite
 > cannot see (real page composition, real widget trees). It is not included in
-> the count above.
+> the count above. `ci.yml`'s `example-tests` job now runs `flutter analyze` and
+> `flutter test` for `example/` on every push and pull request, and gates the
+> `ci-success` merge check like the other jobs — previously nothing in CI ran this
+> suite at all, which is how 13 of its tests sat broken from v0.3.0 until a later fix.
 >
 > **Last Updated:** September 5, 2026
 >

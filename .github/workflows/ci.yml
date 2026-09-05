@@ -220,11 +220,53 @@ jobs:
           flutter test test/memory/
         continue-on-error: false
 
+  # Runs the example app's own suite (example/test/), separate from the package suite
+  # covered by lint-analyze-test above. example/ depends on zmedia_player via a `path: ../`
+  # dependency, so dependencies are resolved for both the root package and example/ before
+  # analyzing/testing it.
+  example-tests:
+    name: Example App Tests
+    runs-on: ubuntu-latest
+    # The suite runs in well under a minute locally; 10 minutes leaves generous headroom
+    # for CI variance and dependency resolution without matching the 20 minutes used by
+    # performance-tests/memory-tests, whose workloads are heavier.
+    timeout-minutes: 10
+    needs: lint-analyze-test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Get dependencies (root package)
+        run: flutter pub get
+
+      - name: Get dependencies (example)
+        run: cd example && flutter pub get
+
+      - name: Analyze example
+        run: |
+          echo "Running Flutter analyze on example/..."
+          cd example && flutter analyze
+        continue-on-error: false
+
+      - name: Run example tests
+        run: |
+          echo "Running example app tests..."
+          cd example && flutter test
+        continue-on-error: false
+
   # Summary job - all required checks must pass
   ci-success:
     name: CI Pipeline Success
     runs-on: ubuntu-latest
-    needs: [lint-analyze-test, performance-tests, memory-tests]
+    needs: [lint-analyze-test, performance-tests, memory-tests, example-tests]
     if: always()
 
     steps:
@@ -232,7 +274,8 @@ jobs:
         run: |
           if [ "${{ needs.lint-analyze-test.result }}" != "success" ] || \
              [ "${{ needs.performance-tests.result }}" != "success" ] || \
-             [ "${{ needs.memory-tests.result }}" != "success" ]; then
+             [ "${{ needs.memory-tests.result }}" != "success" ] || \
+             [ "${{ needs.example-tests.result }}" != "success" ]; then
             echo "One or more CI jobs failed!"
             exit 1
           fi
