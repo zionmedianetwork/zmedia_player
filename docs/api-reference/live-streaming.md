@@ -20,7 +20,7 @@ on top.
 > | Field | Wired? | Android | iOS |
 > |---|---|---|---|
 > | `enableDvr` | **Yes** | Dart-side gate: `MediaPlayer.isSeekable`/`seekTo` reject seeking on a live item unless set (see [Seeking and live-edge detection](#seeking-and-live-edge-detection)). Native-side: once set, the current `Timeline.Window.durationMs` (the DVR window length) is reported as `PlaybackState.duration`, re-derived on every `onTimelineChanged` since a live window grows over time. Does not change what ExoPlayer itself does with the live window otherwise. | Same Dart-side gate; native derives the same window-length duration from `AVPlayerItem.seekableTimeRanges` (re-checked on every position tick, since `AVPlayerItem.duration` is indefinite for a live item and never fires the usual duration KVO) |
-> | `liveLatency` | **Yes** | `MediaItem.LiveConfiguration.setTargetOffsetMs` | `AVPlayerItem.configuredTimeOffsetFromLive` (iOS 14+ only — no effect on iOS 13) |
+> | `liveLatency` | **Yes** | `MediaItem.LiveConfiguration.setTargetOffsetMs` — but see [Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency) below: a manifest whose unix-time anchor disagrees with its own segment timeline silently defeats this target on Android | `AVPlayerItem.configuredTimeOffsetFromLive` (iOS 14+ only — no effect on iOS 13) |
 > | `enableAdaptiveBitrate` | **Yes (Android only)** | `DefaultTrackSelector` — `false` forces a single fixed track instead of ABR | Not honored — AVPlayer has no API to disable ABR |
 > | `maxBitrate` | **Yes** | `DefaultTrackSelector.setMaxVideoBitrate` | `AVPlayerItem.preferredPeakBitRate` |
 > | `minBitrate` | **Yes (Android only)** | `DefaultTrackSelector.setMinVideoBitrate` | Not honored — no faithful AVPlayer equivalent |
@@ -70,6 +70,7 @@ actually requires.
 - [Seeking and live-edge detection](#seeking-and-live-edge-detection)
 - [Knowing which timeline `position` is on](#knowing-which-timeline-position-is-on)
 - [Stall watchdog for live streams](#stall-watchdog-for-live-streams)
+- [Manifest time-anchor defect (`liveEdgeOffset` and `liveLatency`)](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
 - [Monitoring connection quality](#monitoring-connection-quality)
 - [Complete example](#complete-example)
 - [Troubleshooting](#troubleshooting)
@@ -87,7 +88,7 @@ actually requires.
 | Seeking within the live window | Whatever the manifest itself allows (its sliding window / `EXT-X-PLAYLIST-TYPE`) | Same |
 | `enableDvr` (this package's own seek gate) | `MediaPlayer.isSeekable`/`seekTo` reject seeking on a live item unless `enableDvr: true` | Same |
 | DVR window duration (`controller.duration` for a live item) | Reported once `enableDvr: true` — the live window's current known length, re-derived as it grows; `0`/unknown when DVR is off | Same, derived from `seekableTimeRanges` |
-| `liveLatency` target | Wired — `MediaItem.LiveConfiguration` | Wired on iOS 14+ — `configuredTimeOffsetFromLive` |
+| `liveLatency` target | Wired — `MediaItem.LiveConfiguration` (no effect on a manifest with an inconsistent time anchor — see [below](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)) | Wired on iOS 14+ — `configuredTimeOffsetFromLive` |
 | `maxBitrate` cap | Wired — `DefaultTrackSelector` | Wired — `preferredPeakBitRate` |
 | `enableAdaptiveBitrate: false` / `minBitrate` | Wired — `DefaultTrackSelector` | Not honored — no faithful AVPlayer API |
 | Adaptive bitrate for HLS | ExoPlayer's own track selection, constrained by `maxBitrate`/`minBitrate` when set | AVPlayer's own track selection, capped by `maxBitrate` when set |
@@ -309,10 +310,16 @@ final atEdge = controller.state.isAtLiveEdgeWithin(const Duration(seconds: 4)); 
 [videojs-live-tolerance]: https://videojs.com/guides/live/
 
 Natively, `liveEdgeOffset` comes from `Player.getCurrentLiveOffset()` on Android
-(falling back to `Timeline.Window.durationMs - Player.getCurrentPosition()` when
-that is `C.TIME_UNSET`) and from the end of
-`AVPlayerItem.seekableTimeRanges.last` minus `AVPlayerItem.currentTime()` on
-iOS. It arrives on the existing `onPositionChanged` event under the
+**when that value is sanity-checked against the live window and passes** —
+falling back to `Timeline.Window.durationMs - Player.getCurrentPosition()`
+when the platform-reported value is `C.TIME_UNSET`, **or** when it is larger
+than the window's own known duration (impossible by construction, and a real
+manifest defect — see
+[Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
+below). On iOS it is the end of `AVPlayerItem.seekableTimeRanges.last` minus
+`AVPlayerItem.currentTime()`, which is bounded by construction (both operands
+share the item's own timeline, with no unix-time anchor involved) and needs no
+such check. It arrives on the existing `onPositionChanged` event under the
 `liveEdgeOffset` key — see [Events](events.md#onpositionchanged).
 
 ```dart
@@ -503,6 +510,72 @@ watchdog.dispose();
 - `liveEdgeOffset` is `null` for VOD, so `isAtLiveEdge` is always `false`
   there — never use `isAtLiveEdge` as a proxy for "is this a live stream"; use
   `player.isLive` or `positionBasis` for that.
+
+---
+
+## Manifest time-anchor defect (`liveEdgeOffset` and `liveLatency`)
+
+This is a manifest/packaging defect this package can detect and route around for
+`liveEdgeOffset`, but cannot fix for `liveLatency` — the underlying arithmetic belongs to
+Media3, and its input is the manifest.
+
+**What it looks like.** On Android, `Player.getCurrentLiveOffset()` computes
+`nowUnixTime - windowStartTime - position`. For DASH, `windowStartTime` derives from
+`manifest.availabilityStartTimeMs`. Ordinarily that unix-time anchor and the manifest's own
+segment timeline agree. If a packager anchors `availabilityStartTime` to when the broadcast
+began, while re-basing the segment timeline to a rolling window (a live event that has been
+running far longer than its DVR window covers is the common trigger), the two disagree —
+`getCurrentLiveOffset()` then reports **broadcast age**, not distance from the live edge. It
+returns a large, real number, not `C.TIME_UNSET`, so nothing about the value itself flags it
+as wrong.
+
+**Worked example (the real numbers this was diagnosed from — issues #109/#110).** A DASH DVR
+stream (`suggestedPresentationDelay=PT18S`, `timeShiftBufferDepth=PT60S`, 6s segments)
+reported:
+
+```
+liveEdgeOffset = 1973165ms  (~33 minutes)
+position       = 57732ms
+duration       = 61466ms    (the DVR window length)
+```
+
+The playhead was genuinely **~3.7s** from the edge (`duration - position`) — an offset of 33
+minutes inside a 61-second window is impossible by construction. `liveLatency` was set to 18s,
+read back correctly from `controller.config`, and had **zero measurable effect** on join
+position or on how close to the edge playback settled (a probe at 45s produced an identical
+result) — because `MediaItem.LiveConfiguration.targetOffsetMs` is computed from that same
+poisoned anchor (`windowDefaultStartPositionUs`, derived from the same broken
+`nowInWindowUs`), Media3 clamps the join to the real live edge regardless of the configured
+target. The same broken offset also drives `DefaultLivePlaybackSpeedControl`, which compares it
+against the target, sees ~33 minutes of "lag" and speeds up trying to close a gap that was
+never real — eroding whatever cushion a join or a corrective `seekTo` established.
+
+**How to detect it.**
+
+- `liveEdgeOffset` (see [How far behind the live edge am I?](#how-far-behind-the-live-edge-am-i))
+  is now sanity-checked against the live window's known duration on Android: a reported value
+  larger than the window is rejected in favor of the bounded fallback
+  (`duration - position`), which is unaffected by the anchor defect. So as of this fix,
+  `controller.liveEdgeOffset` reads correctly (~3.7s in the example above) even on an affected
+  manifest — you no longer need to guard against it app-side.
+- The rejection itself is diagnostic: native logs a one-time-per-loaded-item warning (tag
+  `MediaPlayerInstance`, `Log.w`) naming the observed offset, the window duration, and that
+  `liveLatency` will not take effect on this stream — check `adb logcat` for it if `liveLatency`
+  appears to do nothing. It is *not* emitted on the normal 500ms position tick — only once per
+  item, the first time the mismatch is observed.
+- `liveLatency` having no measurable effect on join position or steady-state cushion, on
+  Android/DASH specifically, combined with chronic rebuffering, is the behavioral symptom (see
+  [High latency behind live edge / frequent buffering](#high-latency-behind-live-edge--frequent-buffering)
+  below).
+
+**What to do about it.** Nothing in this package can correct the target offset on an affected
+manifest — the join-position arithmetic belongs to Media3, and Media3's input is the
+manifest's own (inconsistent) time anchor. This is a packager/origin-side defect: report it to
+whoever operates the encoder/packager for the stream (an inconsistency between
+`availabilityStartTime` and the segment timeline it publishes). As a stopgap, an app-side
+corrective `seekTo(duration - desiredLatency)` after load can hold a cushion, but expect
+`DefaultLivePlaybackSpeedControl` to erode it over time on the same stream, since it is working
+from the same poisoned offset — periodic re-seeking is a treadmill, not a fix.
 
 ---
 
@@ -713,6 +786,14 @@ duration / switch to low-latency HLS if you actually want to be closer to the ed
 `isAtLiveEdge` is also always `false` for VOD (`liveEdgeOffset` is `null` there) — use
 `player.isLive` to ask "is this live", not `isAtLiveEdge`.
 
+If `liveEdgeOffset` instead reads as an implausibly large value — minutes, when `duration`
+(the DVR window) is under a minute — that is not a tolerance problem; it is the manifest
+time-anchor defect covered in
+[Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
+below. As of this fix, Android's `liveEdgeOffset` already falls back to a bounded computation
+when it detects this, so a value larger than `duration` should not reach Dart any more; if you
+still observe one, please file an issue with the manifest details.
+
 ### High latency behind live edge / frequent buffering
 
 Set `liveLatency` on the matching streaming config to give the native player a target offset
@@ -721,6 +802,14 @@ from the live edge (`MediaItem.LiveConfiguration` on Android; `AVPlayerItem
 latency and buffering are still governed by ExoPlayer's/AVPlayer's own adaptive behavior for
 the manifest. Reducing your CDN's segment duration at the encoder/packager level, and using an
 LL-HLS-compliant manifest, are the other levers that affect this.
+
+If `liveLatency` reaches native correctly (confirm via `controller.config`) but changing its
+value has **no observable effect** on Android/DASH — join position and steady-state cushion stay
+identical regardless of the configured target, alongside chronic rebuffering — check
+`adb logcat` for the one-time `MediaPlayerInstance` warning about an inconsistent manifest time
+anchor. This is a distinct, manifest-side defect, not a wiring bug; see
+[Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency) above
+for the full diagnosis and what to do about it.
 
 ### DASH does not load on iOS
 

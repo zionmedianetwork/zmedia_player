@@ -153,12 +153,20 @@ liveEdgeOffset: int(ms)?}`. `positionBasis` is `"absolute"` or `"liveWindow"` (a
 unrecognised -> `PositionBasis.absolute`). `liveEdgeOffset` is **omitted entirely** (never a
 sentinel) for VOD and whenever the platform cannot answer — a missing key clears
 `PlaybackState.liveEdgeOffset` to `null`. Both ride this existing ~500ms event rather than a
-new channel event. Sources: Android `Player.getCurrentLiveOffset()` (falling back to
-`Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET`) and
-`Timeline.Window.isLive()`; iOS end-of-`AVPlayerItem.seekableTimeRanges.last` minus
-`currentTime()`, with `"liveWindow"` only when the DVR window translation applies. The
-live-without-DVR basis therefore differs by platform (`liveWindow` on Android, `absolute` on
-iOS) **by design** — each reports the basis its values are actually on.
+new channel event. Sources: Android `Player.getCurrentLiveOffset()`, sanity-checked against
+`Timeline.Window.durationMs` before being trusted (issue #109 — a manifest whose unix-time
+anchor disagrees with its own segment timeline can make `getCurrentLiveOffset()` report
+broadcast age instead of live-edge distance, as a real, non-`C.TIME_UNSET` number), falling
+back to `Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET` **or** when the
+reported value exceeds the window duration; and `Timeline.Window.isLive()`. A rejected value
+also logs a one-time-per-item native warning pointing at issue #110 (same anchor defect
+silently defeats `liveLatency`). iOS end-of-`AVPlayerItem.seekableTimeRanges.last` minus
+`currentTime()` — bounded by construction, no equivalent check needed — with `"liveWindow"`
+only when the DVR window translation applies. The live-without-DVR basis therefore differs by
+platform (`liveWindow` on Android, `absolute` on iOS) **by design** — each reports the basis
+its values are actually on. See
+[live-streaming.md](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
+for the full diagnosis.
 
 **`onNetworkStatusChanged` payload.** `{playerId: String, quality: String?, downloadSpeed:
 int(bytes/sec)?, isMetered: bool?, connectionType: String?}`. `quality` is one of
