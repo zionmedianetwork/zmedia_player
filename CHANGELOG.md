@@ -29,6 +29,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plus the optional Bearer token into a single map before its one
   `setDefaultRequestProperties` call, and its per-entry
   `HttpMediaDrmCallback.setKeyRequestProperty(key, value)` calls use a genuinely additive API.
+- **Notification artwork was fetched without the item's `MediaItem.httpHeaders`, so it never
+  appeared for an authenticated or signed media URL** — same defect family as #127 ("headers
+  don't reach every request"), one layer up, and fixed on **both** platforms. When a
+  `MediaItem` has no `artworkUrl`, both platforms fall back to extracting a video frame from
+  the media URL for the notification / Now Playing artwork, and that extraction issues its own
+  HTTP requests — separate from every request the player makes for playback and therefore not
+  covered by the playback data source's headers. Neither side sent any:
+  `NotificationHandler.kt`'s `generateThumbnail` passed a hardcoded
+  `emptyMap<String, String>()` to `MediaMetadataRetriever.setDataSource(url, headers)` (an
+  empty map chosen only to select the non-deprecated overload — the consequence was missed),
+  and `NotificationHandler.swift`'s built a bare `AVURLAsset(url:)` with no
+  `AVURLAssetHTTPHeaderFieldsKey`/`AVURLAssetHTTPCookiesKey`. Against a bearer token, a signed
+  CloudFront cookie, or the multi-header CDN credential of #127, the frame fetch answered
+  401/403 and the notification silently showed no artwork while playback itself was fine, so
+  the symptom never pointed at the cause.
+  `NotificationService.show()` now sends `httpHeaders` on its `mediaItem` payload (**wire-shape
+  change**, key always present, `null` when the item has none — an older cached Dart build
+  simply omits it and native falls back to sending no headers, exactly as before); both native
+  handlers store it and pass it to the frame extraction. Android keeps the two-argument
+  `setDataSource` overload (the single-argument one is deprecated) and passes
+  `httpHeaders ?: emptyMap()`; iOS now builds the thumbnail asset through the new shared
+  `makeAVURLAsset` helper (`ios/.../AssetHTTPOptions.swift`), extracted verbatim from
+  `MediaPlayerManager.swift`'s playback path so the `Cookie` ->
+  `AVURLAssetHTTPCookiesKey` conversion applies to the artwork fetch too and the two asset
+  construction sites can no longer drift apart.
+  Headers are deliberately **not** attached to a `MediaItem.artworkUrl` fetch: that is an
+  independent, frequently third-party host, and sending an `Authorization`/`Cookie` header
+  there would leak the credential. An artwork endpoint behind the same auth as the media
+  should be left unset so the (now authenticated) video-frame fallback is used instead.
+- **Android artwork resolution could wedge permanently after an `OutOfMemoryError`.** Both
+  `loadArtwork` and `generateThumbnail` reset `artworkLoadInFlight` *after* their
+  `try`/`catch (Exception)`, so a `Throwable` that is not an `Exception` — an OOM out of
+  `BitmapFactory.decodeStream`/`getFrameAtTime` being the realistic one — or a coroutine
+  cancellation left the flag stuck at `true`, after which `resolveArtworkIfNeeded()` refused
+  every later artwork attempt for the life of that handler. Both now reset it from a `finally`
+  under `NonCancellable`. `loadArtwork` additionally leaked its `InputStream` whenever
+  decoding threw (the explicit `close()` was on the success path only); it now uses `use {}`.
+  The `MediaMetadataRetriever` was already released from a `finally` and still is.
 - **Documentation:** `docs/api-reference/live-streaming.md` claimed
   "`MediaItem.httpHeaders` (or `MediaConfig.httpHeaders`) is the header path that is actually
   wired to native `load()`" — false for the parenthetical (see Deprecated below), and the
@@ -56,6 +94,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `httpHeaders` map in a single call. Necessary because neither `flutter analyze` (the payload
   is a `Map<String, dynamic>` on both sides of the channel) nor the test suite (every test
   mocks the `MethodChannel`) can see a defect that lives entirely on the native side.
+- **`test/native_contract/notification_artwork_headers_test.dart`** (6 tests) — the same
+  source-text guard style applied to the artwork path, on both platforms: Android's
+  `generateThumbnail` must take a header map and must never hand `setDataSource` a hardcoded
+  empty one (nor fall back to the deprecated single-argument overload); iOS's must take one and
+  build its asset via `makeAVURLAsset` rather than a bare `AVURLAsset(url:)`; both
+  `showNotification`s must read `mediaItem["httpHeaders"]`; `makeAVURLAsset` must apply both
+  the header-fields and the cookies keys; and Dart must still send the key the natives read.
+  Verified to fail against the pre-fix Kotlin *and* Swift.
+- **`test/services/notification_state_sync_test.dart`** — a group (3 tests) pinning the Dart
+  half of that contract: `show()` puts every `MediaItem.httpHeaders` entry on the `mediaItem`
+  payload, sends `null` (never an empty map) when the item has none, and sends a defensive
+  copy rather than the item's live map.
 - **`test/models/media_item_test.dart`** — an `httpHeaders serialization` group (2 tests)
   pinning that `MediaItem.toMap()`/`fromMap()` round-trip *every* header, not just one. Its
   doc comment is explicit that this passed before the Android fix too, and that the

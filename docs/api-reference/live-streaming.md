@@ -164,6 +164,11 @@ sent `X-Session-ID` but not `Authorization` (issue #127). iOS was never affected
 guard (`test/native_contract/android_http_headers_test.dart`) now fails the suite if the
 per-entry call pattern comes back.
 
+The same headers also authenticate the **notification-artwork** frame extraction, which opens
+its own connection to the media URL when the item has no `artworkUrl` (they previously did
+not reach it, so artwork silently never appeared for an authenticated stream — see
+[Models](models.md#mediaitem)). They are never sent to an `artworkUrl` fetch.
+
 > iOS additionally converts a `Cookie` header into `AVURLAssetHTTPCookiesKey` cookies (and
 > drops the header) so signed-cookie auth survives AVFoundation's out-of-process requests —
 > see `MediaPlayerManager.swift`.

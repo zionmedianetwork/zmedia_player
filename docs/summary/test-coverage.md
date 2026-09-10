@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1109 tests passing** as of
+> the original release. The suite has since grown to **1118 tests passing** as of
 > this writing (run `flutter test` for the live count, since it grows with every
 > change) as audit-remediation work added regression coverage. **Important caveat
 > the original summary omitted:** these are all **Dart** unit tests. There are
@@ -36,6 +36,18 @@
 > in `test/models/media_item_test.dart`, 2 tests) while Android silently sent only the last
 > one. iOS was never affected — it applies the map in a single assignment. See
 > [testing.md](../implementation/testing.md#guarding-the-native-contract-from-dart).
+>
+> **Notification-artwork header coverage (same defect family, both platforms):**
+> `test/native_contract/notification_artwork_headers_test.dart` (6 tests) pins that the
+> video-frame artwork fallback — which issues its *own* HTTP requests against the media URL
+> and so is not covered by the playback data source's headers — carries
+> `MediaItem.httpHeaders`. It fails if Android's `generateThumbnail` hands `setDataSource` a
+> hardcoded empty map (or reverts to the deprecated single-argument overload), if iOS's
+> builds a bare `AVURLAsset(url:)` instead of going through `makeAVURLAsset`, if either
+> `showNotification` stops reading `mediaItem["httpHeaders"]`, or if Dart stops sending it.
+> The Dart half is separately pinned by 3 tests in
+> `test/services/notification_state_sync_test.dart`. Verified to fail against the pre-fix
+> Kotlin and Swift.
 >
 > **Playlist regression coverage (issue #79):** `test/core/playlist_extension_test.dart`
 > (15 tests) covers the Dart-observable half of the "`setPlaylist` must not restart the
@@ -159,7 +171,8 @@ test/models/
 ### Native-Contract Tests
 ```
 test/native_contract/
-└── android_http_headers_test.dart (3 source-text guards — issue #127)
+├── android_http_headers_test.dart (3 source-text guards — issue #127)
+└── notification_artwork_headers_test.dart (6 source-text guards — artwork fetch headers)
 ```
 
 ### Performance Tests

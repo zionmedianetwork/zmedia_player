@@ -76,6 +76,19 @@ const _dummyItemNoArtwork = MediaItem(
   url: 'https://example.com/video.mp4',
 );
 
+/// A media item whose media URL is authenticated by several headers — used to
+/// verify that the artwork/thumbnail payload carries them all.
+const _dummyItemWithHeaders = MediaItem(
+  id: 'notif-item-auth',
+  title: 'Authenticated Track',
+  url: 'https://cdn.example.com/private/video.m3u8',
+  httpHeaders: {
+    'Authorization': 'Bearer token-abc',
+    'Cookie': 'CloudFront-Signature=sig; CloudFront-Key-Pair-Id=kid',
+    'X-Session-ID': 'session_123',
+  },
+);
+
 /// A media item that carries both a url and an artworkUrl.
 const _dummyItemWithArtwork = MediaItem(
   id: 'notif-item-with-artwork',
@@ -699,6 +712,145 @@ void main() {
         mediaItemArg['url'],
         _dummyItem.url,
         reason: 'url value must match the MediaItem.url field',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
+
+  // =========================================================================
+  group(
+      'NotificationService — showNotification carries MediaItem.httpHeaders '
+      '(unauthenticated artwork fetch)', () {
+    // The video-frame artwork fallback performs its OWN HTTP requests against
+    // mediaItem["url"] (Android MediaMetadataRetriever, iOS
+    // AVAssetImageGenerator) — separate from every request the player makes for
+    // playback, and therefore not covered by the playback data source's
+    // headers. Android used to hardcode `emptyMap<String, String>()` as the
+    // header argument and iOS built a bare `AVURLAsset(url:)`, so against a
+    // signed/authenticated media URL the frame fetch 401/403'd and the
+    // notification silently showed no artwork. Native can only apply the
+    // headers if Dart sends them, which is what these tests pin.
+    // -----------------------------------------------------------------------
+    test('show() sends every httpHeaders entry in the mediaItem map', () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-headers');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-headers', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItemWithHeaders,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-headers',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      expect(
+        mediaItemArg.containsKey('httpHeaders'),
+        isTrue,
+        reason: 'showNotification mediaItem must include httpHeaders so the '
+            'native artwork frame extraction can authenticate its own '
+            'requests against a signed/authenticated media URL',
+      );
+      expect(
+        Map<String, String>.from(mediaItemArg['httpHeaders'] as Map),
+        _dummyItemWithHeaders.httpHeaders,
+        reason: 'EVERY header entry must be sent — the same "all of them, not '
+            'just one" contract the playback path has (issue #127)',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test('show() sends a null httpHeaders for an item without headers',
+        () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-headers-absent');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-headers-absent', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItemNoArtwork,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-headers-absent',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+
+      expect(
+        mediaItemArg.containsKey('httpHeaders'),
+        isTrue,
+        reason: 'the key is always present; only its value is nullable, so '
+            'the payload shape does not depend on the item',
+      );
+      expect(
+        mediaItemArg['httpHeaders'],
+        isNull,
+        reason: 'a null field is never widened to an empty map — native then '
+            'passes an empty header map, which stays correct for an '
+            'unauthenticated URL',
+      );
+
+      service.dispose();
+      await player.dispose();
+    });
+
+    // -----------------------------------------------------------------------
+    test('the sent header map is a copy, not the item\'s live reference',
+        () async {
+      final calls = _installCapture();
+
+      final player = MediaPlayer(playerId: 'notif-headers-copy');
+      await player.initialize();
+
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-headers-copy', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: _dummyItemWithHeaders,
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-headers-copy',
+      );
+
+      final showCall = calls.firstWhere(
+        (c) => c.method == 'showNotification',
+        orElse: () => fail('No showNotification call found'),
+      );
+      final mediaItemArg =
+          showCall.arguments['mediaItem'] as Map<dynamic, dynamic>;
+      final sent = mediaItemArg['httpHeaders'] as Map;
+
+      expect(
+        identical(sent, _dummyItemWithHeaders.httpHeaders),
+        isFalse,
+        reason: 'matches MediaItem.toMap\'s defensive-copy discipline: the '
+            'payload must never hand out the item\'s own collection',
+      );
+      sent['Authorization'] = 'tampered';
+      expect(
+        _dummyItemWithHeaders.httpHeaders!['Authorization'],
+        'Bearer token-abc',
+        reason: 'mutating the payload must not mutate the MediaItem',
       );
 
       service.dispose();

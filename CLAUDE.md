@@ -279,7 +279,10 @@ The package follows **clean architecture** with clear separation between Flutter
 
 Both managers follow identical interface patterns defined by the MethodChannel protocol.
 
-**Native code is decomposed into per-feature handlers** (mirrored across `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and `ios/zmedia_player/Sources/zmedia_player/`): `MediaPlayerManager`, `DrmHandler`, `PipHandler`, `NotificationHandler`, `BufferingHandler`, `CrashHandler`, `NetworkMonitor`, `SecureStorageHandler`, plus the platform view (`MediaPlayerView`/`MediaPlayerViewFactory`). Casting/AirPlay handlers are platform-specific (`CastHandler`/`CastOptionsProvider` on Android; `AirPlayHandler`/`AirPlayButtonFactory` on iOS). The plugin entry points are `ZMediaPlayerPlugin.kt` / `ZMediaPlayerPlugin.swift`. When adding a native capability, add the same handler on both platforms to keep the MethodChannel contract symmetric.
+**Native code is decomposed into per-feature handlers** (mirrored across `android/src/main/kotlin/com/zionmedianetwork/zmedia_player/` and `ios/zmedia_player/Sources/zmedia_player/`): `MediaPlayerManager`, `DrmHandler`, `PipHandler`, `NotificationHandler`, `BufferingHandler`, `CrashHandler`, `NetworkMonitor`, `SecureStorageHandler`, plus the platform view (`MediaPlayerView`/`MediaPlayerViewFactory`). iOS additionally has
+`AssetHTTPOptions.swift`, a headers/cookies `AVURLAsset` builder (`makeAVURLAsset`) shared by
+`MediaPlayerManager`'s playback path and `NotificationHandler`'s artwork frame extraction, so
+the two cannot drift on how `MediaItem.httpHeaders` is applied. Casting/AirPlay handlers are platform-specific (`CastHandler`/`CastOptionsProvider` on Android; `AirPlayHandler`/`AirPlayButtonFactory` on iOS). The plugin entry points are `ZMediaPlayerPlugin.kt` / `ZMediaPlayerPlugin.swift`. When adding a native capability, add the same handler on both platforms to keep the MethodChannel contract symmetric.
 
 ### Public API Surface
 
@@ -602,6 +605,18 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    `test/native_contract/android_http_headers_test.dart`, which parses the Kotlin source —
    nothing else can see this class of defect, since `flutter analyze` sees only a
    `Map<String, dynamic>` and every test mocks the channel.
+   The map also reaches the **notification-artwork frame extraction**, which makes its own
+   HTTP requests against the media URL (Android `MediaMetadataRetriever`, iOS
+   `AVAssetImageGenerator`) and is therefore not covered by the playback data source's
+   headers. Both platforms sent none — Android hardcoded `emptyMap<String, String>()` into
+   `setDataSource`, iOS built a bare `AVURLAsset(url:)` — so artwork silently never appeared
+   for a signed/authenticated URL. `NotificationService.show()` now sends `httpHeaders` on its
+   `mediaItem` payload and both `NotificationHandler`s apply it; iOS builds **every** asset
+   through the shared `makeAVURLAsset` helper (`ios/.../AssetHTTPOptions.swift`), so the
+   `Cookie` -> `AVURLAssetHTTPCookiesKey` conversion covers the artwork fetch too. Headers are
+   deliberately **not** attached to a `MediaItem.artworkUrl` fetch (independent, often
+   third-party host — sending an `Authorization`/`Cookie` there would leak it). Guarded by
+   `test/native_contract/notification_artwork_headers_test.dart`.
    **`MediaConfig.httpHeaders` is deprecated and inert**: it is still serialized onto the
    `config` payload (wire shape unchanged) but no native code has ever read
    `config["httpHeaders"]`. It is deprecated rather than removed (compilation) or wired

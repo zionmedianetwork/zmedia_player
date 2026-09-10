@@ -25,7 +25,8 @@ const MediaItem({
 });
 ```
 
-If `artworkUrl` is null, media notifications generate artwork from a video frame.
+If `artworkUrl` is null, media notifications generate artwork from a video frame — a fetch
+that carries `httpHeaders` (see below), so it works on an authenticated or signed media URL.
 
 `httpHeaders` is the canonical header path and is honored on both platforms: **every** entry
 is applied to manifest and segment requests. Android hands the whole map to
@@ -36,6 +37,15 @@ out-of-process requests). Android used to make that call once per entry, and bec
 *replaces* rather than merges, only the last header of the map reached the wire — issue #127;
 iOS was never affected. Do **not** use the deprecated `MediaConfig.httpHeaders` (see below):
 it is inert.
+
+The same map also authenticates the **notification-artwork frame extraction** — the fallback
+used when `artworkUrl` is null, which issues its own requests against `url` (Android
+`MediaMetadataRetriever`, iOS `AVAssetImageGenerator`) rather than reusing the player's. It
+previously sent no headers at all, so artwork silently never appeared for a
+signed/authenticated URL. Headers are **not** sent to an `artworkUrl` fetch: that is an
+independent, frequently third-party host and an `Authorization`/`Cookie` header would leak
+there. Put an auth-protected poster behind the video-frame fallback (leave `artworkUrl` unset)
+instead.
 
 `url` accepts `http(s)://` and `file://` — local file playback is supported.
 `InputValidator.validateUrl` rejects a bare filesystem path, so build the URI with

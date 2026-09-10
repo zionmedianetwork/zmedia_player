@@ -940,58 +940,17 @@ class MediaPlayerInstance: NSObject {
         drmHandler = nil
 
         // Create AVURLAsset with custom headers / cookies if provided.
-        var asset: AVURLAsset
-        if let httpHeaders = mediaItem["httpHeaders"] as? [String: String] {
-            var headerFields = httpHeaders
-            var options: [String: Any] = [:]
-            // Signed-cookie auth (e.g. CloudFront live/VOD): AVFoundation does NOT
-            // reliably apply a custom "Cookie" HTTP header to every request the
-            // AVPlayer makes — playlist refreshes and segment fetches run out of
-            // process in mediaplaybackd and intermittently drop the header,
-            // producing HTTP 403s (CoreMediaErrorDomain -12660), especially on long
-            // or live streams. Forwarding the cookies via AVURLAssetHTTPCookiesKey
-            // makes AVFoundation apply them to ALL requests.
-            if let cookieHeader = httpHeaders["Cookie"], !cookieHeader.isEmpty {
-                let host = url.host ?? ""
-                var cookies: [HTTPCookie] = []
-                for pair in cookieHeader.components(separatedBy: ";") {
-                    let trimmed = pair.trimmingCharacters(in: .whitespaces)
-                    guard let eq = trimmed.firstIndex(of: "="), !trimmed.isEmpty else { continue }
-                    let name = String(trimmed[..<eq])
-                    let value = String(trimmed[trimmed.index(after: eq)...])
-                    if name.isEmpty { continue }
-                    var props: [HTTPCookiePropertyKey: Any] = [
-                        .name: name,
-                        .value: value,
-                        .domain: host,
-                        .path: "/",
-                        .version: "0",
-                        .expires: Date(timeIntervalSinceNow: 6 * 3600),
-                    ]
-                    props[HTTPCookiePropertyKey("Secure")] = "TRUE"
-                    if let cookie = HTTPCookie(properties: props) {
-                        cookies.append(cookie)
-                    } else {
-                        zlog("MediaPlayerInstance: HTTPCookie construction failed for cookie \(name)")
-                    }
-                }
-                if !cookies.isEmpty {
-                    options["AVURLAssetHTTPCookiesKey"] = cookies
-                    // Remove the Cookie HTTP header: when BOTH the header and the
-                    // cookies key are set, AVFoundation prefers the header (which it
-                    // drops on some out-of-process requests). Using only the cookies
-                    // key applies the cookies to every request.
-                    headerFields.removeValue(forKey: "Cookie")
-                    zlog("MediaPlayerInstance: forwarding \(cookies.count) cookie(s) via AVURLAssetHTTPCookiesKey for host \(host)")
-                }
-            }
-            if !headerFields.isEmpty {
-                options["AVURLAssetHTTPHeaderFieldsKey"] = headerFields
-            }
-            asset = options.isEmpty ? AVURLAsset(url: url) : AVURLAsset(url: url, options: options)
-        } else {
-            asset = AVURLAsset(url: url)
-        }
+        //
+        // The header/cookie option building lives in makeAVURLAsset (see
+        // AssetHTTPOptions.swift) so that EVERY asset this plugin builds for a
+        // media URL carries the item's headers — this playback path and
+        // NotificationHandler's artwork frame extraction alike. The latter used
+        // to build a bare AVURLAsset and 401/403'd on authenticated URLs.
+        let asset = makeAVURLAsset(
+            url: url,
+            httpHeaders: mediaItem["httpHeaders"] as? [String: String],
+            logTag: "MediaPlayerInstance"
+        )
 
         // --- DRM wiring ---
         // If the media item carries a drmConfig, configure a DrmHandler and attach

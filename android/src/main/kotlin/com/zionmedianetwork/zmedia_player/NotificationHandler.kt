@@ -261,6 +261,17 @@ class NotificationHandler(
     private var currentArtist: String? = null
     private var currentArtworkUrl: String? = null
     private var currentMediaUrl: String? = null
+    // The current item's MediaItem.httpHeaders, sent on the "mediaItem" map by
+    // NotificationService.show() (see notification_service.dart). Needed because
+    // the artwork fallback -- generateThumbnail() -- makes its own HTTP requests
+    // against currentMediaUrl through MediaMetadataRetriever, entirely separate
+    // from the ones ExoPlayer makes for playback. Without these the frame fetch
+    // is unauthenticated and 401/403s on a signed or token-authenticated URL,
+    // leaving the notification silently artwork-less. Mirrors
+    // NotificationHandler.swift's currentHttpHeaders. null when the item carries
+    // no headers, or when an older cached Dart build (predating this key) is
+    // talking to this native build.
+    private var currentHttpHeaders: Map<String, String>? = null
     private var currentArtworkBitmap: Bitmap? = null
 
     // True while a loadArtwork()/generateThumbnail() coroutine is between
@@ -498,6 +509,12 @@ class NotificationHandler(
         currentArtist = mediaItem["artist"] as? String ?: "Unknown Artist"
         currentArtworkUrl = newArtworkUrl
         currentMediaUrl = newMediaUrl
+        // Deliberately NOT part of the mediaChanged comparison above: a
+        // refreshed token on the same URL is not a new media item and must not
+        // discard an artwork bitmap that was already resolved. Read with the
+        // same unchecked `as?` cast MediaPlayerManager.loadMediaItem uses for
+        // the identical key, so both read the payload the same way.
+        currentHttpHeaders = mediaItem["httpHeaders"] as? Map<String, String>
 
         // Read isLive/dvrEnabled before touching duration below -- isSeekable
         // (derived from both) decides whether the incoming duration is honored at
@@ -1166,7 +1183,7 @@ class NotificationHandler(
         if (!artworkUrl.isNullOrEmpty()) {
             loadArtwork(artworkUrl)
         } else if (!mediaUrl.isNullOrEmpty()) {
-            generateThumbnail(mediaUrl)
+            generateThumbnail(mediaUrl, currentHttpHeaders)
         }
     }
 
@@ -1221,9 +1238,20 @@ class NotificationHandler(
                 connection.connectTimeout = ARTWORK_FETCH_TIMEOUT_MS
                 connection.readTimeout = ARTWORK_FETCH_TIMEOUT_MS
                 connection.connect()
-                val input = connection.getInputStream()
-                val bitmap = android.graphics.BitmapFactory.decodeStream(input)
-                input.close()
+                // Deliberately NOT sent the item's httpHeaders, unlike
+                // generateThumbnail() below: [url] here is MediaItem.artworkUrl,
+                // an independent URL that is frequently on a different host from
+                // the media URL the credentials belong to. Attaching an
+                // Authorization/Cookie header to a request for an arbitrary
+                // third-party host would leak it. An artwork endpoint behind the
+                // same auth as the media should be left unset so the video-frame
+                // fallback (which does carry the headers) is used instead.
+                //
+                // `use` closes the stream on the failure path too; the previous
+                // explicit close() was skipped whenever decodeStream threw.
+                val bitmap = connection.getInputStream().use { input ->
+                    android.graphics.BitmapFactory.decodeStream(input)
+                }
 
                 withContext(Dispatchers.Main) {
                     // Discard a stale fetch if the media item's artwork URL
@@ -1240,12 +1268,19 @@ class NotificationHandler(
                     }
                 }
             } catch (e: Exception) {
+                // Artwork is best-effort and never propagates — see the matching
+                // comment in generateThumbnail().
                 // e.message may embed the artwork URL (with any query-string token) — redact
                 // before logging since Log.e is not stripped from release builds (H-03).
                 android.util.Log.e(TAG, "Failed to load artwork: ${LogSanitizer.redactUrls(e.message)}")
-            }
-            withContext(Dispatchers.Main) {
-                artworkLoadInFlight = false
+            } finally {
+                // In a finally for the same reason as generateThumbnail()'s: an
+                // Error (OutOfMemoryError out of BitmapFactory) or a
+                // cancellation must not strand artworkLoadInFlight at true and
+                // block every later artwork attempt.
+                withContext(NonCancellable + Dispatchers.Main) {
+                    artworkLoadInFlight = false
+                }
             }
         }
     }
@@ -1275,14 +1310,34 @@ class NotificationHandler(
      *   • 0 < durationMs < 3 000 ms  → durationMs / 2   (short clip, midpoint)
      *   • fallback (unknown / 0)      → 5 000 ms fixed
      */
-    private fun generateThumbnail(url: String) {
+    private fun generateThumbnail(url: String, httpHeaders: Map<String, String>?) {
         artworkLoadInFlight = true
         scope.launch(Dispatchers.IO) {
             val retriever = android.media.MediaMetadataRetriever()
             try {
-                // Pass an empty headers map so the overload that accepts headers
-                // is used — this avoids the deprecated single-argument setDataSource.
-                retriever.setDataSource(url, emptyMap<String, String>())
+                // Two reasons for the two-argument overload, and BOTH matter:
+                //
+                //  1. [httpHeaders] must be the current item's
+                //     MediaItem.httpHeaders. MediaMetadataRetriever opens its own
+                //     HTTP connection to [url] to read the moov atom/manifest and
+                //     the byte range holding the target frame — a request
+                //     completely separate from the ones ExoPlayer makes for
+                //     playback, and therefore not covered by the data-source
+                //     factory's default request properties. This used to pass
+                //     emptyMap() unconditionally, which made the frame fetch
+                //     unauthenticated: against a signed or token-authenticated
+                //     media URL (bearer token, signed CloudFront cookie, the
+                //     multi-header CDN credential of issue #127) it 401/403s and
+                //     the notification silently ends up with no artwork while
+                //     playback itself is fine.
+                //  2. The overload choice itself: the single-argument
+                //     setDataSource(String) is deprecated, so this call stays on
+                //     the headers overload even when there is nothing to send.
+                //
+                // An empty map therefore remains correct — and is what an item
+                // with no headers still passes — but it must never again be
+                // hardcoded in place of the item's real headers.
+                retriever.setDataSource(url, httpHeaders ?: emptyMap<String, String>())
 
                 // Read the actual duration so we can pick a meaningful target time.
                 val durationMs = retriever
@@ -1336,6 +1391,12 @@ class NotificationHandler(
                     }
                 }
             } catch (e: Exception) {
+                // Artwork is best-effort: a failed frame fetch (401/403 on an
+                // authenticated URL, an unreachable host, an undecodable
+                // container) must never propagate. The scope is a SupervisorJob
+                // on Dispatchers.Main and playback lives in MediaPlayerManager,
+                // so swallowing here leaves both untouched — the notification
+                // simply shows no artwork.
                 // e.message may embed the source media URL — redact before logging (H-03).
                 android.util.Log.e(TAG, "Failed to generate thumbnail: ${LogSanitizer.redactUrls(e.message)}")
             } finally {
@@ -1344,9 +1405,16 @@ class NotificationHandler(
                 } catch (ignore: Exception) {
                     // release() itself can throw on some older API levels; ignore.
                 }
-            }
-            withContext(Dispatchers.Main) {
-                artworkLoadInFlight = false
+                // Reset from the finally, not after the try/catch: the catch
+                // above only covers Exception, so an Error (an OutOfMemoryError
+                // out of frame decoding is the realistic one) or a cancellation
+                // would otherwise strand the flag at true and make
+                // resolveArtworkIfNeeded() refuse every later attempt for the
+                // life of this handler. NonCancellable so the reset still runs
+                // when the scope is being cancelled.
+                withContext(NonCancellable + Dispatchers.Main) {
+                    artworkLoadInFlight = false
+                }
             }
         }
     }

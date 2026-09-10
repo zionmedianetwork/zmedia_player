@@ -122,7 +122,13 @@ Semantics:
 
 - Passing `mediaPlayer:` lets the service mirror playback state to the Now Playing info.
 - If `MediaItem.artworkUrl` is null, artwork is generated from a video frame (iOS
-  `AVAssetImageGenerator`, Android `MediaMetadataRetriever`).
+  `AVAssetImageGenerator`, Android `MediaMetadataRetriever`). That extraction opens its own
+  HTTP connection to `MediaItem.url` — it does not reuse the player's — and sends the item's
+  `httpHeaders`, so authenticated and signed media URLs produce artwork. Before this it sent
+  none and answered 401/403, so the notification silently showed no artwork while playback
+  worked normally. The headers are **not** sent to an `artworkUrl` fetch (an independent,
+  often third-party host); if the poster image needs the same credentials, leave `artworkUrl`
+  unset and let the frame fallback run.
 - iOS background audio requires `UIBackgroundModes: audio`; Android 13+ requires the
   `POST_NOTIFICATIONS` runtime permission.
 - `actionEventStream` emits `NotificationActionEvent` (`action` + an optional

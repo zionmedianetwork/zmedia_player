@@ -71,7 +71,8 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
 
 **Advanced**
 - Lock-screen / Control Center notifications with media controls; artwork falls back to an
-  auto-generated video frame when no `artworkUrl` is provided
+  auto-generated video frame when no `artworkUrl` is provided (that frame fetch carries
+  `MediaItem.httpHeaders`, so it works on authenticated/signed URLs)
 - Picture-in-Picture (iOS AVPictureInPictureController, Android `enterPictureInPictureMode`)
 - Visibility-aware `ListView` playback (`MediaListPlayer`)
 - Casting: Chromecast and AirPlay
@@ -393,7 +394,13 @@ notification before adopting an `enabled: false` config, and — when called bef
 `initialize()` — simply stores the config for the next `initialize()` to send.
 
 When `MediaItem.artworkUrl` is null, the notification artwork is generated from a video frame
-(iOS `AVAssetImageGenerator`, Android `MediaMetadataRetriever`).
+(iOS `AVAssetImageGenerator`, Android `MediaMetadataRetriever`). That extraction makes its own
+HTTP requests against `MediaItem.url` — separate from the player's — and carries the item's
+`httpHeaders`, so it works against an authenticated or signed media URL. (It did not before:
+the frame fetch was unauthenticated and answered 401/403, leaving the notification silently
+artwork-less while playback was fine.) The headers are **not** sent to an `artworkUrl` fetch,
+which is an independent and often third-party host; if your poster image sits behind the same
+auth as the media, leave `artworkUrl` unset and let the video-frame fallback handle it.
 
 `showSeekForward` / `showSeekBackward` follow one contract on both platforms: **the control is
 offered if and only if the flag is `true` and the current item is seekable**
@@ -643,7 +650,10 @@ MediaItem(
 manifest and segment requests (Android sets them as `DefaultHttpDataSource.Factory`'s default
 request properties, iOS as `AVURLAssetHTTPHeaderFieldsKey`). Android used to apply only the
 **last** entry of the map — an item carrying both `Authorization` and `Referer` sent just one
-of them — fixed in issue #127; iOS was never affected.
+of them — fixed in issue #127; iOS was never affected. The headers also authenticate the
+notification-artwork frame extraction (see
+[Media Notifications](#media-notifications)), but are never sent to
+an `artworkUrl` fetch.
 
 ### Playlist
 
@@ -819,7 +829,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** run `flutter test` for the current count (1109 as of this writing, and
+- **Tests:** run `flutter test` for the current count (1118 as of this writing, and
   growing). The `example/` app has its own separate suite too (24 tests,
   `cd example && flutter test`).
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle

@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1109 tests passing** in the package's Dart layer as of this
+> **Current status:** **1118 tests passing** in the package's Dart layer as of this
 > writing — the count grows with every change, so run `flutter test` for the live
 > number rather than trusting this one. Native Kotlin/Swift code still has **no
 > automated tests** — those paths require on-device verification.
@@ -186,7 +186,7 @@ collection, so the MethodChannel payload shape does not change.
 
 Native Kotlin/Swift is not part of this package's Dart test/build pipeline, and every
 Dart test mocks the `MethodChannel` — so a defect that lives *entirely* on the native
-side of the channel produces zero analyzer output and zero failing tests. Three files
+side of the channel produces zero analyzer output and zero failing tests. Four files
 close that gap by parsing the native sources **as text**:
 
 | File | Guards |
@@ -194,8 +194,9 @@ close that gap by parsing the native sources **as text**:
 | `test/exceptions/error_category_vocabulary_test.dart` | Every `"category"` literal either native emits on `onError` is a real `MediaErrorCategory` |
 | `test/models/network_status_vocabulary_test.dart` | The `connectionType`/`quality` literals of `onNetworkStatusChanged` match the Dart enums |
 | `test/native_contract/android_http_headers_test.dart` | `DefaultHttpDataSource.Factory.setDefaultRequestProperties` is never called from inside a loop (issue #127) |
+| `test/native_contract/notification_artwork_headers_test.dart` | The notification-artwork frame extraction carries `MediaItem.httpHeaders` on **both** platforms |
 
-The last one exists because `setDefaultRequestProperties` **replaces** rather than merges
+The third exists because `setDefaultRequestProperties` **replaces** rather than merges
 its argument map (it delegates to `HttpDataSource.RequestProperties.clearAndSet`). Android
 called it once per header entry, so only the *last* entry of `MediaItem.httpHeaders` ever
 reached the wire — an item with both `Authorization` and `Referer` silently sent one of
@@ -204,6 +205,21 @@ them. The Dart-side round-trip test
 because the Dart half was always correct; only a source-text guard could see this class of
 defect. These tests strip comments and string literals before matching, so prose that
 *describes* the banned pattern does not trip them.
+
+The fourth guards the same failure mode one layer up. The video-frame artwork fallback (used
+when `MediaItem.artworkUrl` is null) issues its **own** HTTP requests against the media URL —
+`MediaMetadataRetriever` on Android, `AVAssetImageGenerator`/`AVURLAsset` on iOS — which are
+not covered by the playback data source's headers, and both platforms sent none: Android
+hardcoded `emptyMap<String, String>()` as the `setDataSource` header argument, iOS built a
+bare `AVURLAsset(url:)`. Artwork therefore never appeared for an authenticated or signed media
+URL, while playback was unaffected — a symptom that points nowhere near its cause. The guard
+asserts the header parameter, the construction route on each side, that both
+`showNotification`s read `mediaItem["httpHeaders"]`, and that Dart still sends that key; the
+Dart half of the contract is pinned by real tests in
+`test/services/notification_state_sync_test.dart`. Note this file needs *two* strippers: a
+comments-only one for the positive assertions (the things they look for —
+`mediaItem["httpHeaders"]`, `"AVURLAssetHTTPHeaderFieldsKey"` — *are* string literals) and a
+comments-and-strings one for the negative assertions.
 
 When adding one, follow the existing files' shape: exact-signature lookup, brace/paren
 matching, and a failure `reason` that explains the defect and names the issue.
@@ -628,7 +644,7 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** run `flutter test` for the current package count (1109 as of this
+**Test Coverage:** run `flutter test` for the current package count (1118 as of this
 writing) plus `cd example && flutter test` for the example app's own 24; **no automated
 native tests yet**
 **Status:** Active development — native layers need on-device verification

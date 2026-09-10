@@ -9,7 +9,11 @@
 was being called once per entry; iOS was never affected) together with the deprecation of the
 never-wired `MediaConfig.httpHeaders`, and a new native-source-parsing regression guard,
 `test/native_contract/android_http_headers_test.dart`, for a defect class neither
-`flutter analyze` nor the mocked-channel suite can see.
+`flutter analyze` nor the mocked-channel suite can see. It also holds the same-family
+fix one layer up: the notification-artwork frame extraction now carries
+`MediaItem.httpHeaders` on both platforms (it was an unauthenticated request, so artwork
+silently never appeared for a signed/authenticated media URL), guarded by
+`test/native_contract/notification_artwork_headers_test.dart`.
 
 The items below shipped in `v0.5.0`: the ExoPlayer 2 classpath upgrade note (issue #108),
 the `NetworkStatus` platform-quality fix (issue #112), the live-edge-offset
@@ -62,7 +66,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |
 | Android | minSdk 23 |
-| Tests | 1109 passing (Dart layer; native has none) |
+| Tests | 1118 passing (Dart layer; native has none) |
 
 ---
 
@@ -125,6 +129,13 @@ platform is called out explicitly.
   now guarded by `test/native_contract/android_http_headers_test.dart`.
   `MediaConfig.httpHeaders` is deprecated and inert — no native code has ever read
   `config["httpHeaders"]`.
+- The headers also reach the **notification-artwork** frame extraction, which makes its own
+  HTTP requests against the media URL (Android `MediaMetadataRetriever`, iOS
+  `AVAssetImageGenerator`) and used to make them unauthenticated — artwork silently never
+  appeared for a signed/authenticated URL. `NotificationService.show()` now sends
+  `httpHeaders` on its `mediaItem` payload; guarded by
+  `test/native_contract/notification_artwork_headers_test.dart`. They are deliberately not
+  applied to a `MediaItem.artworkUrl` fetch (independent, often third-party host).
 
 ### Subtitles
 - SRT / WebVTT / ASS / SSA parsing and styling (`SubtitleService`, Dart-side).
@@ -147,7 +158,9 @@ platform is called out explicitly.
 ### Notifications
 - Lock-screen / Control Center media notifications (`NotificationService` + native
   handlers), action stream.
-- Artwork auto-generated from a video frame when `artworkUrl` is null.
+- Artwork auto-generated from a video frame when `artworkUrl` is null; that frame fetch
+  carries the item's `MediaItem.httpHeaders` on both platforms, so it works against an
+  authenticated or signed media URL.
 - Runtime reconfiguration via `NotificationService.updateConfig(config, playerId:)` —
   re-sends the config over `initializeNotification` and re-renders an already-showing
   notification. Config otherwise only ever reaches native at `initialize()`.
@@ -200,12 +213,13 @@ This is the real backlog. State these honestly; do not mark them done.
 - **pub.dev publishing** is not done yet — the package is distributed via GitHub
   releases.
 - **Flaky test:** one DRM performance test is timing-based and can flake.
-- **Notification artwork fetches are unauthenticated.**
-  `NotificationHandler.kt` passes `emptyMap<String, String>()` to
-  `MediaMetadataRetriever.setDataSource(url, headers)`, so the video-frame artwork fetch
-  never carries the item's `MediaItem.httpHeaders` and will 401/403 against an
-  authenticated/signed media URL. Separate from issue #127 (which fixed the *playback*
-  data-source path); not yet filed.
+- **Authenticated notification artwork is unverified on device.** The frame extraction now
+  receives `MediaItem.httpHeaders` on both platforms, but that is confirmed by source
+  inspection and source-text guards only — no automated test executes Kotlin or Swift. Still
+  to confirm on a device against a real signed/authenticated stream: that artwork appears
+  where it previously did not, that a signed-cookie CDN is satisfied by the iOS
+  `AVURLAssetHTTPCookiesKey` path in `makeAVURLAsset`, and that an unauthenticated URL (empty
+  header map) is unchanged.
 
 ---
 

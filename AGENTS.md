@@ -261,6 +261,16 @@ delegates to `RequestProperties.clearAndSet`), so only the **last** header survi
 correctly called per entry in `DrmHandler.kt`. `test/native_contract/android_http_headers_test.dart`
 parses the Kotlin source and fails if the per-entry pattern returns.
 
+The same map now also reaches the **notification-artwork** frame extraction, which makes its
+own HTTP requests against the media URL and used to make them unauthenticated (Android passed
+a hardcoded `emptyMap()` to `MediaMetadataRetriever.setDataSource`; iOS built a bare
+`AVURLAsset(url:)`), so artwork silently never appeared for a signed/authenticated URL.
+`NotificationService.show()` sends `httpHeaders` on its `mediaItem` payload and both
+`NotificationHandler`s read it; iOS builds every asset through `makeAVURLAsset`
+(`AssetHTTPOptions.swift`), shared with the playback path so the `Cookie` ->
+`AVURLAssetHTTPCookiesKey` conversion applies there too. Guarded by
+`test/native_contract/notification_artwork_headers_test.dart`.
+
 **`setPlaylist` and the same-item guard.** `MediaPlayer.setPlaylist()` sends the payload in the
 table above (`{playerId, playlist, startIndex, config}`) on **every** call — the #79 fix changed
 no payload. What it changed is what native does with it: `MediaPlayerInstance.setPlaylist` on
@@ -351,7 +361,14 @@ await notifications.updateConfig(
   playerId: controller.playerId,
 );
 ```
-If `MediaItem.artworkUrl` is null, the artwork is auto-generated from a **video frame**.
+If `MediaItem.artworkUrl` is null, the artwork is auto-generated from a **video frame**. That
+extraction (Android `MediaMetadataRetriever`, iOS `AVAssetImageGenerator` via the shared
+`makeAVURLAsset` helper in `AssetHTTPOptions.swift`) issues its **own** HTTP requests against
+`mediaItem["url"]`, separate from playback's, so `show()` sends `httpHeaders` on the
+`mediaItem` payload and both handlers apply it — without it the fetch was unauthenticated and
+401/403'd on a signed URL, silently yielding no artwork. Headers are deliberately not applied
+to an `artworkUrl` fetch (independent, often third-party host). Guarded by
+`test/native_contract/notification_artwork_headers_test.dart`.
 
 The config is applied at `initialize()` and changed thereafter **only** via `updateConfig()`;
 `show()` re-renders from whatever config native already holds, so mutating flags anywhere else
@@ -511,6 +528,11 @@ PLAN.md · CLAUDE.md               # Roadmap · contributor + architecture guide
 Android and iOS (`MediaPlayerManager`, `DrmHandler`, `PipHandler`, `NotificationHandler`,
 `BufferingHandler`, `CrashHandler`, `NetworkMonitor`, `SecureStorageHandler`, + the platform view).
 Add a native capability → add the same handler on **both** platforms to keep the MethodChannel contract symmetric.
+iOS also has one non-handler helper file, `AssetHTTPOptions.swift` (`makeAVURLAsset`): the single
+place an `AVURLAsset` is built with `MediaItem.httpHeaders`/cookies, shared by `MediaPlayerManager`
+(playback) and `NotificationHandler` (artwork frame extraction). Android needs no counterpart —
+its two paths use different APIs (`DefaultHttpDataSource.Factory` vs `MediaMetadataRetriever`),
+each taking the header map directly.
 
 ---
 
@@ -530,7 +552,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested** (1109 tests as of this writing — run `flutter test`
+The **Dart layer is extensively tested** (1118 tests as of this writing — run `flutter test`
 for the live count); **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
