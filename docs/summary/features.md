@@ -32,7 +32,7 @@ Comprehensive list of all implemented features in the ZMedia Player package.
 - **Start Muted** - Begin with audio muted
 - **Show Controls** - Display UI controls
 - **BoxFit** - Video scaling mode (contain, cover, fill, etc.)
-- **HTTP Headers** - Custom request headers
+- **HTTP Headers** - `MediaConfig.httpHeaders` is **deprecated and inert** (no native code has ever read `config["httpHeaders"]`). Set custom request headers on `MediaItem.httpHeaders` instead — the wired path, where every entry is sent on both platforms (issue #127)
 - **Controls Timeout** - Auto-hide controls duration
 - **Background Playback** - Continue playing in background
 - **Hardware Acceleration** - GPU-accelerated rendering

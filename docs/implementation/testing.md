@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1104 tests passing** in the package's Dart layer as of this
+> **Current status:** **1109 tests passing** in the package's Dart layer as of this
 > writing — the count grows with every change, so run `flutter test` for the live
 > number rather than trusting this one. Native Kotlin/Swift code still has **no
 > automated tests** — those paths require on-device verification.
@@ -30,6 +30,7 @@ test/
 ├── exceptions/           # Typed-exception and error-category-vocabulary tests
 ├── crash_reporting/      # CrashReporter tests
 ├── memory/               # Leak-detection tests (StreamController/Timer cleanup)
+├── native_contract/      # Guards that parse the native Kotlin/Swift sources as text
 ├── performance/          # Performance & benchmark tests
 ├── widgets/              # Widget tests (controls, MediaFeed/MediaPlayerPool, overlays, …)
 └── test_utils/           # Test utilities and mocks
@@ -180,6 +181,32 @@ model's own fields — is covered separately in
 boundaries of the fix: the copies are shallow, and a `null` field still
 serializes as a present key with a `null` value rather than an empty
 collection, so the MethodChannel payload shape does not change.
+
+## Guarding the native contract from Dart
+
+Native Kotlin/Swift is not part of this package's Dart test/build pipeline, and every
+Dart test mocks the `MethodChannel` — so a defect that lives *entirely* on the native
+side of the channel produces zero analyzer output and zero failing tests. Three files
+close that gap by parsing the native sources **as text**:
+
+| File | Guards |
+|---|---|
+| `test/exceptions/error_category_vocabulary_test.dart` | Every `"category"` literal either native emits on `onError` is a real `MediaErrorCategory` |
+| `test/models/network_status_vocabulary_test.dart` | The `connectionType`/`quality` literals of `onNetworkStatusChanged` match the Dart enums |
+| `test/native_contract/android_http_headers_test.dart` | `DefaultHttpDataSource.Factory.setDefaultRequestProperties` is never called from inside a loop (issue #127) |
+
+The last one exists because `setDefaultRequestProperties` **replaces** rather than merges
+its argument map (it delegates to `HttpDataSource.RequestProperties.clearAndSet`). Android
+called it once per header entry, so only the *last* entry of `MediaItem.httpHeaders` ever
+reached the wire — an item with both `Authorization` and `Referer` silently sent one of
+them. The Dart-side round-trip test
+(`test/models/media_item_test.dart`'s "httpHeaders serialization" group) passed throughout,
+because the Dart half was always correct; only a source-text guard could see this class of
+defect. These tests strip comments and string literals before matching, so prose that
+*describes* the banned pattern does not trip them.
+
+When adding one, follow the existing files' shape: exact-signature lookup, brace/paren
+matching, and a failure `reason` that explains the defect and names the issue.
 
 ## Test Utilities
 
@@ -601,7 +628,7 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** run `flutter test` for the current package count (1104 as of this
+**Test Coverage:** run `flutter test` for the current package count (1109 as of this
 writing) plus `cd example && flutter test` for the example app's own 24; **no automated
 native tests yet**
 **Status:** Active development — native layers need on-device verification

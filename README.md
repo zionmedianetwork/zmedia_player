@@ -202,10 +202,26 @@ final controller = MediaController.create(
     allowBackgroundPlayback: true,
     respectSafeArea: true,        // inset video below status bar / notch
     immersiveLandscape: false,    // set true to hide the status bar in landscape
-    httpHeaders: {'Authorization': 'Bearer your-token'},
   ),
 );
+
+// HTTP headers belong on the MediaItem, not on MediaConfig.
+await controller.load(MediaItem(
+  id: '1',
+  title: 'Authenticated Stream',
+  url: 'https://example.com/stream.m3u8',
+  httpHeaders: const {
+    'Authorization': 'Bearer your-token',
+    'Referer': 'https://example.com/',
+  },
+));
 ```
+
+> **`MediaConfig.httpHeaders` is deprecated and inert.** It has never been read by either
+> native platform — Android and iOS both read `mediaItem["httpHeaders"]` — so setting it had
+> no effect. It is still accepted and still serialized (unchanged wire shape) so existing code
+> keeps compiling, but use [`MediaItem.httpHeaders`](#mediaitem) instead; that is the wired,
+> canonical path.
 
 ### HLS/DASH Adaptive Streaming
 
@@ -623,6 +639,12 @@ MediaItem(
 )
 ```
 
+`httpHeaders` is the canonical, wired header path on both platforms: every entry is applied to
+manifest and segment requests (Android sets them as `DefaultHttpDataSource.Factory`'s default
+request properties, iOS as `AVURLAssetHTTPHeaderFieldsKey`). Android used to apply only the
+**last** entry of the map — an item carrying both `Authorization` and `Referer` sent just one
+of them — fixed in issue #127; iOS was never affected.
+
 ### Playlist
 
 ```dart
@@ -797,7 +819,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** run `flutter test` for the current count (1104 as of this writing, and
+- **Tests:** run `flutter test` for the current count (1109 as of this writing, and
   growing). The `example/` app has its own separate suite too (24 tests,
   `cd example && flutter test`).
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle

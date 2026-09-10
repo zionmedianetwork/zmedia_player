@@ -3196,8 +3196,14 @@ class MediaPlayer {
       'volume': config.volume,
       'speed': config.speed,
       'startMuted': config.startMuted,
+      // Deprecated and inert: neither native platform reads
+      // `config["httpHeaders"]` (both read `mediaItem["httpHeaders"]`
+      // instead — see MediaConfig.httpHeaders' dartdoc). Still serialized so
+      // the wire shape is unchanged for older/newer native builds.
+      // ignore: deprecated_member_use_from_same_package
       'httpHeaders': config.httpHeaders == null
           ? null
+          // ignore: deprecated_member_use_from_same_package
           : Map<String, String>.from(config.httpHeaders!),
       'showControls': config.showControls,
       'controlsTimeout': config.controlsTimeout.inMilliseconds,

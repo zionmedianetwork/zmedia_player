@@ -589,6 +589,24 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    defect, and do not build cross-platform UI/alerting thresholds on the assumption the two
    numbers mean the same thing. See "Live-edge signal (issue #88)" above and
    `docs/api-reference/live-streaming.md`'s "Platform divergence" section
+16. **`MediaItem.httpHeaders` is the only wired header path — and all of its entries are now
+   sent on Android** (issue #127). Android's `loadMediaItem` used to call
+   `DefaultHttpDataSource.Factory.setDefaultRequestProperties(mapOf(key to value))` once per
+   entry from inside a `forEach`. That method **replaces** rather than merges (it delegates to
+   `HttpDataSource.RequestProperties.clearAndSet` — `Map.clear()` then `Map.putAll()`), so
+   only the *last* header survived, and which one that was depended on map iteration order.
+   The whole map is now passed in one call. Note the asymmetry with the sibling
+   `HttpMediaDrmCallback.setKeyRequestProperty(key, value)` used in `DrmHandler.kt`, which
+   **is** additive and is correctly called per entry. iOS was never affected (one
+   `AVURLAssetHTTPHeaderFieldsKey` assignment). Guarded by
+   `test/native_contract/android_http_headers_test.dart`, which parses the Kotlin source —
+   nothing else can see this class of defect, since `flutter analyze` sees only a
+   `Map<String, dynamic>` and every test mocks the channel.
+   **`MediaConfig.httpHeaders` is deprecated and inert**: it is still serialized onto the
+   `config` payload (wire shape unchanged) but no native code has ever read
+   `config["httpHeaders"]`. It is deprecated rather than removed (compilation) or wired
+   (silent behavior change), exactly as `HlsConfig`/`DashConfig.enableLiveStream` was
+   deprecated in favor of `MediaItem.isLive`
 
 ## UI/UX Design Specifications
 

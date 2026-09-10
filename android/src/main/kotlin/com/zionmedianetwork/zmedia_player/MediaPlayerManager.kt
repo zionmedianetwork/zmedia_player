@@ -568,13 +568,26 @@ class MediaPlayerInstance(
         applyStreamingTrackSelectionConstraints(activeStreamingConfig(mediaItem))
 
         // Determine which DataSource.Factory to use (custom headers or default).
+        //
+        // Issue #127: the whole header map must be handed to
+        // `setDefaultRequestProperties` in ONE call. That method REPLACES the
+        // factory's default request properties -- it delegates to
+        // `HttpDataSource.RequestProperties.clearAndSet`, which is
+        // `Map.clear()` followed by `Map.putAll()` -- it does NOT merge. The
+        // previous implementation called it once per entry from inside a
+        // `forEach`, so every call wiped the preceding ones and only the LAST
+        // header of the map ever reached the wire (e.g. an item carrying both
+        // `Authorization` and `Referer` sent whichever iterated last, and
+        // which one that was depended on the map's iteration order). This is
+        // also why `DrmHandler.buildRequestHeaders` accumulates into a single
+        // map before its own single `setDefaultRequestProperties` call, and
+        // why `DrmHandler`'s per-key `setKeyRequestProperty(key, value)` --
+        // which IS additive -- is safe to call in a loop.
         val activeDataSourceFactory: androidx.media3.datasource.DataSource.Factory =
             if (httpHeaders != null && httpHeaders.isNotEmpty()) {
                 val customHttpFactory = DefaultHttpDataSource.Factory()
                     .setUserAgent("Flutter Media Player")
-                httpHeaders.forEach { (key, value) ->
-                    customHttpFactory.setDefaultRequestProperties(mapOf(key to value))
-                }
+                    .setDefaultRequestProperties(httpHeaders)
                 DefaultDataSource.Factory(context, customHttpFactory)
             } else {
                 dataSourceFactory

@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Android sent only the LAST entry of `MediaItem.httpHeaders`; every other header was
+  silently dropped** (issue #127). `MediaPlayerManager.loadMediaItem` built its
+  `DefaultHttpDataSource.Factory` by calling `setDefaultRequestProperties(mapOf(key to value))`
+  once per entry from inside `httpHeaders.forEach { ... }`. That method **replaces** the
+  factory's default request properties rather than merging into them — it delegates to
+  `HttpDataSource.RequestProperties.clearAndSet`, i.e. `Map.clear()` followed by
+  `Map.putAll()` (confirmed against media3-datasource 1.11.0) — so each call wiped the
+  previous one and exactly one header survived. Which one depended on the map's iteration
+  order, so an item carrying both `Authorization` and `Referer` sent whichever iterated last.
+  The whole map is now handed over in a single call.
+  **This is a behavior change on Android:** requests that previously carried one header now
+  carry all of them. An origin/CDN that only tolerated the truncated request (for example one
+  that rejects an unexpected `Referer`, or a signed URL where an extra `Authorization` header
+  changes the auth path taken) may respond differently — verify against your CDN if you had
+  been setting multiple headers and playback nonetheless worked.
+  **iOS was never affected**: `MediaPlayerManager.swift` assigns
+  `options["AVURLAssetHTTPHeaderFieldsKey"] = headerFields` in one assignment. Android's DRM
+  path was never affected either: `DrmHandler.buildRequestHeaders` accumulates custom headers
+  plus the optional Bearer token into a single map before its one
+  `setDefaultRequestProperties` call, and its per-entry
+  `HttpMediaDrmCallback.setKeyRequestProperty(key, value)` calls use a genuinely additive API.
+- **Documentation:** `docs/api-reference/live-streaming.md` claimed
+  "`MediaItem.httpHeaders` (or `MediaConfig.httpHeaders`) is the header path that is actually
+  wired to native `load()`" — false for the parenthetical (see Deprecated below), and the
+  root `README.md`'s primary quick-start snippet demonstrated header auth via the inert
+  `MediaConfig.httpHeaders`. Both now show and describe `MediaItem.httpHeaders`.
+
+### Deprecated
+- **`MediaConfig.httpHeaders`** — declared, serialized onto the `config` payload of
+  `initialize`/`updateConfig`/`load`, and read by **neither** native platform. Android's
+  `MediaPlayerManager.loadMediaItem` and iOS's both read `mediaItem["httpHeaders"]`; nothing
+  anywhere has ever read `config["httpHeaders"]`, so setting this field has never had any
+  effect. Use `MediaItem.httpHeaders`, the canonical wired path.
+  It is **not** removed (that would break compilation for existing callers) and **not** wired
+  (that would silently change behavior for anyone currently setting it) — the same treatment
+  `HlsConfig`/`DashConfig.enableLiveStream` received in favor of `MediaItem.isLive`. The field
+  is still serialized exactly as before, so the MethodChannel wire shape is unchanged.
+
+### Added
+- **`test/native_contract/android_http_headers_test.dart`** (3 tests) — a regression guard for
+  issue #127 in the established "parse the native sources as text" style of
+  `test/exceptions/error_category_vocabulary_test.dart` and
+  `test/models/network_status_vocabulary_test.dart`. It fails if
+  `setDefaultRequestProperties` is called from inside any loop body in
+  `MediaPlayerManager.kt` or `DrmHandler.kt`, or if `loadMediaItem` stops passing the whole
+  `httpHeaders` map in a single call. Necessary because neither `flutter analyze` (the payload
+  is a `Map<String, dynamic>` on both sides of the channel) nor the test suite (every test
+  mocks the `MethodChannel`) can see a defect that lives entirely on the native side.
+- **`test/models/media_item_test.dart`** — an `httpHeaders serialization` group (2 tests)
+  pinning that `MediaItem.toMap()`/`fromMap()` round-trip *every* header, not just one. Its
+  doc comment is explicit that this passed before the Android fix too, and that the
+  native-source guard above is what actually covers #127.
+
 ## [0.5.0] - 2026-09-05
 
 ### Fixed

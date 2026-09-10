@@ -57,7 +57,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 |---|---|
 | `MediaController` | Reactive `ChangeNotifier` facade over `MediaPlayer`; use for UI. `create()` factory. Serializes every operation through a per-controller FIFO queue — see the gotcha below. |
 | `MediaPlayer` | Lower-level engine; singleton per `playerId`; exposes all streams. |
-| `MediaConfig` | Player configuration (autoPlay, boxFit, DRM, streaming, `respectSafeArea`, `immersiveLandscape`, `secureSurface`, …). |
+| `MediaConfig` | Player configuration (autoPlay, boxFit, DRM, streaming, `respectSafeArea`, `immersiveLandscape`, `secureSurface`, …). `MediaConfig.httpHeaders` is **deprecated and inert** — neither native reads `config["httpHeaders"]`; use `MediaItem.httpHeaders`. |
 | `CacheConfig`, `BufferConfig` | Cache + buffering sub-configs used by `MediaConfig`. |
 | `CrashReporter` | Optional crash-reporting hook (`MediaPlayer.enableCrashReporting`). |
 | `MediaPlayerException` (sealed) + subclasses | Typed errors: `MediaLoadException`, `NetworkException`, `DrmException`, `PlaybackException`, `InvalidStateException`, `PlayerDisposedException`, `ConfigurationException`, `PlatformOperationException`, `ProtocolMismatchException`. Plus **deprecated** `OperationBusyException` — never thrown any more (`MediaController` queues instead of rejecting), kept only so exhaustive `switch`es over the sealed hierarchy keep compiling. |
@@ -67,7 +67,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 ### Models (`lib/src/models/`)
 | Export | Purpose |
 |---|---|
-| `MediaItem` / `MediaType` / `StreamingFormat` | A playable item (url, title, artwork, drmConfig, headers) / `video`\|`audio` / `hls`\|`dash`\|`progressive`. `MediaItem.streamingFormat` (nullable) states the item's format explicitly and selects which of `hlsConfig`/`dashConfig` applies; `null` falls back to `MediaItem.resolvedStreamingFormat`'s path-based URL inference (`StreamingFormat.fromUrl`). Equality is id-based only. |
+| `MediaItem` / `MediaType` / `StreamingFormat` | A playable item (url, title, artwork, drmConfig, `httpHeaders` — the canonical, wired header path; **all** entries are sent on both platforms) / `video`\|`audio` / `hls`\|`dash`\|`progressive`. `MediaItem.streamingFormat` (nullable) states the item's format explicitly and selects which of `hlsConfig`/`dashConfig` applies; `null` falls back to `MediaItem.resolvedStreamingFormat`'s path-based URL inference (`StreamingFormat.fromUrl`). Equality is id-based only. |
 | `PlaybackState` / `PlayerState` / `PositionBasis` | State snapshot (position, duration, `bufferedPosition`, speed, volume, error, plus `liveEdgeOffset`/`positionBasis` + derived `isAtLiveEdge`/`isAtLiveEdgeWithin`/`isPositionWindowRelative` and `defaultLiveEdgeTolerance` = 15s) / `idle,buffering,ready,playing,paused,completed,error` / `absolute`\|`liveWindow`. |
 | `Playlist` / `PlaybackMode` / `MediaRepeatMode` | Item collection + shuffle order / `sequential`\|`shuffle` / `none`\|`single`\|`all`. **Note: the enum is `MediaRepeatMode`, not `RepeatMode`.** |
 | `SubtitleTrack` / `SubtitleFormat` / `SubtitleConfig` / `SubtitleAlignment` | Subtitle track, format (`srt,webvtt,ass,ssa,ttml`), styling, alignment. |
@@ -208,7 +208,9 @@ guarded by a test that parses the native sources as text**
 (`test/exceptions/error_category_vocabulary_test.dart`) — if you add or rename a category on one
 platform, add it to `MediaErrorCategory` and to both native categorisers, or that test fails. The
 same technique guards the `connectionType` vocabulary in
-`test/models/network_status_vocabulary_test.dart`.
+`test/models/network_status_vocabulary_test.dart`, and the Android HTTP-header wiring in
+`test/native_contract/android_http_headers_test.dart` (issue #127 — see the header note
+below).
 
 **Protocol version.** `initialize` exchanges a protocol version in both directions; a skew raises
 `ProtocolMismatchException` rather than a raw `MissingPluginException`. If you add a MethodChannel
@@ -245,7 +247,19 @@ in-progress runtime `setMuted()` call — see `MediaPlayerManager.kt`'s/`.swift`
 doc). `config` is optional on the native side on all three: an absent key leaves the stored
 config untouched, so an older Dart caller cannot break a newer native build. Per-item
 `httpHeaders`/`drmConfig` are unaffected by all of this — they live on `MediaItem`, not
-`MediaConfig`.
+`MediaConfig`. (`MediaConfig.httpHeaders` exists, is still serialized, and is **deprecated and
+inert**: no native code has ever read `config["httpHeaders"]`.)
+
+**HTTP headers reach native from `MediaItem.httpHeaders` only, and all of them do.** Android
+hands the entire map to `DefaultHttpDataSource.Factory.setDefaultRequestProperties` in a
+single call; iOS sets `AVURLAssetHTTPHeaderFieldsKey` in a single assignment (converting a
+`Cookie` header into `AVURLAssetHTTPCookiesKey` cookies first). Android used to call
+`setDefaultRequestProperties` once per entry — that method *replaces* rather than merges (it
+delegates to `RequestProperties.clearAndSet`), so only the **last** header survived (issue
+#127). If you touch this code, note the asymmetry with the sibling API
+`HttpMediaDrmCallback.setKeyRequestProperty(key, value)`, which **is** additive and is
+correctly called per entry in `DrmHandler.kt`. `test/native_contract/android_http_headers_test.dart`
+parses the Kotlin source and fails if the per-entry pattern returns.
 
 **`setPlaylist` and the same-item guard.** `MediaPlayer.setPlaylist()` sends the payload in the
 table above (`{playerId, playlist, startIndex, config}`) on **every** call — the #79 fix changed
@@ -516,7 +530,7 @@ Add a native capability → add the same handler on **both** platforms to keep t
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested** (1104 tests as of this writing — run `flutter test`
+The **Dart layer is extensively tested** (1109 tests as of this writing — run `flutter test`
 for the live count); **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,

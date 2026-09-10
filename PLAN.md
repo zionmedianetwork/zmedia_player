@@ -1,9 +1,17 @@
 # ZMedia Player - Roadmap
 
-**Version:** 0.4.0
-**Last Updated:** September 5, 2026
-**Status:** Feature-complete for the 0.4.x line; distributed via GitHub releases.
-`CHANGELOG.md`'s `[Unreleased]` holds the ExoPlayer 2 classpath upgrade note (issue #108),
+**Version:** 0.5.0
+**Last Updated:** September 10, 2026
+**Status:** Feature-complete for the 0.5.x line; distributed via GitHub releases.
+`CHANGELOG.md`'s `[Unreleased]` holds the Android multi-header fix (issue #127 —
+`MediaItem.httpHeaders` no longer collapses to its last entry, because
+`DefaultHttpDataSource.Factory.setDefaultRequestProperties` replaces rather than merges and
+was being called once per entry; iOS was never affected) together with the deprecation of the
+never-wired `MediaConfig.httpHeaders`, and a new native-source-parsing regression guard,
+`test/native_contract/android_http_headers_test.dart`, for a defect class neither
+`flutter analyze` nor the mocked-channel suite can see.
+
+The items below shipped in `v0.5.0`: the ExoPlayer 2 classpath upgrade note (issue #108),
 the `NetworkStatus` platform-quality fix (issue #112), the live-edge-offset
 window-sanity fix (issue #109) with its manifest-anchor diagnostic (issue #110), and the
 iOS counterpart to #112/#109: `NetworkMonitor.swift`'s `estimateBandwidth(from:)` no longer
@@ -29,8 +37,7 @@ documentation-only correction (issue #120) stating that `PlaybackState.liveEdgeO
 a different quantity on Android (distance from the published live edge, ~18s on a verification
 stream) than on iOS (bounded near zero by construction during live playback, verified <1s on
 the same stream) — making `isAtLiveEdge`/`defaultLiveEdgeTolerance` near-degenerate on iOS and
-a configured `liveLatency` cushion unobservable through that field there — landed since the
-`v0.4.0` tag.
+a configured `liveLatency` cushion unobservable through that field there.
 
 > This file is the authoritative implementation roadmap referenced by `CLAUDE.md`.
 > It tracks current state and the real backlog. For architecture, UI/UX specs, and
@@ -55,7 +62,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |
 | Android | minSdk 23 |
-| Tests | 1104 passing (Dart layer; native has none) |
+| Tests | 1109 passing (Dart layer; native has none) |
 
 ---
 
@@ -110,6 +117,14 @@ platform is called out explicitly.
   cross-applied) and overrides URL inference on the Dart side and on both natives.
 - Every load path (`load`, `setPlaylist`, `skipToIndex`) carries the current `MediaConfig`
   snapshot, so a reload picks up a changed config immediately.
+- Per-item HTTP headers: `MediaItem.httpHeaders` is the canonical, wired path and **every**
+  entry reaches the wire on both platforms (Android: one
+  `DefaultHttpDataSource.Factory.setDefaultRequestProperties` call with the whole map; iOS:
+  one `AVURLAssetHTTPHeaderFieldsKey` assignment, with `Cookie` promoted to
+  `AVURLAssetHTTPCookiesKey`). Android previously sent only the map's last entry (issue #127),
+  now guarded by `test/native_contract/android_http_headers_test.dart`.
+  `MediaConfig.httpHeaders` is deprecated and inert — no native code has ever read
+  `config["httpHeaders"]`.
 
 ### Subtitles
 - SRT / WebVTT / ASS / SSA parsing and styling (`SubtitleService`, Dart-side).
@@ -185,6 +200,12 @@ This is the real backlog. State these honestly; do not mark them done.
 - **pub.dev publishing** is not done yet — the package is distributed via GitHub
   releases.
 - **Flaky test:** one DRM performance test is timing-based and can flake.
+- **Notification artwork fetches are unauthenticated.**
+  `NotificationHandler.kt` passes `emptyMap<String, String>()` to
+  `MediaMetadataRetriever.setDataSource(url, headers)`, so the video-frame artwork fetch
+  never carries the item's `MediaItem.httpHeaders` and will 401/403 against an
+  authenticated/signed media URL. Separate from issue #127 (which fixed the *playback*
+  data-source path); not yet filed.
 
 ---
 

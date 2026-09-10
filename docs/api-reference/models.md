@@ -16,7 +16,7 @@ const MediaItem({
   Duration? duration,
   String? artworkUrl,
   String? mimeType,
-  Map<String, String>? httpHeaders,
+  Map<String, String>? httpHeaders, // the canonical, wired header path (all entries are sent)
   MediaType mediaType = MediaType.video, // video | audio
   DrmConfig? drmConfig,
   Map<String, dynamic>? metadata,
@@ -26,6 +26,16 @@ const MediaItem({
 ```
 
 If `artworkUrl` is null, media notifications generate artwork from a video frame.
+
+`httpHeaders` is the canonical header path and is honored on both platforms: **every** entry
+is applied to manifest and segment requests. Android hands the whole map to
+`DefaultHttpDataSource.Factory.setDefaultRequestProperties` in one call; iOS sets it as
+`AVURLAssetHTTPHeaderFieldsKey` (converting a `Cookie` header into
+`AVURLAssetHTTPCookiesKey` cookies so signed-cookie auth survives AVFoundation's
+out-of-process requests). Android used to make that call once per entry, and because it
+*replaces* rather than merges, only the last header of the map reached the wire — issue #127;
+iOS was never affected. Do **not** use the deprecated `MediaConfig.httpHeaders` (see below):
+it is inert.
 
 `url` accepts `http(s)://` and `file://` — local file playback is supported.
 `InputValidator.validateUrl` rejects a bare filesystem path, so build the URI with
@@ -104,6 +114,7 @@ const MediaConfig({
   double volume = 1.0,
   double speed = 1.0,
   bool startMuted = false,
+  @Deprecated('inert — use MediaItem.httpHeaders')
   Map<String, String>? httpHeaders,
   DrmConfig? drmConfig,
   SubtitleConfig? subtitleConfig,
@@ -124,6 +135,16 @@ const MediaConfig({
   bool secureSurface = false,       // Android: blocks capture (FLAG_SECURE); iOS: detects capture only
 });
 ```
+
+**`MediaConfig.httpHeaders` is deprecated and inert — it has never had any effect.** It is
+still accepted and still serialized onto the `config` payload of
+`initialize`/`updateConfig`/`load` (the wire shape is unchanged, so nothing breaks), but
+*neither* native platform reads `config["httpHeaders"]`: Android's
+`MediaPlayerManager.loadMediaItem` and iOS's both read `mediaItem["httpHeaders"]`. Use
+[`MediaItem.httpHeaders`](#mediaitem) instead. It is deprecated rather than removed (removal
+would break compilation) and rather than wired (wiring it would silently change behavior for
+anyone currently setting it) — the same treatment
+`HlsConfig`/`DashConfig.enableLiveStream` got in favor of `MediaItem.isLive`.
 
 `respectSafeArea` and `immersiveLandscape` are Flutter-layer and behave identically on iOS and
 Android. `boxFit` maps to native video gravity (`contain` = aspect-fit, `cover` = aspect-fill,
