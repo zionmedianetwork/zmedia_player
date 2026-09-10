@@ -1,8 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1118 tests passing** as of
-> this writing (run `flutter test` for the live count, since it grows with every
+> the original release. The suite has since grown to **1167 tests passing** as of> this writing (run `flutter test` for the live count, since it grows with every
 > change) as audit-remediation work added regression coverage. **Important caveat
 > the original summary omitted:** these are all **Dart** unit tests. There are
 > **no automated native (Kotlin/Swift) tests**, and several native features (DRM
@@ -47,8 +46,7 @@
 > `showNotification` stops reading `mediaItem["httpHeaders"]`, or if Dart stops sending it.
 > The Dart half is separately pinned by 3 tests in
 > `test/services/notification_state_sync_test.dart`. Verified to fail against the pre-fix
-> Kotlin and Swift.
->
+> Kotlin and Swift.>
 > **Playlist regression coverage (issue #79):** `test/core/playlist_extension_test.dart`
 > (15 tests) covers the Dart-observable half of the "`setPlaylist` must not restart the
 > item already playing" fix — payload shape, playlist/index state after an in-place
@@ -57,6 +55,27 @@
 > `id`, and the idle/completed states). The native halves of that fix
 > (`MediaPlayerInstance.setPlaylist` in Kotlin and Swift) remain untested here, per the
 > "no automated native tests" caveat above, and need on-device verification.
+
+> **Load/error semantics regression coverage (issues #125, #126):**
+> `test/core/media_player_terminal_error_test.dart` (13 tests) drives each platform's exact
+> post-failure event sequence (`onError` then `"paused"` for iOS, then `"idle"` for Android)
+> and asserts `PlayerState.error` survives — six of these fail on the pre-fix code, reporting
+> `paused`/`idle`/`ready`/`buffering` instead.
+> `test/core/media_player_load_watchdog_test.dart` (11) covers `MediaConfig.loadTimeout`,
+> with every false-positive guard as its own negative case.
+> `test/core/media_config_load_timeout_test.dart` (9) covers the field, including asserting it
+> is **absent** from every `config` payload that crosses the channel.
+> `test/core/media_player_pause_reason_test.dart` (11) covers one case per `PlayerPauseReason`
+> wire value plus the unknown/absent cases.
+> `test/native_contract/pause_reason_vocabulary_test.dart` (5) is the drift guard.
+>
+> **Not covered, per the "no automated native tests" caveat above:** the native post-failure
+> suppressions (`playerError != null` on Android, `currentItem?.status == .failed` on iOS),
+> the iOS main-thread hop for `invokeMethod`, and the iOS
+> `pauseWasHostInitiated`/`interruptionInProgress` bookkeeping. All are inspection +
+> on-device only — `MediaPlayerManager.swift`'s interruption handler already carries its own
+> `NEEDS ON-DEVICE VERIFICATION` marker, since a phone call/Siri/alarm cannot be exercised in
+> a simulator.
 
 ## Original Status (v0.1.0): **COMPLETE - ALL TESTS PASSING!**
 

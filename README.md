@@ -34,6 +34,11 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
 - Playlist management with sequential/shuffle modes and `MediaRepeatMode` (none/single/all),
   extendable in place without restarting the item already playing
 - Broadcast-stream state model with typed exceptions and error recovery
+- Honest load semantics: `PlayerState.error` is terminal (never overwritten by the quiescent
+  state a failure causes), a `MediaConfig.loadTimeout` watchdog bounds a load that goes silent,
+  and `pauseReasonStream` attributes a pause (`user`/`audioFocusLoss`/`audioBecomingNoisy`/
+  `remote`) so a dead stream is distinguishable from a viewer pause — see
+  [Knowing Whether the Media Actually Loaded](#knowing-whether-the-media-actually-loaded)
 
 **Streaming & subtitles**
 - HLS adaptive streaming (Android + iOS) and DASH (Android only — AVPlayer has no DASH
@@ -272,6 +277,55 @@ await controller.load(const MediaItem(
 ));
 ```
 
+### Knowing Whether the Media Actually Loaded
+
+`load()` completing means the item was **handed to the platform** — not that it loaded.
+ExoPlayer and AVPlayer accept a media item synchronously and only then fetch the manifest,
+negotiate DRM and decode, so a 404, a dead CDN, an expired licence or an unsupported codec
+surfaces *after* the future has already completed successfully.
+
+```dart
+// errorStream is the primary failure signal, not a supplement to try/catch.
+controller.player.errorStream.listen((e) {
+  if (e is NetworkException) showOffline(isTimeout: e.isTimeout);
+  if (e is DrmException) showDrmError(e);
+});
+
+await controller.load(item);  // proves only that the platform accepted it
+await controller.play();
+```
+
+**Distinguishing a viewer pause from a dead stream.** `PlayerState.error` is terminal: it is
+held until an explicit host command (`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`)
+or until the platform reports real forward progress. It is no longer overwritten by the
+quiescent state each platform emits as a *consequence* of a failure (`idle` on Android,
+`paused` on iOS), which previously made a failed load report identically to someone tapping
+pause.
+
+```dart
+controller.player.stateStream.listen((state) {
+  if (state.state == PlayerState.error) {
+    showRetry(state.errorMessage);      // a real failure
+  } else if (state.state == PlayerState.paused) {
+    // Genuinely paused. Why, when the platform knows:
+  }
+});
+
+controller.player.pauseReasonStream.listen((reason) {
+  // user | audioFocusLoss | audioBecomingNoisy (Android) | remote (Android)
+  if (reason != PlayerPauseReason.user) offerResume();
+});
+```
+
+A load that is accepted and then goes completely silent — no error, no `ready` — is bounded by
+`MediaConfig.loadTimeout` (a `Duration?`, **default 30 s**, `null` disables). On firing it
+reports a `NetworkException` with `isTimeout: true`. It only fires if the player is *still*
+buffering **and** the position has not advanced, so a slow-but-progressing load is never
+killed.
+
+See [`load()` completing is not "loaded"](docs/api-reference/player-api.md#load-completing-is-not-loaded)
+and [Events](docs/api-reference/events.md#onerror).
+
 ### Quality, Subtitles & Audio Tracks
 
 > Tracks are reported by the native player **after `play()`** and buffering begins.
@@ -494,8 +548,11 @@ The reactive `ChangeNotifier` facade — use this for UI. Created with
 `checkPipAvailability`, `enterPictureInPicture`, `startCastDiscovery`, `dispose`.
 
 **Key getters:** `state`, `position`, `duration`, `volume`, `speed`, `isPlaying`, `isPaused`,
-`isBuffering`, `hasError`, `bufferedProgress`, `hasNext`, `hasPrevious`, `qualityTracks`,
-`subtitleTracks`, `audioTracks`, `player` (the underlying `MediaPlayer`).
+`isBuffering`, `hasError`, `error`, `bufferedProgress`, `hasNext`, `hasPrevious`,
+`qualityTracks`, `subtitleTracks`, `audioTracks`, `player` (the underlying `MediaPlayer`).
+
+**`load()` completing does not mean the media loaded** — see
+[Knowing Whether the Media Actually Loaded](#knowing-whether-the-media-actually-loaded).
 
 **Operation ordering:** every method above is submitted to a per-controller FIFO queue and
 runs one at a time, in submission order. Calling while another operation is in flight queues
@@ -829,8 +886,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** run `flutter test` for the current count (1118 as of this writing, and
-  growing). The `example/` app has its own separate suite too (24 tests,
+- **Tests:** run `flutter test` for the current count (1167 as of this writing, and  growing). The `example/` app has its own separate suite too (24 tests,
   `cd example && flutter test`).
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated

@@ -726,7 +726,66 @@ controller.player.stateStream.listen((state) {
     handleStreamError(state.errorMessage);
   }
 });
+
+// The typed half — most live failures (dead origin, expired token, 404 on the
+// manifest) are detected asynchronously and arrive here, not as a thrown
+// exception from load().
+controller.player.errorStream.listen((e) {
+  if (e is NetworkException && e.isTimeout) {
+    // The MediaConfig.loadTimeout watchdog fired: the platform accepted the
+    // item and then went silent. Common for a live URL whose origin is down.
+    offerRetry();
+  }
+});
 ```
+
+### A dead live stream vs a paused one (issue #125)
+
+This is the failure mode most often hit with live: a live URL whose origin is
+down, or whose token has expired, is accepted by the platform and then fails
+asynchronously. Two things used to make that indistinguishable from a healthy
+paused player, and both are fixed:
+
+1. **`load()` completing proved nothing.** It still does not prove anything —
+   it means the item was handed to the platform (see
+   [`load()` completing is not "loaded"](player-api.md#load-completing-is-not-loaded)) —
+   but the outcome is now reliably observable.
+2. **`PlayerState.error` was overwritten.** The quiescent state each platform
+   emits as a *consequence* of the failure (`idle` on Android, `paused` on iOS)
+   arrived right after `onError` and clobbered it, so a dead stream reported
+   `paused`. `PlayerState.error` is now terminal until an explicit host command
+   or real forward progress.
+
+A live-specific recovery watchdog therefore has three distinct signals, and
+should use all three:
+
+```dart
+controller.player.stateStream.listen((state) {
+  switch (state.state) {
+    case PlayerState.error:
+      // Definitive failure — retry with backoff, or surface it.
+      scheduleReload();
+    case PlayerState.paused:
+      // A real pause. pauseReasonStream says why, when native knows: an
+      // audioFocusLoss/audioBecomingNoisy pause is a reasonable thing to
+      // auto-resume from, a `user` pause is not.
+      break;
+    default:
+      break;
+  }
+});
+```
+
+**Do not substitute `position` for any of this.** For a live item
+`positionBasis` is `liveWindow`, where a constant `position` is healthy
+playback — see [Stall watchdog for live streams](#stall-watchdog-for-live-streams).
+`liveEdgeOffset` growing without bound is the stall signal; `PlayerState.error`
+is the failure signal; they are not interchangeable.
+
+`MediaConfig.loadTimeout` (default 30s) covers the third case — accepted, then
+total silence — which a live stream pointed at a dead origin can otherwise sit
+in forever. Raise it if your live items routinely take longer than that to
+produce their first frame; set it to `null` to run your own detection instead.
 
 ---
 

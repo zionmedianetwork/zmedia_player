@@ -171,14 +171,33 @@ void main() {
       expect(controller.hasError, isTrue);
       expect(controller.error, isNotNull);
 
-      final secondNotify = _waitForNotify(controller);
-
-      // A subsequent successful state transition (e.g. after a retry/reload)
-      // should clear the stale error.
+      // Issue #125: a quiescent state event no longer counts as recovery.
+      // A `buffering` arriving after a failure is exactly what native emits
+      // as a *consequence* of that failure (or while a doomed retry spins),
+      // and treating it as recovery is what made a dead stream look alive.
+      // The error is now held until real forward progress or an explicit
+      // host command. This assertion used to read `buffering` -> cleared;
+      // it is inverted deliberately, not incidentally.
+      final quiescentNotify = _waitForNotify(controller);
       await _injectEvent('onStateChanged', {
         'playerId': 'ctrl-drm-err-4',
         'state': 'buffering',
         'isBuffering': true,
+        'bufferPercentage': 0.0,
+      });
+      await quiescentNotify;
+
+      expect(controller.hasError, isTrue,
+          reason: 'A post-failure buffering is not recovery.');
+
+      final secondNotify = _waitForNotify(controller);
+
+      // Real forward progress from native (or an explicit host retry — see
+      // MediaPlayer._clearErrorLatch) does clear the stale error.
+      await _injectEvent('onStateChanged', {
+        'playerId': 'ctrl-drm-err-4',
+        'state': 'playing',
+        'isBuffering': false,
         'bufferPercentage': 0.0,
       });
       await secondNotify;

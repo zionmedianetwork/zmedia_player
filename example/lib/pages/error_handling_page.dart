@@ -28,7 +28,7 @@ import '../widgets/player_scaffold.dart';
 /// `controller.player.errorStream`, which this page subscribes to and
 /// mirrors on screen.
 ///
-/// The page provides five buttons:
+/// The page provides six buttons:
 ///   1. Load a valid URL → happy path
 ///   2. Load a forbidden object (GCS bucket, 403) → HTTP category →
 ///      [MediaLoadException]
@@ -37,6 +37,27 @@ import '../widgets/player_scaffold.dart';
 ///   4. Load a non-existent host → NETWORK category → [NetworkException]
 ///   5. Load a real, reachable, non-media file → SOURCE category →
 ///      [PlaybackException] (container/format cannot be parsed)
+///   6. Offline load with a short [MediaConfig.loadTimeout] → the issue-#125
+///      load watchdog → NETWORK category → [NetworkException] with
+///      `isTimeout: true`. **Requires Airplane Mode**, see [_loadWithWatchdog]
+///
+/// ### Issues #125 / #126: what this page is the verification vehicle for
+/// Two behaviours here can only be confirmed on a real device:
+///
+/// - **`PlayerState.error` is terminal.** Every failure scenario above should
+///   leave the "Live Player State" card reading `error` and *stay* there.
+///   Before #125 it flipped to `paused` (iOS) or `idle` (Android) a beat
+///   later, because both platforms emit a quiescent state as a direct
+///   consequence of the failure — which is exactly why a dead stream was
+///   indistinguishable from a viewer pause. The card is the readout: if it
+///   ever settles on `paused`/`idle` right after an `errorStream` entry
+///   appears in the log, the native suppression has regressed.
+/// - **Pause attribution.** This page logs [MediaPlayer.pauseReasonStream]
+///   too. With media playing, unplug headphones (Android →
+///   `audioBecomingNoisy`), take a call or trigger Siri (→ `audioFocusLoss`
+///   on both), or tap pause in the controls (→ `user`). A pause that logs
+///   nothing is an *unattributed* pause, which is a legitimate outcome — see
+///   [PlayerPauseReason].
 ///
 /// ### Why "403" and "404" are separate scenarios
 /// They were originally conflated: a non-existent object in a public GCS
@@ -68,6 +89,7 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
   late final MediaController _controller;
   StreamSubscription<PlaybackState>? _stateSub;
   StreamSubscription<MediaPlayerException>? _errorSub;
+  StreamSubscription<PlayerPauseReason>? _pauseReasonSub;
 
   final List<_ErrorEvent> _errorLog = [];
   bool _isLoading = false;
@@ -110,6 +132,24 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
       // hierarchy via the shared MediaErrorCategory vocabulary.
       _errorSub = _controller.player.errorStream.listen((e) {
         _logTypedError(e, source: 'errorStream');
+      });
+
+      // Issue #126: why a pause happened, when native attributes it. Logged
+      // here (rather than on a dedicated page) because it is the other half
+      // of "is this stream dead or did someone pause it?" — the question
+      // this page exists to answer. Nothing is logged for a pause native
+      // could not attribute; that is the documented, deliberate behaviour,
+      // not a missing event.
+      _pauseReasonSub = _controller.player.pauseReasonStream.listen((reason) {
+        _log(
+          _ErrorEvent(
+            timestamp: DateTime.now(),
+            source: 'pauseReasonStream',
+            type: 'PlayerPauseReason.${reason.name}',
+            message: 'Paused — wire value "${reason.wireValue}". '
+                'This is NOT an error; it is pause attribution.',
+          ),
+        );
       });
     } catch (e) {
       _log(
@@ -242,6 +282,44 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
     }
   }
 
+  /// Issue #125: the load watchdog ([MediaConfig.loadTimeout]).
+  ///
+  /// The failure this covers is a load the platform *accepts* and then never
+  /// resolves either way — no `onError`, no `ready`/`playing`. Before #125
+  /// that left the player in `buffering` forever with nothing on any stream:
+  /// a spinner that spins until the viewer gives up.
+  ///
+  /// **This scenario requires Airplane Mode.** It cannot be provoked from a
+  /// URL: every reachable host either answers or fails fast enough for
+  /// ExoPlayer/AVPlayer to report a real error, which is the *good* path and
+  /// disarms the watchdog. Turn on Airplane Mode, then tap the button.
+  ///
+  /// Expected: nothing for [_watchdogTimeout], then a single
+  /// [NetworkException] with `isTimeout: true` on `errorStream`, and the
+  /// Live Player State card moving to `error` and staying there.
+  ///
+  /// The timeout is lowered from the 30s default purely so the demo is
+  /// watchable. `updateConfig` is used rather than reconstructing the
+  /// controller because the watchdog reads `_config.loadTimeout` at `load()`
+  /// time.
+  static const Duration _watchdogTimeout = Duration(seconds: 8);
+
+  Future<void> _loadWithWatchdog() async {
+    setState(() => _isLoading = true);
+    try {
+      await _controller.updateConfig(
+        _controller.player.config.copyWith(loadTimeout: _watchdogTimeout),
+      );
+      await _controller.load(SampleMedia.forBiggerBlazes);
+    } on MediaPlayerException catch (e) {
+      _logTypedError(e, source: 'catch(load)');
+    } catch (e) {
+      _logUnknown(e, source: 'catch(load)');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   // ---------------------------------------------------------------------
   // Logging helpers
   // ---------------------------------------------------------------------
@@ -332,6 +410,7 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
   void dispose() {
     _stateSub?.cancel();
     _errorSub?.cancel();
+    _pauseReasonSub?.cancel();
     _controller.dispose();
     super.dispose();
   }
@@ -357,6 +436,7 @@ class _ErrorHandlingPageState extends State<ErrorHandlingPage> {
           onLoadNotFound: _loadNotFound,
           onLoadBadHost: _loadBadHost,
           onLoadUnsupportedFormat: _loadUnsupportedFormat,
+          onLoadWithWatchdog: _loadWithWatchdog,
         ),
         const SizedBox(height: 16),
         const SectionHeader('Live Player State'),
@@ -384,6 +464,7 @@ class _ScenarioButtons extends StatelessWidget {
   final VoidCallback onLoadNotFound;
   final VoidCallback onLoadBadHost;
   final VoidCallback onLoadUnsupportedFormat;
+  final VoidCallback onLoadWithWatchdog;
 
   const _ScenarioButtons({
     required this.isLoading,
@@ -392,6 +473,7 @@ class _ScenarioButtons extends StatelessWidget {
     required this.onLoadNotFound,
     required this.onLoadBadHost,
     required this.onLoadUnsupportedFormat,
+    required this.onLoadWithWatchdog,
   });
 
   @override
@@ -424,6 +506,11 @@ class _ScenarioButtons extends StatelessWidget {
           icon: const Icon(Icons.text_snippet_outlined),
           label: const Text('Unsupported Format'),
           onPressed: isLoading ? null : onLoadUnsupportedFormat,
+        ),
+        OutlinedButton.icon(
+          icon: const Icon(Icons.airplanemode_active),
+          label: const Text('Load Watchdog (Airplane Mode)'),
+          onPressed: isLoading ? null : onLoadWithWatchdog,
         ),
       ],
     );
@@ -577,7 +664,21 @@ class _ErrorHandlingNote extends StatelessWidget {
         'DRM (category `drm`) cannot be provoked from this page — every '
         'DRM path needs a real license server + credentials this example '
         'does not have. Reachable here: NETWORK (Bad Host), HTTP (Forbidden '
-        '403, Not Found 404), SOURCE (Unsupported Format).',
+        '403, Not Found 404), SOURCE (Unsupported Format).\n\n'
+        'Issue #125: PlayerState.error is terminal. After any failure the '
+        'Live Player State card above should read "error" and STAY there — '
+        'it must never settle back on paused/idle, which is what made a '
+        'dead stream look like a viewer pause. "Load Watchdog" needs '
+        'Airplane Mode on: it exercises MediaConfig.loadTimeout (lowered to '
+        '8s here from the 30s default), which reports a NetworkException '
+        'with isTimeout: true when a load is accepted and then goes silent.'
+        '\n\n'
+        'Issue #126: pauseReasonStream entries also appear in the log '
+        '(source: pauseReasonStream) — they are attribution, not errors. '
+        'Tap pause -> user; unplug headphones -> audioBecomingNoisy '
+        '(Android only); take a call or trigger Siri -> audioFocusLoss. A '
+        'pause that logs nothing was simply not attributed, which is the '
+        'documented behaviour rather than a missing event.',
         style: Theme.of(context).textTheme.bodySmall,
       ),
     );

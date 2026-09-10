@@ -143,6 +143,7 @@ const MediaConfig({
   bool respectSafeArea = false,     // inset video below status bar / notch
   bool immersiveLandscape = false,  // hide system status bar in landscape (restored on portrait)
   bool secureSurface = false,       // Android: blocks capture (FLAG_SECURE); iOS: detects capture only
+  Duration? loadTimeout = const Duration(seconds: 30), // Dart-only load watchdog; null disables
 });
 ```
 
@@ -167,6 +168,30 @@ report). On iOS there is no equivalent OS-level block available to a third-party
 `secureSurface: true` instead starts observing `UIScreen.isCaptured` and reports changes via
 `screenCaptureStream` — detection only, not prevention. Toggle it after construction with
 `MediaController.setSecureSurface(bool)` / `MediaPlayer.setSecureSurface(bool)`.
+
+**`loadTimeout` bounds how long a silent load can hang (issue #125).** `load()` completing
+means the item was *handed to the platform*, not that it loaded — see
+[`load()` completing is not "loaded"](player-api.md#load-completing-is-not-loaded). A load that
+is accepted and then never resolves either way (no `onError`, no `ready`/`playing`) used to
+leave the player in `buffering` forever with nothing on any stream. When this timeout elapses,
+`MediaPlayer` synthesizes a `NetworkException` with `isTimeout: true` onto `errorStream` and
+moves `PlaybackState.state` to `PlayerState.error`.
+
+- **Default: 30 seconds** — deliberately generous. A slow manifest fetch, a multi-round-trip
+  DRM handshake or a cold CDN can legitimately take many seconds, and a false "this stream is
+  dead" is a worse failure than a late one.
+- **`null` disables it**, restoring the pre-#125 "wait forever" behaviour — for a host running
+  its own, smarter stall detection.
+- **Two guards against false positives:** the watchdog reports an error only if the player is
+  *still* `PlayerState.buffering` **and** `PlaybackState.position` has not advanced since the
+  load was issued.
+- **Dart-side only.** It is never serialized into the `config` MethodChannel payload and no
+  native code reads it; the timer lives entirely in `MediaPlayer`. It is cancelled by the first
+  `ready`/`playing`/`completed`/`error` event, by `pause()`/`stop()`, and by `dispose()`.
+- **`copyWith` needs an explicit flag to clear it.** `null` means "disabled" rather than "leave
+  unchanged" for this field, so `copyWith(loadTimeout: null)` keeps the existing value; use
+  `copyWith(clearLoadTimeout: true)`. Same convention as `PlaybackState.copyWith`'s
+  `clearLiveEdgeOffset`.
 
 **`speed` is a setting, never a transport command.** Setting `speed` (via `MediaConfig` or
 `setSpeed`) changes the rate playback *will* run at; it never starts or stops playback. A paused
@@ -215,6 +240,15 @@ offset back to `null`, which is how `load()` drops a stale live-edge signal when
 switching to a VOD item. `clearLiveEdgeOffset: true` wins over any value passed
 alongside it. Both new fields participate in `==`/`hashCode` and appear in
 `toString()`.
+
+**`PlayerState.error` is terminal (issue #125).** Once native reports a failure, `state` stays
+`error` until the next explicit host command (`load`, `play`, `stop`, `seekTo`, `setPlaylist`,
+`skipToIndex`) or until native reports real forward progress (`playing`/`completed`). It is no
+longer overwritten by the quiescent state each platform emits as a *consequence* of the
+failure (`idle` on Android, `paused` on iOS), which is what previously made a failed load
+report identically to a viewer pause. `isBuffering`/`bufferPercentage` still update while the
+error is held, so host diagnostics keep working. See
+[`load()` completing is not "loaded"](player-api.md#load-completing-is-not-loaded).
 
 **Live-edge fields.** `liveEdgeOffset` is how far behind the live edge the playhead
 is, native-sourced on every `onPositionChanged` event (Android:

@@ -131,10 +131,20 @@ void main() {
           'https://example.com/video.mp4');
       expect(mockReporter.customKeys['drm_enabled'], false);
 
-      // Should log success
+      // Issue #125: deliberately NOT "loaded successfully". load() completing
+      // means the platform accepted the item — the manifest fetch, DRM
+      // handshake and first decode all still lie ahead. The old wording read
+      // as confirmation of a successful load in crash reports, immediately
+      // above the very failures it did not predict.
       expect(
-          mockReporter.logs.any((log) => log.contains('loaded successfully')),
-          true);
+        mockReporter.logs.any((log) => log.contains('handed to platform')),
+        true,
+      );
+      expect(
+        mockReporter.logs.any((log) => log.contains('loaded successfully')),
+        false,
+        reason: 'The misleading wording must not come back.',
+      );
 
       controller.dispose();
     });

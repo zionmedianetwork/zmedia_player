@@ -530,6 +530,40 @@ class MediaPlayerInstance: NSObject {
     /// whether to resume (B-06). Not persisted beyond one interruption cycle.
     private var wasPlayingBeforeInterruption = false
 
+    /// Issue #126: `true` between an `AVAudioSession.interruptionNotification`
+    /// `.began` and its matching `.ended` — i.e. while a phone call, Siri or
+    /// an alarm holds the audio session.
+    ///
+    /// AVFoundation has no `reasonForPausing`: a `.paused`
+    /// `timeControlStatus` transition carries no explanation whatsoever, so
+    /// an interruption pause was reported to Dart identically to a viewer
+    /// pause. This flag is what lets `handleTimeControlStatusChange` label
+    /// it `"audioFocusLoss"`, matching what Android reports natively for the
+    /// same situation.
+    ///
+    /// **Best effort, deliberately.** The `.paused` KVO callback and this
+    /// notification are delivered independently, so a `.paused` observed
+    /// *before* `.began` lands attributes nothing at all. That
+    /// under-attribution is the intended failure mode — a pause labelled
+    /// `"user"` that was really an interruption is far worse for a host
+    /// keying auto-recovery off it than an unlabelled pause.
+    private var interruptionInProgress = false
+
+    /// Issue #126: `true` when this package's own `pause()` initiated the
+    /// pause that is about to be observed, which is the only evidence iOS
+    /// offers that a pause was user/API driven.
+    ///
+    /// Set by `pause()` *before* `avPlayer.pause()` (the KVO callback can be
+    /// delivered synchronously from it), consumed — and cleared — by the
+    /// resulting `.paused` transition, and cleared outright by
+    /// `play()`/`stop()`/`loadMediaItem()` so it can never go stale and
+    /// mislabel a later, unrelated pause.
+    ///
+    /// This is why `PlayerPauseReason.user` is documented as *host-inferred*
+    /// on iOS while Android's is player-reported; see the platform table in
+    /// `PlayerPauseReason`'s dartdoc.
+    private var pauseWasHostInitiated = false
+
     // Modern KVO observers for player item (auto-cleanup, no exceptions)
     private var itemDurationObserver: NSKeyValueObservation?
     private var itemStatusObserver: NSKeyValueObservation?
@@ -921,6 +955,9 @@ class MediaPlayerInstance: NSObject {
         // Fresh item: nothing has been played to the end or stopped yet
         // (issue #79 -- see currentItemIsSpent).
         currentItemIsSpent = false
+        // Issue #126: a new item invalidates any pending pause attribution
+        // from the previous one.
+        pauseWasHostInitiated = false
 
         // Reset access log event counter for new media
         previousAccessLogEventCount = 0
@@ -1280,6 +1317,10 @@ class MediaPlayerInstance: NSObject {
         // Playback is being (re)started -- the item is in progress again
         // (issue #79 -- see currentItemIsSpent).
         currentItemIsSpent = false
+        // Issue #126: whatever caused the previous pause is now history --
+        // never let a stale host-initiated flag label a future, unrelated
+        // pause as "user".
+        pauseWasHostInitiated = false
         if #available(iOS 16.0, *) {
             player.defaultRate = requestedSpeed
             player.play()                      // plays at defaultRate
@@ -1291,6 +1332,13 @@ class MediaPlayerInstance: NSObject {
     }
 
     func pause() {
+        // Issue #126: set BEFORE avPlayer.pause(), because the
+        // timeControlStatus KVO callback that consumes this flag can be
+        // delivered synchronously from that call. This is iOS's only
+        // evidence that a pause was user/API driven -- AVFoundation exposes
+        // no `reasonForPausing` -- so PlayerPauseReason.user is host-inferred
+        // here, unlike Android where ExoPlayer reports it itself.
+        pauseWasHostInitiated = true
         avPlayer?.pause()
         // Explicit user/app pause — release the audio-session slot (B-05).
         // Deliberately NOT tied to timeControlStatus/rate transitions: a
@@ -1302,6 +1350,11 @@ class MediaPlayerInstance: NSObject {
     }
 
     func stop() {
+        // Issue #126: a stop is not a pause. Clear the flag before
+        // avPlayer.pause() below (which can deliver the KVO callback
+        // synchronously) so the resulting transition is reported
+        // unattributed rather than mislabelled "user".
+        pauseWasHostInitiated = false
         avPlayer?.pause()
         avPlayer?.seek(to: .zero)
         // Mirrors Android, where stop() clears ExoPlayer's media items and
@@ -1773,12 +1826,40 @@ class MediaPlayerInstance: NSObject {
     /// `paused`, or a mid-playback rebuffer looks indistinguishable from the
     /// user tapping pause.
     private func handleTimeControlStatusChange(player: AVPlayer) {
+        // Issue #125: an item (or player) failure drives timeControlStatus to
+        // .paused as a direct consequence of the failure. Reported as an
+        // ordinary transition -- as it used to be -- that "paused" landed on
+        // the Dart side *after* the onError this observer knows nothing
+        // about, overwriting PlayerState.error with something byte-identical
+        // to a viewer pause. errorStream was always right; the state lied.
+        //
+        // Suppressing it here cannot hide a recovery: an AVPlayerItem failure
+        // is terminal by design (Apple's contract is that a .failed item must
+        // be replaced, it never returns to .readyToPlay), and the only route
+        // back is loadMediaItem(), which always calls
+        // replaceCurrentItem(with:) with a brand-new item whose status starts
+        // at .unknown. Dart additionally latches the error state, so an older
+        // cached native build without this suppression still behaves
+        // correctly -- see MediaPlayer._handleStateChanged.
+        if player.currentItem?.status == .failed || player.status == .failed {
+            zlog("MediaPlayerInstance: Suppressing post-failure timeControlStatus "
+                + "\(player.timeControlStatus.rawValue) (error already reported)")
+            return
+        }
+
         switch player.timeControlStatus {
         case .playing:
+            // Issue #126: playback resumed -- any pending pause attribution
+            // belongs to a pause that is now over.
+            pauseWasHostInitiated = false
             notifyStateChanged(state: "playing", isBuffering: false)
 
         case .paused:
-            notifyStateChanged(state: "paused", isBuffering: false)
+            notifyStateChanged(
+                state: "paused",
+                isBuffering: false,
+                pauseReason: consumePauseReason()
+            )
 
         case .waitingToPlayAtSpecifiedRate:
             // `reasonForWaitingToPlay` further distinguishes a real
@@ -1795,6 +1876,47 @@ class MediaPlayerInstance: NSObject {
         @unknown default:
             break
         }
+    }
+
+    /// Issue #126: the `pauseReason` wire value for the `.paused` transition
+    /// being reported right now, or `nil` when it cannot be attributed
+    /// confidently.
+    ///
+    /// The returned strings MUST stay identical to `PlayerPauseReason`'s
+    /// `wireValue`s in `lib/src/core/media_player.dart`;
+    /// `test/native_contract/pause_reason_vocabulary_test.dart` parses this
+    /// function as text and fails if they drift.
+    ///
+    /// Order matters: an OS interruption is checked FIRST, because a call or
+    /// alarm arriving immediately after a host `pause()` must not be
+    /// relabelled `"user"`. Only `"user"` and `"audioFocusLoss"` are ever
+    /// produced here -- `"audioBecomingNoisy"` and `"remote"` are
+    /// ExoPlayer-reported reasons with no AVFoundation equivalent, and are
+    /// documented Android-only.
+    ///
+    /// `nil` (send no key at all) is the deliberate default for everything
+    /// else: AVFoundation offers no `reasonForPausing`, and guessing would
+    /// hand a host a confident-looking wrong answer.
+    ///
+    /// NEEDS ON-DEVICE VERIFICATION: neither branch is reachable in a
+    /// simulator/unit-test environment -- the interruption path needs a real
+    /// call/Siri/alarm (see handleAudioSessionInterruption's own marker), and
+    /// the KVO-delivery ordering that `pauseWasHostInitiated` depends on
+    /// cannot be exercised from Dart tests, which mock the channel.
+    private func consumePauseReason() -> String? {
+        // One `.paused` transition consumes at most one attribution; clear
+        // the host flag either way so it can never leak into a later,
+        // unrelated pause.
+        let hostInitiated = pauseWasHostInitiated
+        pauseWasHostInitiated = false
+
+        if interruptionInProgress {
+            return "audioFocusLoss"
+        }
+        if hostInitiated {
+            return "user"
+        }
+        return nil
     }
 
     /// Handles `AVAudioSession.interruptionNotification` (B-06): phone
@@ -1828,6 +1950,13 @@ class MediaPlayerInstance: NSObject {
             // actually playing, to decide on resumption below.
             wasPlayingBeforeInterruption = (avPlayer?.timeControlStatus == .playing
                 || avPlayer?.timeControlStatus == .waitingToPlayAtSpecifiedRate)
+            // Issue #126: mark the window in which a `.paused` transition is
+            // the OS's doing, not the viewer's, so consumePauseReason() can
+            // report "audioFocusLoss" -- matching what Android reports
+            // natively for the equivalent audio-focus revocation. Best
+            // effort: if the KVO callback beat this notification, the pause
+            // goes out unattributed rather than mislabelled.
+            interruptionInProgress = true
             // The OS revokes activation for the whole process on .began, not
             // just this instance's slot — clear the local bookkeeping so a
             // subsequent pause()/dispose() doesn't try to "release" a
@@ -1843,6 +1972,10 @@ class MediaPlayerInstance: NSObject {
             }
 
             zlog("MediaPlayerInstance: Audio session interruption ended (playerId: \(playerId), wasPlaying: \(wasPlayingBeforeInterruption), shouldResume: \(shouldResume))")
+
+            // Issue #126: the interruption window is over -- a `.paused`
+            // observed from here on is no longer attributable to it.
+            interruptionInProgress = false
 
             if wasPlayingBeforeInterruption && shouldResume {
                 // Route through play() (not a bare avPlayer?.play()) so the
@@ -1968,14 +2101,60 @@ class MediaPlayerInstance: NSObject {
         }
     }
 
-    private func notifyStateChanged(state: String, isBuffering: Bool) {
-        let arguments: [String: Any] = [
+    /// Issue #126: [pauseReason] is attached only when non-nil, mirroring
+    /// `MediaPlayerManager.kt`'s `notifyStateChanged` exactly so the
+    /// `onStateChanged` payload stays symmetric across platforms. Dart's
+    /// `PlayerPauseReason.fromWireValue` treats an absent key as "not
+    /// attributed" and emits nothing on `pauseReasonStream`.
+    private func notifyStateChanged(
+        state: String,
+        isBuffering: Bool,
+        pauseReason: String? = nil
+    ) {
+        var arguments: [String: Any] = [
             "playerId": playerId,
             "state": state,
             "isBuffering": isBuffering,
             "bufferPercentage": computeBufferPercentage()
         ]
-        methodChannel.invokeMethod("onStateChanged", arguments: arguments)
+        if let pauseReason = pauseReason {
+            arguments["pauseReason"] = pauseReason
+        }
+        // Snapshot into a `let` before capturing: a captured `var` is boxed
+        // by reference, and this payload must not be able to change between
+        // being handed to the closure and the closure running.
+        let payload = arguments
+        invokeOnMainThread { [weak self] in
+            self?.methodChannel.invokeMethod("onStateChanged", arguments: payload)
+        }
+    }
+
+    /// Runs [block] on the main thread, INLINE when already there.
+    ///
+    /// `FlutterMethodChannel.invokeMethod` must be called on the main thread
+    /// (the same rule `ZMediaPlayerPlugin.broadcastNetworkStatus` and
+    /// `DrmHandler.notifyOnMainThread` already follow). Several of this
+    /// class's event emitters run from KVO callbacks
+    /// (`AVPlayerItem.status`, `AVPlayer.status`, `timeControlStatus`) and
+    /// AVFoundation does not guarantee those are delivered on the main
+    /// thread, so `notifyError`/`notifyStateChanged` were calling
+    /// `invokeMethod` off-main whenever they were not.
+    ///
+    /// The inline-when-already-main branch is load-bearing, not an
+    /// optimization: an unconditional `DispatchQueue.main.async` would defer
+    /// an event that is currently emitted synchronously, reordering it
+    /// relative to its neighbours. Concretely, `onError` would arrive AFTER
+    /// a `onStateChanged` emitted synchronously later in the same call
+    /// stack -- re-creating, by a different route, exactly the
+    /// error-clobbered-by-a-later-state defect issue #125 is about. Running
+    /// inline preserves the existing ordering for every already-main caller
+    /// and only serializes the genuinely off-main ones.
+    private func invokeOnMainThread(_ block: @escaping () -> Void) {
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.async(execute: block)
+        }
     }
 
     /// Computes the percentage (0-100) of the current item's total duration
@@ -2705,7 +2884,14 @@ class MediaPlayerInstance: NSObject {
         if let httpStatusCode = httpStatusCode {
             arguments["httpStatusCode"] = httpStatusCode
         }
-        methodChannel.invokeMethod("onError", arguments: arguments)
+        // Reached from `AVPlayerItem.status`/`AVPlayer.status` KVO callbacks,
+        // whose delivery thread AVFoundation does not guarantee -- see
+        // invokeOnMainThread for why this must not be an unconditional async
+        // hop.
+        let payload = arguments
+        invokeOnMainThread { [weak self] in
+            self?.methodChannel.invokeMethod("onError", arguments: payload)
+        }
     }
 }
 

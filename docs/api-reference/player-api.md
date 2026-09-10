@@ -47,7 +47,7 @@ Contract:
 
 | Method | Description |
 |---|---|
-| `Future<void> load(MediaItem item)` | Load a single item |
+| `Future<void> load(MediaItem item)` | Hand a single item to the platform. **Completing does not mean it loaded** — see [`load()` completing is not "loaded"](#load-completing-is-not-loaded) |
 | `Future<void> setPlaylist(Playlist playlist, {int? startIndex})` | Load (or extend/re-issue) a playlist. Does **not** restart the item at `startIndex` if it is already the loaded, in-progress item — see [Extending a playlist in place](#extending-a-playlist-in-place) |
 | `Future<void> play()` / `pause()` / `stop()` | Playback control |
 | `Future<void> togglePlayPause()` | Toggle play/pause |
@@ -58,6 +58,84 @@ Contract:
 | `Future<void> toggleMute()` | Mute/unmute |
 | `Future<void> setSpeed(double speed)` | 0.25–4.0. A setting, not a transport command — never starts or pauses playback |
 | `Future<void> cycleSpeed()` | Cycle preset speeds |
+
+### `load()` completing is not "loaded"
+
+`load()` resolving means the item was **handed to the platform**, not that anything played.
+ExoPlayer and AVPlayer accept a media item synchronously and only then fetch the manifest,
+negotiate DRM and decode — a 404, a dead CDN, an expired licence or an unsupported codec is
+discovered *after* the future has already completed successfully.
+
+What `load()` itself throws is the narrow class of **synchronous** failures: input validation
+(`ConfigurationException` — e.g. the HTTPS-for-DRM rule) and a native rejection while building
+the media source (`MediaLoadException`/`NetworkException`/`DrmException`).
+
+Observe the real outcome on the streams:
+
+| Outcome | Signal |
+|---|---|
+| Success | `stateStream` reaching `PlayerState.ready` or `PlayerState.playing` |
+| Failure | `errorStream` emitting, with `currentState.state == PlayerState.error` |
+| Neither (accepted, then silence) | The `MediaConfig.loadTimeout` watchdog, below |
+
+```dart
+// Correct: await the hand-off, then watch for the outcome.
+final sub = player.errorStream.listen(showError);
+await player.load(item);   // proves nothing about playback
+await player.play();
+```
+
+**`PlayerState.error` is terminal** (issue #125). It is held until the next explicit host
+command (`load`, `play`, `stop`, `seekTo`, `setPlaylist`, `skipToIndex`) or until native
+reports real forward progress (`playing`/`completed`). Previously the quiescent state each
+platform emits as a *consequence* of the failure — `idle` on Android, `paused` on iOS, both
+arriving right after `onError` — overwrote it, so a failed load was reported identically to a
+viewer pause. `errorStream` was always correct; only `PlaybackState.state` lied. Buffer
+telemetry (`isBuffering`, `bufferPercentage`) still flows while the error is held.
+
+#### Distinguishing a viewer pause from a dead stream
+
+```dart
+player.stateStream.listen((state) {
+  if (state.state == PlayerState.error) {
+    // A real failure — retry or show an error. Never reached before #125
+    // for a failed load; it arrived as `paused`/`idle` instead.
+    showRetry(state.errorMessage);
+  } else if (state.state == PlayerState.paused) {
+    // Genuinely paused. `pauseReasonStream` says why, when native knows —
+    // see events.md#10-pause-reason-stream-pausereasonstream.
+  }
+});
+```
+
+#### `MediaConfig.loadTimeout` (the load watchdog)
+
+A load that is accepted and then never resolves either way — no `onError`, no
+`ready`/`playing` — used to leave the player in `buffering` forever with nothing on any stream.
+`MediaConfig.loadTimeout` (a `Duration?`, **default 30 seconds**, `null` disables) bounds that
+wait:
+
+```dart
+final player = MediaPlayer(
+  playerId: 'p',
+  config: const MediaConfig(loadTimeout: Duration(seconds: 15)),
+);
+// Opt out entirely (pre-#125 "wait forever" behaviour):
+const MediaConfig(loadTimeout: null);
+// Note copyWith needs the explicit flag to clear it:
+config.copyWith(clearLoadTimeout: true);
+```
+
+On firing it reports a `NetworkException` with `isTimeout: true` on `errorStream` and moves
+the state to `PlayerState.error`, indistinguishable to a host from a native failure. It is
+**Dart-only**: never serialized into the `config` MethodChannel payload, and no native code
+reads it. It is armed by `load()` and cancelled by the first `ready`/`playing`/`completed`/
+`error` event, by `pause()`/`stop()`, and by `dispose()`.
+
+Two guards make a false positive unlikely — a false "this stream is dead" is a worse failure
+than a late true one. When the timer fires it reports an error only if the player is **still**
+`buffering` *and* `PlaybackState.position` has not advanced since the load. A slow-but-
+progressing manifest fetch or a long DRM handshake is therefore never killed.
 
 ### Playlist navigation
 
@@ -204,7 +282,10 @@ Content: `currentItem`, `currentPlaylist`, `hasNext`, `hasPrevious`.
 Tracks: `qualityTracks`, `selectedQualityTrack`, `subtitleTracks`, `selectedSubtitleTrack`,
 `audioTracks`, `selectedAudioTrack`.
 PiP/Cast: `pipStatus`, `isPipAvailable`, `isInPipMode`, `castStatus`, `isCastAvailable`, `isCasting`.
-Errors: `error` (most recently observed `MediaPlayerException`, or `null`), `errorStream`.
+Errors: `error` (most recently observed `MediaPlayerException`, or `null`), `errorStream`,
+`hasError` (`state == PlayerState.error`). Note that as of issue #125 a held error is cleared
+by real forward progress or an explicit host command, **not** by any state event — a
+post-failure `buffering` is not recovery.
 Other: `controlsVisible`, `isOperationInProgress` (**informational only** — `true` while an
 operation is *running*; it does not mean the queue is empty, and you never need to check it
 before issuing a call, which was always racy), `playerId`, `player` (the `MediaPlayer`),
@@ -284,7 +365,10 @@ playlist is therefore not a way to apply a config change now — `updateConfig()
 `subtitleTracksStream`, `qualityTracksStream`, `audioTracksStream`, `bandwidthStream` (bps),
 `bufferHealthStream`, `pipStatusStream`, `pipActionStream` (carries `PipActionEvent` — a tap on
 a custom `PipConfig.actions` entry, Android only), `castStatusStream`, `castDevicesStream`,
-`drmSessionStream`, `errorStream` (typed `MediaPlayerException`s), `screenCaptureStream`,
+`drmSessionStream`, `errorStream` (typed `MediaPlayerException`s — the primary failure signal;
+see [`load()` completing is not "loaded"](#load-completing-is-not-loaded)), `pauseReasonStream`
+(`PlayerPauseReason` — why a pause happened, when native attributes it; see
+[Events](events.md#10-pause-reason-stream-pausereasonstream)), `screenCaptureStream`,
 `notificationActionEventStream` (carries `NotificationActionEvent`, including scrub-bar
 position; prefer this over the deprecated `Stream<String> notificationActionStream`). See
 [Events & Streams](events.md).
@@ -300,7 +384,8 @@ if set, else path-based URL inference; see
 `isSeekable` (`false` only when `isLive && !dvrEnabled`), `liveEdgeOffset`,
 `isAtLiveEdge`, `positionBasis`, `currentBandwidth`, `networkQuality`,
 `bufferStatistics`, `lastBufferHealth`, the track lists/selections, and the PiP/cast status
-getters mirrored on the controller.
+getters mirrored on the controller. `config` reflects the live `MediaConfig`, including
+`loadTimeout` (see [the load watchdog](#mediaconfigloadtimeout-the-load-watchdog)).
 
 The three live-edge getters are native-sourced and delivered on the existing `onPositionChanged`
 event (see [Events](events.md#onpositionchanged)):
@@ -320,6 +405,12 @@ All player errors are subclasses of the sealed `MediaPlayerException`:
 `OperationBusyException`. Errors also surface via
 `PlaybackState.state == PlayerState.error` with `errorMessage`, and as typed exceptions on
 `errorStream`/`error` (above).
+
+**`errorStream` is the primary surface, not a supplement.** Most real playback failures are
+detected asynchronously, after the method call that triggered them has already returned
+successfully — see [`load()` completing is not "loaded"](#load-completing-is-not-loaded).
+`NetworkException.isTimeout` is `true` for a `MediaConfig.loadTimeout` watchdog failure and for
+nothing else this package synthesizes.
 
 `MediaController` methods can additionally complete with a `TimeoutException` (not a
 `MediaPlayerException`) when a native call exceeds the 10 s per-operation timeout — see

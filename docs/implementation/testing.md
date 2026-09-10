@@ -4,8 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1118 tests passing** in the package's Dart layer as of this
-> writing — the count grows with every change, so run `flutter test` for the live
+> **Current status:** **1167 tests passing** in the package's Dart layer as of this> writing — the count grows with every change, so run `flutter test` for the live
 > number rather than trusting this one. Native Kotlin/Swift code still has **no
 > automated tests** — those paths require on-device verification.
 >
@@ -19,6 +18,25 @@ This guide covers testing strategies, test execution, and quality assurance for 
 > nowhere in CI, which is how tests sat broken across a release without anything
 > catching it.
 
+### Native/Dart drift guards (`test/native_contract/`, plus two older siblings)
+
+A `MethodChannel` payload is a `Map<String, dynamic>` on both sides, so a native/Dart
+vocabulary drift is invisible to `flutter analyze` **and** to every test here — the suite mocks
+the channel, so a test only ever proves that Dart parses what the test author typed. Three
+tests close that gap by parsing the native sources as *text*:
+
+| Test | Guards |
+|---|---|
+| `test/exceptions/error_category_vocabulary_test.dart` | `onError`'s `category` (`MediaErrorCategory`) |
+| `test/models/network_status_vocabulary_test.dart` | `onNetworkStatusChanged`'s `connectionType` |
+| `test/native_contract/pause_reason_vocabulary_test.dart` | `onStateChanged`'s `pauseReason` (`PlayerPauseReason`) |
+
+Each fails in **both** directions: a native literal with no Dart counterpart, *and* a Dart
+member no native code can produce. The second direction is the one that matters most — it is
+exactly the defect issue #126 was (`PlayerPauseReason.user` declared, exported and documented
+while no code path could emit it). The pause-reason guard additionally pins the documented
+Android-only members, so iOS gaining one fails the test rather than silently outdating the docs.
+
 ## Test Structure
 
 ```
@@ -28,6 +46,7 @@ test/
 ├── services/             # Cache, streaming, subtitle, buffering, network, notification services
 ├── security/             # Certificate pinning, secure storage, input validation
 ├── exceptions/           # Typed-exception and error-category-vocabulary tests
+├── native_contract/      # Drift guards that parse the Kotlin/Swift sources as text
 ├── crash_reporting/      # CrashReporter tests
 ├── memory/               # Leak-detection tests (StreamController/Timer cleanup)
 ├── native_contract/      # Guards that parse the native Kotlin/Swift sources as text
@@ -644,8 +663,7 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** run `flutter test` for the current package count (1118 as of this
-writing) plus `cd example && flutter test` for the example app's own 24; **no automated
+**Test Coverage:** run `flutter test` for the current package count (1167 as of thiswriting) plus `cd example && flutter test` for the example app's own 24; **no automated
 native tests yet**
 **Status:** Active development — native layers need on-device verification
 **Last Updated:** September 5, 2026
