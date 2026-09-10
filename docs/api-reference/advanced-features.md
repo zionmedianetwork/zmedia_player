@@ -495,6 +495,42 @@ if (controller.error != null) {
 This mirrors `MediaPlayer.errorStream`; `MediaController` clears its cached `error` once the
 condition that caused it is no longer current.
 
+**"No longer current" means real recovery, not any state event** (issue #125). As of that
+fix, `PlayerState.error` is terminal: it is held — and so is `controller.error`/`hasError` —
+until an explicit host command (`load`, `play`, `stop`, `seekTo`, `setPlaylist`,
+`skipToIndex`) or until native reports real forward progress (`playing`/`completed`). A
+`buffering` arriving after a failure is what the platform emits as a *consequence* of that
+failure (or while a doomed retry spins), and no longer clears the error. See
+[`load()` completing is not "loaded"](player-api.md#load-completing-is-not-loaded).
+
+`errorStream` is also the **primary** failure signal, not a supplement to `try`/`catch`: most
+real playback failures are detected asynchronously, after `load()`/`play()` has already
+returned successfully.
+
+## Pause attribution
+
+`MediaPlayer.pauseReasonStream` emits a `PlayerPauseReason` alongside a `paused` transition
+when native attributes the pause — the other half of "is this stream dead or did someone
+pause it?":
+
+```dart
+controller.player.pauseReasonStream.listen((reason) {
+  switch (reason) {
+    case PlayerPauseReason.user:
+      break;                    // deliberate — do not auto-resume
+    case PlayerPauseReason.audioFocusLoss:
+    case PlayerPauseReason.audioBecomingNoisy:   // Android only
+    case PlayerPauseReason.remote:               // Android only
+      offerResume();
+  }
+});
+```
+
+A pause native cannot attribute emits **nothing** — `PlayerPauseReason.fromWireValue` never
+guesses. `user` is player-reported on Android and **host-inferred on iOS** (AVFoundation
+exposes no `reasonForPausing`). Full table:
+[Events](events.md#10-pause-reason-stream-pausereasonstream).
+
 ## Screen capture protection
 
 `MediaConfig.secureSurface` (default `false`) is deliberately asymmetric across platforms:

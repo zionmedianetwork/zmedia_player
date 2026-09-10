@@ -377,7 +377,8 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - Custom exceptions in `lib/src/core/exceptions.dart`
 - Platform-specific error mapping (PlatformException → MediaPlayerException)
 - CrashReporter integration for production error tracking
-- Error state propagated via PlaybackState.state = PlayerState.error
+- Error state propagated via PlaybackState.state = PlayerState.error, which is **terminal**
+  until a host command or real forward progress (issue #125 — see gotcha 16)
 
 ### State Management
 - **All state is broadcast via StreamControllers**
@@ -396,13 +397,23 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - `enterPictureInPicture`: PiP mode activation
 - `setDrmConfig`: DRM configuration
 
-**Event callbacks (Native → Dart):**
-- `onPlaybackStateChanged`: State transitions
-- `onPositionChanged`: Playback position updates
+**Event callbacks (Native → Dart):** (payload shapes documented in
+`docs/api-reference/events.md`'s "Native Event Payloads" section)
+- `onStateChanged`: State transitions. Payload `{playerId, state, isBuffering,
+  bufferPercentage, pauseReason?}`. **Both natives suppress this event entirely while the
+  player sits in a reported error** (issue #125 — `playerError != null` on Android,
+  `currentItem?.status == .failed` on iOS); see gotcha 16
+- `onPositionChanged`: Playback position updates (plus `liveEdgeOffset`/`positionBasis`)
 - `onDurationChanged`: Media duration
-- `onQualityTracksChanged`: Available quality tracks
+- `onQualityTracksChanged` / `onSubtitleTracksChanged` / `onAudioTracksChanged`: track lists
 - `onDrmSessionUpdate`: DRM session state
 - `onBandwidthUpdate`: Network bandwidth estimation
+- `onNetworkStatusChanged`: OS-level connectivity (see `NetworkMonitor` on each platform)
+- `onError`: Typed failure. Payload `{playerId, error, category?, nativeErrorCode?,
+  httpStatusCode?}`. **The primary path for real playback failures** — they are detected
+  asynchronously, after the `load`/`play` call has already returned successfully
+- `onPipStatusChanged` / `onPipAction` / `onCastStatusChanged` / `onCastDevicesChanged` /
+  `onNotificationAction` / `onScreenCaptureChanged` / `onBufferHealthUpdate`
 
 ## Testing Strategy
 
@@ -622,6 +633,41 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    `config["httpHeaders"]`. It is deprecated rather than removed (compilation) or wired
    (silent behavior change), exactly as `HlsConfig`/`DashConfig.enableLiveStream` was
    deprecated in favor of `MediaItem.isLive`
+17. **`load()` completing means "handed to the platform", not "loaded"** (issue #125) -
+   ExoPlayer/AVPlayer accept a media item synchronously and only then fetch the manifest,
+   negotiate DRM and decode, so a 404/dead CDN/expired licence/unsupported codec surfaces
+   *after* `load()`'s future has already completed successfully. What `load()` itself throws is
+   the narrow synchronous class (validation, a rejected media source). Observe the outcome on
+   the streams: `PlayerState.ready`/`.playing` for success, `errorStream` +
+   `PlayerState.error` for failure. `crashReporter?.log('Media load handed to platform', ...)`
+   is worded that way deliberately — it used to say "Media loaded successfully"
+18. **`PlayerState.error` is terminal until a host command** (issue #125) - it is held until
+   `load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`, or until native reports real
+   forward progress (`playing`/`completed`). It used to be overwritten by the very next state
+   event, and both platforms emit a quiescent state as a *direct consequence of* the failure
+   (`STATE_IDLE` -> `"idle"` on Android; `timeControlStatus` -> `.paused` -> `"paused"` on
+   iOS), arriving right after `onError` — so a failed load ended up byte-identical to a viewer
+   pause while `errorStream` was correct all along. Three layers: both natives suppress the
+   trailing event at the source, and `MediaPlayer._errorLatched` holds it on the Dart side too
+   (defense in depth — the only protection for new Dart against an older cached native build).
+   Buffer telemetry (`isBuffering`, `bufferPercentage`) deliberately still flows while latched.
+   A post-failure `buffering` is **not** recovery. `MediaConfig.loadTimeout` (a `Duration?`,
+   default 30s, `null` disables) additionally bounds a load that goes silent, reporting a
+   `NetworkException` with `isTimeout: true`; it is **Dart-only** (never serialized, no native
+   code reads it) and refuses to fire unless the state is still `buffering` AND `position` has
+   not advanced
+19. **iOS `PlayerPauseReason.user` is host-inferred; Android's is player-reported** (issue
+   #126) - Android maps all four of ExoPlayer's `PlayWhenReadyChangeReason` constants
+   (`USER_REQUEST`/`AUDIO_FOCUS_LOSS`/`AUDIO_BECOMING_NOISY`/`REMOTE`), which the player fills
+   in itself. AVFoundation has no `reasonForPausing` at all, so iOS infers `user` from a flag
+   set by this package's own `pause()`, and `audioFocusLoss` from an in-progress
+   `AVAudioSession` interruption; `audioBecomingNoisy` and `remote` are **Android-only**. A
+   pause native cannot attribute sends no `pauseReason` key and emits nothing —
+   `PlayerPauseReason.fromWireValue` returns `null` for absent *and* unrecognized values and
+   never guesses `user`, because that is what a host keys "don't auto-recover" on. Same class
+   of documented asymmetry as gotcha 15. `pauseReasonStream` is now chatty (it fires on every
+   attributed pause, not only audio-focus loss) — a **breaking** change, along with the two
+   new enum members. Guarded by `test/native_contract/pause_reason_vocabulary_test.dart`
 
 ## UI/UX Design Specifications
 

@@ -15,8 +15,13 @@ fix one layer up: the notification-artwork frame extraction now carries
 silently never appeared for a signed/authenticated media URL), guarded by
 `test/native_contract/notification_artwork_headers_test.dart`.
 
-The items below shipped in `v0.5.0`: the ExoPlayer 2 classpath upgrade note (issue #108),
-the `NetworkStatus` platform-quality fix (issue #112), the live-edge-offset
+`CHANGELOG.md`'s `[Unreleased]` additionally holds the load/error-semantics work:
+a failed load now terminates in `PlayerState.error` instead of `paused`/`idle`
+(issue #125), `PlayerPauseReason` became a wire-valued enum that actually emits
+`user` (issue #126), and `MediaConfig.loadTimeout` bounds a load that goes silent.
+Guarded by `test/native_contract/pause_reason_vocabulary_test.dart`.
+
+The items below shipped in `v0.5.0`: the ExoPlayer 2 classpath upgrade note (issue #108),the `NetworkStatus` platform-quality fix (issue #112), the live-edge-offset
 window-sanity fix (issue #109) with its manifest-anchor diagnostic (issue #110), and the
 iOS counterpart to #112/#109: `NetworkMonitor.swift`'s `estimateBandwidth(from:)` no longer
 reports `connectionType: "none"`/`downloadSpeed: 0` for a connected but unrecognized
@@ -36,8 +41,12 @@ silently resolve a CDN-rewritten/signed URL to `progressive`, under which neithe
 nor `DashConfig` applies + one optional HTTP header) so the #109-shaped defect stream from a
 device bug report, unreachable from the app's own bundled fixtures, can be verified the same
 way without a rebuild; 11 feature pages added to `example/README.md`'s previously-incomplete
-table; corrections to several stale hardcoded Dart test-suite counts across the docs; and a
-documentation-only correction (issue #120) stating that `PlaybackState.liveEdgeOffset` measures
+table; corrections to several stale hardcoded Dart test-suite counts across the docs; the
+terminal-`error`/load-watchdog fix (issue #125) with its `MediaConfig.loadTimeout` addition
+and the iOS main-thread `invokeMethod` fix found while tracing it; the native-sourced pause
+attribution work (issue #126 — **breaking**: two new `PlayerPauseReason` members, and a
+`pauseReasonStream` that now fires on every attributed pause rather than only on audio-focus
+loss); and a documentation-only correction (issue #120) stating that `PlaybackState.liveEdgeOffset` measures
 a different quantity on Android (distance from the published live edge, ~18s on a verification
 stream) than on iOS (bounded near zero by construction during live playback, verified <1s on
 the same stream) — making `isAtLiveEdge`/`defaultLiveEdgeTolerance` near-degenerate on iOS and
@@ -66,7 +75,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |
 | Android | minSdk 23 |
-| Tests | 1118 passing (Dart layer; native has none) |
+| Tests | 1167 passing (Dart layer; native has none) |
 
 ---
 
@@ -80,6 +89,26 @@ platform is called out explicitly.
 - `MediaController` — facade over `MediaPlayer` (auto-hiding controls, operation locks).
 - `MediaConfig`, `CrashReporter`.
 - Multiple-instance registry: one instance per `playerId`, 15-minute stale cleanup.
+
+### Load & error semantics
+- `load()` completing means the item was **handed to the platform**, not that it loaded —
+  documented on the method, in `README.md`, `AGENTS.md` and
+  [player-api.md](docs/api-reference/player-api.md#load-completing-is-not-loaded).
+- `PlayerState.error` is **terminal** (issue #125): held until an explicit host command
+  (`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or real forward progress from
+  native. Suppressed at the source on both platforms (`Player.getPlayerError() != null` on
+  Android, `currentItem?.status == .failed` on iOS) **and** latched in Dart, so new Dart
+  against an older cached native build still behaves. Buffer telemetry keeps flowing while
+  latched.
+- `MediaConfig.loadTimeout` (issue #125) — Dart-only load watchdog, default 30s, `null`
+  disables. Reports a `NetworkException` with `isTimeout: true` when a load is accepted and
+  then goes silent; refuses to fire while the load is still progressing.
+- `PlayerPauseReason` (issue #126) — wire-valued enum (`user`, `audioFocusLoss`,
+  Android-only `audioBecomingNoisy` and `remote`) on `MediaPlayer.pauseReasonStream`, sourced
+  natively on both platforms. **iOS `user` is host-inferred** (AVFoundation has no
+  `reasonForPausing`) while Android's is player-reported — the same class of documented
+  asymmetry as `liveEdgeOffset` (#120). An unattributed pause emits nothing rather than
+  guessing. Guarded by `test/native_contract/pause_reason_vocabulary_test.dart`.
 
 ### Playback
 - play / pause / stop / seek, volume / mute.

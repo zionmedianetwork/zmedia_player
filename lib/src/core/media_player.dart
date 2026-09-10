@@ -33,15 +33,96 @@ import 'exceptions.dart';
 /// state strings — here both "user paused" and "OS revoked audio focus" are
 /// legitimately `paused`, so the disambiguation has to travel alongside the
 /// state event rather than replace it.
+///
+/// Every member carries the exact [wireValue] native sends as the
+/// `pauseReason` key of the `onStateChanged` MethodChannel event; parsing
+/// goes through [fromWireValue], which returns `null` — never a guess — for
+/// an absent or unrecognized value. See
+/// `docs/api-reference/events.md#onstatechanged`.
+///
+/// **Attribution is not symmetric across platforms** (issue #126), in the
+/// same way `PlaybackState.liveEdgeOffset` is not (see CLAUDE.md gotcha 15):
+///
+/// | Reason | Android | iOS |
+/// |---|---|---|
+/// | [user] | player-reported (`PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST`) | **host-inferred** |
+/// | [audioFocusLoss] | player-reported (`..._AUDIO_FOCUS_LOSS`) | reported for an `AVAudioSession` interruption |
+/// | [audioBecomingNoisy] | player-reported (`..._AUDIO_BECOMING_NOISY`) | never sent |
+/// | [remote] | player-reported (`..._REMOTE`) | never sent |
+///
+/// On Android all four values come from ExoPlayer's own
+/// `Player.PlayWhenReadyChangeReason`, which the player fills in itself. On
+/// iOS, AVFoundation exposes no equivalent "why did this pause?" property
+/// at all — there is no `reasonForPausing` to read — so [user] there is a
+/// *heuristic*: native sets a flag when this package's own `pause()` runs
+/// and attributes the resulting `.paused` transition to it. A pause with no
+/// confident attribution sends no `pauseReason` at all on either platform
+/// and therefore emits nothing on [MediaPlayer.pauseReasonStream];
+/// under-attribution is the deliberate failure mode, because a wrong [user]
+/// is worse than a missing one for any host that keys "do not auto-recover"
+/// off it.
 enum PlayerPauseReason {
-  /// A normal user- or API-driven pause (or any other/unknown cause).
-  user,
+  /// An explicit user- or API-driven pause.
+  ///
+  /// Android: `Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST`, reported
+  /// by ExoPlayer itself. iOS: **host-inferred** — see the table in this
+  /// enum's own dartdoc for why, and treat it as best-effort there.
+  ///
+  /// Note this no longer means "or any other/unknown cause": an unknown or
+  /// absent reason now emits nothing at all rather than being collapsed
+  /// onto this member (issue #126).
+  user('user'),
 
-  /// Android only, currently: the OS paused playback by revoking audio
-  /// focus (e.g. another app started playing audio). See
-  /// `MediaPlayerInstance.onPlayWhenReadyChanged`/`onIsPlayingChanged` in
-  /// `android/.../MediaPlayerManager.kt`.
-  audioFocusLoss,
+  /// The OS paused playback by revoking audio focus (e.g. another app
+  /// started playing audio, a phone call arrived).
+  ///
+  /// Android: `Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS`. iOS:
+  /// an `AVAudioSession.interruptionNotification` `.began` (phone call,
+  /// Siri, alarm) that is in progress when the pause is observed.
+  audioFocusLoss('audioFocusLoss'),
+
+  /// **Android only.** Playback was paused because the audio output became
+  /// "noisy" — headphones unplugged, or a Bluetooth device disconnected.
+  ///
+  /// ExoPlayer performs this pause itself (`setHandleAudioBecomingNoisy`),
+  /// so it never round-trips through Dart; before issue #126 it arrived
+  /// with no reason attached and was therefore indistinguishable from a
+  /// viewer pause. iOS never sends this value.
+  audioBecomingNoisy('audioBecomingNoisy'),
+
+  /// **Android only.** Playback was paused by a remote/external controller —
+  /// a media-session client such as a notification, a Bluetooth control, a
+  /// wearable, or Android Auto
+  /// (`Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE`). iOS never sends this
+  /// value.
+  remote('remote');
+
+  const PlayerPauseReason(this.wireValue);
+
+  /// The exact string native sends as the `pauseReason` key of the
+  /// `onStateChanged` event for this reason. Keep in sync with
+  /// `MediaPlayerManager.kt`'s `onIsPlayingChanged` and
+  /// `MediaPlayerManager.swift`'s `handleTimeControlStatusChange` —
+  /// `test/native_contract/pause_reason_vocabulary_test.dart` parses both
+  /// natives as text and fails on drift.
+  final String wireValue;
+
+  /// Parses a native `pauseReason` string.
+  ///
+  /// Returns `null` for a missing value (an ordinary pause native chose not
+  /// to attribute, or an older native build that predates a member) **and**
+  /// for an unrecognized one. Deliberately unlike
+  /// [MediaErrorCategory.fromWireValue], there is no catch-all member to
+  /// fall back to: guessing [user] for something native did not say is
+  /// [user] would re-create exactly the mis-attribution issue #126 is about
+  /// (an `audioBecomingNoisy` pause reading as a deliberate viewer pause).
+  static PlayerPauseReason? fromWireValue(String? value) {
+    if (value == null) return null;
+    for (final reason in PlayerPauseReason.values) {
+      if (reason.wireValue == value) return reason;
+    }
+    return null;
+  }
 }
 
 /// M-09: strips the query string and fragment from [url] before it is
@@ -275,6 +356,28 @@ class MediaPlayer {
 
   /// Whether the player has been disposed
   bool _isDisposed = false;
+
+  /// Issue #125: whether the player is currently in a *reported* error, so
+  /// that a subsequent quiescent state event from native cannot silently
+  /// erase [PlayerState.error].
+  ///
+  /// Set by [_handleError]. Cleared by [_clearErrorLatch] on any explicit
+  /// host command that means "I am trying again / doing something new"
+  /// ([load], [play], [stop], [seekTo], [setPlaylist], [skipToIndex]), and
+  /// by [_handleStateChanged] when native reports real forward progress
+  /// (`playing`/`completed`). See [_handleStateChanged] for the full
+  /// rationale.
+  bool _errorLatched = false;
+
+  /// Issue #125: watchdog armed by [load] and disarmed by the first
+  /// definitive outcome, per [MediaConfig.loadTimeout]. `null` whenever no
+  /// load is outstanding, or when the timeout is disabled.
+  Timer? _loadWatchdogTimer;
+
+  /// [PlaybackState.position] as of the moment [_loadWatchdogTimer] was
+  /// armed. The watchdog refuses to fire if the position has moved since —
+  /// a load that is slow but genuinely progressing is not a dead load.
+  Duration? _loadWatchdogStartPosition;
 
   /// Completer for initialization
   Completer<void>? _initializationCompleter;
@@ -641,8 +744,20 @@ class MediaPlayer {
   }
 
   /// Stream of [PlayerPauseReason]s, emitted alongside a `paused`
-  /// [PlaybackState] transition when the reason for the pause is known
-  /// (currently: Android audio-focus loss). See [PlayerPauseReason].
+  /// [PlaybackState] transition whenever native attributes the pause.
+  ///
+  /// Emits for [PlayerPauseReason.user], [PlayerPauseReason.audioFocusLoss],
+  /// [PlayerPauseReason.audioBecomingNoisy] and [PlayerPauseReason.remote];
+  /// stays silent for a pause native could not confidently attribute. See
+  /// [PlayerPauseReason] for the per-platform availability table — in
+  /// particular, `user` is player-reported on Android but host-inferred on
+  /// iOS, and the last two are Android-only.
+  ///
+  /// **Changed in issue #126:** this used to emit only
+  /// [PlayerPauseReason.audioFocusLoss] (it was matched against a hardcoded
+  /// string, which is why [PlayerPauseReason.user] was declared but
+  /// unreachable). Code that treated *any* event here as "audio focus was
+  /// lost" must now switch on the value.
   Stream<PlayerPauseReason> get pauseReasonStream {
     _throwIfDisposed();
     return _pauseReasonController.stream;
@@ -1121,10 +1236,44 @@ class MediaPlayer {
     }
   }
 
-  /// Load a single media item
+  /// Load a single media item.
+  ///
+  /// **This future completing means the item was handed to the platform —
+  /// not that it loaded.** ExoPlayer and AVPlayer both accept a media item
+  /// synchronously and only then begin fetching the manifest, negotiating
+  /// DRM and decoding; a 404, a dead CDN, an expired licence or an
+  /// unsupported codec is discovered *after* this call has already returned
+  /// successfully. Awaiting it is therefore not confirmation of anything a
+  /// viewer can see (issue #125).
+  ///
+  /// What throws from here is the narrow class of *synchronous* failures:
+  /// input validation ([ConfigurationException] — e.g. the HTTPS-for-DRM
+  /// rule), and a native rejection while building the media source
+  /// ([MediaLoadException]/[NetworkException]/[DrmException], mapped from
+  /// the `LOAD_ERROR` platform exception).
+  ///
+  /// To know whether playback actually started, observe the outcome instead:
+  ///
+  /// - [stateStream] / [currentState] reaching [PlayerState.ready] or
+  ///   [PlayerState.playing] — success;
+  /// - [errorStream] emitting, with [currentState] at [PlayerState.error] —
+  ///   failure. As of issue #125 that error state is *terminal*: it is held
+  ///   until the next explicit host command ([load], [play], [stop],
+  ///   [seekTo], [setPlaylist], [skipToIndex]) or until native reports real
+  ///   forward progress, so it can no longer be overwritten by the
+  ///   `idle`/`paused` event native emits as a consequence of the failure.
+  ///
+  /// A load that produces neither outcome (accepted, then silence) is caught
+  /// by the [MediaConfig.loadTimeout] watchdog — 30s by default, `null` to
+  /// disable — which reports a [NetworkException] with `isTimeout: true` on
+  /// [errorStream].
   Future<void> load(MediaItem item) async {
     await _ensureInitialized();
     _markActivity();
+
+    // Issue #125: a new load is the clearest possible statement that the
+    // host has moved on from any previous failure.
+    _clearErrorLatch();
 
     // Enforce HTTPS for DRM-protected media URLs before touching any state.
     InputValidator.validateMediaItemWithDrm(item);
@@ -1218,7 +1367,18 @@ class MediaPlayer {
         positionBasis: PositionBasis.absolute,
       ));
 
-      crashReporter?.log('Media loaded successfully', context: {
+      // Issue #125: armed only after the state has been forced to
+      // `buffering` above, since that is the state the watchdog re-checks
+      // before it is willing to report a timeout.
+      _armLoadWatchdog();
+
+      // Issue #125: deliberately NOT "Media loaded successfully". Reaching
+      // this line means the platform *accepted* the item, not that anything
+      // was loaded — the manifest fetch, DRM handshake and first decode all
+      // still lie ahead, and any of them can still fail asynchronously. The
+      // old wording read as confirmation of a successful load in crash
+      // reports, immediately above the very failures it did not predict.
+      crashReporter?.log('Media load handed to platform', context: {
         'mediaId': item.id,
         'duration': item.duration?.inSeconds,
         'mediaType': item.mediaType.name,
@@ -1335,6 +1495,10 @@ class MediaPlayer {
   Future<void> setPlaylist(Playlist playlist, {int? startIndex}) async {
     await _ensureInitialized();
     _markActivity();
+
+    // Issue #125: setting a playlist is an explicit host command that moves
+    // on from any previous failure.
+    _clearErrorLatch();
 
     if (playlist.items.isEmpty) {
       throw const ConfigurationException(
@@ -1521,6 +1685,10 @@ class MediaPlayer {
     await _ensureInitialized();
     _markActivity();
 
+    // Issue #125: an explicit play() is a retry attempt — end the terminal
+    // error latch so native's next state event is reported as-is again.
+    _clearErrorLatch();
+
     try {
       // If playback has finished, restart from the beginning so that calling
       // play() (e.g. from a lock-screen control or the play button) resumes
@@ -1562,6 +1730,12 @@ class MediaPlayer {
     await _ensureInitialized();
     _markActivity();
 
+    // Issue #125: a deliberate pause ends any outstanding load watchdog —
+    // the host is no longer waiting for this load to start playing, so a
+    // timeout would be reporting a failure nobody is waiting on. Note this
+    // does NOT clear the error latch: pausing is not a retry.
+    _cancelLoadWatchdog();
+
     try {
       await _invokeMethod('pause', {'playerId': playerId});
 
@@ -1592,6 +1766,12 @@ class MediaPlayer {
     await _ensureInitialized();
     _markActivity();
 
+    // Issue #125: stopping abandons the current load outright — disarm the
+    // watchdog, and clear the error latch so the `idle` state forced below
+    // (and everything native reports afterwards) is honest again.
+    _cancelLoadWatchdog();
+    _clearErrorLatch();
+
     try {
       await _invokeMethod('stop', {'playerId': playerId});
       _updateState(_currentState.copyWith(state: PlayerState.idle));
@@ -1617,6 +1797,10 @@ class MediaPlayer {
     // activity — otherwise a user actively seeking around a paused player
     // could still have it swept as "stale" mid-interaction.
     _markActivity();
+
+    // Issue #125: seeking is an explicit attempt to resume from somewhere —
+    // like play(), it ends the terminal error latch.
+    _clearErrorLatch();
 
     if (position.isNegative) {
       throw ConfigurationException(
@@ -2228,6 +2412,10 @@ class MediaPlayer {
   Future<void> skipToIndex(int index) async {
     _validatePlaylistOperation();
 
+    // Issue #125: skipping loads a (possibly different) item — end the
+    // terminal error latch so the new item's own state is reported.
+    _clearErrorLatch();
+
     if (index < 0 || index >= _currentPlaylist!.items.length) {
       throw ConfigurationException(
         'Invalid playlist index: $index',
@@ -2311,6 +2499,11 @@ class MediaPlayer {
     _isDisposed = true;
     _instances.remove(playerId);
     _lastActivity.remove(playerId);
+
+    // Issue #125: a pending load watchdog holds a Timer referencing `this`;
+    // cancel it before anything else so it can never fire against a disposed
+    // player (and never keeps the instance alive past disposal).
+    _cancelLoadWatchdog();
 
     // Close platform channel
     if (_isInitialized) {
@@ -2548,10 +2741,92 @@ class MediaPlayer {
 
   /// Handle load errors consistently
   void _handleLoadError(String errorMessage) {
+    // Issue #125: a synchronous load failure is just as terminal as an
+    // asynchronous one, and is followed by the same trailing quiescent
+    // native event. Latch it (and disarm the watchdog — this load already
+    // has its verdict) exactly like [_handleError] does.
+    _errorLatched = true;
+    _cancelLoadWatchdog();
     _updateState(_currentState.copyWith(
       state: PlayerState.error,
       errorMessage: errorMessage,
     ));
+  }
+
+  /// Issue #125: ends the terminal-error latch.
+  ///
+  /// Called from every explicit host command that expresses intent to move
+  /// on from the failure ([load], [play], [stop], [seekTo], [setPlaylist],
+  /// [skipToIndex]). Deliberately NOT called from passive/observational
+  /// calls or from the arrival of a native event that merely describes the
+  /// post-failure resting state — that is precisely what the latch exists to
+  /// ignore. Cheap and idempotent, so call sites do not need to test first.
+  void _clearErrorLatch() {
+    _errorLatched = false;
+  }
+
+  /// Issue #125: arms the load watchdog for the load just issued.
+  ///
+  /// No-op when [MediaConfig.loadTimeout] is `null` (watchdog disabled).
+  /// Records the current position so [_onLoadWatchdogFired] can tell a
+  /// genuinely stuck load from a slow-but-progressing one.
+  void _armLoadWatchdog() {
+    _cancelLoadWatchdog();
+
+    final timeout = _config.loadTimeout;
+    if (timeout == null || _isDisposed) return;
+
+    _loadWatchdogStartPosition = _currentState.position;
+    _loadWatchdogTimer = Timer(timeout, _onLoadWatchdogFired);
+  }
+
+  /// Issue #125: disarms the load watchdog. Idempotent.
+  void _cancelLoadWatchdog() {
+    _loadWatchdogTimer?.cancel();
+    _loadWatchdogTimer = null;
+    _loadWatchdogStartPosition = null;
+  }
+
+  /// Issue #125: the load handed to the platform never produced any
+  /// outcome — no `onError`, and no `ready`/`playing`/`completed`.
+  ///
+  /// Both guards below exist to make a false positive very unlikely, because
+  /// a false "this stream is dead" is a worse failure than a late true one:
+  ///
+  /// 1. the player must STILL be in [PlayerState.buffering] — anything else
+  ///    means something already resolved this load; and
+  /// 2. [PlaybackState.position] must not have advanced since [load] — a
+  ///    manifest fetch that is merely slow, or a long DRM handshake that is
+  ///    still making progress, keeps moving the playhead and is left alone.
+  ///
+  /// Routed through [_handleError] rather than [_updateState] directly so
+  /// the synthesized failure is indistinguishable, to a host, from a native
+  /// one: it lands on [errorStream] as a typed [NetworkException]
+  /// (`isTimeout: true`), sets [PlaybackState.errorMessage], and engages the
+  /// same terminal-error latch.
+  void _onLoadWatchdogFired() {
+    _loadWatchdogTimer = null;
+    if (_isDisposed) return;
+
+    if (_currentState.state != PlayerState.buffering) return;
+    if (_loadWatchdogStartPosition != null &&
+        _currentState.position != _loadWatchdogStartPosition) {
+      return;
+    }
+
+    final timeout = _config.loadTimeout;
+    _loadWatchdogStartPosition = null;
+
+    _handleError(
+      {
+        'error': 'Timed out after ${timeout?.inSeconds}s waiting for the '
+            'platform to report an outcome for the loaded media. The load '
+            'was accepted but never became ready and never reported an '
+            'error (see MediaConfig.loadTimeout).',
+        'category': MediaErrorCategory.network.wireValue,
+      },
+      isTimeout: true,
+    );
   }
 
   /// Update subtitle tracks selection state
@@ -2685,10 +2960,52 @@ class MediaPlayer {
     if (_isDisposed) return;
 
     final stateString = arguments['state'] as String;
-    final state = _stringToPlayerState(stateString);
+    final reportedState = _stringToPlayerState(stateString);
     final wasCompleted = _currentState.state == PlayerState.completed;
 
+    // Issue #125, layer B: `error` is terminal until something explicitly
+    // ends it. Native reports a *quiescent* state as a direct consequence of
+    // a failure — `STATE_IDLE` on Android, and on iOS a `timeControlStatus`
+    // transition to `.paused` — and both arrive AFTER the error event that
+    // explains them (verified for Media3 1.11.0: `EVENT_PLAYER_ERROR` is
+    // queued before `EVENT_PLAYBACK_STATE_CHANGED`). Applied unconditionally,
+    // as this used to be, that trailing event silently overwrote
+    // `PlayerState.error` with `idle`/`paused` — leaving a failed load
+    // byte-identical to a viewer pause in `PlaybackState`, which is exactly
+    // what #125 reported. `errorStream` was always correct; the state was not.
+    //
+    // Both natives now suppress that trailing event at the source (layer A),
+    // so in a matched Dart+native build this latch normally has nothing to
+    // do. It is kept as defense in depth because it is the ONLY protection
+    // for new Dart running against an older cached native build, where the
+    // suppression does not exist.
+    //
+    // Cleared by any explicit host command (load/play/stop/seekTo/
+    // setPlaylist/skipToIndex — see [_clearErrorLatch]) and, below, by
+    // native reporting real forward progress.
+    if (reportedState == PlayerState.playing ||
+        reportedState == PlayerState.completed) {
+      _errorLatched = false;
+    }
+    final state = _errorLatched ? PlayerState.error : reportedState;
+
+    // Issue #125: the first definitive outcome for the load disarms the
+    // watchdog. `error` counts — the failure has been reported by the
+    // regular path, so there is nothing left for a synthesized timeout to
+    // add. `idle`/`paused`/`buffering` deliberately do NOT: they are exactly
+    // the states a load that never resolves sits in.
+    if (reportedState == PlayerState.ready ||
+        reportedState == PlayerState.playing ||
+        reportedState == PlayerState.completed ||
+        reportedState == PlayerState.error) {
+      _cancelLoadWatchdog();
+    }
+
     _updateState(_currentState.copyWith(
+      // Buffer telemetry is passed through even while latched: it is
+      // diagnostic, host-facing, and still accurate after a failure (a host
+      // watching buffer health to decide whether to retry needs it to keep
+      // updating). Only the coarse `state` is held at `error`.
       state: state,
       isBuffering: arguments['isBuffering'] as bool? ?? false,
       bufferPercentage:
@@ -2709,15 +3026,22 @@ class MediaPlayer {
       _bufferingService.stopMonitoring();
     }
 
-    // H-01: only present on Android, and only for a "paused" event caused
-    // by the OS revoking audio focus — see
-    // MediaPlayerInstance.onPlayWhenReadyChanged/onIsPlayingChanged in
-    // android/.../MediaPlayerManager.kt. Absent otherwise, in which case a
-    // paused state is left to mean an ordinary user/API pause.
-    final pauseReasonString = arguments['pauseReason'] as String?;
-    if (pauseReasonString == 'audioFocusLoss' &&
-        !_pauseReasonController.isClosed) {
-      _pauseReasonController.add(PlayerPauseReason.audioFocusLoss);
+    // Issue #126: the `pauseReason` key, when native attaches one, names why
+    // a `paused` transition happened. Parsed through
+    // [PlayerPauseReason.fromWireValue] rather than compared against a
+    // hardcoded string — the previous `== 'audioFocusLoss'` test was why
+    // `PlayerPauseReason.user` was declared but literally unreachable, and
+    // why an Android `AUDIO_BECOMING_NOISY` pause (headphones unplugged)
+    // arrived unattributed and read as a viewer pause.
+    //
+    // An absent or unrecognized value emits nothing at all: native only
+    // attaches a reason it is confident about, and inventing one here would
+    // be worse than staying silent. See [PlayerPauseReason] for the full
+    // per-platform availability table (notably: iOS `user` is host-inferred).
+    final pauseReason =
+        PlayerPauseReason.fromWireValue(arguments['pauseReason'] as String?);
+    if (pauseReason != null && !_pauseReasonController.isClosed) {
+      _pauseReasonController.add(pauseReason);
     }
 
     // Auto-advance the playlist (respecting repeat/shuffle) when an item
@@ -2966,6 +3290,14 @@ class MediaPlayer {
         // directly. Mirror [_handleError]'s behaviour here so a DRM failure
         // is reachable through both surfaces, exactly like every other
         // playback error category.
+        //
+        // Issue #125: latch it too. A DRM failure is followed by the same
+        // trailing quiescent native state event as any other failure
+        // (ExoPlayer goes to STATE_IDLE, AVPlayer's timeControlStatus goes
+        // to .paused), which would otherwise erase this `error` a moment
+        // after C-01 finally made it reachable.
+        _errorLatched = true;
+        _cancelLoadWatchdog();
         _updateState(_currentState.copyWith(
           state: PlayerState.error,
           errorMessage: message,
@@ -3016,10 +3348,21 @@ class MediaPlayer {
   /// [PlaybackState.errorMessage] this always set, build and emit the
   /// concrete typed [MediaPlayerException] via [errorStream] using the
   /// shared [MediaErrorCategory] wire-format vocabulary native now sends.
-  void _handleError(Map<dynamic, dynamic> arguments) {
+  ///
+  /// [isTimeout] is Dart-side only and is never read from [arguments]:
+  /// it is set exclusively by the issue-#125 load watchdog
+  /// ([_onLoadWatchdogFired]) so the [NetworkException] it synthesizes
+  /// reports `isTimeout: true`. Native never sends such a key.
+  void _handleError(Map<dynamic, dynamic> arguments, {bool isTimeout = false}) {
     if (_isDisposed) return;
 
     final errorMessage = arguments['error'] as String;
+
+    // Issue #125: hold `error` until a host command (or real forward
+    // progress from native) ends it — see [_handleStateChanged]'s latch
+    // comment for why the very next native event would otherwise erase it.
+    _errorLatched = true;
+    _cancelLoadWatchdog();
 
     _updateState(_currentState.copyWith(
       state: PlayerState.error,
@@ -3027,14 +3370,16 @@ class MediaPlayer {
     ));
 
     if (!_errorController.isClosed) {
-      final details = arguments['httpStatusCode'] != null
-          ? {'httpStatusCode': arguments['httpStatusCode']}
-          : null;
+      final details = <String, dynamic>{
+        if (arguments['httpStatusCode'] != null)
+          'httpStatusCode': arguments['httpStatusCode'],
+        if (isTimeout) 'isTimeout': true,
+      };
       _errorController.add(mapNativeMediaError(
         message: errorMessage,
         categoryWireValue: arguments['category'] as String?,
         nativeErrorCode: arguments['nativeErrorCode']?.toString(),
-        details: details,
+        details: details.isEmpty ? null : details,
       ));
     }
   }

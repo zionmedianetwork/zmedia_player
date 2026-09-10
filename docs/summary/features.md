@@ -335,9 +335,15 @@ Purpose-built for TikTok/Reels-style vertical feeds, backed by `MediaPlayerPool`
 - **onCastStatusChanged** - Cast state changes
 - **onCastDevicesChanged** - Available devices
 - **onDrmSessionChanged** - DRM session updates
-- **errorStream / error** - `MediaController` convenience typed-error stream and last-error getter (re-emits `MediaPlayer.errorStream`)
+- **errorStream / error** - `MediaController` convenience typed-error stream and last-error getter (re-emits `MediaPlayer.errorStream`). **The primary failure signal** — most real playback failures are detected asynchronously, after `load()`/`play()` has already returned successfully
+- **pauseReasonStream** - `PlayerPauseReason` for a pause native attributes (`user`, `audioFocusLoss`, and Android-only `audioBecomingNoisy`/`remote`). Emits nothing for a pause native cannot attribute; **iOS `user` is host-inferred**, Android's is player-reported
 
-**Total:** 13 events
+**Total:** 14 events
+
+### Load & error semantics (issues #125, #126)
+- **`load()` completing means "handed to the platform"**, not "loaded" — see [player-api.md](../api-reference/player-api.md#load-completing-is-not-loaded)
+- **`PlayerState.error` is terminal** - held until an explicit host command (`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or real forward progress from native. It is no longer overwritten by the quiescent state each platform emits as a consequence of the failure (`idle` on Android, `paused` on iOS), which previously made a failed load report identically to a viewer pause. Suppressed natively on both platforms *and* latched in Dart (so new Dart against an older cached native build still behaves)
+- **`MediaConfig.loadTimeout`** - Dart-only load watchdog, default 30s, `null` disables. Reports a `NetworkException` with `isTimeout: true` when a load is accepted and then goes silent; refuses to fire while the load is still progressing
 
 ---
 

@@ -390,6 +390,98 @@ player.audioTracksStream.listen((List<AudioTrack> tracks) {
 
 ---
 
+### 9. Error Stream (`errorStream`)
+
+**Type**: `Stream<MediaPlayerException>`
+**Access**: `player.errorStream` (also re-emitted by `MediaController.errorStream`)
+
+The reachable half of the typed exception hierarchy. **Most real playback
+failures arrive here, not as a thrown exception**: ExoPlayer and AVPlayer both
+accept a media item synchronously and only afterwards discover network, HTTP,
+DRM, decoder and source problems, so `load()` has usually already completed
+successfully by the time the failure is detected. See
+[`load()` completing is not "loaded"](#load-completing-is-not-loaded) below.
+
+```dart
+player.errorStream.listen((MediaPlayerException e) {
+  if (e is NetworkException) {
+    // e.isTimeout is true for a MediaConfig.loadTimeout watchdog failure
+    showOfflineBanner();
+  } else if (e is DrmException) {
+    showDrmError(e);
+  } else if (e is MediaLoadException) {
+    showHttpError(e.statusCode);
+  }
+});
+```
+
+Emits exactly one typed exception per native `onError` event. Also emits a
+`DrmException` whenever `drmSessionStream` reports `DrmSessionState.error`, so
+DRM failures are reachable here rather than only as an untyped session state.
+
+The exception subtype is chosen from the `category` key of the `onError`
+payload — see [`onError`](#onerror) below.
+
+---
+
+### 10. Pause Reason Stream (`pauseReasonStream`)
+
+**Type**: `Stream<PlayerPauseReason>`
+**Access**: `player.pauseReasonStream`
+
+Emits alongside a `paused` `PlaybackState` transition **when native attributes
+the pause**. `PlaybackState` itself carries no field for this, so the reason
+travels beside the state event rather than replacing it — both "the viewer
+tapped pause" and "the OS revoked audio focus" are legitimately `paused`.
+
+```dart
+player.pauseReasonStream.listen((PlayerPauseReason reason) {
+  switch (reason) {
+    case PlayerPauseReason.user:
+      // A deliberate pause. Do NOT auto-resume.
+      break;
+    case PlayerPauseReason.audioFocusLoss:
+    case PlayerPauseReason.audioBecomingNoisy:
+    case PlayerPauseReason.remote:
+      // Not the viewer's doing — a "Resume" affordance is appropriate.
+      break;
+  }
+});
+```
+
+| Member | Wire value | Android | iOS |
+|---|---|---|---|
+| `user` | `"user"` | player-reported (`PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST`) | **host-inferred** |
+| `audioFocusLoss` | `"audioFocusLoss"` | player-reported (`..._AUDIO_FOCUS_LOSS`) | `AVAudioSession` interruption (call/Siri/alarm) |
+| `audioBecomingNoisy` | `"audioBecomingNoisy"` | player-reported (`..._AUDIO_BECOMING_NOISY` — headphones unplugged / Bluetooth disconnected) | **never sent** |
+| `remote` | `"remote"` | player-reported (`..._REMOTE` — notification, Bluetooth control, wearable, Android Auto) | **never sent** |
+
+**A pause native cannot attribute emits nothing at all.**
+`PlayerPauseReason.fromWireValue` returns `null` for an absent *and* for an
+unrecognised value — deliberately unlike `MediaErrorCategory.fromWireValue`,
+which falls back to `unknown`. There is no catch-all member to guess with, and
+guessing `user` would be actively harmful for any host that keys "don't
+auto-recover" off it.
+
+**iOS `user` is host-inferred, Android's is player-reported.** AVFoundation
+exposes no `reasonForPausing` — a `.paused` `timeControlStatus` carries no
+explanation — so on iOS this package sets a flag when its own `pause()` runs
+and attributes the resulting transition to it. Treat it as best-effort there.
+This is the same class of documented cross-platform divergence as
+`liveEdgeOffset` (see [Platform divergence](live-streaming.md#platform-divergence-this-value-measures-different-things)),
+not a defect on either side.
+
+> **Breaking change (issue #126).** This stream previously emitted **only**
+> `PlayerPauseReason.audioFocusLoss`; the emission site compared the payload
+> against a hardcoded string, which is why `PlayerPauseReason.user` was
+> declared, exported and documented but could not be produced by any input.
+> The stream is now chatty — it fires on every attributed pause — so code that
+> treated *any* event here as "audio focus was lost" must switch on the value.
+> Two new members (`audioBecomingNoisy`, `remote`) also break an exhaustive
+> `switch` with no `default`.
+
+---
+
 ## Complete Usage Example
 
 ```dart
@@ -616,6 +708,8 @@ Rx.combineLatest2(
 | `subtitleTracksStream` | On track change | Tracks loaded/changed | Yes Yes |
 | `qualityTracksStream` | On track change | Tracks loaded/changed | Yes Yes |
 | `audioTracksStream` | On track change | Tracks loaded/changed | Yes Yes |
+| `errorStream` | On failure | Native `onError`, or a `DrmSessionState.error` | Yes Yes |
+| `pauseReasonStream` | On an *attributed* pause | Native attached a `pauseReason` | Yes Yes |
 
 **Note**: All streams are **broadcast streams**, meaning multiple listeners can subscribe simultaneously.
 
@@ -627,6 +721,101 @@ These are the raw native -> Dart `MethodChannel` payloads that back the streams
 above. Host apps never construct these; they are documented because a payload
 key is invisible to `flutter analyze` and to the (channel-mocking) test suite,
 so this table is the only place the contract is recorded.
+
+### `onStateChanged`
+
+Backs `stateStream`/`PlaybackState.state`, and `pauseReasonStream`.
+
+| Key | Type | Required | Meaning |
+|-----|------|----------|---------|
+| `playerId` | String | yes | Routes the event to a `MediaPlayer` instance |
+| `state` | String | yes | One of `idle`/`buffering`/`ready`/`playing`/`paused`/`completed`/`error`; parsed into `PlayerState` |
+| `isBuffering` | bool | no (defaults `false`) | Whether the player is actively buffering |
+| `bufferPercentage` | num | no (defaults `0.0`) | Percentage of the full duration buffered. Android: `Player.getBufferedPercentage()`. iOS: computed from the furthest end of any loaded time range; `0` for live/unknown-duration content |
+| `pauseReason` | String | no | Why a `paused` transition happened — `"user"`/`"audioFocusLoss"`/`"audioBecomingNoisy"`/`"remote"`. **Omitted entirely** (never sent as `null`) when native cannot attribute the pause. See [Pause Reason Stream](#10-pause-reason-stream-pausereasonstream) for the per-platform availability table |
+
+Native sources:
+
+| | Android (ExoPlayer / Media3) | iOS (AVFoundation) |
+|---|---|---|
+| `state` | `Player.Listener.onPlaybackStateChanged` (`STATE_IDLE`/`BUFFERING`/`READY`/`ENDED`, with `READY` split on `playWhenReady`) and `onIsPlayingChanged` | `AVPlayer.timeControlStatus` KVO, with `AVPlayerItem.status` KVO for `buffering`/`ready`, and `AVPlayerItemDidPlayToEndTime` for `completed` |
+| `pauseReason` | `Player.PlayWhenReadyChangeReason`, captured by `onPlayWhenReadyChanged` and read in `onIsPlayingChanged`. `END_OF_MEDIA_ITEM` and `SUPPRESSED_TOO_LONG` are deliberately unmapped (the first is not a pause; the second has no consumer-meaningful cause) | `consumePauseReason()` — the `AVAudioSession` interruption flag first, then the host-`pause()` flag. Never produces `audioBecomingNoisy` or `remote` |
+
+#### Post-failure suppression (issue #125)
+
+**Both natives deliberately stop sending this event while the player is in a
+reported error**, and this is load-bearing rather than an optimisation.
+
+Each platform emits a *quiescent* state as a direct consequence of a failure —
+`STATE_IDLE` (`"idle"`) on Android, a `timeControlStatus` transition to
+`.paused` (`"paused"`) on iOS — and it arrives immediately **after** the
+`onError` that explains it. (On Android this ordering is guaranteed: Media3
+queues `EVENT_PLAYER_ERROR` before `EVENT_PLAYBACK_STATE_CHANGED` and before
+`onIsPlayingChanged`.) Applied as an ordinary transition, that trailing event
+overwrote `PlayerState.error`, so a failed load ended up reported as `paused`
+on iOS and `idle` on Android — byte-identical to a viewer pause.
+
+- **Android** returns early from `onPlaybackStateChanged`/`onIsPlayingChanged`
+  while `Player.getPlayerError() != null`, which is non-null from the error
+  until the next `prepare()` — exactly the window that needs suppressing, since
+  every real recovery goes through `prepare()`.
+- **iOS** returns early from `handleTimeControlStatusChange` while
+  `currentItem?.status == .failed || player.status == .failed`. This cannot
+  hide a recovery: an `AVPlayerItem` failure is terminal by Apple's contract
+  (the item must be replaced), and the only route back is `loadMediaItem()`,
+  which always calls `replaceCurrentItem(with:)`.
+
+Dart latches the error state independently (see
+`MediaPlayer._handleStateChanged`), so **new Dart against an older cached
+native build that lacks these suppressions still behaves correctly.** While
+latched, `state` is pinned at `error` but `isBuffering`/`bufferPercentage`
+still flow through, so host diagnostics keep updating.
+
+### `onError`
+
+Backs `errorStream` and `PlaybackState.errorMessage`/`PlayerState.error`.
+
+| Key | Type | Required | Meaning |
+|-----|------|----------|---------|
+| `playerId` | String | yes | Routes the event to a `MediaPlayer` instance |
+| `error` | String | yes | Human-readable message. Becomes `PlaybackState.errorMessage` and the exception's `message` |
+| `category` | String | no | `NETWORK`/`HTTP`/`DRM`/`DECODER`/`SOURCE`/`UNKNOWN` — the `MediaErrorCategory` vocabulary that selects the exception subtype. Absent or unrecognised maps to `UNKNOWN` -> `PlaybackException` |
+| `nativeErrorCode` | String or int | no | The platform's own code (`PlaybackException.errorCodeName` on Android, `NSError.code` on iOS). Stringified into `DrmException.errorCode`/`PlaybackException.errorCode` |
+| `httpStatusCode` | int | no | HTTP status behind the failure, when one was recorded. Becomes `MediaLoadException.statusCode` for the `HTTP` category |
+
+There is no `isTimeout` key: `NetworkException.isTimeout` is set only by the
+Dart-side `MediaConfig.loadTimeout` watchdog (below), never by native.
+
+Both natives emit this from KVO/listener callbacks whose delivery thread is not
+guaranteed to be the main thread; iOS routes it through a helper that runs
+**inline when already on main** and hops only when it is not, because an
+unconditional hop would reorder `onError` after synchronously-emitted state
+events — recreating the clobbering defect above by a different route.
+
+#### `load()` completing is not "loaded"
+
+`MediaPlayer.load()` resolving means the item was **handed to the platform**.
+The manifest fetch, DRM handshake and first decode all still lie ahead, and any
+of them can fail after the future has already completed successfully. Observe
+the outcome on the streams instead:
+
+| Outcome | Signal |
+|---|---|
+| Success | `stateStream` reaching `PlayerState.ready` or `PlayerState.playing` |
+| Failure | `errorStream` emitting, with `currentState.state == PlayerState.error` |
+| Neither (accepted, then silence) | `MediaConfig.loadTimeout` watchdog |
+
+`PlayerState.error` is **terminal**: held until the next explicit host command
+(`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or until native
+reports real forward progress (`playing`/`completed`).
+
+The watchdog (`MediaConfig.loadTimeout`, default 30s, `null` disables) is
+**Dart-only** — it is never serialized into the `config` payload and no native
+code reads it. On firing it synthesizes a `NetworkException` with
+`isTimeout: true` onto `errorStream` and moves the state to
+`PlayerState.error`. It refuses to fire unless the player is *still*
+`buffering` **and** `position` has not advanced since the load, so a
+slow-but-progressing manifest fetch or a long DRM handshake is never killed.
 
 ### `onPositionChanged`
 
@@ -810,7 +999,7 @@ player.positionStream.listen((position) {
 
 ## Summary
 
-The ZMedia Player provides **8 comprehensive event streams** covering:
+The ZMedia Player provides **10 comprehensive event streams** covering:
 
 1. **Playback state** - Complete player state with rich metadata
 2. **Position tracking** - Real-time position updates
@@ -820,11 +1009,19 @@ The ZMedia Player provides **8 comprehensive event streams** covering:
 6. **Subtitle management** - Available and selected subtitles
 7. **Quality selection** - Video quality/resolution options
 8. **Audio tracks** - Multi-language audio support
+9. **Errors** - Typed, category-tagged failures (`errorStream`)
+10. **Pause attribution** - Why a pause happened, when known (`pauseReasonStream`)
+
+(Plus `bandwidthStream`, `bufferHealthStream`, `drmSessionStream`,
+`pipStatusStream`/`pipActionStream`, `castStatusStream`/`castDevicesStream`,
+`notificationActionStream`, `screenCaptureStream` and
+`networkStatusStream`/`networkChangeStream` — see
+[player-api.md](player-api.md) for the full inventory.)
 
 All streams follow Flutter's reactive programming model and are broadcast streams supporting multiple simultaneous listeners.
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: October 19, 2025
+**Document Version**: 1.1
+**Last Updated**: September 10, 2026
 **Status**: Complete

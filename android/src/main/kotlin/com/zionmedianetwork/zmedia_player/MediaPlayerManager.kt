@@ -355,19 +355,57 @@ class MediaPlayerInstance(
     // log for the item that's already been flagged.
     private var liveOffsetAnchorWarningLogged: Boolean = false
 
-    // H-01: reason for the most recent playWhenReady change, so that when
-    // onIsPlayingChanged subsequently reports isPlaying == false we can tell
-    // an explicit user/API pause apart from one the OS forced by revoking
-    // audio focus (e.g. another app started playing audio). onIsPlayingChanged
-    // alone cannot distinguish these — both drive playWhenReady to false —
-    // which previously made a focus-loss pause indistinguishable from a user
-    // pause on the Dart side. Mirrors, in spirit, how Phase 2 disambiguated
-    // stall-vs-pause on iOS via timeControlStatus/reasonForWaitingToPlay.
+    // H-01 / issue #126: reason for the most recent playWhenReady change, so
+    // that when onIsPlayingChanged subsequently reports isPlaying == false we
+    // can tell an explicit user/API pause apart from one the OS forced —
+    // revoked audio focus, headphones unplugged (AUDIO_BECOMING_NOISY), or a
+    // remote/media-session controller. onIsPlayingChanged alone cannot
+    // distinguish any of these — all drive playWhenReady to false — which
+    // previously made every non-focus-loss pause indistinguishable from a
+    // user pause on the Dart side. Mirrors, in spirit, how Phase 2
+    // disambiguated stall-vs-pause on iOS via
+    // timeControlStatus/reasonForWaitingToPlay.
     private var lastPlayWhenReadyChangeReason: Int =
         Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST
 
     private val playerListener = object : Player.Listener {
+        /**
+         * Issue #125: whether ExoPlayer is currently sitting in a reported
+         * error, in which case any state/isPlaying transition it emits is
+         * error-derived noise rather than an ordinary transition worth
+         * reporting to Dart.
+         *
+         * Media3 queues `EVENT_PLAYER_ERROR` BEFORE
+         * `EVENT_PLAYBACK_STATE_CHANGED` (and before `onIsPlayingChanged`) —
+         * see `ExoPlayerImpl.updatePlaybackInfo` in Media3 1.11.0 — so on a
+         * failure Dart correctly receives `onError` first and then, a beat
+         * later, the `STATE_IDLE` ("idle") the failure itself caused, or a
+         * "paused" if the failure interrupted real playback. Applied as an
+         * ordinary transition, that trailing event overwrote
+         * `PlayerState.error` on the Dart side, making a failed load
+         * indistinguishable from a viewer pause.
+         *
+         * `Player.getPlayerError()` is non-null from the moment the error is
+         * raised until the next `prepare()`, which is exactly the window in
+         * which those trailing events must be suppressed: a real recovery
+         * always goes through `prepare()` (loadMediaItem/retry), which clears
+         * it and re-opens reporting. Dart additionally latches the error
+         * state itself, so an older cached native build without this
+         * suppression still behaves correctly — see
+         * `MediaPlayer._handleStateChanged`.
+         */
+        private fun isInReportedError(): Boolean = exoPlayer?.playerError != null
+
         override fun onPlaybackStateChanged(playbackState: Int) {
+            // Issue #125 — see isInReportedError().
+            if (isInReportedError()) {
+                android.util.Log.d(
+                    "MediaPlayerInstance",
+                    "Suppressing post-error playback state $playbackState (error already reported)"
+                )
+                return
+            }
+
             val stateName = when (playbackState) {
                 Player.STATE_IDLE -> "IDLE"
                 Player.STATE_BUFFERING -> "BUFFERING"
@@ -399,17 +437,57 @@ class MediaPlayerInstance(
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             android.util.Log.d("MediaPlayerInstance", "IsPlaying changed: $isPlaying")
+
+            // Issue #125 — see isInReportedError(). A failure that interrupts
+            // real playback drives isPlaying to false; reporting that as a
+            // plain "paused" is what made a dead stream look like a viewer
+            // pause.
+            if (isInReportedError()) {
+                android.util.Log.d(
+                    "MediaPlayerInstance",
+                    "Suppressing post-error isPlaying=$isPlaying (error already reported)"
+                )
+                return
+            }
+
             val state = if (isPlaying) "playing" else "paused"
-            // Only a "paused" transition caused by the OS revoking audio focus
-            // gets a reason attached; a normal user/API pause or any other
-            // playWhenReady-change reason leaves pauseReason null so the Dart
-            // side's default ("user pause") interpretation stands.
-            val pauseReason = if (!isPlaying &&
-                lastPlayWhenReadyChangeReason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS
-            ) {
-                "audioFocusLoss"
-            } else {
+
+            // Issue #126: attribute the pause using ExoPlayer's own
+            // PlayWhenReadyChangeReason, which onPlayWhenReadyChanged has
+            // already captured into lastPlayWhenReadyChangeReason. Every
+            // constant Media3 defines is mapped, and the wire strings must
+            // stay identical to PlayerPauseReason.wireValue in
+            // lib/src/core/media_player.dart —
+            // test/native_contract/pause_reason_vocabulary_test.dart parses
+            // this file as text and fails if they drift.
+            //
+            // Previously only AUDIO_FOCUS_LOSS was mapped and everything else
+            // collapsed to null, which had two costs: USER_REQUEST — literally
+            // PlayerPauseReason.user, already sitting in this field — never
+            // reached Dart at all, and AUDIO_BECOMING_NOISY (headphones
+            // unplugged; ExoPlayer pauses itself via
+            // setHandleAudioBecomingNoisy(true), so it never round-trips
+            // through Dart) arrived unattributed and read as a viewer pause.
+            //
+            // The two remaining Media3 constants are deliberately left
+            // unmapped: END_OF_MEDIA_ITEM (5) is not a pause at all (the
+            // player reaches STATE_ENDED, reported as "completed"), and
+            // SUPPRESSED_TOO_LONG (6) is an ExoPlayer-internal suppression
+            // with no consumer-meaningful cause. Both, like any unrecognized
+            // future reason, map to null: Dart treats a missing reason as
+            // "not attributed" and emits nothing, which is the safe failure
+            // mode. Guessing "user" would be worse than silence, since that
+            // is what a host keys "don't auto-recover" on.
+            val pauseReason = if (isPlaying) {
                 null
+            } else {
+                when (lastPlayWhenReadyChangeReason) {
+                    Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> "user"
+                    Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS -> "audioFocusLoss"
+                    Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY -> "audioBecomingNoisy"
+                    Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE -> "remote"
+                    else -> null
+                }
             }
             notifyStateChanged(state, false, pauseReason)
         }
@@ -1625,10 +1703,16 @@ class MediaPlayerInstance(
                 "isBuffering" to isBuffering,
                 "bufferPercentage" to (exoPlayer?.bufferedPercentage ?: 0)
             )
-            // H-01: only attached for a "paused" event caused by the OS
-            // revoking audio focus — see onIsPlayingChanged/onPlayWhenReadyChanged
-            // above and MediaPlayer._handleStateChanged / pauseReasonStream on
-            // the Dart side.
+            // Issue #126: attached for any "paused" event ExoPlayer
+            // attributes — "user", "audioFocusLoss", "audioBecomingNoisy" or
+            // "remote". Omitted entirely (never sent as null) when the pause
+            // has no confident attribution, so Dart's
+            // PlayerPauseReason.fromWireValue returns null and
+            // pauseReasonStream stays silent rather than guessing. See
+            // onIsPlayingChanged/onPlayWhenReadyChanged above and
+            // MediaPlayer._handleStateChanged / pauseReasonStream on the Dart
+            // side. iOS mirrors this key in
+            // MediaPlayerManager.swift's notifyStateChanged.
             pauseReason?.let { arguments["pauseReason"] = it }
             methodChannel.invokeMethod("onStateChanged", arguments)
         } catch (e: Exception) {

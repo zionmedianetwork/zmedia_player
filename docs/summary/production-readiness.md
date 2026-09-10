@@ -16,6 +16,14 @@
 > validated production-ready end-to-end**. Treat this as a historical snapshot; see
 > the [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md)
 > for current status.
+>
+> **Still awaiting on-device verification (issues #125/#126, this change):** the native
+> post-failure state suppressions (`Player.getPlayerError() != null` on Android;
+> `currentItem?.status == .failed` on iOS), the iOS main-thread hop for
+> `FlutterMethodChannel.invokeMethod` from KVO callbacks, and the iOS pause-attribution
+> bookkeeping (`pauseWasHostInitiated`, `interruptionInProgress` — the latter needs a real
+> phone call/Siri/alarm, which a simulator cannot produce). The Dart halves of both fixes are
+> covered by automated tests.
 
 ## Executive Summary
 
@@ -416,6 +424,15 @@ flutter analyze
    - DRM license acquisition failures
    - Certificate loading errors
    - Playback errors
+
+   Instrument `MediaPlayer.errorStream`, not just thrown exceptions: most real failures are
+   detected asynchronously, after `load()`/`play()` has already returned successfully (see
+   [`load()` completing is not "loaded"](../api-reference/player-api.md#load-completing-is-not-loaded)).
+   `PlaybackState.state == PlayerState.error` is now a reliable second signal — as of issue
+   #125 it is terminal until a host command, rather than being overwritten by the quiescent
+   state each platform emits as a consequence of the failure. `NetworkException.isTimeout`
+   distinguishes a `MediaConfig.loadTimeout` watchdog failure (accepted, then silence) from a
+   reported one, which is worth splitting in a dashboard: they usually have different causes.
 
 2. **Performance Metrics**
    - Startup time trends

@@ -138,8 +138,31 @@ doesn't have to reach through `controller.player` just for error state.
 | `pipActionStream` | `PipActionEvent` (custom `PipConfig.actions` tap — Android only) |
 | `notificationActionStream` | `String` (action id) |
 | `errorStream` | `MediaPlayerException` (typed — see error categories below) |
-| `pauseReasonStream` | `PlayerPauseReason` (distinguishes an audio-focus-loss pause from a user pause) |
+| `pauseReasonStream` | `PlayerPauseReason` — why a `paused` transition happened, when native attributes it |
 | `networkStatusStream` / `networkChangeStream` | `NetworkStatus` / `NetworkChangeEvent` |
+
+### `pauseReasonStream` — pause attribution (issue #126)
+
+Emits only when native attaches a `pauseReason` to its `onStateChanged` event. An
+unattributed pause emits **nothing** — `PlayerPauseReason.fromWireValue` returns `null` for an
+absent *or* unrecognized value and never guesses, because a wrong `user` is worse than none for
+a host keying "don't auto-recover" off it.
+
+| `PlayerPauseReason` | wire value | Android | iOS |
+|---|---|---|---|
+| `user` | `"user"` | player-reported (`PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST`) | **host-inferred** — a flag set by this package's own `pause()` |
+| `audioFocusLoss` | `"audioFocusLoss"` | player-reported (`..._AUDIO_FOCUS_LOSS`) | `AVAudioSession` interruption in progress (call/Siri/alarm) |
+| `audioBecomingNoisy` | `"audioBecomingNoisy"` | player-reported (`..._AUDIO_BECOMING_NOISY` — headphones unplugged) | **never sent** |
+| `remote` | `"remote"` | player-reported (`..._REMOTE` — notification/Bluetooth/Auto) | **never sent** |
+
+The `user` asymmetry is real and deliberate: AVFoundation exposes no `reasonForPausing`, so iOS
+has nothing to read and infers instead. Same class of documented cross-platform divergence as
+`liveEdgeOffset` (CLAUDE.md gotcha 15). `test/native_contract/pause_reason_vocabulary_test.dart`
+parses both natives as text and fails on drift in either direction.
+
+**Breaking, as of this change:** this stream used to emit *only* `audioFocusLoss` (it was
+matched against a hardcoded string, which is why `user` was declared but unreachable). Code that
+treated any event here as "focus lost" must now switch on the value.
 
 Native→Dart events (handled in `MediaPlayer._handleMethodCall`, dispatched by `playerId`):
 `onPlaybackStateChanged`, `onPositionChanged`, `onDurationChanged`, `onVolumeChanged`,
@@ -208,9 +231,34 @@ guarded by a test that parses the native sources as text**
 (`test/exceptions/error_category_vocabulary_test.dart`) — if you add or rename a category on one
 platform, add it to `MediaErrorCategory` and to both native categorisers, or that test fails. The
 same technique guards the `connectionType` vocabulary in
-`test/models/network_status_vocabulary_test.dart`, and the Android HTTP-header wiring in
+`test/models/network_status_vocabulary_test.dart`, the Android HTTP-header wiring in
 `test/native_contract/android_http_headers_test.dart` (issue #127 — see the header note
-below).
+below), the notification-artwork header wiring in
+`test/native_contract/notification_artwork_headers_test.dart`, and the `pauseReason`
+vocabulary in `test/native_contract/pause_reason_vocabulary_test.dart`.
+
+**`load()` completing != loaded (issue #125).** `MediaPlayer.load()`/`MediaController.load()`
+resolving means the item was *handed to the platform*. ExoPlayer and AVPlayer accept a media item
+synchronously and only then fetch the manifest, negotiate DRM and decode — a 404, dead CDN,
+expired licence or unsupported codec surfaces **after** the future has already completed
+successfully. Observe the outcome instead: `PlayerState.ready`/`.playing` for success,
+`errorStream` + `PlayerState.error` for failure.
+
+`PlayerState.error` is now **terminal**: it is held until the next explicit host command
+(`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or until native reports real forward
+progress (`playing`/`completed`). Previously the quiescent state each platform emits as a
+*consequence* of the failure (`idle` on Android, `paused` on iOS — both arrive right after
+`onError`) overwrote it, so a failed load ended up byte-identical to a viewer pause. Both natives
+now suppress that trailing event at the source (`playerError != null` in `MediaPlayerManager.kt`;
+`currentItem?.status == .failed` in `MediaPlayerManager.swift`), and Dart latches it as well so
+new Dart against an older cached native build still behaves. Buffer telemetry (`isBuffering`,
+`bufferPercentage`) is deliberately still passed through while latched.
+
+A load that produces *no* outcome at all is caught by `MediaConfig.loadTimeout` (default 30s,
+`null` disables): it reports a `NetworkException` with `isTimeout: true` on `errorStream`. The
+timer is **Dart-only** — it never crosses the channel and no native code reads it — and refuses to
+fire unless the player is still `buffering` **and** `position` has not advanced, so a slow-but-
+progressing load is never killed.
 
 **Protocol version.** `initialize` exchanges a protocol version in both directions; a skew raises
 `ProtocolMismatchException` rather than a raw `MissingPluginException`. If you add a MethodChannel
@@ -552,8 +600,7 @@ each taking the header map directly.
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested** (1118 tests as of this writing — run `flutter test`
-for the live count); **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested** (1167 tests as of this writing — run `flutter test`for the live count); **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Media notifications —

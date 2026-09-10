@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### BREAKING
+- **`PlayerPauseReason` gained two members and `pauseReasonStream` became chatty** (issue #126).
+  The enum is now an enhanced enum with a `wireValue` field and a static
+  `PlayerPauseReason.fromWireValue(String?)` (returning `null` — never a guess — for an absent
+  or unrecognized value, following the `MediaErrorCategory.fromWireValue` precedent but
+  deliberately without its `unknown` catch-all). Two members were added:
+  `PlayerPauseReason.audioBecomingNoisy` (Android only — headphones unplugged / Bluetooth
+  disconnected) and `PlayerPauseReason.remote` (Android only — notification, Bluetooth control,
+  wearable, Android Auto). **This breaks any consumer's exhaustive `switch` over
+  `PlayerPauseReason` that has no `default` arm.**
+
+  `MediaPlayer.pauseReasonStream` now fires on **every** pause native attributes, not only on
+  audio-focus loss. Previously the sole emission site compared the payload against the
+  hardcoded string `'audioFocusLoss'`, which is why `PlayerPauseReason.user` was declared,
+  exported and documented while no input could ever produce it — and why an Android
+  `AUDIO_BECOMING_NOISY` pause arrived unattributed and therefore read as a viewer pause per
+  the enum's own dartdoc. **Code that treated any event on this stream as "audio focus was
+  lost" must now switch on the value.**
+
+  `PlayerPauseReason.user`'s meaning also narrowed: it no longer means "or any other/unknown
+  cause". An unattributed pause emits nothing at all.
+
 ### Fixed
 - **Android sent only the LAST entry of `MediaItem.httpHeaders`; every other header was
   silently dropped** (issue #127). `MediaPlayerManager.loadMediaItem` built its
@@ -73,6 +95,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root `README.md`'s primary quick-start snippet demonstrated header auth via the inert
   `MediaConfig.httpHeaders`. Both now show and describe `MediaItem.httpHeaders`.
 
+- **A failed load ended in `paused`/`idle`, never `error`** (issue #125). `PlayerState.error`
+  was not terminal — it was overwritten by the very next state event, and both platforms emit
+  a quiescent state as a *direct consequence of* the failure: ExoPlayer goes to `STATE_IDLE`
+  (reported `"idle"`), and on iOS an item failure drives `timeControlStatus` to `.paused`
+  (reported `"paused"`, byte-identical to a viewer pause). On Android the ordering is
+  guaranteed by Media3, which queues `EVENT_PLAYER_ERROR` before `EVENT_PLAYBACK_STATE_CHANGED`
+  and before `onIsPlayingChanged` — so the error genuinely arrived first and was then clobbered.
+  `MediaPlayer.errorStream` was correct on both platforms throughout; it was
+  `PlaybackState.state` that lied, which is why a dead stream was indistinguishable from a
+  paused one in any UI driven by state rather than by `errorStream`.
+
+  Fixed in three layers:
+  - **Native suppression.** `MediaPlayerManager.kt` returns early from
+    `onPlaybackStateChanged`/`onIsPlayingChanged` while `Player.getPlayerError() != null`
+    (non-null from the error until the next `prepare()` — exactly the window that needs
+    suppressing, since every real recovery goes through `prepare()`).
+    `MediaPlayerManager.swift` returns early from `handleTimeControlStatusChange` while
+    `currentItem?.status == .failed || player.status == .failed`; this cannot hide a recovery,
+    because an `AVPlayerItem` failure is terminal by Apple's contract and the only route back
+    is `loadMediaItem()`, which always calls `replaceCurrentItem(with:)`.
+  - **Dart error latch.** `PlayerState.error` is held until an explicit host command (`load`,
+    `play`, `stop`, `seekTo`, `setPlaylist`, `skipToIndex`) or until native reports real
+    forward progress (`playing`/`completed`). This is defense in depth: it is the only
+    protection for an app running new Dart against an older cached native build. Buffer
+    telemetry (`isBuffering`, `bufferPercentage`) deliberately keeps flowing while latched so
+    host diagnostics stay live. A synchronous load failure and a `DrmSessionState.error` engage
+    the same latch.
+  - **Load watchdog.** See `MediaConfig.loadTimeout` under Added.
+
+  Consequence worth calling out: **a post-failure `buffering` is no longer treated as
+  recovery.** `MediaController.hasError`/`error` now clear on real forward progress or a host
+  command, not on any state event.
+- **iOS emitted `onError`/`onStateChanged` from KVO callbacks on an unspecified thread**
+  (found while tracing #125). `FlutterMethodChannel.invokeMethod` must be called on the main
+  thread — a rule this package already followed for `onNetworkStatusChanged`
+  (`ZMediaPlayerPlugin.swift`) and `onDrmSessionUpdate` (`DrmHandler.swift`) — but
+  `notifyError`/`notifyStateChanged` called it directly from `AVPlayerItem.status`,
+  `AVPlayer.status` and `timeControlStatus` observers, whose delivery thread AVFoundation does
+  not guarantee. Both now route through a shared helper that runs the block **inline when
+  already on the main thread** and hops only when it is not. The inline branch is load-bearing:
+  an unconditional `DispatchQueue.main.async` would defer synchronously-emitted events and
+  reorder `onError` after a later `onStateChanged`, recreating #125's clobbering by a
+  different route.
+- **`crashReporter.log('Media loaded successfully', ...)` in `MediaPlayer.load()` was a false
+  confirmation** — it was logged when the platform *accepted* the item, immediately above the
+  asynchronous failures it did not predict. Reworded to `'Media load handed to platform'`.
+  `load()`'s dartdoc now states plainly that completing means "handed to the platform", not
+  "loaded", and points at `stateStream`/`errorStream` for the real outcome.
+- **`PlayerPauseReason.user` was declared but unreachable, and `AUDIO_BECOMING_NOISY` was
+  actively mislabelled** (issue #126). Android's `onIsPlayingChanged` collapsed every
+  `PlayWhenReadyChangeReason` other than audio-focus loss to `null` — including
+  `PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST`, which is exactly `user` and was already sitting
+  in the field, and including `AUDIO_BECOMING_NOISY` (ExoPlayer pauses itself via
+  `setHandleAudioBecomingNoisy(true)`, so it never round-trips through Dart). All four Media3
+  constants are now mapped; `END_OF_MEDIA_ITEM` and `SUPPRESSED_TOO_LONG` are deliberately left
+  unmapped, and any unrecognized future reason still sends no key.
+
+  iOS never sent a `pauseReason` key at all — a call/Siri/alarm interruption was reported
+  identically to a viewer pause, which is the parity gap #126 reported.
+  `MediaPlayerManager.swift`'s `notifyStateChanged` now takes an optional `pauseReason`
+  (attached only when non-nil, mirroring `MediaPlayerManager.kt` so the payload stays
+  symmetric), fed by a new `consumePauseReason()` that checks an `AVAudioSession` interruption
+  flag first and a host-`pause()` flag second. **iOS `user` is host-inferred** — AVFoundation
+  exposes no `reasonForPausing` — while Android's is player-reported; this asymmetry is
+  documented in the enum's dartdoc, `AGENTS.md`, `docs/api-reference/events.md` and CLAUDE.md
+  gotcha 18, in the same spirit as the `liveEdgeOffset` divergence (gotcha 15).
+
 ### Deprecated
 - **`MediaConfig.httpHeaders`** — declared, serialized onto the `config` payload of
   `initialize`/`updateConfig`/`load`, and read by **neither** native platform. Android's
@@ -110,6 +199,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pinning that `MediaItem.toMap()`/`fromMap()` round-trip *every* header, not just one. Its
   doc comment is explicit that this passed before the Android fix too, and that the
   native-source guard above is what actually covers #127.
+
+- **`MediaConfig.loadTimeout`** (`Duration?`, **default 30 seconds**, `null` disables) — a load
+  watchdog for issue #125. A load that the platform accepts and then never resolves either way
+  (no `onError`, no `ready`/`playing`) previously left the player in `buffering` forever with
+  nothing on any stream. On firing, `MediaPlayer` synthesizes a `NetworkException` with
+  `isTimeout: true` onto `errorStream` and moves `PlaybackState.state` to `PlayerState.error`,
+  indistinguishable to a host from a native failure.
+
+  The default is deliberately generous and the watchdog carries two false-positive guards: when
+  the timer fires it reports an error only if the player is *still* `PlayerState.buffering`
+  **and** `PlaybackState.position` has not advanced since the load was issued — a
+  slow-but-progressing manifest fetch or a long DRM handshake is never killed. It is armed by
+  `load()` and cancelled by the first `ready`/`playing`/`completed`/`error` event, by
+  `pause()`/`stop()`, and by `dispose()`.
+
+  **Dart-side only:** it is never serialized into the `config` MethodChannel payload and no
+  native code reads it (asserted by a test). `MediaConfig.copyWith` gained a
+  `bool clearLoadTimeout = false` flag, because `null` means "disabled" rather than "leave
+  unchanged" for this field — same convention as `PlaybackState.copyWith`'s
+  `clearLiveEdgeOffset`.
+- **`PlayerPauseReason.wireValue` / `PlayerPauseReason.fromWireValue`** — see BREAKING above.
+- **`test/native_contract/pause_reason_vocabulary_test.dart`** — a drift guard that parses
+  `MediaPlayerManager.kt` **and** `MediaPlayerManager.swift` as text and fails if either emits
+  a `pauseReason` literal with no `PlayerPauseReason.wireValue` counterpart, if any member is
+  unreachable from both natives, or if iOS starts emitting one of the documented Android-only
+  reasons. Same technique as `test/exceptions/error_category_vocabulary_test.dart` and
+  `test/models/network_status_vocabulary_test.dart`; it is the only mechanism in the repo that
+  catches the exact "declared but never emitted" drift that produced #126, since `flutter
+  analyze` cannot see a `Map<String, dynamic>` payload key and the test suite mocks the channel.
+- 49 tests: `test/core/media_player_terminal_error_test.dart` (13 — the #125 regression, driving
+  each platform's exact event sequence), `test/core/media_player_load_watchdog_test.dart` (11 —
+  including every false-positive guard as a negative case),
+  `test/core/media_config_load_timeout_test.dart` (9),
+  `test/core/media_player_pause_reason_test.dart` (11) and the vocabulary guard above (5).
+  Package total 1118 -> 1167.
+
+### Changed
+- The `onStateChanged` and `onError` MethodChannel payloads are now documented in
+  `docs/api-reference/events.md`'s "Native Event Payloads" section — both were previously
+  undocumented entirely. `onStateChanged` gained an optional `pauseReason` key (Android and
+  iOS); no key was renamed or removed, so an older native build remains compatible.
+- `MediaPlayer.protocolVersion` stays at **1**. Every old/new combination degrades safely: the
+  native suppressions are removals of events an old Dart already tolerated, the Dart latch and
+  the load watchdog are Dart-only, and `pauseReason` is an additive optional key that an old
+  Dart ignores and a new Dart treats as "not attributed" when an old native omits it.
 
 ## [0.5.0] - 2026-09-05
 

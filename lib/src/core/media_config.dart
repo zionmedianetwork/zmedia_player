@@ -123,6 +123,41 @@ class MediaConfig {
   /// (`UIScreen.isCaptured` detection only) behaviour this controls.
   final bool secureSurface;
 
+  /// Issue #125: how long `MediaPlayer.load()` will wait for the platform to
+  /// report *any* outcome for the item it just handed over, before
+  /// synthesizing a [NetworkException] (category
+  /// `MediaErrorCategory.network`) onto `MediaPlayer.errorStream` and
+  /// moving `PlaybackState.state` to `PlayerState.error`.
+  ///
+  /// This exists because `load()` completing successfully only means "the
+  /// item was handed to the platform" — ExoPlayer/AVPlayer accept a media
+  /// item synchronously and only discover network/HTTP/DRM/decoder problems
+  /// afterwards, asynchronously. A load that never resolves either way (no
+  /// `onError`, no `ready`/`playing`) would otherwise leave the player in
+  /// `buffering` forever with nothing on any stream — the exact "spinner
+  /// that spins until the user gives up" failure #125 reported.
+  ///
+  /// Defaults to 30 seconds — deliberately generous. A slow manifest fetch
+  /// on a poor connection, a multi-round-trip DRM licence handshake, or a
+  /// cold CDN can all legitimately take many seconds, and a false "this
+  /// stream is dead" is a worse failure than a late one. The watchdog adds
+  /// a second guard on top of this: when the timer fires it only reports an
+  /// error if the player is *still* in `PlayerState.buffering` **and**
+  /// `PlaybackState.position` has not advanced since the load was issued,
+  /// so a slow-but-progressing load is never killed.
+  ///
+  /// Set to `null` to disable the watchdog entirely (restoring the
+  /// pre-#125 "wait forever" behaviour) — e.g. for a host app that runs its
+  /// own, smarter stall detection. Note `copyWith` cannot null this field by
+  /// passing `null`; use `copyWith(clearLoadTimeout: true)`.
+  ///
+  /// **Dart-side only.** This value is never serialized across the
+  /// MethodChannel and neither native platform reads it; the timer lives
+  /// entirely in `MediaPlayer`. It is cancelled by the first
+  /// `ready`/`playing`/`completed`/`error` event, by `pause()`/`stop()`, and
+  /// by `dispose()`.
+  final Duration? loadTimeout;
+
   const MediaConfig({
     this.autoPlay = false,
     this.looping = false,
@@ -156,6 +191,7 @@ class MediaConfig {
     this.respectSafeArea = false,
     this.immersiveLandscape = false,
     this.secureSurface = false,
+    this.loadTimeout = const Duration(seconds: 30),
   });
 
   /// Creates a copy of this config with updated values
@@ -188,6 +224,8 @@ class MediaConfig {
     bool? respectSafeArea,
     bool? immersiveLandscape,
     bool? secureSurface,
+    Duration? loadTimeout,
+    bool clearLoadTimeout = false,
   }) {
     return MediaConfig(
       autoPlay: autoPlay ?? this.autoPlay,
@@ -219,6 +257,14 @@ class MediaConfig {
       respectSafeArea: respectSafeArea ?? this.respectSafeArea,
       immersiveLandscape: immersiveLandscape ?? this.immersiveLandscape,
       secureSurface: secureSurface ?? this.secureSurface,
+      // [loadTimeout] is the one nullable field here whose `null` is
+      // meaningful (it *disables* the #125 load watchdog) rather than
+      // "leave unchanged", so it cannot be cleared by passing `null` — the
+      // `??` idiom every other field uses would read that as "keep the
+      // current value". Clearing goes through the explicit
+      // [clearLoadTimeout] flag instead, which wins over any passed value.
+      // Same convention as `PlaybackState.copyWith`'s `clearLiveEdgeOffset`.
+      loadTimeout: clearLoadTimeout ? null : (loadTimeout ?? this.loadTimeout),
     );
   }
 
@@ -226,7 +272,8 @@ class MediaConfig {
   String toString() {
     return 'MediaConfig(autoPlay: $autoPlay, boxFit: $boxFit, volume: $volume, '
         'speed: $speed, respectSafeArea: $respectSafeArea, '
-        'immersiveLandscape: $immersiveLandscape, secureSurface: $secureSurface)';
+        'immersiveLandscape: $immersiveLandscape, secureSurface: $secureSurface, '
+        'loadTimeout: $loadTimeout)';
   }
 }
 
