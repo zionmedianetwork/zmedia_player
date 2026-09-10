@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-10
+
 ### BREAKING
 - **`PlayerPauseReason` gained two members and `pauseReasonStream` became chatty** (issue #126).
   The enum is now an enhanced enum with a `wireValue` field and a static
