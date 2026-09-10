@@ -20,7 +20,7 @@ on top.
 > | Field | Wired? | Android | iOS |
 > |---|---|---|---|
 > | `enableDvr` | **Yes** | Dart-side gate: `MediaPlayer.isSeekable`/`seekTo` reject seeking on a live item unless set (see [Seeking and live-edge detection](#seeking-and-live-edge-detection)). Native-side: once set, the current `Timeline.Window.durationMs` (the DVR window length) is reported as `PlaybackState.duration`, re-derived on every `onTimelineChanged` since a live window grows over time. Does not change what ExoPlayer itself does with the live window otherwise. | Same Dart-side gate; native derives the same window-length duration from `AVPlayerItem.seekableTimeRanges` (re-checked on every position tick, since `AVPlayerItem.duration` is indefinite for a live item and never fires the usual duration KVO) |
-> | `liveLatency` | **Yes** | `MediaItem.LiveConfiguration.setTargetOffsetMs` — a *maintained* target: ExoPlayer adjusts playback speed to drift toward it over time. But see [Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency) below: a manifest whose unix-time anchor disagrees with its own segment timeline silently defeats this target on Android | `AVPlayerItem.configuredTimeOffsetFromLive` (iOS 14+ only — no effect on iOS 13) governs the join position, honored once when playback starts (or on a seek to the live edge). This package also sets `automaticallyPreservesTimeOffsetFromLive = true`, an independent AVFoundation setting that controls whether the player skips forward to restore the cushion after a rebuffer; `true` means it does, so the configured cushion is **maintained** after every rebuffer instead of drifting away (see [dartdoc on `HlsConfig.liveLatency`](../../lib/src/models/streaming_config.dart) for the full trade-off — the cost is a visible forward skip right after each rebuffer, and there is no way to opt out of it) |
+> | `liveLatency` | **Yes** | `MediaItem.LiveConfiguration.setTargetOffsetMs` — a **join target, not a maintained one**: it decides where playback starts (and where a seek-to-live lands), and is then left alone. ExoPlayer does *not* drift playback speed toward it, because this package supplies no speed bounds and Media3 forces unit speed when neither the `MediaItem` nor the manifest does — see [Is `liveLatency` maintained on Android?](#is-livelatency-maintained-on-android-no) below. See also [Manifest time-anchor defect](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency): a manifest whose unix-time anchor disagrees with its own segment timeline silently defeats even the join target on Android/DASH | `AVPlayerItem.configuredTimeOffsetFromLive` (iOS 14+ only — no effect on iOS 13) governs the join position, honored once when playback starts (or on a seek to the live edge). This package also sets `automaticallyPreservesTimeOffsetFromLive = true`, an independent AVFoundation setting that controls whether the player skips forward to restore the cushion after a rebuffer; `true` means it does, so the configured cushion is **maintained** after every rebuffer instead of drifting away (see [dartdoc on `HlsConfig.liveLatency`](../../lib/src/models/streaming_config.dart) for the full trade-off — the cost is a visible forward skip right after each rebuffer, and there is no way to opt out of it) |
 > | `enableAdaptiveBitrate` | **Yes (Android only)** | `DefaultTrackSelector` — `false` forces a single fixed track instead of ABR | Not honored — AVPlayer has no API to disable ABR |
 > | `maxBitrate` | **Yes** | `DefaultTrackSelector.setMaxVideoBitrate` | `AVPlayerItem.preferredPeakBitRate` |
 > | `minBitrate` | **Yes (Android only)** | `DefaultTrackSelector.setMinVideoBitrate` | Not honored — no faithful AVPlayer equivalent |
@@ -70,6 +70,7 @@ actually requires.
 - [Seeking and live-edge detection](#seeking-and-live-edge-detection)
 - [Knowing which timeline `position` is on](#knowing-which-timeline-position-is-on)
 - [Stall watchdog for live streams](#stall-watchdog-for-live-streams)
+- [Is `liveLatency` maintained on Android? (No.)](#is-livelatency-maintained-on-android-no)
 - [Manifest time-anchor defect (`liveEdgeOffset` and `liveLatency`)](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
 - [Monitoring connection quality](#monitoring-connection-quality)
 - [Complete example](#complete-example)
@@ -88,7 +89,7 @@ actually requires.
 | Seeking within the live window | Whatever the manifest itself allows (its sliding window / `EXT-X-PLAYLIST-TYPE`) | Same |
 | `enableDvr` (this package's own seek gate) | `MediaPlayer.isSeekable`/`seekTo` reject seeking on a live item unless `enableDvr: true` | Same |
 | DVR window duration (`controller.duration` for a live item) | Reported once `enableDvr: true` — the live window's current known length, re-derived as it grows; `0`/unknown when DVR is off | Same, derived from `seekableTimeRanges` |
-| `liveLatency` target | Wired, and *maintained* — ExoPlayer drifts playback speed toward it over time (no effect on a manifest with an inconsistent time anchor — see [below](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)) | Wired on iOS 14+ — `configuredTimeOffsetFromLive` for the join position, honored once at start/seek, plus `automaticallyPreservesTimeOffsetFromLive = true` so it is also **restored** after every rebuffer — via a visible forward skip rather than Android's smooth speed adjustment (see the wiring table above) |
+| `liveLatency` target | Wired as a **join target only** — honored at start and on a seek to the live edge, then not actively maintained ([why](#is-livelatency-maintained-on-android-no)). On a DASH manifest with an inconsistent time anchor, even the join target is defeated — see [below](#manifest-time-anchor-defect-liveedgeoffset-and-livelatency) | Wired on iOS 14+ — `configuredTimeOffsetFromLive` for the join position, honored once at start/seek, plus `automaticallyPreservesTimeOffsetFromLive = true` so it is also **restored** after every rebuffer, via a visible forward skip. This is the one platform where the cushion is genuinely re-established after a stall (see the wiring table above) |
 | `maxBitrate` cap | Wired — `DefaultTrackSelector` | Wired — `preferredPeakBitRate` |
 | `enableAdaptiveBitrate: false` / `minBitrate` | Wired — `DefaultTrackSelector` | Not honored — no faithful AVPlayer API |
 | Adaptive bitrate for HLS | ExoPlayer's own track selection, constrained by `maxBitrate`/`minBitrate` when set | AVPlayer's own track selection, capped by `maxBitrate` when set |
@@ -354,14 +355,22 @@ Practical consequences:
    [High latency behind live edge / frequent buffering](#high-latency-behind-live-edge--frequent-buffering)
    for what is actually observable there.
 
-What still works identically on both platforms: a genuinely **frozen playhead**
-in a sliding window grows `liveEdgeOffset` without bound on both — on iOS
-because the seekable range's end keeps advancing while `currentTime()` does
-not, on Android because distance from the published edge keeps widening.
-**DVR scrub-back** also behaves the same way on both: seeking backward grows
-the offset because the playhead moves while the reference point (seekable end
-/ published edge) does not. See
-[Stall watchdog for live streams](#stall-watchdog-for-live-streams) below.
+What works identically on both platforms: **DVR scrub-back**. Seeking backward
+grows the offset on both, because the playhead moves while the reference point
+(seekable end on iOS / published edge on Android) does not.
+
+What does **not** work identically, contrary to what this guide used to claim
+(issue #124): a genuinely **frozen playhead** does *not* grow
+`liveEdgeOffset` without bound on iOS. The arithmetic would — the seekable
+range's end keeps advancing while `currentTime()` does not — but the value is
+computed and emitted only from inside `AVPlayer.addPeriodicTimeObserver`'s
+block, and that observer stops firing when time stops progressing. During a
+hard stall on iOS the offset is therefore never sampled, and the last value
+delivered to Dart simply freezes. On Android the offset really does grow
+without bound, because position events keep being emitted while
+`playWhenReady && STATE_BUFFERING`. See
+[Stall watchdog for live streams](#stall-watchdog-for-live-streams) below for
+the three signals a correct watchdog needs as a result.
 
 **Why 15 seconds, and when to change it.** A healthy live player does *not* sit
 at an offset of zero. A standard (non-low-latency) HLS or DASH player
@@ -454,60 +463,154 @@ so a healthy live edge reports a roughly constant `position` and a naive
 watchdog escalates forever (reload -> re-auth -> hard reopen, minting a new
 native player every lap).
 
-The reliable signal is `liveEdgeOffset`. Against a genuinely frozen playhead in
-a sliding window it **grows without bound on both platforms**; at a healthy
-edge it stays bounded — on Android jittering around the stream's target
-latency (commonly 15-30s), on iOS pinned near zero by construction (see
-[Platform divergence](#platform-divergence-this-value-measures-different-things)).
-The watchdog below only cares that the value stays bounded, not what the bound
-is, so it works unmodified on both.
+There is, however, **no single signal that covers every platform and every
+class of stall** — an earlier version of this guide claimed `liveEdgeOffset`
+alone did, and it does not (issue #124). A correct watchdog carries three:
+
+| # | Signal | Fires for | Blind to |
+|---|--------|-----------|----------|
+| 1 | `liveEdgeOffset` growing past a threshold | Any Android stall — its offset is referenced to a wall clock, so it widens by construction. An iOS *soft* stall, where media-playlist refreshes still succeed | iOS during healthy playback (pinned under a second — see [Platform divergence](#platform-divergence-this-value-measures-different-things)) and, more importantly, an iOS *hard* stall, where the value is neither emitted nor growing |
+| 2 | `position` repeating on `PositionBasis.absolute` | VOD, and live-without-DVR on iOS | Anything on `PositionBasis.liveWindow`, where a constant `position` is healthy playback |
+| 3 | **Event staleness** — no `onPositionChanged` arriving at all while the host still intends to play | An iOS hard stall — the case neither of the others sees | A stall where the platform keeps talking, which is Android's behavior by design |
+
+**Why signal 3 is not optional.** iOS drives position from
+`AVPlayer.addPeriodicTimeObserver`, and *both* `notifyPositionChanged` call
+sites in `MediaPlayerManager.swift` sit inside that observer's block — as does
+the `liveEdgeOffset` computation itself. The observer only fires while time is
+progressing, so during a hard stall on iOS **nothing is emitted at all**:
+`position`, `positionBasis` and `liveEdgeOffset` all freeze at their last
+values. `liveEdgeOffset` does not grow there, because it is never sampled.
+Android is the opposite: it keeps emitting position events while
+`playWhenReady && STATE_BUFFERING`, so its offset visibly grows through a
+rebuffer.
+
+**And a native fix on iOS would only be a partial one.** Android's
+`Player.getCurrentLiveOffset()` is referenced to a wall clock, so it widens
+during any stall whatever the cause. iOS's reference point is the end of
+`AVPlayerItem.seekableTimeRanges.last`, which advances only as media-playlist
+refreshes succeed. During a soft stall (decode trouble, network still up) that
+range keeps advancing, so the offset would grow if it were emitted; during a
+total-connectivity-loss stall the refreshes fail too, the range's end stops
+moving, and the offset stays constant *even if you emit it*. **Event
+staleness, not offset growth, is the correct iOS hard-stall signal**, and it
+would remain so even if iOS started emitting position through a stall.
+
+**The watchdog must stay armed while the player reports `buffering`.** A
+rebuffer is reported as `PlayerState.buffering` on both platforms
+(`Player.STATE_BUFFERING` on Android; `.waitingToPlayAtSpecifiedRate` and
+`AVPlayerItemPlaybackStalled` on iOS), so a first guard of
+`if (state != PlayerState.playing) { reset(); return; }` disarms the watchdog
+at the exact moment the stall becomes visible — and discards the escalation
+level it had accumulated. Judge on "does the host still intend to play", i.e.
+`playing` **or** `buffering`. A user pause, an idle or completed player and a
+reported `error` are all still "not a stall".
 
 ```dart
 import 'dart:async';
 import 'package:zmedia_player/zmedia_player.dart';
 
 /// Escalating stall watchdog that is correct for VOD, live-without-DVR and
-/// live-with-DVR alike, because it branches on what the player reports rather
-/// than on the app's own config.
+/// live-with-DVR alike, on both Android and iOS, because it branches on what
+/// the player reports rather than on the app's own config — and because it
+/// carries three independent stall signals rather than trusting any one of
+/// them to cover every platform.
 class LiveStallWatchdog {
-  LiveStallWatchdog(this.controller, {required this.onEscalate});
+  LiveStallWatchdog(
+    this.controller, {
+    required this.onEscalate,
+    this.samplingInterval = const Duration(seconds: 2),
+    this.liveEdgeStallThreshold = const Duration(seconds: 45),
+  });
 
   final MediaController controller;
   final void Function(int level) onEscalate;
 
-  /// Escalate once the playhead has fallen this far behind the live edge.
-  /// Must comfortably exceed your stream's normal live latency — a standard
-  /// HLS stream sits 15-30s behind the edge when perfectly healthy.
-  static const _liveEdgeStallThreshold = Duration(seconds: 45);
+  /// How often the sampler runs. Every "how many samples" constant below is
+  /// expressed in multiples of this.
+  final Duration samplingInterval;
 
-  /// Absolute-basis fallback: how many consecutive samples `position` may
-  /// repeat before we call it a stall. 6 x 2s = 12s of no progress.
+  /// Signal 1: escalate once the playhead has fallen this far behind the
+  /// live edge.
+  ///
+  /// Calibrate this against **Android**, where a standard (non-low-latency)
+  /// HLS/DASH stream sits 15-30s behind the edge when perfectly healthy. On
+  /// iOS `liveEdgeOffset` is pinned under a second during live playback
+  /// (issue #120), so this branch effectively never fires there and signals
+  /// 2 and 3 carry that platform. Tighten it freely for low-latency streams:
+  /// nothing here is clamped to `PlaybackState.defaultLiveEdgeTolerance`.
+  final Duration liveEdgeStallThreshold;
+
+  /// Signal 2: how many consecutive samples `position` may repeat, on an
+  /// absolute basis, before we call it a stall. 6 x 2s = 12s of no progress.
   static const _absoluteStallSamples = 6;
 
+  /// Signal 3: how many consecutive samples may pass with no native
+  /// `onPositionChanged` at all. 3 x 2s = 6s, comfortably longer than the
+  /// ~500ms tick both platforms emit while playing.
+  static const _silentSamples = 3;
+
   Timer? _timer;
+  StreamSubscription<Duration>? _positionEvents;
   Duration? _lastPosition;
   int _repeats = 0;
+  int _silentStreak = 0;
+  bool _sawPositionEvent = false;
   int _level = 0;
 
   void start() {
-    _timer?.cancel();
-    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _sample());
+    stop();
+    // Subscribe to the RAW native tick, not to MediaController's change
+    // notifications: the controller throttles position-only updates to one
+    // per 500ms and drops the rest, and "did an event arrive at all" is
+    // exactly the question a throttle can silently answer wrong.
+    _positionEvents = controller.player.positionStream.listen((_) {
+      _sawPositionEvent = true;
+    });
+    _timer = Timer.periodic(samplingInterval, (_) => _sample());
   }
 
   void _sample() {
-    // Only judge liveness while the player claims to be playing. A user pause
-    // is not a stall.
-    if (controller.state.state != PlayerState.playing) {
+    // Judge liveness only while the host still INTENDS to play. `buffering`
+    // must count: a rebuffer is reported as PlayerState.buffering on both
+    // platforms, so treating only `playing` as live would disarm the
+    // watchdog at the exact moment a stall starts — and reset the escalation
+    // level with it. A user pause, an idle/completed player and a reported
+    // error are genuinely not stalls.
+    final state = controller.state.state;
+    final intendsToPlay =
+        state == PlayerState.playing || state == PlayerState.buffering;
+    if (!intendsToPlay) {
       _reset();
       return;
     }
 
-    final stalled = controller.positionBasis == PositionBasis.liveWindow
-        ? _liveWindowStalled()
-        : _absoluteStalled();
+    // Signal 3's bookkeeping. This streak is cleared here, by an event
+    // actually having arrived, and nowhere else — deliberately not by the
+    // "not stalled" path below. Folding it into a general reset would clear
+    // it on every healthy-looking sample, and a staleness counter that is
+    // zeroed every time it fails to reach its own threshold can never reach
+    // it.
+    final sawEvent = _sawPositionEvent;
+    _sawPositionEvent = false;
+    if (sawEvent) {
+      _silentStreak = 0;
+    } else {
+      _silentStreak++;
+    }
+
+    // Signal 3 is checked first: it is the only one that can fire once the
+    // platform has stopped talking, and when it fires the other two are
+    // reading values frozen at their last sample by definition.
+    final stalled = _silentStreak >= _silentSamples ||
+        (controller.positionBasis == PositionBasis.liveWindow
+            ? _liveWindowStalled()
+            : _absoluteStalled());
 
     if (!stalled) {
-      _reset();
+      // Only the escalation level unwinds here. `_repeats`/`_lastPosition`
+      // are owned by _absoluteStalled(), and `_silentStreak` by the block
+      // above.
+      _level = 0;
       return;
     }
 
@@ -515,25 +618,29 @@ class LiveStallWatchdog {
     onEscalate(_level);
   }
 
-  /// On a sliding window, position is expected to be constant. Judge on the
-  /// distance from the live edge instead: healthy playback keeps it bounded.
+  /// Signal 1. On a sliding window `position` is expected to be constant, so
+  /// judge on the distance from the live edge instead.
   bool _liveWindowStalled() {
     final offset = controller.liveEdgeOffset;
 
     // The platform cannot answer yet (playlist just loaded, or an older
-    // native build). Fall back to the position-repeat heuristic rather than
-    // guessing — but note it is weak on this basis, so it is only reached
-    // when there is genuinely nothing better.
+    // cached native build). Fall back to the position-repeat heuristic
+    // rather than guessing — it is weak on this basis, so it is only ever
+    // reached when there is genuinely nothing better.
     if (offset == null) return _absoluteStalled();
 
-    // Riding the edge: unambiguously healthy, whatever position is doing.
-    if (controller.isAtLiveEdge) return false;
-
-    return offset > _liveEdgeStallThreshold;
+    // There is deliberately NO `if (controller.isAtLiveEdge) return false;`
+    // short-circuit here, and adding one back would be a regression.
+    // `isAtLiveEdge` is `offset <= PlaybackState.defaultLiveEdgeTolerance`
+    // (15s), so for any threshold >= 15s the comparison below already
+    // subsumes it — and for a threshold tightened below 15s, which
+    // low-latency streams want, it would silently suppress every real
+    // escalation in the band between the threshold and 15s.
+    return offset > liveEdgeStallThreshold;
   }
 
-  /// On an absolute basis (VOD, and live-without-DVR on iOS), a position that
-  /// stops advancing really is a stall.
+  /// Signal 2. On an absolute basis (VOD, and live-without-DVR on iOS), a
+  /// position that stops advancing really is a stall.
   bool _absoluteStalled() {
     final position = controller.position;
     if (position == _lastPosition) {
@@ -545,13 +652,27 @@ class LiveStallWatchdog {
     return _repeats >= _absoluteStallSamples;
   }
 
+  /// Full reset: only for "the host is not trying to play" and [stop]. See
+  /// _sample() for why the not-stalled path deliberately does less.
   void _reset() {
     _lastPosition = controller.position;
     _repeats = 0;
+    _silentStreak = 0;
     _level = 0;
   }
 
-  void dispose() => _timer?.cancel();
+  /// Stops sampling and releases the position subscription. Safe to call
+  /// repeatedly, and safe to [start] again afterwards.
+  void stop() {
+    _timer?.cancel();
+    _timer = null;
+    _positionEvents?.cancel();
+    _positionEvents = null;
+    _sawPositionEvent = false;
+    _reset();
+  }
+
+  void dispose() => stop();
 }
 ```
 
@@ -576,28 +697,36 @@ final watchdog = LiveStallWatchdog(
 watchdog.dispose();
 ```
 
+This class is copied verbatim into
+[`test/core/live_stall_watchdog_test.dart`](../../test/core/live_stall_watchdog_test.dart)
+and exercised against injected `MethodChannel` events, so it is a checked
+artifact rather than an aspirational snippet: an iOS hard stall, an Android
+rebuffer, a healthy live edge, a low-latency threshold and a user pause each
+have a test. Keep the two copies in sync when you edit either.
+
 **Platform notes for watchdog authors:**
 
 - **Android** keeps emitting position events while playback is stalled but the
   host still intends to play (`playWhenReady && STATE_BUFFERING`), so
-  `liveEdgeOffset` visibly grows through a rebuffer. It stays silent while
-  genuinely paused, idle or ended.
-- **iOS** drives position from `AVPlayer.addPeriodicTimeObserver`, which only
-  fires while time is progressing. During a hard stall, updates stop entirely,
-  so `liveEdgeOffset` freezes at its last value rather than growing. On iOS,
-  also treat "no position/state event at all for several sampling intervals
-  while `state == PlayerState.playing`" as a stall signal.
+  `liveEdgeOffset` visibly grows through a rebuffer and signal 1 carries the
+  platform. It stays silent while genuinely paused, idle or ended — which is
+  why signal 3 is gated on "still intends to play" rather than firing on any
+  silence.
+- **iOS** emits nothing at all during a hard stall (see above), so signal 3 is
+  the *only* one that fires there. Do not remove it because "the offset
+  covers it" — the offset is frozen, not growing.
+- **`buffering` is not a reason to stand down** on either platform. It is the
+  state a stall is reported in.
 - `liveEdgeOffset` is `null` for VOD, so `isAtLiveEdge` is always `false`
   there — never use `isAtLiveEdge` as a proxy for "is this a live stream"; use
   `player.isLive` or `positionBasis` for that.
 - **On iOS, `isAtLiveEdge` is effectively always `true` during live playback**
-  (see [Platform divergence](#platform-divergence-this-value-measures-different-things)),
-  so the `if (controller.isAtLiveEdge) return false;` short-circuit above will
-  fire on nearly every iOS sample. That is harmless for this watchdog — it
-  just means the `offset > _liveEdgeStallThreshold` branch is effectively the
-  only one that ever escalates on iOS — but do not read a steady `true` there
-  as evidence the stream is healthily riding 15-30s behind the edge the way it
-  would on Android.
+  (see [Platform divergence](#platform-divergence-this-value-measures-different-things)).
+  That is one more reason the watchdog above does not consult it: a value that
+  is `true` on nearly every iOS sample cannot gate anything useful there, and
+  on Android it only duplicates the threshold comparison. Do not read a steady
+  `true` on iOS as evidence the stream is healthily riding 15-30s behind the
+  edge the way it would on Android.
 
 **Seeing these fields on a real device.** The example app's
 `pages/wired_config_verification_page.dart` renders `liveEdgeOffset`,
@@ -606,6 +735,58 @@ watchdog.dispose();
 you're looking at (defect/anomaly, healthy live edge, or VOD) — the only way
 to confirm any of this by eye, since CI never builds native code and every
 test in the package/example suites mocks the `MethodChannel`.
+
+---
+
+## Is `liveLatency` maintained on Android? (No.)
+
+This guide, the README and `HlsConfig.liveLatency`'s own dartdoc used to state
+that ExoPlayer "actively maintains" the configured cushion by adjusting
+playback speed toward it. **That is false as this package ships** (issue #110).
+`liveLatency` is a **join target**: it decides where playback starts and where
+a seek to the live edge lands, and nothing then holds the playhead there.
+
+Verified against Media3 1.11.0's own sources:
+
+1. `MediaPlayerManager.kt`'s `buildMediaItem` sets **only**
+   `MediaItem.LiveConfiguration.Builder().setTargetOffsetMs(...)`. It supplies
+   no `minPlaybackSpeed`/`maxPlaybackSpeed`.
+2. `DashMediaSource.updateLiveConfiguration` (and `HlsMediaSource`'s
+   equivalent) reacts to that by **forcing `minPlaybackSpeed =
+   maxPlaybackSpeed = 1f`**, with the comment *"Force unit speed (instead of
+   automatic adjustment with fallback speeds) if there are no specific speed
+   limits defined by the media item or the manifest, and the manifest contains
+   no low-latency target offset either."* On HLS the equivalent condition is
+   the playlist declaring neither `HOLD-BACK` nor `PART-HOLD-BACK` in
+   `EXT-X-SERVER-CONTROL`; on DASH it is the manifest carrying no
+   `ServiceDescription` target offset.
+3. `DefaultLivePlaybackSpeedControl.setLiveConfiguration` then does
+   `if (minPlaybackSpeed == 1f && maxPlaybackSpeed == 1f)
+   { mediaConfigurationTargetLiveOffsetUs = C.TIME_UNSET; }`, and
+   `getAdjustedPlaybackSpeed` returns `1f` unconditionally from that point on.
+   **The speed control is switched off entirely** for every ordinary
+   (non-low-latency) HLS/DASH live stream this package plays.
+
+Even fully enabled, the correction would be small: Media3's
+`DEFAULT_FALLBACK_MAX_PLAYBACK_SPEED` is `1.03f`, i.e. at most 0.03s of
+cushion recovered per second of playback.
+
+**What this means for you.** After a rebuffer on Android, the playhead is
+wherever the rebuffer left it; the configured `liveLatency` is not
+re-established. iOS is the outlier here, not Android: it *does* restore the
+cushion after every rebuffer, because this package sets
+`automaticallyPreservesTimeOffsetFromLive = true` — at the cost of a visible
+forward skip. If you need a cushion held on Android, hold it yourself with a
+corrective `seekTo` when `liveEdgeOffset` drifts past your tolerance.
+
+**The open option (not implemented).** Supplying explicit speed bounds
+(`setMinPlaybackSpeed`/`setMaxPlaybackSpeed` on the `MediaItem
+.LiveConfiguration`) would re-enable `DefaultLivePlaybackSpeedControl` and
+make the target genuinely maintained. It is deliberately **not** done today:
+it would change playback timing — and therefore audio pitch handling and
+A/V sync behavior — for every live consumer of this package, on every stream,
+including the many that are perfectly happy with unit speed. It is tracked on
+issue #110 as a candidate change, not as a pending fix.
 
 ---
 
@@ -642,9 +823,14 @@ position or on how close to the edge playback settled (a probe at 45s produced a
 result) — because `MediaItem.LiveConfiguration.targetOffsetMs` is computed from that same
 poisoned anchor (`windowDefaultStartPositionUs`, derived from the same broken
 `nowInWindowUs`), Media3 clamps the join to the real live edge regardless of the configured
-target. The same broken offset also drives `DefaultLivePlaybackSpeedControl`, which compares it
-against the target, sees ~33 minutes of "lag" and speeds up trying to close a gap that was
-never real — eroding whatever cushion a join or a corrective `seekTo` established.
+target.
+
+(An earlier version of this section also blamed `DefaultLivePlaybackSpeedControl` for
+"speeding up to close a gap that was never real". That was wrong on every count and has been
+removed: the speed control is **switched off entirely** for a stream like this one — see
+[Is `liveLatency` maintained on Android?](#is-livelatency-maintained-on-android-no) — it is
+capped at 1.03x even when it is enabled, and it corrects *toward* a target rather than eroding
+a cushion. The join-position clamp above is the whole of the defect.)
 
 **How to detect it.**
 
@@ -674,14 +860,37 @@ never real — eroding whatever cushion a join or a corrective `seekTo` establis
   — and an optional HTTP header for a signed/token-gated origin) and reload, rather than being
   limited to the app's own bundled fixtures.
 
-**What to do about it.** Nothing in this package can correct the target offset on an affected
-manifest — the join-position arithmetic belongs to Media3, and Media3's input is the
-manifest's own (inconsistent) time anchor. This is a packager/origin-side defect: report it to
+**How far this actually reaches — scope it precisely.** The defect is
+**Android/DASH-specific**, and the three cases genuinely differ:
+
+- **Android/DASH — proven broken, and this package cannot correct it.**
+  `DashMediaSource.updateLiveConfiguration` floors the target at
+  `minLiveOffsetMs = usToMs(nowInWindowUs - windowDurationUs)`, derived purely from the
+  `availabilityStartTime` anchor. An app-supplied `minOffsetMs` is passed through
+  `constrainValue(value, minLiveOffsetMs, maxPossibleOffsetMs)`, so it can only *raise* that
+  floor, never lower it. There is no input this package could send that would recover the
+  intended join position.
+- **Android/HLS — not affected the same way.** `HlsMediaSource` constrains the target against
+  the *playlist's own* duration (`constrainValue(target, liveEdgeOffsetUs,
+  playlist.durationUs + liveEdgeOffsetUs)`), so a live playlist with no
+  `EXT-X-PROGRAM-DATE-TIME` has a floor of zero and `liveLatency` is honored normally. Two
+  caveats: an `EXT-X-START` offset in the playlist wins over the configured target, and a
+  wildly stale `EXT-X-PROGRAM-DATE-TIME` inflates `liveEdgeOffsetUs`
+  (`nowUnixTime - playlist end time`) and can raise the floor the same way DASH's anchor does
+  — a consistent PDT, or none at all, is fine.
+- **iOS — structurally immune.** `AVPlayerItem.configuredTimeOffsetFromLive` is applied
+  against the item's own seekable range, with no unix-time anchor anywhere in the path, so a
+  manifest whose clock disagrees with its segment timeline cannot move it. (DASH has no iOS
+  playback path at all, so in practice this is about HLS.)
+
+**What to do about it.** On Android/DASH, this is a packager/origin-side defect: report it to
 whoever operates the encoder/packager for the stream (an inconsistency between
 `availabilityStartTime` and the segment timeline it publishes). As a stopgap, an app-side
-corrective `seekTo(duration - desiredLatency)` after load can hold a cushion, but expect
-`DefaultLivePlaybackSpeedControl` to erode it over time on the same stream, since it is working
-from the same poisoned offset — periodic re-seeking is a treadmill, not a fix.
+corrective `seekTo(duration - desiredLatency)` after load holds a cushion; nothing in ExoPlayer
+will erode it (the speed control is inert — see
+[Is `liveLatency` maintained on Android?](#is-livelatency-maintained-on-android-no)), but
+nothing will re-establish it after a rebuffer either, so re-seek when `liveEdgeOffset` drifts
+past your tolerance rather than on a timer.
 
 ---
 
@@ -779,8 +988,10 @@ controller.player.stateStream.listen((state) {
 **Do not substitute `position` for any of this.** For a live item
 `positionBasis` is `liveWindow`, where a constant `position` is healthy
 playback — see [Stall watchdog for live streams](#stall-watchdog-for-live-streams).
-`liveEdgeOffset` growing without bound is the stall signal; `PlayerState.error`
-is the failure signal; they are not interchangeable.
+The stall signal is `liveEdgeOffset` growing without bound (on Android) or
+`onPositionChanged` going silent entirely while the player still intends to
+play (on iOS); `PlayerState.error` is the failure signal. They are not
+interchangeable.
 
 `MediaConfig.loadTimeout` (default 30s) covers the third case — accepted, then
 total silence — which a live stream pointed at a dead origin can otherwise sit
@@ -936,9 +1147,12 @@ You are almost certainly sampling `controller.position`. On a live stream whose
 in an endless loop.
 
 Branch on `controller.positionBasis` and judge liveness from `controller.liveEdgeOffset`
-(which grows without bound against a genuinely frozen playhead) rather than from `position`.
-See [Stall watchdog for live streams](#stall-watchdog-for-live-streams) for a complete,
-copy-pasteable implementation covering VOD, live-without-DVR and live-with-DVR.
+(which grows without bound against a genuinely frozen playhead **on Android**) rather than
+from `position` — and pair it with an event-staleness check, because on iOS a hard stall stops
+the position events entirely and freezes the offset instead of growing it. See
+[Stall watchdog for live streams](#stall-watchdog-for-live-streams) for a complete,
+copy-pasteable implementation carrying all three signals, covering VOD, live-without-DVR and
+live-with-DVR.
 
 ### `isAtLiveEdge` is false even though playback looks fine
 
@@ -974,8 +1188,12 @@ explanation. Practically:
 
 - Do not use `isAtLiveEdge` on iOS to distinguish "riding the edge normally" from "riding it
   unusually close" — both look identical (`true`) there.
-- A `false` reading on iOS is the informative one — it means `liveEdgeOffset` was `null`
-  (platform can't answer yet, or VOD) rather than a stream genuinely far from the edge.
+- A `false` reading on iOS is the informative one, but do not over-read *which* case produced
+  it. It means one of: `liveEdgeOffset` was `null` (VOD, or the platform cannot answer yet);
+  the viewer has scrubbed back into the DVR window; or the playhead genuinely fell more than
+  the tolerance behind the end of the seekable range, which is what a *soft* stall looks like
+  on iOS. All three are real and all three happen — DVR scrub-back and soft-stall growth are
+  exactly the cases this document says still work on iOS.
 - If you need an Android-comparable "how far behind the published edge" number on iOS, this
   package does not currently compute one; see the issue for the trade-offs of adding an
   `AVPlayerItem.currentDate()`-against-wall-clock approach, which was considered and deferred
@@ -993,12 +1211,18 @@ LL-HLS-compliant manifest, are the other levers that affect this.
 
 **On iOS specifically**, `liveLatency` applies at join/seek time and is also maintained
 afterward: this package sets `automaticallyPreservesTimeOffsetFromLive = true`, so AVPlayer
-skips forward to restore the configured cushion after a rebuffer, matching (in intent, not
-mechanism) Android's ExoPlayer, which drifts smoothly toward its target via playback-speed
-adjustment instead. The cost of the iOS approach is a visible forward jump in the playhead
-right after a rebuffer, rather than a smooth correction (see the wiring table and
-`HlsConfig.liveLatency`'s dartdoc for the full trade-off). There is no way to opt out of the
-skip and get the old drift-instead-of-skip behavior.
+skips forward to restore the configured cushion after a rebuffer. The cost is a visible forward
+jump in the playhead right after a rebuffer rather than a smooth correction (see the wiring
+table and `HlsConfig.liveLatency`'s dartdoc for the full trade-off), and there is no way to opt
+out of it.
+
+**On Android the target is not maintained at all.** It is honored at join and at a seek to the
+live edge, and then left alone — ExoPlayer's `DefaultLivePlaybackSpeedControl` is switched off
+for every ordinary HLS/DASH stream this package plays, because neither this package nor a
+non-low-latency manifest supplies the playback-speed bounds it requires. See
+[Is `liveLatency` maintained on Android?](#is-livelatency-maintained-on-android-no) for the
+Media3 code paths that establish this. Hold a cushion yourself with a corrective `seekTo` if
+you need one.
 
 **This cushion is not observable through `liveEdgeOffset` on iOS** (issue #120): the gap
 `automaticallyPreservesTimeOffsetFromLive` maintains lives between the seekable range's end and
@@ -1006,8 +1230,10 @@ the *published* live edge, which is outside what `seekableTimeRanges.last - curr
 see — `liveEdgeOffset` stays pinned near zero on iOS whether or not the cushion is actually
 being held. If you need to confirm the skip is happening, the visible forward jump in
 `controller.position` right after a rebuffer is the only signal this package's API currently
-exposes; there is no dedicated event for it. (On Android, `liveEdgeOffset` does reflect the
-maintained target — see [Stall watchdog for live streams](#stall-watchdog-for-live-streams).)
+exposes; there is no dedicated event for it. (On Android, `liveEdgeOffset` does track the
+playhead's real distance from the published edge — but there is no maintained target for it to
+reflect; see
+[Is `liveLatency` maintained on Android?](#is-livelatency-maintained-on-android-no).)
 
 If `liveLatency` reaches native correctly (confirm via `controller.config`) but changing its
 value has **no observable effect** on Android/DASH — join position and steady-state cushion stay

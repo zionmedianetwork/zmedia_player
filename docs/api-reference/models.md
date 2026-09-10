@@ -274,13 +274,24 @@ in turn makes `isAtLiveEdge` effectively always `true` on iOS, and means a
 `liveLatency` cushion configured on iOS cannot be observed through this field.
 See [live-streaming.md](live-streaming.md#platform-divergence-this-value-measures-different-things)
 for the full explanation, including what still works identically on both
-platforms (stall detection and DVR scrub-back).
+platforms (DVR scrub-back) and what does not.
+
+**Stall detection is *not* one of the things that works identically** (issue
+#124). A frozen playhead grows this value without bound on Android, but not on
+iOS: the computation and both of its emission sites live inside
+`AVPlayer.addPeriodicTimeObserver`'s block, which stops firing when time stops
+progressing — so during an iOS hard stall the offset is never sampled and
+freezes at its last value. A watchdog therefore also needs an event-staleness
+signal ("no `onPositionChanged` at all while the host still intends to play");
+see [Stall watchdog for live streams](live-streaming.md#stall-watchdog-for-live-streams).
 
 **`positionBasis` matters for stall detection.** On `PositionBasis.liveWindow` the
 window start slides forward with the playhead, so a *constant* `position` is what
 healthy playback looks like — not a stall. Branch on this rather than inferring the
-basis from your own `enableDvr` config. See
-[Live Streaming](live-streaming.md#stall-watchdog-for-live-streams).
+basis from your own `enableDvr` config. Note also that a stall is reported as
+`PlayerState.buffering` on both platforms, so a watchdog that stands down on
+anything other than `PlayerState.playing` disarms itself exactly when it is needed.
+See [Live Streaming](live-streaming.md#stall-watchdog-for-live-streams).
 
 ## Playlist
 
@@ -344,13 +355,17 @@ cross-applied, so an app that serves HLS on one platform and DASH on the other m
 `HlsConfig`/`DashConfig` are serialized to the platform channel and read by native for a
 specific subset of fields — `enableDvr` (Dart-side seek gate for
 `MediaPlayer.isSeekable`/`seekTo`; also gates whether native reports a duration for the live
-item at all — see below), `liveLatency` (`MediaItem.LiveConfiguration` on Android, *maintained*
-via playback-speed adjustment; `AVPlayerItem.configuredTimeOffsetFromLive` on iOS 14+ for the
-join position, also **maintained** after a rebuffer since this package sets
+item at all — see below), `liveLatency` (`MediaItem.LiveConfiguration` on Android — a **join
+target only**, *not* actively maintained: this package supplies no playback-speed bounds, and
+Media3 responds by forcing unit speed and disabling `DefaultLivePlaybackSpeedControl`
+altogether for an ordinary HLS/DASH stream;
+`AVPlayerItem.configuredTimeOffsetFromLive` on iOS 14+ for the join position, and there
+**maintained** after a rebuffer since this package sets
 `automaticallyPreservesTimeOffsetFromLive = true` — at the cost of a visible forward skip
 right after the rebuffer, with no opt-out — see
-[`HlsConfig.liveLatency`'s dartdoc](../../lib/src/models/streaming_config.dart) and the
-[Live Streaming guide](live-streaming.md) for the full trade-off), and the inherited
+[`HlsConfig.liveLatency`'s dartdoc](../../lib/src/models/streaming_config.dart) and
+[Is `liveLatency` maintained on Android?](live-streaming.md#is-livelatency-maintained-on-android-no)
+for the full trade-off), and the inherited
 `enableAdaptiveBitrate`/
 `maxBitrate`/`minBitrate` (`DefaultTrackSelector` on Android; iOS honors only `maxBitrate` via
 `preferredPeakBitRate` — no faithful `minBitrate`/force-non-adaptive equivalent exists on

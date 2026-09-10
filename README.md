@@ -45,9 +45,10 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
   support), quality switching via each native player's own defaults
 - Live HLS/DASH playback (`MediaItem.isLive`); `HlsConfig`/`DashConfig.enableDvr` gates seeking
   (and reports a DVR-window duration) on a live stream, `liveLatency` sets a target offset from
-  the live edge — Android maintains it over time via playback-speed adjustment, iOS (14+ only)
-  maintains it too but via a visible forward skip after each rebuffer rather than a smooth
-  correction — and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track selection —
+  the live edge — a **join target only** on Android (ExoPlayer's live playback-speed control is
+  switched off for ordinary HLS/DASH streams, so nothing re-establishes the cushion after a
+  rebuffer), while iOS 14+ does restore it after every rebuffer via a visible forward skip —
+  and `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track selection —
   beyond that, remaining seek range and buffering behavior are still governed by the native
   player's own defaults for the manifest (see the
   [Live Streaming guide](docs/api-reference/live-streaming.md) for the full field-by-field wiring
@@ -64,7 +65,9 @@ notifications. See the [complete feature list](docs/summary/features.md) for the
   measure `liveEdgeOffset` differently and the values are not comparable** — Android reports
   distance from the published edge (commonly 15-30s during healthy playback), iOS is bounded
   near zero by construction, making `isAtLiveEdge` effectively always `true` there and the
-  `liveLatency` cushion invisible to this field on iOS; see
+  `liveLatency` cushion invisible to this field on iOS. On iOS the offset also **stops being
+  emitted, and stops growing, during a hard stall**, so a stall watchdog needs an
+  event-staleness signal alongside it; see
   [Platform divergence](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things).
   See also
   [Manifest time-anchor defect](docs/api-reference/live-streaming.md#manifest-time-anchor-defect-liveedgeoffset-and-livelatency)
@@ -372,8 +375,12 @@ live-edge signal instead:
 final Duration? behind = controller.liveEdgeOffset; // null for VOD
 final bool atEdge = controller.isAtLiveEdge;        // within 15s of the edge (Android)
 
-// A frozen playhead in a sliding window makes `liveEdgeOffset` grow without bound,
-// on both platforms; a healthy edge keeps it bounded, whatever `position` is doing.
+// On Android, a frozen playhead in a sliding window makes `liveEdgeOffset` grow
+// without bound, while a healthy edge keeps it bounded whatever `position` does.
+// On iOS the offset is emitted only while time progresses, so a hard stall freezes
+// it instead of growing it — a correct watchdog also treats "no onPositionChanged
+// at all while the player still intends to play" as a stall. Note `buffering` is
+// still "intends to play": it is the state a stall is reported in.
 if (controller.positionBasis == PositionBasis.liveWindow && !atEdge) {
   // ... escalate
 }
@@ -386,7 +393,8 @@ always `true` there. See
 [Platform divergence](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things).
 
 See [Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall-watchdog-for-live-streams)
-for a complete, copy-pasteable implementation covering VOD, live-without-DVR and live-with-DVR.
+for a complete, copy-pasteable implementation carrying all three signals, covering VOD,
+live-without-DVR and live-with-DVR.
 
 ### Media Notifications
 
@@ -886,7 +894,7 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
 
 ### Quality Metrics
 
-- **Tests:** run `flutter test` for the current count (1167 as of this writing, and  growing). The `example/` app has its own separate suite too (24 tests,
+- **Tests:** run `flutter test` for the current count (1175 as of this writing, and  growing). The `example/` app has its own separate suite too (24 tests,
   `cd example && flutter test`).
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated

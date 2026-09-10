@@ -4,7 +4,7 @@ High-level overview of development progress, completed features, and project sta
 
 > **Historical (v0.1.0).** The "Production Ready / 113 tests / 100%" figures below
 > are the Oct 2025 release snapshot. The project is now in audit-driven hardening: the
-> Dart suite has grown since — run `flutter test` for the live count (1167 as of this
+> Dart suite has grown since — run `flutter test` for the live count (1175 as of this
 > writing) — but native code has no automated tests and needs on-device verification.
 > The `example/` app has its own separate suite (24 tests, `cd example && flutter
 > test`). See the

@@ -77,12 +77,15 @@ Comprehensive list of all implemented features in the ZMedia Player package.
   VOD. **The two platforms measure different quantities under this name and the values are not
   comparable** — Android reports distance from the published edge (commonly 15-30s during
   healthy playback), iOS is bounded near zero by construction, making `isAtLiveEdge`
-  effectively always `true` there. See
+  effectively always `true` there. **It is also not a sufficient stall signal on its own**: on
+  iOS it is emitted only from `AVPlayer.addPeriodicTimeObserver`, which stops firing when time
+  stops progressing, so a hard stall freezes it rather than growing it (issue #124). See
   [Platform divergence](../api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things)
 - **Position Basis Reporting** - `PlaybackState.positionBasis` (`PositionBasis.absolute` |
   `.liveWindow`) tells a host which timeline `position` is measured against, so a stall
   detector does not mistake a healthy live edge (constant window-relative position) for a
-  frozen playhead. See
+  frozen playhead. A correct watchdog pairs it with `liveEdgeOffset` growth **and** an
+  event-staleness check, and stays armed while the player reports `buffering`. See
   [Stall watchdog for live streams](../api-reference/live-streaming.md#stall-watchdog-for-live-streams)
 - **DVR/Time-Shifting** - `HlsConfig`/`DashConfig.enableDvr` gates seeking on a live stream and
   enables reporting of a DVR-window duration to seek within
@@ -92,13 +95,15 @@ Comprehensive list of all implemented features in the ZMedia Player package.
   `endsWith('.mpd')`). The two configs are never cross-applied, and a live item that resolves
   to a format with no config logs a debug-only warning
 - **Latency Configuration** - `liveLatency` sets a target offset from the live edge (Android;
-  iOS 14+ only). Both platforms now *maintain* the target after a rebuffer, by different
-  mechanisms: Android's ExoPlayer adjusts playback speed to drift toward it smoothly, while iOS
-  restores it via a visible forward skip (`automaticallyPreservesTimeOffsetFromLive = true`) —
-  there is no way to opt out of the skip and get the old drift-instead-of-skip behavior. Has no
-  effect on Android/DASH manifests with an inconsistent time anchor (same root cause as the Live
-  Edge Detection caveat above) — a manifest/packaging defect, not a wiring gap; native logs a
-  one-time diagnostic when it is detected
+  iOS 14+ only) — a **join target** on both platforms, *maintained* after a rebuffer on **iOS
+  only**, via a visible forward skip (`automaticallyPreservesTimeOffsetFromLive = true`, no
+  opt-out). Android does **not** maintain it: ExoPlayer's `DefaultLivePlaybackSpeedControl` is
+  switched off for every ordinary HLS/DASH stream, since this package supplies no playback-speed
+  bounds and Media3 then forces unit speed (issue #110 — see
+  [Is `liveLatency` maintained on Android?](../api-reference/live-streaming.md#is-livelatency-maintained-on-android-no)).
+  On Android/DASH, a manifest with an inconsistent time anchor defeats even the join target
+  (same root cause as the Live Edge Detection caveat above) — a manifest/packaging defect, not a
+  wiring gap; native logs a one-time diagnostic when it is detected
 - **Adaptive Segment Caching** - Transparent, read-through HLS/DASH segment cache during playback (**Android only**; caches what has been played for replay, not an offline download)
 
 **Total:** 21 features

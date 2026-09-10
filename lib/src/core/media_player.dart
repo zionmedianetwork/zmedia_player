@@ -959,10 +959,15 @@ class MediaPlayer {
   /// live edge from a frozen playhead: when [positionBasis] is
   /// [PositionBasis.liveWindow], the window start slides forward with the
   /// playhead and the position stays roughly constant during perfectly
-  /// healthy playback. This value does not — against a frozen playhead in a sliding
-  /// window it grows without bound. See
-  /// `docs/api-reference/live-streaming.md` for the worked stall-watchdog
-  /// pattern.
+  /// healthy playback. This value does not — against a frozen playhead in a
+  /// sliding window it grows without bound **on Android**.
+  ///
+  /// On **iOS** it is emitted only from `AVPlayer.addPeriodicTimeObserver`,
+  /// which stops firing when time stops progressing, so a hard stall freezes
+  /// this value rather than growing it (issue #124). A watchdog there needs
+  /// an event-staleness signal as well — see
+  /// `docs/api-reference/live-streaming.md` ("Stall watchdog for live
+  /// streams") for the worked three-signal pattern.
   ///
   /// **Android and iOS measure this differently and the values are not
   /// comparable** — see [PlaybackState.liveEdgeOffset]'s dartdoc.

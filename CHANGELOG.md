@@ -30,6 +30,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cause". An unattributed pause emits nothing at all.
 
 ### Fixed
+- **Docs: the shipped live stall watchdog could not fire, and the docs contradicted themselves
+  about why** (issue #124). Documentation-only correction — no runtime behavior changed.
+  - `docs/api-reference/live-streaming.md` asserted in two places that a frozen playhead grows
+    `liveEdgeOffset` "without bound on both platforms" so the example watchdog "works
+    unmodified on both", while a third section in the same document stated the opposite. The
+    same claim, without any counterweight, was in `README.md`, `AGENTS.md`, `CLAUDE.md`,
+    `docs/api-reference/events.md`, `docs/api-reference/models.md`,
+    `docs/summary/features.md`, `PlaybackState.liveEdgeOffset`'s dartdoc and
+    `MediaPlayer.liveEdgeOffset`'s dartdoc. **The narrower claim is the correct one:** on iOS
+    both `notifyPositionChanged` call sites *and* the offset computation live inside
+    `AVPlayer.addPeriodicTimeObserver`'s block, which only fires while time is progressing, so
+    a hard stall freezes the value instead of growing it. Corrected everywhere.
+  - The documented `LiveStallWatchdog` example was **inert during an announced stall on both
+    platforms**: its first guard was `if (state != PlayerState.playing) { _reset(); return; }`,
+    and a rebuffer is reported as `PlayerState.buffering` on both platforms — so it stood down
+    the moment the stall became visible, and `_reset()` discarded its accumulated escalation
+    level. It also short-circuited on `isAtLiveEdge`, which is redundant at the default 45s
+    threshold and actively suppresses escalations for the tighter threshold the same document
+    recommends for low-latency streams. The example has been rewritten to carry three
+    independent signals (offset growth, `position` repetition on an absolute basis, and event
+    staleness), to judge on `playing` **or** `buffering`, and to subscribe to
+    `MediaPlayer.positionStream` rather than `MediaController` notifications (the controller
+    throttles position-only updates, and "did an event arrive at all" is exactly what a
+    throttle answers wrong).
+  - The rewritten example is now pinned by `test/core/live_stall_watchdog_test.dart`, which
+    holds a verbatim copy of it; four of its eight tests fail against the previously
+    documented version.
+  - `docs/api-reference/live-streaming.md`'s "`isAtLiveEdge` reads `true` no matter what on
+    iOS" entry claimed a `false` reading there "means `liveEdgeOffset` was `null` … rather
+    than a stream genuinely far from the edge". `false` also occurs for a genuine offset past
+    the tolerance, which is exactly what DVR scrub-back and a soft stall produce. Corrected.
+  - `docs/api-reference/events.md` documented iOS's `max(0, …)` clamp on `liveEdgeOffset` but
+    not Android's identical `coerceAtLeast(0L)`. Both platforms clamp; neither returns `null`
+    where the other clamps. Documented symmetrically so the asymmetry is not assumed.
+- **Docs: "Android maintains the `liveLatency` cushion via playback-speed adjustment" was
+  false** (issue #110). Documentation-only correction — no runtime behavior changed.
+  Verified against Media3 1.11.0's sources: `MediaPlayerManager.kt` supplies only
+  `setTargetOffsetMs` and no speed bounds; `DashMediaSource`/`HlsMediaSource
+  .updateLiveConfiguration` respond by forcing `minPlaybackSpeed == maxPlaybackSpeed == 1f`
+  whenever neither the `MediaItem` nor the manifest supplies bounds (and, for DASH, the
+  manifest carries no `ServiceDescription` target offset); `DefaultLivePlaybackSpeedControl`
+  then sets `mediaConfigurationTargetLiveOffsetUs = C.TIME_UNSET` and returns `1f`
+  unconditionally. **The speed control is switched off entirely for every ordinary HLS/DASH
+  live stream this package plays**, and even fully enabled it is capped at
+  `DEFAULT_FALLBACK_MAX_PLAYBACK_SPEED = 1.03f`. `liveLatency` is now documented as a **join
+  target** on Android, *maintained* on iOS only (via
+  `automaticallyPreservesTimeOffsetFromLive`). Corrected in `README.md`, `CLAUDE.md`,
+  `AGENTS.md`, `docs/api-reference/live-streaming.md` (new
+  "Is `liveLatency` maintained on Android? (No.)" section), `docs/api-reference/models.md`,
+  `docs/summary/features.md`, `HlsConfig.liveLatency`'s dartdoc, `example/README.md` and
+  `example/lib/pages/wired_config_verification_page.dart`. Supplying explicit speed bounds to
+  re-enable the control is described as an open candidate change on issue #110, **not**
+  implemented — it would alter playback timing for every live consumer.
+  - The same section's claim that `DefaultLivePlaybackSpeedControl` "sees ~33 minutes of lag
+    and speeds up trying to close a gap that was never real" was wrong on three counts (the
+    control is off; it is capped at 1.03x; it corrects *toward* a target rather than eroding a
+    cushion) and has been deleted.
+  - The manifest time-anchor defect's reach is now scoped precisely: **proven** for
+    Android/DASH (`DashMediaSource`'s floor derives purely from `availabilityStartTime`, and an
+    app-supplied `minOffsetMs` can only raise it), **not the same on Android/HLS**
+    (`HlsMediaSource` constrains against the playlist's own duration; caveats are `EXT-X-START`
+    and a wildly stale `EXT-X-PROGRAM-DATE-TIME`), and **structurally impossible on iOS** (no
+    unix-time anchor in the path).
+- **Docs: `AGENTS.md` listed six native→Dart channel events that do not exist.**
+  `onPlaybackStateChanged` (an ExoPlayer *listener* method, not a channel event — the wire name
+  is `onStateChanged`), `onVolumeChanged`, `onSpeedChanged`, `onBufferHealthUpdate`,
+  `onBandwidthUpdate` (the wire name is `onBandwidthChanged`) and `onPlatformViewError` appear
+  nowhere in `MediaPlayer._handleMethodCall`'s switch. `CLAUDE.md` carried the
+  `onBandwidthUpdate` name too. Both lists corrected, and `AGENTS.md` now records that native
+  emits `onPlatformViewError`/`onNativeError`/`onNativeWarning` with no Dart handler at all.
 - **Android sent only the LAST entry of `MediaItem.httpHeaders`; every other header was
   silently dropped** (issue #127). `MediaPlayerManager.loadMediaItem` built its
   `DefaultHttpDataSource.Factory` by calling `setDefaultRequestProperties(mapOf(key to value))`
@@ -174,6 +244,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is still serialized exactly as before, so the MethodChannel wire shape is unchanged.
 
 ### Added
+- **`test/core/live_stall_watchdog_test.dart`** (8 tests) — holds a **verbatim copy** of the
+  `LiveStallWatchdog` example from `docs/api-reference/live-streaming.md` and drives it with
+  injected `onStateChanged`/`onPositionChanged` events under `fakeAsync`, so the documented
+  artifact is executable rather than aspirational (issue #124). Covers an iOS hard stall
+  (`buffering` then total event silence — the regression lock), an Android rebuffer, a healthy
+  live edge over 60s of virtual time, VOD, a low-latency threshold tightened below the 15s
+  `defaultLiveEdgeTolerance`, a user pause, an idle player and the `stop()`/`start()`
+  lifecycle. Four of the eight fail against the previously documented example. Its header
+  documents that mock-based coverage is exactly how the defect survived: the existing
+  issue-#88 test simulates a frozen playhead with a constant `position` and a *growing*
+  offset — a sequence no real iOS device produces.
+- **`fake_async` added to `dev_dependencies`** (`^1.3.1`). It was already present transitively
+  via `flutter_test`; declaring it explicitly is what makes importing it legal under
+  `depend_on_referenced_packages`. Test-only — it is not a runtime dependency of the package.
 - **`test/native_contract/android_http_headers_test.dart`** (3 tests) — a regression guard for
   issue #127 in the established "parse the native sources as text" style of
   `test/exceptions/error_category_vocabulary_test.dart` and

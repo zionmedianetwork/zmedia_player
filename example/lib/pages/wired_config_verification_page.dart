@@ -38,7 +38,9 @@ enum _StreamSource { liveHls, vodMp4, custom }
 ///    logcat` (see the section's own disclaimer for how to read the three
 ///    cases: a rejected/bounded offset, a healthy live edge, and VOD's
 ///    `null`/`absolute`, and the Android/iOS divergence in whether the
-///    configured offset is *maintained* after the initial join).
+///    configured offset is *maintained* after the initial join — it is on
+///    iOS only; on Android `liveLatency` is a join target and nothing
+///    holds it afterwards, issue #110).
 /// 3. **[NotificationConfig.customActions] / .priority / .dismissible**
 ///    (Android only — see those fields' dartdocs for why iOS cannot honour
 ///    them). The notification is posted automatically the first time
@@ -1150,19 +1152,22 @@ class _LiveLatencyDisclaimer extends StatelessWidget {
         'green) is true almost continuously on iOS, so do not read a green '
         'banner there as "riding 15-30s behind the edge" the way it would on '
         'Android.\n\n'
-        'Both platforms now maintain the configured liveLatency cushion '
-        'after the initial join, but by different mechanisms with different '
-        'visible costs, and only one of them shows up in liveEdgeOffset:\n'
-        '- Android (LiveConfiguration.targetOffsetMs) actively maintains the '
-        'target via playback-speed adjustment -- a smooth correction, no '
-        'visible jump, and visible in liveEdgeOffset over a long session -- '
-        'EXCEPT on a manifest whose unix-time anchor disagrees with its own '
-        'segment timeline, which silently defeats it entirely (issue #110, '
-        'still open). Tell for that case: adb logcat for a one-time '
-        'MediaPlayerInstance warning naming the observed offset/window and '
-        'that liveLatency will not take effect on this stream.\n'
-        '- iOS 14+ (configuredTimeOffsetFromLive) also maintains the target '
-        'now: this package sets automaticallyPreservesTimeOffsetFromLive = '
+        'liveLatency is a JOIN TARGET on both platforms, and is actively '
+        'maintained after the join on iOS only:\n'
+        '- Android (LiveConfiguration.targetOffsetMs) sets where playback '
+        'joins and where a seek to the live edge lands, and then leaves the '
+        'playhead alone. It is NOT maintained: ExoPlayer\'s '
+        'DefaultLivePlaybackSpeedControl would drift speed toward the '
+        'target, but it is switched off for every ordinary HLS/DASH stream '
+        '(this package supplies no min/maxPlaybackSpeed, so Media3 forces '
+        'unit speed) -- see issue #110. Separately, a manifest whose '
+        'unix-time anchor disagrees with its own segment timeline defeats '
+        'even the join target on Android/DASH. Tell for that case: adb '
+        'logcat for a one-time MediaPlayerInstance warning naming the '
+        'observed offset/window and that liveLatency will not take effect '
+        'on this stream.\n'
+        '- iOS 14+ (configuredTimeOffsetFromLive) DOES maintain the target: '
+        'this package sets automaticallyPreservesTimeOffsetFromLive = '
         'true, so AVPlayer skips forward after a rebuffer to restore the '
         'cushion to what it was when buffering began. This cushion is NOT '
         'observable through liveEdgeOffset on iOS -- that field stays '
@@ -1172,8 +1177,7 @@ class _LiveLatencyDisclaimer extends StatelessWidget {
         'liveEdgeOffset can see. The only signal this page (or this '
         'package\'s API) exposes for it is a visible forward jump in '
         'position/duration right after a rebuffer, watched by eye -- there '
-        'is no way to opt out of the skip and get the old '
-        'drift-instead-of-skip behavior.\n'
+        'is no way to opt out of the skip.\n'
         'Judge liveLatency\'s actual join-time effect by ear/eye against the '
         'real stream after reloading with each option -- this page does not '
         'assert it from a Dart-exposed field.',

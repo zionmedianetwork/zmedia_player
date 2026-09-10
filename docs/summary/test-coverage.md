@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1167 tests passing** as of> this writing (run `flutter test` for the live count, since it grows with every
+> the original release. The suite has since grown to **1175 tests passing** as of> this writing (run `flutter test` for the live count, since it grows with every
 > change) as audit-remediation work added regression coverage. **Important caveat
 > the original summary omitted:** these are all **Dart** unit tests. There are
 > **no automated native (Kotlin/Swift) tests**, and several native features (DRM
@@ -69,6 +69,31 @@
 > wire value plus the unknown/absent cases.
 > `test/native_contract/pause_reason_vocabulary_test.dart` (5) is the drift guard.
 >
+> **Live stall watchdog regression coverage (issue #124):**
+> `test/core/live_stall_watchdog_test.dart` (8 tests) holds a **verbatim copy** of the
+> `LiveStallWatchdog` example from
+> [`docs/api-reference/live-streaming.md`](../api-reference/live-streaming.md#stall-watchdog-for-live-streams)
+> and drives it with injected `onStateChanged`/`onPositionChanged` events under `fakeAsync`,
+> so the documented artifact is executable rather than aspirational. Cases: an iOS hard stall
+> (`buffering`, then total event silence — the regression lock), an Android rebuffer
+> (`buffering` plus a stream of events with a growing offset), a healthy live edge (constant
+> position, `liveWindow` basis, offset oscillating 15-30s for 60s of virtual time), VOD
+> advancing normally, a low-latency threshold tightened below the 15s
+> `defaultLiveEdgeTolerance`, a user pause, an idle player, and `stop()`/`start()` lifecycle.
+> **Four of the eight fail against the previously documented example** — it guarded on
+> `state != PlayerState.playing` (so a `buffering` stall disarmed it *and* reset its
+> escalation level), it had no event-staleness signal (so an iOS hard stall was invisible),
+> and it short-circuited on `isAtLiveEdge` (so a tightened threshold could never escalate in
+> the band below 15s).
+>
+> **Worth stating plainly, because it is how the defect survived:** every test in this suite
+> mocks the `MethodChannel`, and the existing issue-#88 coverage in
+> `test/core/media_player_live_edge_test.dart` simulates a frozen playhead by emitting a
+> constant `position` with a *growing* `liveEdgeOffset` — a sequence that is faithful to
+> Android and that no real iOS device will ever produce, since iOS emits nothing at all
+> during a hard stall. A mock can emit impossible wire sequences, so mock-based coverage can
+> only ever check the claims someone thought to encode.
+
 > **Not covered, per the "no automated native tests" caveat above:** the native post-failure
 > suppressions (`playerError != null` on Android, `currentItem?.status == .failed` on iOS),
 > the iOS main-thread hop for `invokeMethod`, and the iOS

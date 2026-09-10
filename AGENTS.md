@@ -72,7 +72,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `Playlist` / `PlaybackMode` / `MediaRepeatMode` | Item collection + shuffle order / `sequential`\|`shuffle` / `none`\|`single`\|`all`. **Note: the enum is `MediaRepeatMode`, not `RepeatMode`.** |
 | `SubtitleTrack` / `SubtitleFormat` / `SubtitleConfig` / `SubtitleAlignment` | Subtitle track, format (`srt,webvtt,ass,ssa,ttml`), styling, alignment. |
 | `QualityTrack` / `AudioTrack` | Selectable video-quality / audio-track descriptors. |
-| `StreamingConfig` / `BitrateSelectionStrategy` / `HlsConfig` / `DashConfig` | Adaptive-streaming config; `HlsConfig`/`DashConfig` wire `enableDvr` (seek gating + live duration reporting), `liveLatency`, and inherited `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` to native (see [live-streaming.md](docs/api-reference/live-streaming.md) for the per-field, per-platform table). Exactly one of the two applies per item, chosen by `MediaItem.resolvedStreamingFormat`; they are **never** cross-applied, so an HLS-on-iOS/DASH-on-Android app must set both. `enableLiveStream` is deprecated — use `MediaItem.isLive`. |
+| `StreamingConfig` / `BitrateSelectionStrategy` / `HlsConfig` / `DashConfig` | Adaptive-streaming config; `HlsConfig`/`DashConfig` wire `enableDvr` (seek gating + live duration reporting), `liveLatency` (a **join target** on both platforms; *maintained* after a rebuffer on iOS only — ExoPlayer's live speed control is inert for ordinary HLS/DASH, issue #110), and inherited `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` to native (see [live-streaming.md](docs/api-reference/live-streaming.md) for the per-field, per-platform table). Exactly one of the two applies per item, chosen by `MediaItem.resolvedStreamingFormat`; they are **never** cross-applied, so an HLS-on-iOS/DASH-on-Android app must set both. `enableLiveStream` is deprecated — use `MediaItem.isLive`. |
 | `DrmConfig` / `DrmScheme` / `EzdrmConfig` / `DrmSession` | DRM config + factories (`.widevine`, `.fairplay`, `.ezdrm`, `.token`); session state. `DrmConfig.minWidevineSecurityLevel` sets the floor for Android Widevine only (no effect on iOS FairPlay). |
 | `BufferingConfig` / `BufferHealth` / `BufferStatus` / `BufferStatistics` | Adaptive buffering config + health/stats. |
 | `NetworkStatus` / `NetworkQuality` / `ConnectionType` / `NetworkChangeEvent` | Network monitoring model. `NetworkStatus.fromPlatform` honours the platform's `quality` field when it parses, falling back to `NetworkQuality.fromBandwidth(downloadSpeed)` only when `quality` is absent or unparseable (issue #112 — see the `onNetworkStatusChanged` payload note below). |
@@ -165,11 +165,17 @@ matched against a hardcoded string, which is why `user` was declared but unreach
 treated any event here as "focus lost" must now switch on the value.
 
 Native→Dart events (handled in `MediaPlayer._handleMethodCall`, dispatched by `playerId`):
-`onPlaybackStateChanged`, `onPositionChanged`, `onDurationChanged`, `onVolumeChanged`,
-`onSpeedChanged`, `onQualityTracksChanged`, `onSubtitleTracksChanged`, `onAudioTracksChanged`,
-`onBandwidthUpdate`, `onBufferHealthUpdate`, `onDrmSessionUpdate`, `onNotificationAction`,
-`onPipStatusChanged`, `onPipAction`, `onCastStatusChanged`, `onCastDevicesChanged`,
-`onNetworkStatusChanged`, `onPlatformViewError`, `onError`.
+`onStateChanged`, `onPositionChanged`, `onDurationChanged`, `onQualityTracksChanged`,
+`onSubtitleTracksChanged`, `onAudioTracksChanged`, `onBandwidthChanged`, `onDrmSessionUpdate`,
+`onNotificationAction`, `onPipStatusChanged`, `onPipAction`, `onCastStatusChanged`,
+`onCastDevicesChanged`, `onNetworkStatusChanged`, `onScreenCaptureChanged`, `onError`.
+(This list previously named `onPlaybackStateChanged`, `onVolumeChanged`, `onSpeedChanged`,
+`onBufferHealthUpdate`, `onBandwidthUpdate` and `onPlatformViewError` — none of which appear
+in `_handleMethodCall`'s switch. `onPlaybackStateChanged` is an ExoPlayer *listener* method on
+the Kotlin side, not a channel event; the wire name is `onStateChanged`. Volume, speed and
+buffer health are Dart-side state, not native events. Separately, native does emit
+`onPlatformViewError`, `onNativeError` and `onNativeWarning`, but Dart has **no handler** for
+any of them — they land in the `default:` "Unhandled method call" branch.)
 
 **`onPositionChanged` payload.** `{playerId: String, position: int(ms), positionBasis: String?,
 liveEdgeOffset: int(ms)?}`. `positionBasis` is `"absolute"` or `"liveWindow"` (absent or
@@ -196,8 +202,10 @@ just a units/timeline detail: Android reports distance from the *published* live
 (commonly 15-30s during healthy playback); iOS's "bounded by construction" computation above
 means AVPlayer keeps the playhead pinned to the seekable range's end during live playback, so
 the value reads under a second there regardless of stream health. `isAtLiveEdge` is
-consequently effectively always `true` on iOS, and a `liveLatency` cushion maintained on iOS is
-not observable through `liveEdgeOffset` at all. See
+consequently effectively always `true` on iOS, and a `liveLatency` cushion maintained on iOS
+(via `automaticallyPreservesTimeOffsetFromLive` — iOS is the only platform that maintains one;
+`liveLatency` is a join target only on Android, issue #110) is not observable through
+`liveEdgeOffset` at all. See
 [live-streaming.md](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things)
 for the full explanation.
 
@@ -501,10 +509,17 @@ controller.isAtLiveEdge;    // offset <= PlaybackState.defaultLiveEdgeTolerance 
 ```
 On `PositionBasis.liveWindow` the window start slides forward with the playhead, so a
 **constant `position` is healthy playback, not a stall** — a naive position-sampling watchdog
-escalates forever. `liveEdgeOffset` is the reliable signal: it grows without bound against a
-genuinely frozen playhead, on both platforms. Reported for live streams with **and without**
-`enableDvr`. **Android and iOS measure `liveEdgeOffset` itself differently and the values are
-not comparable — `isAtLiveEdge` is effectively always `true` on iOS.** See
+escalates forever. `liveEdgeOffset` is the reliable signal **on Android**: it grows without
+bound against a genuinely frozen playhead there. Reported for live streams with **and
+without** `enableDvr`. **On iOS it is not sufficient on its own** (issue #124): the offset is
+computed and emitted only from inside `AVPlayer.addPeriodicTimeObserver`'s block, which stops
+firing when time stops progressing, so a hard stall freezes it rather than growing it. A
+correct watchdog carries three signals — offset growth, `position` repeating on an absolute
+basis, and **event staleness** ("no `onPositionChanged` at all while the host still intends to
+play") — and stays armed while the player reports `buffering`, which is the state a stall is
+reported in on both platforms. **Android and iOS also measure `liveEdgeOffset` itself
+differently and the values are not comparable — `isAtLiveEdge` is effectively always `true` on
+iOS.** See
 [Platform divergence](docs/api-reference/live-streaming.md#platform-divergence-this-value-measures-different-things)
 and [Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall-watchdog-for-live-streams).
 
@@ -600,7 +615,7 @@ each taking the header map directly.
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested** (1167 tests as of this writing — run `flutter test`for the live count); **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested** (1175 tests as of this writing — run `flutter test`for the live count); **native Kotlin/Swift has no automated tests yet**,
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Media notifications —

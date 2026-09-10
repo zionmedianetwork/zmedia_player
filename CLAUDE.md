@@ -407,7 +407,7 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - `onDurationChanged`: Media duration
 - `onQualityTracksChanged` / `onSubtitleTracksChanged` / `onAudioTracksChanged`: track lists
 - `onDrmSessionUpdate`: DRM session state
-- `onBandwidthUpdate`: Network bandwidth estimation
+- `onBandwidthChanged`: Network bandwidth estimation
 - `onNetworkStatusChanged`: OS-level connectivity (see `NetworkMonitor` on each platform)
 - `onError`: Typed failure. Payload `{playerId, error, category?, nativeErrorCode?,
   httpStatusCode?}`. **The primary path for real playback failures** — they are detected
@@ -456,15 +456,24 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - `liveLatency` (a `Duration?`, no default — unset means native's own default live-edge
   behavior applies) configures the target offset from the live edge:
   `MediaItem.LiveConfiguration.setTargetOffsetMs` on Android,
-  `AVPlayerItem.configuredTimeOffsetFromLive` on iOS (14+ only). Both platforms *maintain*
-  the target after a rebuffer, by different mechanisms: Android's ExoPlayer drifts playback
-  speed toward it smoothly over time (see the manifest time-anchor defect below for a case
-  where the manifest itself defeats this), while iOS restores it via a visible forward skip —
+  `AVPlayerItem.configuredTimeOffsetFromLive` on iOS (14+ only). It is a **join target on
+  both platforms**, and *maintained* after a rebuffer on **iOS only**:
   `automaticallyPreservesTimeOffsetFromLive = true` means AVPlayer skips forward after a
-  rebuffer to restore the cushion to what it was when buffering began. There is no way to opt
-  out of the skip and get the old drift-instead-of-skip behavior — see
-  `HlsConfig.liveLatency`'s dartdoc and `docs/api-reference/live-streaming.md`'s wiring table
-  for the full rationale.
+  rebuffer to restore the cushion to what it was when buffering began, and there is no way to
+  opt out of that skip. **Android does not maintain it** (issue #110) — ExoPlayer's
+  `DefaultLivePlaybackSpeedControl` would, but it is switched off for every ordinary HLS/DASH
+  live stream this package plays: `buildMediaItem` supplies only `setTargetOffsetMs` and no
+  `min`/`maxPlaybackSpeed`, so `DashMediaSource`/`HlsMediaSource` force
+  `minPlaybackSpeed == maxPlaybackSpeed == 1f`, and the speed control responds by setting its
+  own target to `C.TIME_UNSET` and returning a constant `1f` (verified against Media3
+  1.11.0's sources; even fully enabled its cap is `DEFAULT_FALLBACK_MAX_PLAYBACK_SPEED =
+  1.03f`). Earlier revisions of this file, the README, `models.md` and the `liveLatency`
+  dartdoc all claimed Android maintained the cushion "via playback-speed adjustment" — that
+  claim was false and has been removed everywhere. Supplying explicit speed bounds is an open
+  candidate change on #110, deliberately not implemented, since it would alter playback timing
+  for every live consumer. See `HlsConfig.liveLatency`'s dartdoc and
+  `docs/api-reference/live-streaming.md`'s
+  "Is `liveLatency` maintained on Android? (No.)" section.
 - `MediaItem.isLive` is the canonical live flag; `HlsConfig`/`DashConfig.enableLiveStream` is
   deprecated in its favor
 - `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` bound track selection (Android via
@@ -487,7 +496,8 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   `liveEdgeOffset` (int ms, omitted when unknown) and `positionBasis` (String)):
   - `liveEdgeOffset` (`Duration?`) — distance behind the live edge; `null` for VOD, reported
     for live **with and without** DVR. Grows without bound against a genuinely frozen
-    playhead, which is what makes it the reliable signal. Android:
+    playhead **on Android**, which is what makes it the reliable signal there; on iOS it
+    freezes instead (see below). Android:
     `Player.getCurrentLiveOffset()` when it agrees with the window — see below — falling back
     to `Timeline.Window.durationMs - getCurrentPosition()` on `C.TIME_UNSET` **or** when the
     reported value exceeds the window's own duration. iOS: end of
@@ -506,10 +516,21 @@ A separate exported module — not to be confused with `CrashReporter` in core:
     below); the two platforms' `liveEdgeOffset` values are not comparable; and a `liveLatency`
     cushion held via `automaticallyPreservesTimeOffsetFromLive` on iOS is invisible to this
     field — the gap it maintains sits between the seekable range's end and the *published*
-    edge, outside what `seekableTimeRanges.last - currentTime()` can see. What still works
-    identically on both platforms: a genuinely frozen playhead grows the value without bound,
-    and DVR scrub-back grows it correctly. See `docs/api-reference/live-streaming.md`'s
-    "Platform divergence" section for the full write-up.
+    edge, outside what `seekableTimeRanges.last - currentTime()` can see. What works
+    identically on both platforms: DVR scrub-back grows the value correctly. What does
+    **not** (issue #124, correcting an earlier claim in this file): a frozen playhead grows
+    the value without bound on **Android only**. The iOS computation and both of its
+    `notifyPositionChanged` call sites live inside `addPeriodicTimeObserver`'s block, which
+    stops firing when time stops progressing, so a hard stall freezes the value rather than
+    growing it — the arithmetic would grow, but it is never sampled. Even a native fix that
+    emitted through a stall would be partial: iOS's reference point
+    (`seekableTimeRanges.last.end`) only advances as media-playlist refreshes succeed, so a
+    total-connectivity-loss stall would hold the offset constant anyway, while Android's
+    wall-clock-referenced `getCurrentLiveOffset()` grows for every stall class. Both
+    platforms clamp a negative computed offset to `0` (`coerceAtLeast(0L)` on both Kotlin
+    return paths, `max(0, ...)` in Swift) — neither returns `null` where the other clamps.
+    See `docs/api-reference/live-streaming.md`'s "Platform divergence" section for the full
+    write-up.
   - **Manifest time-anchor defect (issue #109/#110).** `Player.getCurrentLiveOffset()` is
     `nowUnixTime - windowStartTime - position`, and for DASH, `windowStartTime` derives from
     `manifest.availabilityStartTimeMs`. If a packager anchors that to broadcast start while
@@ -543,8 +564,17 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - Android emits position events while `playWhenReady && STATE_BUFFERING` as well as while
   `isPlaying`, so `liveEdgeOffset` keeps updating through a rebuffer. iOS's
   `addPeriodicTimeObserver` only fires while time is progressing, so a hard stall suspends
-  updates there — a host watchdog should treat "no event at all while `state == playing`" as
-  its own iOS signal.
+  updates there — a host watchdog must treat **event staleness** ("no `onPositionChanged` at
+  all while the host still intends to play") as its own signal, and it is the *only* signal
+  that fires for an iOS hard stall.
+- **A stall watchdog must stay armed while the player reports `buffering`.** A rebuffer is
+  reported as `PlayerState.buffering` on both platforms (`Player.STATE_BUFFERING` on Android;
+  `.waitingToPlayAtSpecifiedRate` and `AVPlayerItemPlaybackStalled` on iOS), so a first guard
+  of `if (state != PlayerState.playing) { reset(); return; }` disarms the watchdog at the
+  exact moment the stall becomes visible — and throws away its accumulated escalation level.
+  Judge on `playing` **or** `buffering`. The worked implementation lives in
+  `docs/api-reference/live-streaming.md` ("Stall watchdog for live streams") and is pinned by
+  `test/core/live_stall_watchdog_test.dart`, which holds a verbatim copy of it.
 
 ### Picture-in-Picture
 - Android: Uses `enterPictureInPictureMode()` API
@@ -572,10 +602,23 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 10. **Every load path carries the current config snapshot** - `load()`, `setPlaylist()` and `skipToIndex()` each send a `config` key (the current `MediaConfig`, serialized exactly as `initialize`/`updateConfig` send it) with every call, so reloading with a changed `MediaConfig` (e.g. flipping `hlsConfig.enableDvr`) takes effect immediately — on playlist-driven items too. `skipToNext()`/`skipToPrevious()`/playlist auto-advance route through `skipToIndex()` and are covered by the same key. Native replaces its stored config from it before any config-dependent work, but deliberately does not re-run `applyConfig()` from these paths (that would undo an in-progress runtime `setMuted()`); the key is optional on the native side, so an older Dart caller cannot break a newer native build
 11. **`setPlaylist` no longer restarts the item already playing** - native skips its `loadMediaItem` call when `items[startIndex]` is, key for key, the currently loaded item AND that item is still in progress (issue #79). This is what makes sliding-window playlists and mid-playback `mode`/`repeatMode` changes free. A changed `url`/`httpHeaders`/`drmConfig` for the same `id`, a different `id`, or a stopped/completed/errored player all still reload. `skipToIndex` deliberately keeps its unconditional reload — `MediaRepeatMode.single` repeats an item through exactly that call
 12. **A changed `MediaConfig` does not force a reload** - a `setPlaylist()` carrying a new config for an unchanged, in-progress item **stores that config** (gotcha 10 — the next real load uses it) but **does not reload the item** (gotcha 11). Re-issuing a playlist is therefore not a way to apply config immediately: call `updateConfig()` to apply a config change to live playback now, or `load()` to apply it *and* reload
-13. **Never stall-detect on `position` for a live stream** - when
+13. **Never stall-detect on `position` for a live stream — and never on `liveEdgeOffset`
+   alone either** (issue #124) - when
    `PlaybackState.positionBasis == PositionBasis.liveWindow`, a *constant* `position` is
-   healthy playback in a sliding window, not a stall. Use `liveEdgeOffset`/`isAtLiveEdge`
-   (see "Live Streaming DVR" above and `docs/api-reference/live-streaming.md`)
+   healthy playback in a sliding window, not a stall. `liveEdgeOffset` is the right
+   replacement **on Android**, where it grows without bound against a frozen playhead. It is
+   **not sufficient on iOS**: it is computed and emitted only from inside
+   `addPeriodicTimeObserver`'s block, which stops firing when time stops progressing, so a
+   hard stall freezes it instead of growing it. A correct watchdog carries three signals —
+   offset growth, `position` repeating on an absolute basis, and **event staleness** ("no
+   `onPositionChanged` at all while the host still intends to play") — and it must treat
+   `PlayerState.buffering` as "still intends to play", since that is the state a stall is
+   reported in on both platforms. Do **not** gate it on `isAtLiveEdge`: that comparison is
+   either redundant with the threshold or, for a tightened low-latency threshold, actively
+   suppresses real escalations. See "Live Streaming DVR" above,
+   `docs/api-reference/live-streaming.md`'s "Stall watchdog for live streams", and
+   `test/core/live_stall_watchdog_test.dart`, which pins a verbatim copy of the documented
+   implementation
 14. **`NetworkStatus.quality`/`.isAvailable` and `.connectionType` are two independent
    signals** - `NetworkStatus.fromPlatform` honours the platform's `quality` field (falling
    back to `NetworkQuality.fromBandwidth(downloadSpeed)` only when `quality` is absent or
@@ -601,8 +644,10 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    a `liveLatency` cushion held via `automaticallyPreservesTimeOffsetFromLive` is invisible to
    `liveEdgeOffset` there. Both computations are internally correct; do not treat either as a
    defect, and do not build cross-platform UI/alerting thresholds on the assumption the two
-   numbers mean the same thing. See "Live-edge signal (issue #88)" above and
-   `docs/api-reference/live-streaming.md`'s "Platform divergence" section
+   numbers mean the same thing. Note also that both platforms clamp a negative computed
+   offset to `0` (`coerceAtLeast(0L)` / `max(0, ...)`) — neither reports `null` where the
+   other clamps, so do not build on an asymmetry there. See "Live-edge signal (issue #88)"
+   above and `docs/api-reference/live-streaming.md`'s "Platform divergence" section
 16. **`MediaItem.httpHeaders` is the only wired header path — and all of its entries are now
    sent on Android** (issue #127). Android's `loadMediaItem` used to call
    `DefaultHttpDataSource.Factory.setDefaultRequestProperties(mapOf(key to value))` once per

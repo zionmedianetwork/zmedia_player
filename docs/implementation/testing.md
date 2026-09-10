@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1167 tests passing** in the package's Dart layer as of this> writing — the count grows with every change, so run `flutter test` for the live
+> **Current status:** **1175 tests passing** in the package's Dart layer as of this> writing — the count grows with every change, so run `flutter test` for the live
 > number rather than trusting this one. Native Kotlin/Swift code still has **no
 > automated tests** — those paths require on-device verification.
 >
@@ -111,6 +111,23 @@ Test individual components in isolation.
   queued at `dispose()` resolves as a no-op without touching the disposed player, and the
   10 s per-operation timeout bounds head-of-line blocking. (That file supersedes
   `operation_lock_non_critical_test.dart`, which asserted the removed throwing behaviour.)
+- Live stall watchdog — `test/core/live_stall_watchdog_test.dart` holds a **verbatim copy**
+  of the `LiveStallWatchdog` example from
+  [`docs/api-reference/live-streaming.md`](../api-reference/live-streaming.md#stall-watchdog-for-live-streams)
+  and exercises it against injected `onStateChanged`/`onPositionChanged` events under
+  `fakeAsync`, so the documented snippet is a checked artifact rather than an aspirational
+  one (issue #124). It pins the three cases a single-signal watchdog gets wrong: an iOS hard
+  stall (event silence, offset frozen), an Android rebuffer (`buffering` state, offset
+  growing), and a low-latency threshold tightened below the 15s
+  `PlaybackState.defaultLiveEdgeTolerance`. **If you edit the doc snippet, edit the test copy
+  in the same change** — nothing enforces the correspondence automatically.
+
+**Test-only dependency:** `fake_async` is declared in `dev_dependencies` (it was already
+present transitively via `flutter_test`; declaring it explicitly is what makes importing it
+legal under `depend_on_referenced_packages`). It supplies the deterministic virtual clock the
+watchdog test drives its 2 s sampler and ~500 ms native tick with. `fakeAsync` is preferred
+over `testWidgets`/`tester.pump` for this: the widget binding asserts no timers are pending at
+teardown, which `MediaPlayer`'s static 5-minute instance-cleanup timer would trip.
 
 **Example:**
 ```dart
@@ -663,7 +680,7 @@ For questions about testing:
 
 ---
 
-**Test Coverage:** run `flutter test` for the current package count (1167 as of thiswriting) plus `cd example && flutter test` for the example app's own 24; **no automated
+**Test Coverage:** run `flutter test` for the current package count (1175 as of thiswriting) plus `cd example && flutter test` for the example app's own 24; **no automated
 native tests yet**
 **Status:** Active development — native layers need on-device verification
 **Last Updated:** September 5, 2026
