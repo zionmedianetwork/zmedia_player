@@ -52,6 +52,22 @@ stream) than on iOS (bounded near zero by construction during live playback, ver
 the same stream) — making `isAtLiveEdge`/`defaultLiveEdgeTolerance` near-degenerate on iOS and
 a configured `liveLatency` cushion unobservable through that field there.
 
+`CHANGELOG.md`'s `[Unreleased]` also holds two further documentation-only corrections in the
+same family. Issue #124: the docs claimed in several places that a frozen playhead grows
+`liveEdgeOffset` "without bound on both platforms" (and contradicted themselves elsewhere in
+the same file). It grows on **Android only** — on iOS the value is computed and emitted solely
+from inside `AVPlayer.addPeriodicTimeObserver`'s block, which stops firing when time stops
+progressing, so a hard stall freezes it. The documented `LiveStallWatchdog` example was also
+inert during an *announced* stall on **both** platforms, because it stood down on
+`state != PlayerState.playing` while a rebuffer is reported as `PlayerState.buffering`; it has
+been rewritten to carry three signals (offset growth, absolute-basis position repetition, and
+event staleness) and is now pinned by `test/core/live_stall_watchdog_test.dart`, which holds a
+verbatim copy of it. Issue #110: "Android maintains the `liveLatency` cushion via
+playback-speed adjustment" was false — verified against Media3 1.11.0's sources, the live
+playback-speed control is switched off entirely for every ordinary HLS/DASH stream this
+package plays, so `liveLatency` is a **join target** on Android and is *maintained* on iOS
+only.
+
 > This file is the authoritative implementation roadmap referenced by `CLAUDE.md`.
 > It tracks current state and the real backlog. For architecture, UI/UX specs, and
 > the contribution/branching/release workflow, see `CLAUDE.md`.
@@ -75,7 +91,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |
 | Android | minSdk 23 |
-| Tests | 1167 passing (Dart layer; native has none) |
+| Tests | 1175 passing (Dart layer; native has none) |
 
 ---
 
@@ -121,17 +137,20 @@ platform is called out explicitly.
 - Adaptive bitrate / bandwidth estimation (`StreamingService` + native `NetworkMonitor`).
 - Quality and audio-track selection.
 - Live + DVR: `enableDvr` (seek gating + DVR-window duration reporting), `liveLatency`
-  (target offset from live edge; iOS 14+ only — both platforms now *maintain* the target
-  after a rebuffer, but by different mechanisms: Android's ExoPlayer drifts playback speed
-  toward it smoothly, iOS restores it via a visible forward skip, since
-  `automaticallyPreservesTimeOffsetFromLive = true`, with no opt-out),
+  (target offset from live edge; iOS 14+ only — a **join target** on both platforms, and
+  *maintained* after a rebuffer on **iOS only**, via a visible forward skip since
+  `automaticallyPreservesTimeOffsetFromLive = true`, with no opt-out. Android does not
+  maintain it: ExoPlayer's live playback-speed control is switched off for ordinary HLS/DASH
+  streams, issue #110),
   `maxBitrate`/`minBitrate`/`enableAdaptiveBitrate` (track-selection bounds; iOS honors
   only `maxBitrate`).
 - Live-edge signal: `PlaybackState.liveEdgeOffset`, `isAtLiveEdge` /
   `isAtLiveEdgeWithin(tolerance)` / `defaultLiveEdgeTolerance` (15s), and `positionBasis`
   (`PositionBasis.absolute` / `.liveWindow`) — all mirrored on `MediaPlayer` and
   `MediaController`. A live `position` is window-relative and stays ~constant at the edge,
-  so `liveEdgeOffset` is the signal a stall watchdog must use (issue #88). Android's
+  so `liveEdgeOffset` — not `position` — is the signal a stall watchdog must use (issue #88),
+  paired with an event-staleness check because iOS emits nothing at all during a hard stall
+  and the offset freezes rather than growing there (issue #124). Android's
   `liveEdgeOffset` is sanity-checked against the live window's own duration before being
   trusted, falling back to a bounded computation when a manifest's unix-time anchor
   disagrees with its own segment timeline (issue #109); the same anchor defect silently

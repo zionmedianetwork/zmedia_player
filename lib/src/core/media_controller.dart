@@ -210,6 +210,14 @@ class MediaController extends ChangeNotifier {
   /// the platform cannot answer yet. See [PlaybackState.liveEdgeOffset],
   /// including why Android and iOS measure this differently and the values
   /// are not comparable.
+  ///
+  /// Not a sufficient stall signal on its own: on iOS a hard stall stops the
+  /// position events entirely, so this freezes at its last value rather than
+  /// growing. Pair it with an event-staleness check on
+  /// [MediaPlayer.positionStream] (this controller throttles position-only
+  /// updates, so ask the player, not the controller, whether an event
+  /// arrived at all) — see `docs/api-reference/live-streaming.md`'s
+  /// "Stall watchdog for live streams".
   Duration? get liveEdgeOffset => _currentState.liveEdgeOffset;
 
   /// Whether the playhead is riding the live edge, within
@@ -217,9 +225,10 @@ class MediaController extends ChangeNotifier {
   /// for VOD. Effectively always `true` on iOS during live playback — see
   /// [PlaybackState.isAtLiveEdge].
   ///
-  /// Drive a LIVE badge or a "jump to live" affordance from this, and see
-  /// `docs/api-reference/live-streaming.md` for the stall-watchdog pattern
-  /// that pairs it with [liveEdgeOffset].
+  /// Drive a LIVE badge or a "jump to live" affordance from this. Do **not**
+  /// use it to gate a stall watchdog: see
+  /// `docs/api-reference/live-streaming.md`'s "Stall watchdog for live
+  /// streams", whose implementation deliberately does not consult it.
   bool get isAtLiveEdge => _currentState.isAtLiveEdge;
 
   /// Whether there's a next track available

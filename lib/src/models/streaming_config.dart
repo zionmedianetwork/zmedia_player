@@ -338,11 +338,31 @@ class HlsConfig extends StreamingConfig {
 
   /// Live stream latency target.
   ///
-  /// **Android:** `MediaItem.LiveConfiguration.Builder.setTargetOffsetMs`.
-  /// ExoPlayer actively maintains this cushion via playback-speed
-  /// adjustment, so it drifts *toward* the target over time (subject to the
-  /// manifest's own live/DVR window — see issue #110, still open, for a
-  /// case where the manifest itself defeats this).
+  /// **Android:** `MediaItem.LiveConfiguration.Builder.setTargetOffsetMs` —
+  /// a **join target only**. It decides where playback starts and where a
+  /// seek to the live edge lands; it is *not* actively maintained
+  /// afterwards, so after a rebuffer the playhead simply stays wherever the
+  /// rebuffer left it.
+  ///
+  /// This package deliberately does not claim otherwise any more (issue
+  /// #110). ExoPlayer's `DefaultLivePlaybackSpeedControl` would drift
+  /// playback speed toward the target, but it is switched off for every
+  /// ordinary HLS/DASH live stream this package plays:
+  /// `MediaPlayerManager.kt` supplies only `setTargetOffsetMs` and no
+  /// `min`/`maxPlaybackSpeed`, so `DashMediaSource`/`HlsMediaSource`
+  /// force `minPlaybackSpeed == maxPlaybackSpeed == 1f` (verified against
+  /// Media3 1.11.0), and `DefaultLivePlaybackSpeedControl` responds by
+  /// setting its target to `C.TIME_UNSET` and returning a constant `1f`
+  /// adjustment. Supplying explicit speed bounds is a candidate future
+  /// change tracked on issue #110, not a pending fix — it would alter
+  /// playback timing for every live consumer.
+  ///
+  /// Separately, a manifest whose unix-time anchor disagrees with its own
+  /// segment timeline defeats even the *join* target on Android/DASH — see
+  /// issue #110 and `docs/api-reference/live-streaming.md`'s
+  /// "Manifest time-anchor defect" section. Android/HLS constrains the
+  /// target against the playlist's own duration instead and is not affected
+  /// the same way.
   ///
   /// **iOS:** `AVPlayerItem.configuredTimeOffsetFromLive` — iOS 14+ only;
   /// silently has no effect on iOS 13, where the API does not exist. Per the
@@ -355,11 +375,10 @@ class HlsConfig extends StreamingConfig {
   /// the playhead's distance from the live edge" after a rebuffer. Setting a
   /// target offset is a statement of intent to hold that cushion, so `true`
   /// means the cushion honoured at join/seek is also restored after every
-  /// rebuffer, matching Android's ExoPlayer, which maintains its target the
-  /// same way (via playback-speed adjustment rather than a skip). The cost
-  /// is real: restoring the offset is a forward skip, so the playhead can
-  /// visibly jump right after a rebuffer. There is no way to opt out of the
-  /// skip and get the old drift-instead-of-skip behavior.
+  /// rebuffer. **iOS is the only platform where the cushion is maintained**
+  /// — Android's target is a join target only, per above. The cost is real:
+  /// restoring the offset is a forward skip, so the playhead can visibly
+  /// jump right after a rebuffer, and there is no way to opt out of it.
   ///
   /// **This cushion is not observable through `liveEdgeOffset` on iOS**
   /// (issue #120). `PlaybackState.liveEdgeOffset` there is the end of
@@ -368,7 +387,9 @@ class HlsConfig extends StreamingConfig {
   /// whether the cushion is being held or eroded — the gap this property
   /// maintains lives between the seekable range's end and the *published*
   /// live edge, a quantity outside what that subtraction can see. On Android,
-  /// `liveEdgeOffset` does reflect the maintained target. See
+  /// `liveEdgeOffset` does track the playhead's real distance from the
+  /// published edge — but there is no maintained target there for it to
+  /// reflect. See
   /// `docs/api-reference/live-streaming.md`'s "Platform divergence" section
   /// for the full explanation of why the two platforms' `liveEdgeOffset`
   /// values are not comparable.

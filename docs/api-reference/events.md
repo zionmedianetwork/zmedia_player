@@ -59,10 +59,19 @@ enum PositionBasis {
 
 > **Read this before writing a stall detector.** On `PositionBasis.liveWindow`,
 > `position` stays roughly constant during perfectly healthy playback, because
-> the window start advances at the same rate as the playhead. Use
-> `liveEdgeOffset` (which grows without bound against a genuinely frozen
-> playhead, on both platforms) rather than `position` to detect a live stall.
-> See [Live Streaming](live-streaming.md#stall-watchdog-for-live-streams).
+> the window start advances at the same rate as the playhead. Do not detect a
+> live stall from `position`.
+>
+> `liveEdgeOffset` is the right signal **on Android**, where it grows without
+> bound against a genuinely frozen playhead. It is **not sufficient on iOS**:
+> both `notifyPositionChanged` call sites and the offset computation itself
+> live inside `AVPlayer.addPeriodicTimeObserver`'s block, which stops firing
+> when time stops progressing — so during an iOS hard stall the offset is
+> never sampled and freezes at its last value instead of growing. A correct
+> watchdog therefore also treats **no `onPositionChanged` arriving at all,
+> while the host still intends to play**, as a stall signal (issue #124).
+> See [Live Streaming](live-streaming.md#stall-watchdog-for-live-streams) for
+> the three-signal implementation.
 >
 > **Android and iOS measure `liveEdgeOffset` itself differently, and the
 > values are not comparable** — see
@@ -835,7 +844,17 @@ Where each value comes from natively:
 
 | | Android (ExoPlayer / Media3) | iOS (AVFoundation) |
 |---|---|---|
-| `liveEdgeOffset` | `Player.getCurrentLiveOffset()`, **sanity-checked against the live window first** (issue #109): used only when it is `C.TIME_UNSET` or `<= Timeline.Window.durationMs`. Falls back to `Timeline.Window.durationMs - Player.getCurrentPosition()` (both window-relative, so the difference is the distance to the live edge) both when the platform value is `C.TIME_UNSET` **and** when it exceeds the window's own duration — the latter is provably wrong (a manifest whose unix-time anchor disagrees with its segment timeline; see `docs/api-reference/live-streaming.md`'s "Manifest time-anchor defect" section) rather than trusted | End of `AVPlayerItem.seekableTimeRanges.last` (`start + duration`) minus `AVPlayerItem.currentTime()`, clamped to >= 0 — bounded by construction (no unix-time anchor involved), so it needed no equivalent check |
+| `liveEdgeOffset` | `Player.getCurrentLiveOffset()`, **sanity-checked against the live window first** (issue #109): used only when it is `C.TIME_UNSET` or `<= Timeline.Window.durationMs`. Falls back to `Timeline.Window.durationMs - Player.getCurrentPosition()` (both window-relative, so the difference is the distance to the live edge) both when the platform value is `C.TIME_UNSET` **and** when it exceeds the window's own duration — the latter is provably wrong (a manifest whose unix-time anchor disagrees with its segment timeline; see `docs/api-reference/live-streaming.md`'s "Manifest time-anchor defect" section) rather than trusted. **Both return paths are clamped to >= 0** (`coerceAtLeast(0L)`) | End of `AVPlayerItem.seekableTimeRanges.last` (`start + duration`) minus `AVPlayerItem.currentTime()`, **clamped to >= 0** (`max(0, ...)`) — bounded by construction (no unix-time anchor involved), so it needed no equivalent window check |
+
+**The negative clamp is symmetric across platforms.** Both natives coerce a
+negative computed offset to `0` before it crosses the channel — Android with
+`coerceAtLeast(0L)` on both of its return paths, iOS with `max(0, ...)` — so
+neither platform ever reports a negative offset, and neither reports `null`
+where the other clamps. (`null` on either platform means "cannot answer at
+all": not live, or the timeline/seekable range not yet established.) A
+transient negative is normal on both: the playhead can read a few milliseconds
+past the last observed edge between samples. `PlaybackState.isAtLiveEdgeWithin`
+treats a zero or negative offset as "at the edge" either way.
 | `positionBasis` | `"liveWindow"` whenever `Timeline.Window.isLive()` — ExoPlayer's `getCurrentPosition()` is window-relative for **any** live item, DVR or not | `"liveWindow"` only when the live **DVR** window translation is applied; a live item without `enableDvr` reports `"absolute"`, because there `position` is the `AVPlayerItem`'s own absolute timeline |
 
 The `positionBasis` divergence between platforms for *live-without-DVR* is
@@ -861,6 +880,15 @@ for the full explanation, including what still works identically on both
 were considered and rejected as the iOS source: both are *target* offsets (what
 the app asked for / what the server recommends), so they are constant by
 construction and useless as a liveness signal.
+
+**When this event stops arriving.** Android keeps emitting it while
+`playWhenReady && STATE_BUFFERING`, so it continues through a rebuffer. iOS
+emits it only from `AVPlayer.addPeriodicTimeObserver`, which fires only while
+time is progressing — so on iOS the event stops entirely during a hard stall.
+"No `onPositionChanged` at all while the player reports `playing` or
+`buffering`" is therefore itself a stall signal, and the only one available for
+that case on iOS; see
+[Stall watchdog for live streams](live-streaming.md#stall-watchdog-for-live-streams).
 
 ### `onNetworkStatusChanged`
 

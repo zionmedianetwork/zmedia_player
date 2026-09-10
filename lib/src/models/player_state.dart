@@ -61,7 +61,10 @@ enum PositionBasis {
   /// **Position staying constant on this basis is not a stall.** It is what
   /// a healthy playhead riding the live edge of a sliding window looks like.
   /// Use [PlaybackState.liveEdgeOffset] / [PlaybackState.isAtLiveEdge] to
-  /// tell a healthy edge from a frozen playhead.
+  /// tell a healthy edge from a frozen playhead — plus, on iOS, an
+  /// event-staleness check, because a hard stall there stops position events
+  /// entirely and freezes the offset instead of growing it (see
+  /// [PlaybackState.liveEdgeOffset]).
   liveWindow,
 }
 
@@ -126,11 +129,20 @@ class PlaybackState {
   ///    see.
   ///
   /// The values are therefore **not comparable across platforms**. What does
-  /// hold on both: a genuinely frozen playhead in a sliding window grows this
-  /// value without bound, which is why it (not `position`) is the reliable
-  /// live-stall signal, and DVR scrub-back grows it correctly on both. See
-  /// `docs/api-reference/live-streaming.md`'s "Platform divergence" section
-  /// for the full explanation.
+  /// hold on both: DVR scrub-back grows this value correctly.
+  ///
+  /// What does **not** hold on both, contrary to what this dartdoc used to
+  /// claim (issue #124): a genuinely frozen playhead grows this value
+  /// without bound on **Android only**. On iOS the value is computed and
+  /// emitted only from inside `AVPlayer.addPeriodicTimeObserver`'s block,
+  /// which stops firing when time stops progressing — so during a hard stall
+  /// it is never sampled and freezes at its last value. On iOS, "no
+  /// `onPositionChanged` event at all while the player still reports
+  /// [PlayerState.playing] or [PlayerState.buffering]" is the hard-stall
+  /// signal; this field alone is not. See
+  /// `docs/api-reference/live-streaming.md`'s "Platform divergence" and
+  /// "Stall watchdog for live streams" sections for the full explanation and
+  /// a three-signal watchdog.
   ///
   /// Delivered on the existing `onPositionChanged` event under the
   /// `liveEdgeOffset` key (milliseconds); see `docs/api-reference/events.md`.
