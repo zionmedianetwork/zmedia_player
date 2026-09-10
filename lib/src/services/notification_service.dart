@@ -349,6 +349,21 @@ class NotificationService {
           'album': mediaItem.album,
           'artworkUrl': mediaItem.artworkUrl,
           'url': mediaItem.url,
+          // The artwork fallback runs its own HTTP requests against `url`
+          // (Android `MediaMetadataRetriever`, iOS `AVAssetImageGenerator`) to
+          // extract a video frame when `artworkUrl` is null. Those requests are
+          // separate from the ones the player makes for playback, so without
+          // the item's headers they are unauthenticated and 401/403 against a
+          // signed or token-authenticated media URL — artwork then silently
+          // never appears. Native reads this key in
+          // `NotificationHandler.showNotification` on both platforms and passes
+          // it to the frame extraction; it is not applied to an `artworkUrl`
+          // fetch, which is an independent (often third-party) host.
+          // Copied rather than passed by reference, matching
+          // [MediaItem.toMap]'s defensive-copy discipline.
+          'httpHeaders': mediaItem.httpHeaders == null
+              ? null
+              : Map<String, String>.from(mediaItem.httpHeaders!),
           'duration': mediaItem.duration?.inMilliseconds,
           // Lets native gate seeking (ACTION_SEEK_TO / METADATA_KEY_DURATION
           // on Android, changePlaybackPositionCommand / skipForward/Backward

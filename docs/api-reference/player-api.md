@@ -267,7 +267,9 @@ volume/speed/mute from it (that would undo an in-progress runtime `setMuted()`);
 build that predates it ignores it and keeps its stored config, exactly as before.
 
 Per-item `httpHeaders` and `drmConfig` are unaffected — they live on `MediaItem`, so per-item
-auth has always worked on the playlist path.
+auth has always worked on the playlist path. (`MediaItem.httpHeaders` is the only wired header
+path, and **all** of its entries are sent on both platforms; `MediaConfig.httpHeaders` is
+deprecated and inert — see [models.md](models.md#mediaconfig).)
 
 One nuance on the `setPlaylist` path: "honored immediately" means "on the next *load*". When
 `setPlaylist` skips its load because the item at `startIndex` is unchanged and in progress

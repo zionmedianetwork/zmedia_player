@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1104 tests passing** as of
+> the original release. The suite has since grown to **1118 tests passing** as of
 > this writing (run `flutter test` for the live count, since it grows with every
 > change) as audit-remediation work added regression coverage. **Important caveat
 > the original summary omitted:** these are all **Dart** unit tests. There are
@@ -23,7 +23,31 @@
 > `ci-success` merge check like the other jobs — previously nothing in CI ran this
 > suite at all, which is how 13 of its tests sat broken from v0.3.0 until a later fix.
 >
-> **Last Updated:** September 5, 2026
+> **Last Updated:** September 10, 2026
+>
+> **Android HTTP-header regression coverage (issue #127):**
+> `test/native_contract/android_http_headers_test.dart` (3 tests) parses
+> `MediaPlayerManager.kt`/`DrmHandler.kt` as text and fails if
+> `DefaultHttpDataSource.Factory.setDefaultRequestProperties` — which *replaces* rather
+> than merges its argument map — is ever called from inside a loop again, or if
+> `loadMediaItem` stops passing the whole `httpHeaders` map in one call. Nothing else in
+> the suite could see this defect: every test mocks the `MethodChannel`, so the Dart half
+> round-tripped all headers correctly (now pinned by the "httpHeaders serialization" group
+> in `test/models/media_item_test.dart`, 2 tests) while Android silently sent only the last
+> one. iOS was never affected — it applies the map in a single assignment. See
+> [testing.md](../implementation/testing.md#guarding-the-native-contract-from-dart).
+>
+> **Notification-artwork header coverage (same defect family, both platforms):**
+> `test/native_contract/notification_artwork_headers_test.dart` (6 tests) pins that the
+> video-frame artwork fallback — which issues its *own* HTTP requests against the media URL
+> and so is not covered by the playback data source's headers — carries
+> `MediaItem.httpHeaders`. It fails if Android's `generateThumbnail` hands `setDataSource` a
+> hardcoded empty map (or reverts to the deprecated single-argument overload), if iOS's
+> builds a bare `AVURLAsset(url:)` instead of going through `makeAVURLAsset`, if either
+> `showNotification` stops reading `mediaItem["httpHeaders"]`, or if Dart stops sending it.
+> The Dart half is separately pinned by 3 tests in
+> `test/services/notification_state_sync_test.dart`. Verified to fail against the pre-fix
+> Kotlin and Swift.
 >
 > **Playlist regression coverage (issue #79):** `test/core/playlist_extension_test.dart`
 > (15 tests) covers the Dart-observable half of the "`setPlaylist` must not restart the
@@ -142,6 +166,13 @@ test/models/
 ├── playlist_test.dart (20 tests)
 ├── subtitle_track_test.dart (25 tests)
 └── phase3_models_test.dart (28 tests)
+```
+
+### Native-Contract Tests
+```
+test/native_contract/
+├── android_http_headers_test.dart (3 source-text guards — issue #127)
+└── notification_artwork_headers_test.dart (6 source-text guards — artwork fetch headers)
 ```
 
 ### Performance Tests

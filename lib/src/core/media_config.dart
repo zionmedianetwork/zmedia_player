@@ -31,7 +31,31 @@ class MediaConfig {
   /// Whether to start muted
   final bool startMuted;
 
-  /// Custom HTTP headers for media requests
+  /// Custom HTTP headers for media requests.
+  ///
+  /// **Deprecated and inert — this field has never had any effect.** It is
+  /// serialized onto the `config` payload of `initialize`/`updateConfig`/
+  /// `load` exactly as before (the wire shape is unchanged), but *neither*
+  /// native implementation reads that key: Android's
+  /// `MediaPlayerManager.loadMediaItem` reads `mediaItem["httpHeaders"]` and
+  /// iOS's reads `mediaItem["httpHeaders"]` — the per-item map — and nothing
+  /// anywhere reads `config["httpHeaders"]`.
+  ///
+  /// Use [MediaItem.httpHeaders] instead; that is the canonical, wired path
+  /// for request headers (it becomes `DefaultHttpDataSource.Factory`'s
+  /// default request properties on Android and
+  /// `AVURLAssetHTTPHeaderFieldsKey` on iOS).
+  ///
+  /// Kept (rather than removed) so existing code keeps compiling, and
+  /// deprecated (rather than wired) because wiring it would be a silent
+  /// behavior change for anyone currently setting it. This mirrors how
+  /// `HlsConfig`/`DashConfig.enableLiveStream` was deprecated in favor of the
+  /// canonical `MediaItem.isLive`.
+  @Deprecated(
+    'MediaConfig.httpHeaders is never read by either native platform, so it '
+    'has no effect. Use MediaItem.httpHeaders — the canonical, wired header '
+    'path — instead. This field will be removed in a future major release.',
+  )
   final Map<String, String>? httpHeaders;
 
   /// DRM configuration
@@ -106,6 +130,14 @@ class MediaConfig {
     this.volume = 1.0,
     this.speed = 1.0,
     this.startMuted = false,
+    // The parameter stays (removing it would break existing callers), but
+    // is annotated so the deprecation surfaces at the call site rather than
+    // only on a field read.
+    @Deprecated(
+      'MediaConfig.httpHeaders is never read by either native platform, so '
+      'it has no effect. Use MediaItem.httpHeaders instead.',
+    )
+    // ignore: deprecated_member_use_from_same_package
     this.httpHeaders,
     this.drmConfig,
     this.subtitleConfig,
@@ -134,6 +166,10 @@ class MediaConfig {
     double? volume,
     double? speed,
     bool? startMuted,
+    @Deprecated(
+      'MediaConfig.httpHeaders is never read by either native platform, so '
+      'it has no effect. Use MediaItem.httpHeaders instead.',
+    )
     Map<String, String>? httpHeaders,
     DrmConfig? drmConfig,
     SubtitleConfig? subtitleConfig,
@@ -160,6 +196,9 @@ class MediaConfig {
       volume: volume ?? this.volume,
       speed: speed ?? this.speed,
       startMuted: startMuted ?? this.startMuted,
+      // Deliberately still copied: deprecating the field must not silently
+      // drop a value a caller already set (the wire shape is unchanged).
+      // ignore: deprecated_member_use_from_same_package
       httpHeaders: httpHeaders ?? this.httpHeaders,
       drmConfig: drmConfig ?? this.drmConfig,
       subtitleConfig: subtitleConfig ?? this.subtitleConfig,

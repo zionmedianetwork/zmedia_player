@@ -156,7 +156,10 @@ meaningful):
 - **Android 13+:** `POST_NOTIFICATIONS` runtime permission.
 - **Artwork:** when a `MediaItem` has no `artworkUrl`, the notification artwork falls
   back to an **auto-generated frame** grabbed from the video (iOS
-  `AVAssetImageGenerator`, Android `MediaMetadataRetriever`).
+  `AVAssetImageGenerator`, Android `MediaMetadataRetriever`). That grab is a separate
+  HTTP request from playback's and carries the item's `httpHeaders`, so it also works
+  for an authenticated or signed URL. (The demo's streams are public, so nothing here
+  exercises that path.)
 - The demo loads a short **playlist** so all lock-screen controls are exercisable:
   play/pause, next/previous, and ±10s skip.
 

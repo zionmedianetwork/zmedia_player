@@ -135,10 +135,12 @@ endpoint), add `streamingFormat:` so the right streaming config is applied — s
 
 ### Custom headers for authenticated live manifests
 
-`MediaItem.httpHeaders` (or `MediaConfig.httpHeaders`) is the header path that is actually
-wired to native `load()`. `StreamingConfig` has no headers field of its own — it was removed
-(it was never read by native); use `MediaItem.httpHeaders` for authenticated manifest/segment
-requests:
+`MediaItem.httpHeaders` is the **only** header path that is actually wired to native `load()`.
+`StreamingConfig` has no headers field of its own — it was removed (it was never read by
+native) — and `MediaConfig.httpHeaders` is deprecated and inert for the same reason: it is
+serialized onto the `config` payload but neither Android nor iOS ever reads
+`config["httpHeaders"]` (both read `mediaItem["httpHeaders"]`). Use `MediaItem.httpHeaders`
+for authenticated manifest/segment requests:
 
 ```dart
 final liveStream = MediaItem(
@@ -152,6 +154,24 @@ final liveStream = MediaItem(
   },
 );
 ```
+
+**Every entry is sent, on both platforms.** Android applies the whole map as
+`DefaultHttpDataSource.Factory`'s default request properties in a single call; iOS applies it
+as `AVURLAssetHTTPHeaderFieldsKey`. Android previously called
+`setDefaultRequestProperties` once per entry, and because that method *replaces* rather than
+merges, only the **last** header of the map reached the wire — so the example above would have
+sent `X-Session-ID` but not `Authorization` (issue #127). iOS was never affected. A source-text
+guard (`test/native_contract/android_http_headers_test.dart`) now fails the suite if the
+per-entry call pattern comes back.
+
+The same headers also authenticate the **notification-artwork** frame extraction, which opens
+its own connection to the media URL when the item has no `artworkUrl` (they previously did
+not reach it, so artwork silently never appeared for an authenticated stream — see
+[Models](models.md#mediaitem)). They are never sent to an `artworkUrl` fetch.
+
+> iOS additionally converts a `Cookie` header into `AVURLAssetHTTPCookiesKey` cookies (and
+> drops the header) so signed-cookie auth survives AVFoundation's out-of-process requests —
+> see `MediaPlayerManager.swift`.
 
 ---
 

@@ -80,6 +80,17 @@ class NotificationHandler: NSObject {
     private var currentAlbum: String?
     private var currentArtworkUrl: String?
     private var currentMediaUrl: String?
+    // The current item's MediaItem.httpHeaders, sent on the "mediaItem" map by
+    // NotificationService.show() (see notification_service.dart). Needed because
+    // the artwork fallback -- generateThumbnail() -- performs its own HTTP
+    // requests against currentMediaUrl through AVFoundation, entirely separate
+    // from the ones AVPlayer makes for playback. Without these the frame fetch
+    // is unauthenticated and 401/403s on a signed or token-authenticated URL,
+    // leaving the notification silently artwork-less. Mirrors
+    // NotificationHandler.kt's currentHttpHeaders. nil when the item carries no
+    // headers, or when an older cached Dart build (predating this key) is
+    // talking to this native build.
+    private var currentHttpHeaders: [String: String]?
     private var currentArtwork: MPMediaItemArtwork?
     private var isPlaying: Bool = false
     private var position: Double = 0.0
@@ -474,6 +485,10 @@ class NotificationHandler: NSObject {
         currentAlbum = mediaItem["album"] as? String
         currentArtworkUrl = newArtworkUrl
         currentMediaUrl = newMediaUrl
+        // Deliberately NOT part of the mediaChanged comparison above: a
+        // refreshed token on the same URL is not a new media item and must not
+        // discard an artwork bitmap that was already resolved.
+        currentHttpHeaders = mediaItem["httpHeaders"] as? [String: String]
 
         // Sent by NotificationService.show() (see notification_service.dart); both
         // default to false, i.e. non-live, if absent (an older cached Dart build
@@ -506,7 +521,7 @@ class NotificationHandler: NSObject {
         } else if (currentArtworkUrl == nil || currentArtworkUrl?.isEmpty == true),
                   currentArtwork == nil,
                   let mediaUrl = currentMediaUrl, !mediaUrl.isEmpty {
-            generateThumbnail(from: mediaUrl)
+            generateThumbnail(from: mediaUrl, httpHeaders: currentHttpHeaders)
         }
 
         isShowing = true
@@ -648,6 +663,16 @@ class NotificationHandler: NSObject {
             guard let self = self else { return }
 
             do {
+                // Deliberately NOT sent the item's httpHeaders, unlike
+                // generateThumbnail() below: `urlString` here is
+                // MediaItem.artworkUrl, an independent URL that is frequently on
+                // a different host from the media URL the credentials belong to,
+                // and attaching an Authorization/Cookie header to a request for
+                // an arbitrary third-party host would leak it. An artwork
+                // endpoint behind the same auth as the media should be left
+                // unset so the video-frame fallback (which does carry the
+                // headers) is used instead. Matches NotificationHandler.kt's
+                // loadArtwork.
                 let data = try Data(contentsOf: url)
 
                 if let image = UIImage(data: data) {
@@ -694,7 +719,7 @@ class NotificationHandler: NSObject {
     ///   • duration ≥ 3 s  → clamp(duration × 0.1, min: 3 s, max: 10 s)
     ///   • 0 < duration < 3 s → duration × 0.5   (short clip, meet in the middle)
     ///   • fallback (unknown duration) → 5 s fixed offset
-    private func generateThumbnail(from urlString: String) {
+    private func generateThumbnail(from urlString: String, httpHeaders: [String: String]?) {
         guard let url = URL(string: urlString) else {
             zlog("NotificationHandler: Invalid media URL for thumbnail generation")
             return
@@ -702,7 +727,23 @@ class NotificationHandler: NSObject {
 
         zlog("NotificationHandler: Generating thumbnail from media: \(redactedURL(urlString))")
 
-        let asset = AVURLAsset(url: url)
+        // The asset MUST carry the item's httpHeaders: AVAssetImageGenerator
+        // issues its own HTTP requests for this URL (headers/moov atom, then the
+        // byte range holding the target frame), completely separate from the
+        // ones AVPlayer makes for playback. A bare AVURLAsset(url:) here -- what
+        // this used to be -- makes them unauthenticated, so an authenticated or
+        // signed media URL (bearer token, signed CloudFront cookie, multi-header
+        // CDN credential) answers 401/403 and the notification silently ends up
+        // with no artwork while playback itself is fine. Built through
+        // makeAVURLAsset (AssetHTTPOptions.swift), the same helper the playback
+        // path uses, so the Cookie -> AVURLAssetHTTPCookiesKey conversion
+        // applies here too; a nil/empty map still yields a plain
+        // AVURLAsset(url:), which stays correct for an unauthenticated URL.
+        let asset = makeAVURLAsset(
+            url: url,
+            httpHeaders: httpHeaders,
+            logTag: "NotificationHandler"
+        )
 
         // Load "duration" and "tracks" asynchronously so the asset is ready
         // before we attempt image generation.  For local files this is nearly

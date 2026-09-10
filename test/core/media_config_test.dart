@@ -126,6 +126,14 @@ void main() {
     });
 
     group('HTTP Headers', () {
+      // `MediaConfig.httpHeaders` is deprecated and inert: it is still
+      // serialized onto the `config` payload (unchanged wire shape) but
+      // NEITHER native platform reads `config["httpHeaders"]` — both read
+      // `mediaItem["httpHeaders"]`. These tests therefore only pin the
+      // value-object behavior (storage/copy), not any playback effect. The
+      // wired, canonical path is `MediaItem.httpHeaders`; see
+      // `test/models/media_item_test.dart`'s "httpHeaders serialization"
+      // group and `test/native_contract/android_http_headers_test.dart`.
       test('supports custom headers', () {
         final config = MediaConfig(
           httpHeaders: {

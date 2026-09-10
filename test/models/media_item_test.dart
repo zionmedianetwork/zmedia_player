@@ -142,6 +142,60 @@ void main() {
       });
     });
 
+    group('httpHeaders serialization', () {
+      /// Issue #127 companion. Be clear about what this does and does not
+      /// prove: it passes today, and it passed *before* the Android fix too,
+      /// because every test in this suite mocks the `MethodChannel` — the
+      /// Dart side has always serialized every header faithfully, and it was
+      /// Android's `MediaPlayerManager.loadMediaItem` that then dropped all
+      /// but the last one when handing them to
+      /// `DefaultHttpDataSource.Factory.setDefaultRequestProperties`. The
+      /// actual guard for #127 is
+      /// `test/native_contract/android_http_headers_test.dart`, which parses
+      /// the Kotlin source. This test exists to pin the Dart half of the
+      /// contract so a future regression can be localised to one side or the
+      /// other.
+      test('toMap round-trips every header, not just the last one', () {
+        const headers = {
+          'Authorization': 'Bearer token',
+          'Referer': 'https://example.com/',
+          'X-Custom': 'custom-value',
+          'Cookie': 'CloudFront-Signature=abc',
+        };
+
+        final item = MediaItem(
+          id: '1',
+          title: 'Test Video',
+          url: 'https://example.com/video.m3u8',
+          httpHeaders: headers,
+        );
+
+        final serialized = item.toMap()['httpHeaders'] as Map<String, String>;
+
+        expect(serialized, hasLength(headers.length));
+        expect(serialized, equals(headers));
+      });
+
+      test('fromMap restores every header', () {
+        const headers = {
+          'Authorization': 'Bearer token',
+          'Referer': 'https://example.com/',
+          'X-Custom': 'custom-value',
+        };
+
+        final restored = MediaItem.fromMap(
+          MediaItem(
+            id: '1',
+            title: 'Test Video',
+            url: 'https://example.com/video.m3u8',
+            httpHeaders: headers,
+          ).toMap(),
+        );
+
+        expect(restored.httpHeaders, equals(headers));
+      });
+    });
+
     group('copyWith', () {
       test('can update DRM config', () {
         final original = MediaItem(

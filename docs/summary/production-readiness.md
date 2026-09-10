@@ -127,7 +127,7 @@ All operations significantly exceed performance targets:
 - [x] Basic media playback
 - [x] Cross-platform support (Android/iOS)
 - [x] Flutter widget integration
-- [x] HTTP headers support
+- [x] HTTP headers support (via `MediaItem.httpHeaders`; all entries sent on both platforms since issue #127. `MediaConfig.httpHeaders` is deprecated and inert.)
 - [x] Playlist management
 
 ### Phase 2: Streaming & Subtitles

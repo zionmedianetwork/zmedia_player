@@ -1,9 +1,21 @@
 # ZMedia Player - Roadmap
 
-**Version:** 0.4.0
-**Last Updated:** September 5, 2026
-**Status:** Feature-complete for the 0.4.x line; distributed via GitHub releases.
-`CHANGELOG.md`'s `[Unreleased]` holds the ExoPlayer 2 classpath upgrade note (issue #108),
+**Version:** 0.5.0
+**Last Updated:** September 10, 2026
+**Status:** Feature-complete for the 0.5.x line; distributed via GitHub releases.
+`CHANGELOG.md`'s `[Unreleased]` holds the Android multi-header fix (issue #127 —
+`MediaItem.httpHeaders` no longer collapses to its last entry, because
+`DefaultHttpDataSource.Factory.setDefaultRequestProperties` replaces rather than merges and
+was being called once per entry; iOS was never affected) together with the deprecation of the
+never-wired `MediaConfig.httpHeaders`, and a new native-source-parsing regression guard,
+`test/native_contract/android_http_headers_test.dart`, for a defect class neither
+`flutter analyze` nor the mocked-channel suite can see. It also holds the same-family
+fix one layer up: the notification-artwork frame extraction now carries
+`MediaItem.httpHeaders` on both platforms (it was an unauthenticated request, so artwork
+silently never appeared for a signed/authenticated media URL), guarded by
+`test/native_contract/notification_artwork_headers_test.dart`.
+
+The items below shipped in `v0.5.0`: the ExoPlayer 2 classpath upgrade note (issue #108),
 the `NetworkStatus` platform-quality fix (issue #112), the live-edge-offset
 window-sanity fix (issue #109) with its manifest-anchor diagnostic (issue #110), and the
 iOS counterpart to #112/#109: `NetworkMonitor.swift`'s `estimateBandwidth(from:)` no longer
@@ -29,8 +41,7 @@ documentation-only correction (issue #120) stating that `PlaybackState.liveEdgeO
 a different quantity on Android (distance from the published live edge, ~18s on a verification
 stream) than on iOS (bounded near zero by construction during live playback, verified <1s on
 the same stream) — making `isAtLiveEdge`/`defaultLiveEdgeTolerance` near-degenerate on iOS and
-a configured `liveLatency` cushion unobservable through that field there — landed since the
-`v0.4.0` tag.
+a configured `liveLatency` cushion unobservable through that field there.
 
 > This file is the authoritative implementation roadmap referenced by `CLAUDE.md`.
 > It tracks current state and the real backlog. For architecture, UI/UX specs, and
@@ -55,7 +66,7 @@ on ExoPlayer (Android) and AVPlayer (iOS) behind a single Dart API.
 | Flutter SDK | >=3.19.0 (developed on 3.44.3) |
 | iOS | 13.0+ |
 | Android | minSdk 23 |
-| Tests | 1104 passing (Dart layer; native has none) |
+| Tests | 1118 passing (Dart layer; native has none) |
 
 ---
 
@@ -110,6 +121,21 @@ platform is called out explicitly.
   cross-applied) and overrides URL inference on the Dart side and on both natives.
 - Every load path (`load`, `setPlaylist`, `skipToIndex`) carries the current `MediaConfig`
   snapshot, so a reload picks up a changed config immediately.
+- Per-item HTTP headers: `MediaItem.httpHeaders` is the canonical, wired path and **every**
+  entry reaches the wire on both platforms (Android: one
+  `DefaultHttpDataSource.Factory.setDefaultRequestProperties` call with the whole map; iOS:
+  one `AVURLAssetHTTPHeaderFieldsKey` assignment, with `Cookie` promoted to
+  `AVURLAssetHTTPCookiesKey`). Android previously sent only the map's last entry (issue #127),
+  now guarded by `test/native_contract/android_http_headers_test.dart`.
+  `MediaConfig.httpHeaders` is deprecated and inert — no native code has ever read
+  `config["httpHeaders"]`.
+- The headers also reach the **notification-artwork** frame extraction, which makes its own
+  HTTP requests against the media URL (Android `MediaMetadataRetriever`, iOS
+  `AVAssetImageGenerator`) and used to make them unauthenticated — artwork silently never
+  appeared for a signed/authenticated URL. `NotificationService.show()` now sends
+  `httpHeaders` on its `mediaItem` payload; guarded by
+  `test/native_contract/notification_artwork_headers_test.dart`. They are deliberately not
+  applied to a `MediaItem.artworkUrl` fetch (independent, often third-party host).
 
 ### Subtitles
 - SRT / WebVTT / ASS / SSA parsing and styling (`SubtitleService`, Dart-side).
@@ -132,7 +158,9 @@ platform is called out explicitly.
 ### Notifications
 - Lock-screen / Control Center media notifications (`NotificationService` + native
   handlers), action stream.
-- Artwork auto-generated from a video frame when `artworkUrl` is null.
+- Artwork auto-generated from a video frame when `artworkUrl` is null; that frame fetch
+  carries the item's `MediaItem.httpHeaders` on both platforms, so it works against an
+  authenticated or signed media URL.
 - Runtime reconfiguration via `NotificationService.updateConfig(config, playerId:)` —
   re-sends the config over `initializeNotification` and re-renders an already-showing
   notification. Config otherwise only ever reaches native at `initialize()`.
@@ -185,6 +213,13 @@ This is the real backlog. State these honestly; do not mark them done.
 - **pub.dev publishing** is not done yet — the package is distributed via GitHub
   releases.
 - **Flaky test:** one DRM performance test is timing-based and can flake.
+- **Authenticated notification artwork is unverified on device.** The frame extraction now
+  receives `MediaItem.httpHeaders` on both platforms, but that is confirmed by source
+  inspection and source-text guards only — no automated test executes Kotlin or Swift. Still
+  to confirm on a device against a real signed/authenticated stream: that artwork appears
+  where it previously did not, that a signed-cookie CDN is satisfied by the iOS
+  `AVURLAssetHTTPCookiesKey` path in `makeAVURLAsset`, and that an unauthenticated URL (empty
+  header map) is unchanged.
 
 ---
 

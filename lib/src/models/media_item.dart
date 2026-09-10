@@ -26,7 +26,26 @@ class MediaItem {
   /// MIME type of the media content
   final String? mimeType;
 
-  /// Custom HTTP headers for this specific media item
+  /// Custom HTTP headers for this specific media item.
+  ///
+  /// The canonical, wired header path — `MediaConfig.httpHeaders` is deprecated
+  /// and inert. **Every** entry is applied on both platforms (Android hands the
+  /// whole map to `DefaultHttpDataSource.Factory.setDefaultRequestProperties` in
+  /// one call; iOS sets `AVURLAssetHTTPHeaderFieldsKey`, promoting a `Cookie`
+  /// header to `AVURLAssetHTTPCookiesKey` so signed-cookie auth survives
+  /// AVFoundation's out-of-process requests).
+  ///
+  /// Applied to two distinct sets of requests:
+  ///  * manifest and segment requests made by the player, and
+  ///  * the notification-artwork frame extraction, which opens its **own**
+  ///    connection to [url] when [artworkUrl] is null (see
+  ///    `NotificationService.show`).
+  ///
+  /// **Not** applied to an [artworkUrl] fetch: that is an independent and
+  /// frequently third-party host, and forwarding an `Authorization`/`Cookie`
+  /// header there would leak the credential. If a poster image sits behind the
+  /// same auth as the media, leave [artworkUrl] null and let the video-frame
+  /// fallback — which does carry these headers — produce the artwork.
   final Map<String, String>? httpHeaders;
 
   /// Whether this is a video or audio-only content
