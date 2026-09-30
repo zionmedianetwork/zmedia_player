@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A paused player that the app still held was disposed after ~15-19 minutes, after which Play
+  did nothing** (issue #133). Android, iOS and Dart each ran a stale-instance reaper (sweep every
+  5 min, dispose any non-playing instance idle >15 min) that never checked for an attached
+  platform view/session/notification and told Dart nothing; the next command was a silent no-op
+  on Android and a `playerNotFound` `FlutterError` with no state/error event on iOS. The reapers
+  are removed on all three layers: Dart owns the lifecycle, and an instance lives until
+  `dispose()` is called (or the plugin detaches from the engine). No new event was needed since
+  nothing is reaped natively any more. **Apps must dispose players they create** - a leaked
+  player is no longer cleaned up after 15 minutes.
+- Android commands (`load`, `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`,
+  `setSpeed`, `setMuted`, `setBoxFit`, `set*Track`, `enableAutoQuality`, `skipToIndex`,
+  `updateConfig`) against a player native does not hold now return their `*_ERROR`
+  `FlutterError` ("Player not found") instead of silently doing nothing, matching iOS. iOS's
+  `MediaPlayerError` is now a `LocalizedError` so that message is readable.
+
+### Deprecated
+- `MediaPlayer.attach()` / `MediaPlayer.detach()` are now no-ops (their only purpose was to shield
+  an instance from the removed Dart sweep).
+
 ## [0.5.1] - 2026-09-10
 
 ### BREAKING

@@ -89,8 +89,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() {
-    // The MediaPlayer class uses a static 5-minute periodic cleanup Timer
-    // (created lazily via _ensureCleanupTimer).  Creating and immediately
+    // Legacy warm-up from when MediaPlayer had a static cleanup Timer (removed,
+    // issue #133); harmless.  Creating and immediately
     // disposing a player here "warms up" the static timer so it exists
     // before any testWidgets run — the test framework only flags timers that
     // are *newly created* during a test, not ones that already existed at

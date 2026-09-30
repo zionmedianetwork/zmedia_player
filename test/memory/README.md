@@ -6,8 +6,7 @@ Comprehensive test suite to verify Fix #1 (Memory Leak Prevention) implementatio
 
 These tests verify that:
 - ✅ No memory leaks with repeated create/dispose cycles
-- ✅ Stale instances are cleaned up automatically
-- ✅ Active players are protected from premature cleanup
+- ✅ Disposed instances are removed (there is no time-based reaper since #133)
 - ✅ Multiple instances work correctly
 - ✅ Stream controllers are properly closed
 - ✅ Thread-safe concurrent operations
@@ -76,17 +75,15 @@ open coverage/html/index.html
 - No crashes
 - Operations throw appropriate errors after disposal
 
-### 2. Cleanup Timer Tests ✅
+### 2. Lifetime Tests ✅
 
-**Purpose:** Verify automatic cleanup works
+**Purpose:** Verify a live player is never reaped (issue #133)
 
-**Tests:**
-- `Cleanup timer handles empty instance map`
-- `Activity tracking updates on key operations`
+**Tests:** see `test/core/media_player_lifetime_test.dart` and
+`test/native_contract/no_stale_reaper_test.dart`.
 
 **Expected Results:**
-- Timer doesn't crash on empty map
-- Activity updates prevent premature cleanup
+- An idle paused player survives hours of inactivity and can still `play()`
 
 ### 3. Edge Cases ✅
 
@@ -348,7 +345,6 @@ class MediaPlayerTelemetry {
 ```dart
 // Add to MediaPlayer
 static int get instanceCount => _instances.length;
-static int get activityCount => _lastActivity.length;
 
 // Monitor in production
 Timer.periodic(Duration(minutes: 5), (_) {

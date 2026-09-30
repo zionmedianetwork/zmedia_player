@@ -370,8 +370,14 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 ### Instance Management
 - **MediaPlayer uses factory pattern with instance registry**
 - Each playerId gets a unique instance stored in `_instances` map
-- Background cleanup timer removes stale instances (15min inactivity)
-- Always dispose controllers to prevent memory leaks
+- **There is no time-based reaper on any layer** (issue #133). Dart, Android and iOS each used to
+  dispose any non-playing instance idle for 15 min, which reaped a paused on-screen player and
+  broke Play (silent no-op on Android, `playerNotFound` on iOS, no event either way). An
+  instance now lives from `initialize` until the host calls `dispose()`
+  (`MediaPlayer.dispose`/`MediaController.dispose`) or the plugin detaches from the engine
+  (`shutdown()`). `MediaPlayer.attach()`/`detach()` are deprecated no-ops.
+- Always dispose controllers — with the reaper gone, an undisposed player is a real leak
+  (Dart registry entry + native ExoPlayer/AVPlayer)
 
 ### Error Handling
 - Custom exceptions in `lib/src/core/exceptions.dart`
@@ -713,6 +719,17 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    of documented asymmetry as gotcha 15. `pauseReasonStream` is now chatty (it fires on every
    attributed pause, not only audio-focus loss) — a **breaking** change, along with the two
    new enum members. Guarded by `test/native_contract/pause_reason_vocabulary_test.dart`
+
+20. **Commands against a missing native player fail loudly on both platforms** (issue #133) -
+   Android's manager calls `requirePlayer(playerId)` synchronously (before the main-thread
+   `post`) so the plugin handler returns its `*_ERROR` `FlutterError` (`IllegalStateException`
+   "Player not found"), symmetric with iOS's `MediaPlayerError.playerNotFound` (now a
+   `LocalizedError`, so the message is readable). Dart surfaces it as a `PlaybackException`
+   whose `errorCode` is the channel code (e.g. `PLAY_ERROR`). It used to be a silent
+   `players[id]?.play()` no-op on Android. Do **not** reintroduce a time-based reaper: the only
+   leak it guarded is an orphaned native instance (Dart never disposed), which is the host's
+   bug and is loud now, whereas reaping a live paused player is silent data loss. Guarded by
+   `test/native_contract/no_stale_reaper_test.dart` and `test/core/media_player_lifetime_test.dart`
 
 ## UI/UX Design Specifications
 

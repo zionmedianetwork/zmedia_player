@@ -52,53 +52,29 @@ class MediaPlayerManager(
         return created
     }
 
-    // Activity tracking for memory leak prevention
-    private val lastActivity = ConcurrentHashMap<String, Long>()
-    private val cleanupRunnable = object : Runnable {
-        override fun run() {
-            cleanupStaleInstances()
-            mainHandler.postDelayed(this, CLEANUP_INTERVAL_MS)
-        }
-    }
+    // Issue #133: there is deliberately NO time-based "stale instance" reaper
+    // here. It used to dispose any player idle for 15 minutes that was not
+    // playing -- which includes a paused player still on screen -- and told
+    // Dart nothing, so the next play() was a silent no-op. Dart owns the
+    // lifecycle: an instance lives from "initialize" until Dart sends "dispose"
+    // (MediaPlayer.dispose / MediaController.dispose) or the engine detaches
+    // (ZMediaPlayerPlugin.onDetachedFromEngine -> shutdown()).
 
-    companion object {
-        private const val CLEANUP_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
-        private const val STALE_THRESHOLD_MS = 15 * 60 * 1000L // 15 minutes
-    }
-
-    init {
-        mainHandler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS)
-    }
-
-    private fun markActivity(playerId: String) {
-        lastActivity[playerId] = System.currentTimeMillis()
-    }
-
-    private fun cleanupStaleInstances() {
-        val now = System.currentTimeMillis()
-        val stalePlayers = mutableListOf<String>()
-
-        lastActivity.forEach { (playerId, lastUsed) ->
-            if (now - lastUsed > STALE_THRESHOLD_MS) {
-                players[playerId]?.let { instance ->
-                    if (!instance.isPlaying()) {
-                        stalePlayers.add(playerId)
-                    }
-                }
-            }
-        }
-
-        stalePlayers.forEach { playerId ->
-            android.util.Log.d("MediaPlayerManager", "Auto-cleaning stale instance: $playerId")
-            players[playerId]?.dispose()
-            players.remove(playerId)
-            lastActivity.remove(playerId)
-        }
-    }
+    /**
+     * Issue #133: fails loudly, on the calling (method-channel) thread, when a
+     * command targets an id native does not hold. Every handler in
+     * ZMediaPlayerPlugin catches the exception and returns it as its own
+     * `*_ERROR` FlutterError, which Dart surfaces as a typed exception --
+     * symmetric with iOS's `MediaPlayerError.playerNotFound`. Replaces the
+     * silent `players[playerId]?.x()` no-op.
+     */
+    private fun requirePlayer(playerId: String): MediaPlayerInstance =
+        players[playerId] ?: throw IllegalStateException(
+            "Player not found: $playerId (it was never initialized or has been disposed)"
+        )
 
     fun initializePlayer(playerId: String, config: Map<String, Any>?) {
         android.util.Log.d("MediaPlayerManager", "initializePlayer called for playerId: $playerId")
-        markActivity(playerId)
 
         // Initialize synchronously on main thread to avoid timing issues with platform view creation
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -119,7 +95,7 @@ class MediaPlayerManager(
     }
 
     fun loadMediaItem(playerId: String, mediaItem: Map<String, Any>, config: Map<String, Any>? = null) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             crashHandler.wrapOperation("loadMediaItem", playerId, mapOf("url" to (mediaItem["url"] ?: "unknown"))) {
                 players[playerId]?.loadMediaItem(mediaItem, config)
@@ -133,14 +109,14 @@ class MediaPlayerManager(
         startIndex: Int,
         config: Map<String, Any>? = null
     ) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setPlaylist(playlist, startIndex, config)
         }
     }
 
     fun play(playerId: String) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             crashHandler.wrapOperation("play", playerId) {
                 players[playerId]?.play()
@@ -149,7 +125,7 @@ class MediaPlayerManager(
     }
 
     fun pause(playerId: String) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             crashHandler.wrapOperation("pause", playerId) {
                 players[playerId]?.pause()
@@ -158,74 +134,84 @@ class MediaPlayerManager(
     }
 
     fun stop(playerId: String) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.stop()
         }
     }
 
     fun seekTo(playerId: String, position: Int) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.seekTo(position)
         }
     }
 
     fun setVolume(playerId: String, volume: Float) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setVolume(volume)
         }
     }
 
     fun setPlaybackSpeed(playerId: String, speed: Float) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setPlaybackSpeed(speed)
         }
     }
 
     fun setMuted(playerId: String, muted: Boolean) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setMuted(muted)
         }
     }
 
     fun setBoxFit(playerId: String, boxFit: String) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setBoxFit(boxFit)
         }
     }
 
     fun setSubtitleTrack(playerId: String, subtitleTrack: Map<String, Any>?) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setSubtitleTrack(subtitleTrack)
         }
     }
 
     fun setQualityTrack(playerId: String, qualityTrack: Map<String, Any>) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setQualityTrack(qualityTrack)
         }
     }
 
     fun setAudioTrack(playerId: String, audioTrack: Map<String, Any>) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setAudioTrack(audioTrack)
         }
     }
 
     fun enableAutoQuality(playerId: String) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.enableAutoQuality()
         }
     }
 
     fun skipToIndex(playerId: String, index: Int, config: Map<String, Any>? = null) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.skipToIndex(index, config)
         }
     }
 
     fun updateConfig(playerId: String, config: Map<String, Any>) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.updateConfig(config)
         }
@@ -250,7 +236,6 @@ class MediaPlayerManager(
     }
 
     fun getBufferHealth(playerId: String): Map<String, Any> {
-        markActivity(playerId)
         return players[playerId]?.getBufferHealth() ?: mapOf(
             "bufferedDurationMs" to 0,
             "currentPositionMs" to 0,
@@ -263,7 +248,6 @@ class MediaPlayerManager(
         mainHandler.post {
             players[playerId]?.dispose()
             players.remove(playerId)
-            lastActivity.remove(playerId)
         }
     }
 
@@ -271,12 +255,10 @@ class MediaPlayerManager(
         mainHandler.post {
             players.values.forEach { it.dispose() }
             players.clear()
-            lastActivity.clear()
         }
     }
 
     fun shutdown() {
-        mainHandler.removeCallbacks(cleanupRunnable)
         dispose()
         // C-03b: release this manager's reference (if any was ever acquired)
         // on the process-wide shared adaptive-stream cache. Pairs 1:1 with
