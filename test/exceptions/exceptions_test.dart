@@ -260,7 +260,7 @@ void main() {
         title: 'Test Video',
       );
 
-      expect(
+      await expectLater(
         () => player.load(mediaItem),
         throwsA(isA<NetworkException>()),
       );
@@ -281,7 +281,7 @@ void main() {
         ),
       );
 
-      expect(
+      await expectLater(
         () => player.load(mediaItem),
         throwsA(isA<DrmException>()),
       );
@@ -326,7 +326,7 @@ void main() {
         title: 'Legacy Error Video',
       );
 
-      expect(
+      await expectLater(
         () => player.load(mediaItem),
         throwsA(isA<MediaLoadException>()),
       );
@@ -361,7 +361,7 @@ void main() {
 
       await player.load(mediaItem);
 
-      expect(
+      await expectLater(
         () => player.play(),
         throwsA(isA<PlaybackException>()),
       );
@@ -373,7 +373,7 @@ void main() {
       final player = MediaPlayer();
       await player.initialize();
 
-      expect(
+      await expectLater(
         () => player.seekTo(const Duration(milliseconds: -100)),
         throwsA(isA<ConfigurationException>()),
       );
@@ -391,7 +391,7 @@ void main() {
         items: const [],
       );
 
-      expect(
+      await expectLater(
         () => player.setPlaylist(emptyPlaylist),
         throwsA(isA<ConfigurationException>()),
       );

@@ -378,6 +378,9 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   (`shutdown()`). `MediaPlayer.attach()`/`detach()` are deprecated no-ops.
 - Always dispose controllers — with the reaper gone, an undisposed player is a real leak
   (Dart registry entry + native ExoPlayer/AVPlayer)
+- `MediaController.dispose()` is synchronous (a `State.dispose()` cannot await). When the caller
+  must know the native player is gone -- e.g. replacing a still-loading controller on the same
+  `playerId` -- `await controller.release()` instead (issue #139; gotcha 24)
 
 ### Error Handling
 - Custom exceptions in `lib/src/core/exceptions.dart`
@@ -450,7 +453,7 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   a physical device (`cd example && flutter test integration_test -d <device-id>`) and asserts
   on *raw* native events via `raw_channel_spy.dart`, so Dart-side latches/optimistic updates
   cannot mask a native regression (the mocked-channel suites cannot see that class of defect).
-  Checks A-D, F for #132-#137; check E (21-minute idle, #133) is opt-in via
+  Checks A-D, F for #132-#137 and G for #139 (dispose/replace while a load is in flight); check E (21-minute idle, #133) is opt-in via
   `--dart-define=ZMP_LONG_IDLE=true`. Needs a device + network; **not run in CI** and excluded
   from `example/test/`. Update it when changing native state/seek/lifecycle/error behavior
 
@@ -793,6 +796,34 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    `loadTimeout` watchdog (requires `buffering`) is no longer defeated by a spurious `ready`.
    No Dart backstop: Dart cannot tell a spurious `ready` from a real one. Guarded by
    `test/native_contract/ready_only_from_item_status_test.dart` and on-device check F
+24. **Disposing mid-`initialize` must still tear native down; use `release()` to wait for it**
+   (issue #139) - `MediaPlayer.dispose()` flips `isDisposed` and leaves `_instances`
+   synchronously, but used to send the native `dispose` only `if (_isInitialized)`, which is false
+   while `initialize()` awaits native. The native player then came up anyway, and the `load()`
+   queued behind `_ensureInitialized()` loaded and played it with no Dart owner (stacked audio on
+   iOS; one leak per recovery in a live-recovery loop). Now: `dispose()` awaits an in-flight
+   initialize (bounded, 5s) and then sends native `dispose` -- skipped when initialize failed, and
+   skipped when a replacement with the same `playerId` has already started initializing (a
+   `dispose` keyed by the shared id would kill it; native `initializePlayer` disposes whatever it
+   replaces). `_invokeMethod` refuses every command but `dispose` once disposed
+   (`PlayerDisposedException`; `load`/`setPlaylist` rethrow it instead of latching an error
+   state), which covers every multi-await path (`setSpeed(1.0)` before `load`, `seekTo` before
+   `play`) in one place -- a new multi-await method needs no extra check. Native
+   `initializePlayer` disposes an existing instance for the same id before replacing it, on both
+   platforms (Android in both the main-looper and posted branches). `MediaController.dispose()`
+   stays synchronous (its native teardown is unawaited, failures logged); `await
+   controller.release({timeout})` is the awaitable form: stop (queued behind any running
+   `load()`, bounded to half the timeout), same teardown, then await `MediaPlayer.dispose()`;
+   `TimeoutException` if native teardown overran, idempotent, safe before/after `dispose()`.
+   Android's `disposePlayer`/`dispose()` are synchronous on the main looper too (they used to
+   always post, so a reused-id `dispose` -> `initialize` ran as initialize -> late dispose and
+   killed the replacement); the off-main posted path dispose-checks the captured instance's
+   identity. Deliberately no `activePlayerIds`/`disposeAll()`. Guarded by
+   `test/core/media_player_dispose_during_initialize_test.dart`,
+   `test/native_contract/initialize_disposes_existing_test.dart` and on-device check G
+   (`example/integration_test/check_g_test.dart`, which disposes at 0-20ms offsets so `dispose()`
+   lands after `initialize` is sent but before native answers; disposing synchronously after
+   `MediaController.load()` never enters that window, since the queued op drops first)
 
 ## UI/UX Design Specifications
 

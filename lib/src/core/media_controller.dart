@@ -1250,18 +1250,98 @@ class MediaController extends ChangeNotifier {
     }
   }
 
+  /// Future of the underlying [MediaPlayer.dispose], set by the synchronous
+  /// teardown (see [_teardown]). [release] awaits it, including when
+  /// [dispose] already ran.
+  Future<void>? _playerDisposeFuture;
+
+  /// In-flight or finished [release], so concurrent/repeated calls share one.
+  Future<void>? _releaseFuture;
+
   /// Dispose the controller and the underlying player.
+  ///
+  /// Synchronous by contract (it is the [ChangeNotifier.dispose] override,
+  /// and a widget's `State.dispose` cannot await). The native teardown it
+  /// starts therefore runs unawaited: its failures are logged, never left as
+  /// unhandled async errors (issue #139). A host that needs to *know* the
+  /// native player is gone -- e.g. before creating a replacement with the
+  /// same `playerId` in a recovery loop -- should `await` [release] instead.
   ///
   /// Any operation still sitting in the serialization queue (see
   /// [_executeOperation]) is dropped: `_isDisposed` is set first, so each
   /// queued operation sees it when its turn comes and completes its future
   /// normally as a no-op instead of touching the disposed player. An
-  /// operation that is already *running* is not cancelled — it finishes (or
-  /// fails) against the player being torn down, exactly as before.
+  /// operation that is already *running* is not cancelled, but since issue
+  /// #139 nothing it does after this point reaches native: [MediaPlayer]
+  /// refuses every command once disposed, and a dispose that lands while the
+  /// player is still initializing sends the native `dispose` as soon as
+  /// native answers. Safe to call after (or before) [release].
   @override
+  // _teardown() calls super.dispose(); it is shared with release().
+  // ignore: must_call_super
   void dispose() {
     if (_isDisposed) return;
+    final playerDispose = _teardown();
+    unawaited(playerDispose.catchError((Object e) {
+      debugPrint('MediaController: Error disposing player: $e');
+    }));
+  }
 
+  /// Release the controller and wait for the native player to be gone.
+  ///
+  /// Use instead of [dispose] when the caller must know teardown finished --
+  /// chiefly when replacing a controller that may still be loading (live
+  /// recovery loops). Sequence:
+  ///
+  /// 1. **Stop (best effort).** `stop()` is queued like any other operation,
+  ///    so it runs *behind* an in-flight [load] and cuts off the playback
+  ///    that load is about to start. Skipped when the player was never
+  ///    initialized and nothing is running. Failures and a stop that does
+  ///    not finish within half of [timeout] are logged and ignored.
+  /// 2. **Teardown.** The same synchronous teardown as [dispose] (queued
+  ///    operations dropped, subscriptions and timers cancelled), then
+  ///    [MediaPlayer.dispose] is awaited for the remainder of [timeout]. That
+  ///    itself waits (up to 5s) for an in-flight native `initialize`, then
+  ///    sends the native `dispose`.
+  ///
+  /// Completes normally once the native player has been disposed (native
+  /// `dispose` errors are swallowed by [MediaPlayer.dispose], as they are for
+  /// [dispose]). Throws [TimeoutException] when the native teardown did not
+  /// finish within [timeout]; local teardown has completed regardless, and
+  /// the native `dispose` remains queued on the channel. Idempotent: repeat
+  /// and concurrent calls share one result, and calling after [dispose]
+  /// just awaits that dispose's native teardown. Calling [dispose] after
+  /// [release] is a no-op.
+  Future<void> release({Duration timeout = const Duration(seconds: 10)}) {
+    final existing = _releaseFuture;
+    if (existing != null) return existing;
+    return _releaseFuture = _release(timeout);
+  }
+
+  Future<void> _release(Duration timeout) async {
+    final clock = Stopwatch()..start();
+
+    if (!_isDisposed && (_player.isInitialized || _operationInProgress)) {
+      try {
+        await _executeOperation(() => _player.stop()).timeout(timeout ~/ 2);
+      } catch (e) {
+        debugPrint('MediaController: release() could not stop first: $e');
+      }
+    }
+
+    // dispose() (or an earlier path) may have run during the stop.
+    final playerDispose = _isDisposed ? _playerDisposeFuture : _teardown();
+    if (playerDispose == null) return;
+
+    final remaining = timeout - clock.elapsed;
+    await playerDispose.timeout(
+      remaining > Duration.zero ? remaining : Duration.zero,
+    );
+  }
+
+  /// The synchronous teardown shared by [dispose] and [release]. Returns the
+  /// underlying [MediaPlayer.dispose] future; never throws.
+  Future<void> _teardown() {
     // Set first: queued operations check this when their turn comes.
     _isDisposed = true;
 
@@ -1277,14 +1357,19 @@ class MediaController extends ChangeNotifier {
     // Dispose the scoped position listenable
     _positionNotifier.dispose();
 
-    // Dispose player
+    // Dispose player. MediaPlayer.dispose() flips its own isDisposed
+    // synchronously, so anything that must run against the live player
+    // (release()'s stop) has to be done before this point.
+    Future<void> playerDispose;
     try {
-      _player.dispose();
-    } catch (e) {
-      debugPrint('MediaController: Error disposing player: $e');
+      playerDispose = _player.dispose();
+    } catch (e, st) {
+      playerDispose = Future<void>.error(e, st);
     }
+    _playerDisposeFuture = playerDispose;
 
     super.dispose();
+    return playerDispose;
   }
 }
 
