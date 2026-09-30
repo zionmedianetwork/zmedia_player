@@ -377,6 +377,17 @@ class MediaPlayer {
   /// other native state (`playing`, `ready`, `buffering`, `error`).
   bool _completedLatched = false;
 
+  /// Issue #137: set once native has reported `playing`, `paused` or
+  /// `completed` for the current item, i.e. the item has started playback.
+  /// `ready` means "loaded, not yet started", so a `ready` arriving after
+  /// this is set (Android reported one after a seek/rebuffer while paused,
+  /// with `playWhenReady == false`) is really the item returning to
+  /// `paused`, and is surfaced as such. Defense in depth exactly like the
+  /// error/completed latches: current natives already report `paused`, this
+  /// protects new Dart against an older cached native build. Reset by
+  /// [load], [stop], [skipToIndex] and a [setPlaylist] that reloads.
+  bool _itemStarted = false;
+
   /// Issue #125: watchdog armed by [load] and disarmed by the first
   /// definitive outcome, per [MediaConfig.loadTimeout]. `null` whenever no
   /// load is outstanding, or when the timeout is disabled.
@@ -1164,6 +1175,7 @@ class MediaPlayer {
     // Issue #125: a new load is the clearest possible statement that the
     // host has moved on from any previous failure.
     _clearErrorLatch();
+    _itemStarted = false;
 
     // Enforce HTTPS for DRM-protected media URLs before touching any state.
     InputValidator.validateMediaItemWithDrm(item);
@@ -1429,6 +1441,7 @@ class MediaPlayer {
       _currentPlaylist = playlist.copyWith(currentIndex: index);
 
       if (!reloadSkipped) {
+        _itemStarted = false;
         // Clear previous track data immediately to prevent stale UI
         _subtitleTracks = [];
         _audioTracks = [];
@@ -1657,6 +1670,7 @@ class MediaPlayer {
     // (and everything native reports afterwards) is honest again.
     _cancelLoadWatchdog();
     _clearErrorLatch();
+    _itemStarted = false;
 
     try {
       await _invokeMethod('stop', {'playerId': playerId});
@@ -2308,6 +2322,7 @@ class MediaPlayer {
     // Issue #125: skipping loads a (possibly different) item — end the
     // terminal error latch so the new item's own state is reported.
     _clearErrorLatch();
+    _itemStarted = false;
 
     if (index < 0 || index >= _currentPlaylist!.items.length) {
       throw ConfigurationException(
@@ -2896,6 +2911,19 @@ class MediaPlayer {
         state = PlayerState.completed;
       } else {
         _completedLatched = false;
+      }
+    }
+
+    // Issue #137: `ready` after the item has already started playback is a
+    // paused item returning from a seek/rebuffer, not a fresh load. See
+    // [_itemStarted].
+    if (!_errorLatched) {
+      if (reportedState == PlayerState.playing ||
+          reportedState == PlayerState.paused ||
+          reportedState == PlayerState.completed) {
+        _itemStarted = true;
+      } else if (reportedState == PlayerState.ready && _itemStarted) {
+        state = PlayerState.paused;
       }
     }
 

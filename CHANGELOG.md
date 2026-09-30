@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **Android: a `seekTo()` (or any rebuffer) while paused now returns to `PlayerState.paused`,
+  not `ready`** (issue #137). `onPlaybackStateChanged` mapped `STATE_READY` with
+  `playWhenReady == false` to `ready`, so a paused seek went `paused` -> `buffering` -> `ready`
+  and hosts rendering a play/pause control from `PlayerState.paused` showed the wrong one. iOS
+  never had the problem (no state event on a paused seek). `ready` now means only "loaded, not
+  yet started": Android tracks a per-item `hasStartedPlayback` flag (set when `isPlaying` first
+  becomes true or the item ends; reset by load and `stop()`), and a `STATE_READY` after that
+  reports `paused` with no `pauseReason`, so `pauseReasonStream` does not fire again. `MediaPlayer`
+  carries the same rule as defense in depth for an older cached native build. Guarded by
+  `test/native_contract/ready_after_start_paused_test.dart` and
+  `test/core/media_player_paused_seek_state_test.dart`.
 - **`PlayerState.completed` now persists after a natural end of playback** (issue #132). Both
   platforms emitted a quiescent event right after `completed` that overwrote it with `paused`:
   Android's `onIsPlayingChanged(false)` (about 8ms after `STATE_ENDED`) and iOS's

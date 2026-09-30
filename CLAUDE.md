@@ -410,7 +410,10 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   player sits in a reported error** (issue #125 — `playerError != null` on Android,
   `currentItem?.status == .failed` on iOS); see gotcha 16. **Both also suppress the plain
   `paused` that follows a natural end** (issue #132 — `playbackState == STATE_ENDED` on
-  Android, `currentItemPlayedToEnd` on iOS) so `completed` persists; see gotcha 20
+  Android, `currentItemPlayedToEnd` on iOS) so `completed` persists; see gotcha 20. **`ready`
+  means only "loaded, not yet started"**: Android reports `paused` (no `pauseReason`) for a
+  `STATE_READY` with `playWhenReady == false` once the item has started (issue #137); see
+  gotcha 22
 - `onPositionChanged`: Playback position updates (plus `liveEdgeOffset`/`positionBasis`).
   Periodic while playing (Android: also while stalled-but-intending-to-play; silent while
   paused), **plus exactly one one-off emit after every seek regardless of play state**
@@ -756,6 +759,17 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    leak it guarded is an orphaned native instance (Dart never disposed), which is the host's
    bug and is loud now, whereas reaping a live paused player is silent data loss. Guarded by
    `test/native_contract/no_stale_reaper_test.dart` and `test/core/media_player_lifetime_test.dart`
+22. **`PlayerState.ready` only occurs before an item has started playback** (issue #137) -
+   Android used to map `STATE_READY` + `playWhenReady == false` to `ready` unconditionally, so a
+   `seekTo()`/rebuffer while paused ended `paused` -> `buffering` -> `ready`. `MediaPlayerManager.kt`
+   now keeps `hasStartedPlayback` (set when `isPlaying` first becomes true or on `STATE_ENDED`;
+   reset in `loadMediaItem` and `stop()`) and `readyStateName()` returns `paused` once it is set.
+   That re-reported `paused` carries **no** `pauseReason` (it is not a new pause), so
+   `pauseReasonStream` stays silent. iOS never emits `ready` after a seek (its two `"ready"`
+   emissions are the one-time player/item `readyToPlay` status KVOs at load). `MediaPlayer` has
+   the same rule (`_itemStarted`, reset by load/stop/skipToIndex/reloading setPlaylist) as
+   defense in depth. Guarded by `test/native_contract/ready_after_start_paused_test.dart` and
+   `test/core/media_player_paused_seek_state_test.dart`
 
 ## UI/UX Design Specifications
 

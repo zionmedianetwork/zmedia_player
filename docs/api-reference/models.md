@@ -206,6 +206,8 @@ happens.)
 
 ```dart
 enum PlayerState { idle, buffering, ready, playing, paused, completed, error }
+// `ready` = loaded, not yet started. After an item has played, a seek/rebuffer
+// while paused returns to `paused`, not `ready` (both platforms, issue #137).
 
 /// Which timeline `PlaybackState.position` is measured against.
 enum PositionBasis {

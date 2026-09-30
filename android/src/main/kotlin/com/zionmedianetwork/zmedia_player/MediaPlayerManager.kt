@@ -350,6 +350,26 @@ class MediaPlayerInstance(
     private var lastPlayWhenReadyChangeReason: Int =
         Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST
 
+    // Issue #137: whether the item currently loaded has already started
+    // playback (isPlaying became true, or it reached STATE_ENDED) since the
+    // last [loadMediaItem]/[stop]. "ready" means loaded-but-not-yet-started;
+    // once this is true, STATE_READY with playWhenReady == false is a
+    // paused item coming back from a seek/rebuffer, and is reported "paused".
+    private var hasStartedPlayback: Boolean = false
+
+    /**
+     * Wire name for `STATE_READY` (issue #137): "playing" when
+     * playWhenReady, otherwise "paused" if the item has already started
+     * playback (a paused seek/rebuffer must return to the state the viewer
+     * left it in, matching iOS) and "ready" only for the first ready after
+     * load, before anything has played.
+     */
+    private fun readyStateName(playWhenReady: Boolean): String = when {
+        playWhenReady -> "playing"
+        hasStartedPlayback -> "paused"
+        else -> "ready"
+    }
+
     private val playerListener = object : Player.Listener {
         /**
          * Issue #125: whether ExoPlayer is currently sitting in a reported
@@ -400,11 +420,18 @@ class MediaPlayerInstance(
             val state = when (playbackState) {
                 Player.STATE_IDLE -> "idle"
                 Player.STATE_BUFFERING -> "buffering"
-                Player.STATE_READY -> if (exoPlayer?.playWhenReady == true) "playing" else "ready"
-                Player.STATE_ENDED -> "completed"
+                Player.STATE_READY -> readyStateName(exoPlayer?.playWhenReady == true)
+                Player.STATE_ENDED -> {
+                    hasStartedPlayback = true
+                    "completed"
+                }
                 else -> "idle"
             }
 
+            // Issue #137: a "paused" derived from STATE_READY is a re-report
+            // of an existing pause, never a new one, so it carries no
+            // pauseReason (Dart's fromWireValue(null) -> null emits nothing on
+            // pauseReasonStream).
             notifyStateChanged(state, playbackState == Player.STATE_BUFFERING)
 
             // Notify duration when player is ready
@@ -446,6 +473,7 @@ class MediaPlayerInstance(
                 return
             }
 
+            if (isPlaying) hasStartedPlayback = true
             val state = if (isPlaying) "playing" else "paused"
 
             // Issue #126: attribute the pause using ExoPlayer's own
@@ -647,6 +675,8 @@ class MediaPlayerInstance(
         // diagnostic (see currentLiveEdgeOffsetMs) — this item may or may not
         // share the previous one's defect.
         liveOffsetAnchorWarningLogged = false
+        // Issue #137: a new item has not started playback yet.
+        hasStartedPlayback = false
 
         android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
 
@@ -924,7 +954,7 @@ class MediaPlayerInstance(
         val state = when (player.playbackState) {
             Player.STATE_IDLE -> "idle"
             Player.STATE_BUFFERING -> "buffering"
-            Player.STATE_READY -> if (player.playWhenReady) "playing" else "ready"
+            Player.STATE_READY -> readyStateName(player.playWhenReady)
             Player.STATE_ENDED -> "completed"
             else -> "idle"
         }
@@ -1022,6 +1052,9 @@ class MediaPlayerInstance(
     }
 
     fun stop() {
+        // Issue #137: stop() unloads the item (STATE_IDLE, no media items);
+        // the next thing to be loaded has not started.
+        hasStartedPlayback = false
         exoPlayer?.apply {
             stop()
             clearMediaItems()

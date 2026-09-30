@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1201 tests passing** in the package's Dart layer as of this writing — the count grows with every change, so run `flutter test` for the live
+> **Current status:** **1209 tests passing** in the package's Dart layer as of this writing — the count grows with every change, so run `flutter test` for the live
 > number rather than trusting this one. Native Kotlin/Swift code still has **no
 > automated tests** — those paths require on-device verification.
 >
@@ -31,6 +31,7 @@ tests close that gap by parsing the native sources as *text*:
 | `test/models/network_status_vocabulary_test.dart` | `onNetworkStatusChanged`'s `connectionType` |
 | `test/native_contract/pause_reason_vocabulary_test.dart` | `onStateChanged`'s `pauseReason` (`PlayerPauseReason`) |
 | `test/native_contract/completed_persists_test.dart` | Both natives guard the plain `paused` emission once the item has ended (issue #132) |
+| `test/native_contract/ready_after_start_paused_test.dart` | Android maps `STATE_READY` + `playWhenReady == false` to `paused` once the item has started, `ready` only before (issue #137); Dart backstop in `test/core/media_player_paused_seek_state_test.dart` |
 | `test/native_contract/paused_seek_position_test.dart` | both natives emit one `onPositionChanged` after a seek while paused (issue #134); Dart behavior in `test/core/media_player_paused_seek_test.dart` |
 
 Each fails in **both** directions: a native literal with no Dart counterpart, *and* a Dart
