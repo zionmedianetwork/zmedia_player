@@ -749,8 +749,9 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    Android's manager calls `requirePlayer(playerId)` synchronously (before the main-thread
    `post`) so the plugin handler returns its `*_ERROR` `FlutterError` (`IllegalStateException`
    "Player not found"), symmetric with iOS's `MediaPlayerError.playerNotFound` (now a
-   `LocalizedError`, so the message is readable). Dart surfaces it as a `PlaybackException`
-   whose `errorCode` is the channel code (e.g. `PLAY_ERROR`). It used to be a silent
+   `LocalizedError`, so the message is readable). Dart surfaces it as the method's typed
+   `MediaPlayerException` (e.g. `PlaybackException` with `errorCode` `PLAY_ERROR` from `play()`;
+   `load()` maps to `MediaLoadException`). It used to be a silent
    `players[id]?.play()` no-op on Android. Do **not** reintroduce a time-based reaper: the only
    leak it guarded is an orphaned native instance (Dart never disposed), which is the host's
    bug and is loud now, whereas reaping a live paused player is silent data loss. Guarded by

@@ -297,6 +297,7 @@ Purpose-built for TikTok/Reels-style vertical feeds, backed by `MediaPlayerPool`
 ### MediaPlayerWidget
 - **Video Display** - Native video rendering
 - **Built-in Controls** - Play, pause, seek bar
+- **Viewer-safe error overlay** - `ErrorOverlay` maps the typed `MediaController.error` to friendly copy, never renders raw platform/exception text (unmatched errors show `ErrorOverlay.genericMessage`), words a 403 as retryable, and hides the developer "Error Code:" chip unless `showErrorCode: true` (issue #135)
 - **Custom Controls** - Build your own UI
 - **Fullscreen Mode** - Expand to fullscreen
 - **Control Overlay** - Auto-hiding controls
@@ -349,6 +350,11 @@ Purpose-built for TikTok/Reels-style vertical feeds, backed by `MediaPlayerPool`
 - **`load()` completing means "handed to the platform"**, not "loaded" — see [player-api.md](../api-reference/player-api.md#load-completing-is-not-loaded)
 - **`PlayerState.error` is terminal** - held until an explicit host command (`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or real forward progress from native. It is no longer overwritten by the quiescent state each platform emits as a consequence of the failure (`idle` on Android, `paused` on iOS), which previously made a failed load report identically to a viewer pause. Suppressed natively on both platforms *and* latched in Dart (so new Dart against an older cached native build still behaves)
 - **`MediaConfig.loadTimeout`** - Dart-only load watchdog, default 30s, `null` disables. Reports a `NetworkException` with `isTimeout: true` when a load is accepted and then goes silent; refuses to fire while the load is still progressing
+
+### Playback lifecycle (issues #132, #133, #134)
+- **`PlayerState.completed` persists after a natural end** - no longer overwritten by the trailing `paused` each platform emitted right after it, so a Replay control keyed on `completed` works and `play()` restarts from the beginning. Suppressed natively on both platforms and latched in Dart until a host command or real progress
+- **A seek while paused reports its position** - one `onPositionChanged` after every seek regardless of play state (the periodic tick stays silent while paused), plus an optimistic `position` update in Dart for non-live items
+- **No idle-time reaper** - a `MediaPlayer` lives from `initialize()` until `dispose()`; a paused on-screen player is never disposed behind the host's back. A command against a missing native player throws a typed `MediaPlayerException` on both platforms (e.g. `PlaybackException` from `play()`) (Android used to no-op silently). `attach()`/`detach()` are deprecated no-ops
 
 ---
 

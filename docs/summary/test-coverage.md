@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1175 tests passing** as of> this writing (run `flutter test` for the live count, since it grows with every
+> the original release. The suite has since grown to **1201 tests passing** as of this writing (run `flutter test` for the live count, since it grows with every
 > change) as audit-remediation work added regression coverage. **Important caveat
 > the original summary omitted:** these are all **Dart** unit tests. There are
 > **no automated native (Kotlin/Swift) tests**, and several native features (DRM
@@ -22,7 +22,20 @@
 > `ci-success` merge check like the other jobs — previously nothing in CI ran this
 > suite at all, which is how 13 of its tests sat broken from v0.3.0 until a later fix.
 >
-> **Last Updated:** September 10, 2026
+> **Last Updated:** September 30, 2026
+>
+> **Player lifecycle regression coverage (issues #132, #133, #134, #135):**
+> `test/core/media_player_completed_latch_test.dart` (a natural end stays `completed`
+> against a trailing `paused`/`idle` until a host command),
+> `test/core/media_player_paused_seek_test.dart` (a paused `seekTo` updates `position`),
+> `test/core/media_player_lifetime_test.dart` (a paused player survives hours of idle time
+> and still reaches native — it replaces the removed `media_player_stale_sweep_test.dart`),
+> and `test/widgets/error_overlay_test.dart` (no raw platform text reaches the viewer).
+> Their native halves are pinned by source-parsing tests —
+> `test/native_contract/completed_persists_test.dart`,
+> `test/native_contract/paused_seek_position_test.dart` and
+> `test/native_contract/no_stale_reaper_test.dart` — which prove the guards are present in
+> the Kotlin/Swift source, not that they behave correctly on a device.
 >
 > **Android HTTP-header regression coverage (issue #127):**
 > `test/native_contract/android_http_headers_test.dart` (3 tests) parses

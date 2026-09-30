@@ -326,6 +326,20 @@ reports a `NetworkException` with `isTimeout: true`. It only fires if the player
 buffering **and** the position has not advanced, so a slow-but-progressing load is never
 killed.
 
+**End of playback.** When an item plays to its natural end the state becomes
+`PlayerState.completed` and **stays** there until you issue a command (`play()` restarts from
+the beginning) — safe to key a Replay control on. A `seekTo()` while paused updates
+`position` immediately, so a scrubber tracks the frame.
+
+**Player lifetime.** A player lives from `initialize()` until `dispose()`; there is no idle
+timeout, so a player paused for hours still resumes. The flip side: a player you never
+dispose is never cleaned up for you.
+
+**The built-in error overlay is viewer-safe.** `MediaPlayerWidget`'s default `ErrorOverlay`
+shows friendly copy mapped from the typed error and never the raw platform text; the
+developer "Error Code:" chip is off unless you pass `ErrorOverlay(showErrorCode: true, ...)`
+through `errorWidget:`.
+
 See [`load()` completing is not "loaded"](docs/api-reference/player-api.md#load-completing-is-not-loaded)
 and [Events](docs/api-reference/events.md#onerror).
 

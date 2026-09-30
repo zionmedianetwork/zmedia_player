@@ -1,25 +1,32 @@
 # ZMedia Player - Roadmap
 
-**Version:** 0.5.0
-**Last Updated:** September 10, 2026
+**Version:** 0.5.1
+**Last Updated:** September 30, 2026
 **Status:** Feature-complete for the 0.5.x line; distributed via GitHub releases.
-`CHANGELOG.md`'s `[Unreleased]` holds the Android multi-header fix (issue #127 —
-`MediaItem.httpHeaders` no longer collapses to its last entry, because
-`DefaultHttpDataSource.Factory.setDefaultRequestProperties` replaces rather than merges and
-was being called once per entry; iOS was never affected) together with the deprecation of the
-never-wired `MediaConfig.httpHeaders`, and a new native-source-parsing regression guard,
-`test/native_contract/android_http_headers_test.dart`, for a defect class neither
-`flutter analyze` nor the mocked-channel suite can see. It also holds the same-family
-fix one layer up: the notification-artwork frame extraction now carries
-`MediaItem.httpHeaders` on both platforms (it was an unauthenticated request, so artwork
-silently never appeared for a signed/authenticated media URL), guarded by
-`test/native_contract/notification_artwork_headers_test.dart`.
+`CHANGELOG.md`'s `[Unreleased]` holds four player-lifecycle/UI fixes (PR #136):
+`PlayerState.completed` now persists after a natural end instead of being overwritten by a
+trailing `paused` on both platforms (issue #132); a `seekTo()` while paused now reports the new
+position (issue #134); the time-based stale-instance reaper is removed on Dart, Android and iOS,
+so a paused on-screen player is never disposed behind the host's back, and a command against a
+missing native player now fails loudly on Android too (issue #133); and `ErrorOverlay` no longer
+renders raw platform/exception text, maps the typed `MediaController.error`, words a 403 as
+retryable, and defaults `showErrorCode` to `false` (issue #135). Guarded by
+`test/native_contract/completed_persists_test.dart`,
+`test/native_contract/paused_seek_position_test.dart` and
+`test/native_contract/no_stale_reaper_test.dart`; the native changes still need on-device
+verification.
 
-`CHANGELOG.md`'s `[Unreleased]` additionally holds the load/error-semantics work:
-a failed load now terminates in `PlayerState.error` instead of `paused`/`idle`
-(issue #125), `PlayerPauseReason` became a wire-valued enum that actually emits
-`user` (issue #126), and `MediaConfig.loadTimeout` bounds a load that goes silent.
-Guarded by `test/native_contract/pause_reason_vocabulary_test.dart`.
+`v0.5.1` shipped the Android multi-header fix (issue #127 — `MediaItem.httpHeaders` no longer
+collapses to its last entry, because `DefaultHttpDataSource.Factory.setDefaultRequestProperties`
+replaces rather than merges and was being called once per entry; iOS was never affected)
+together with the deprecation of the never-wired `MediaConfig.httpHeaders`, guarded by
+`test/native_contract/android_http_headers_test.dart`, and the same-family notification-artwork
+fix (the frame extraction now carries `MediaItem.httpHeaders` on both platforms), guarded by
+`test/native_contract/notification_artwork_headers_test.dart`. It also shipped the
+load/error-semantics work: a failed load now terminates in `PlayerState.error` instead of
+`paused`/`idle` (issue #125), `PlayerPauseReason` became a wire-valued enum that actually emits
+`user` (issue #126), and `MediaConfig.loadTimeout` bounds a load that goes silent, guarded by
+`test/native_contract/pause_reason_vocabulary_test.dart`.
 
 The items below shipped in `v0.5.0`: the ExoPlayer 2 classpath upgrade note (issue #108),the `NetworkStatus` platform-quality fix (issue #112), the live-edge-offset
 window-sanity fix (issue #109) with its manifest-anchor diagnostic (issue #110), and the
@@ -52,8 +59,7 @@ stream) than on iOS (bounded near zero by construction during live playback, ver
 the same stream) — making `isAtLiveEdge`/`defaultLiveEdgeTolerance` near-degenerate on iOS and
 a configured `liveLatency` cushion unobservable through that field there.
 
-`CHANGELOG.md`'s `[Unreleased]` also holds two further documentation-only corrections in the
-same family. Issue #124: the docs claimed in several places that a frozen playhead grows
+`v0.5.1` also shipped two further documentation-only corrections in the same family. Issue #124: the docs claimed in several places that a frozen playhead grows
 `liveEdgeOffset` "without bound on both platforms" (and contradicted themselves elsewhere in
 the same file). It grows on **Android only** — on iOS the value is computed and emitted solely
 from inside `AVPlayer.addPeriodicTimeObserver`'s block, which stops firing when time stops
@@ -104,7 +110,8 @@ platform is called out explicitly.
 - `MediaPlayer` — primary interface, MethodChannel communication, broadcast state.
 - `MediaController` — facade over `MediaPlayer` (auto-hiding controls, operation locks).
 - `MediaConfig`, `CrashReporter`.
-- Multiple-instance registry: one instance per `playerId`, 15-minute stale cleanup.
+- Multiple-instance registry: one instance per `playerId`, living from `initialize()` until
+  `dispose()` — no idle-time reaper on any layer since issue #133.
 
 ### Load & error semantics
 - `load()` completing means the item was **handed to the platform**, not that it loaded —
