@@ -403,7 +403,15 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   bufferPercentage, pauseReason?}`. **Both natives suppress this event entirely while the
   player sits in a reported error** (issue #125 — `playerError != null` on Android,
   `currentItem?.status == .failed` on iOS); see gotcha 16
-- `onPositionChanged`: Playback position updates (plus `liveEdgeOffset`/`positionBasis`)
+- `onPositionChanged`: Playback position updates (plus `liveEdgeOffset`/`positionBasis`).
+  Periodic while playing (Android: also while stalled-but-intending-to-play; silent while
+  paused), **plus exactly one one-off emit after every seek regardless of play state**
+  (issue #134: Android `onPositionDiscontinuity` for `SEEK`/`SEEK_ADJUSTMENT`, iOS
+  `seek(to:completionHandler:)` completion via `emitPositionSnapshot`), so a scrubber moves
+  on a paused seek. `MediaPlayer.seekTo` also applies the requested position optimistically
+  for non-live items (skipped if native already reported one during the call);
+  `MediaController.seekTo` reopens its position throttle so the report is not dropped.
+  Guarded by `test/native_contract/paused_seek_position_test.dart`
 - `onDurationChanged`: Media duration
 - `onQualityTracksChanged` / `onSubtitleTracksChanged` / `onAudioTracksChanged`: track lists
 - `onDrmSessionUpdate`: DRM session state
@@ -519,9 +527,10 @@ A separate exported module — not to be confused with `CrashReporter` in core:
     edge, outside what `seekableTimeRanges.last - currentTime()` can see. What works
     identically on both platforms: DVR scrub-back grows the value correctly. What does
     **not** (issue #124, correcting an earlier claim in this file): a frozen playhead grows
-    the value without bound on **Android only**. The iOS computation and both of its
-    `notifyPositionChanged` call sites live inside `addPeriodicTimeObserver`'s block, which
-    stops firing when time stops progressing, so a hard stall freezes the value rather than
+    the value without bound on **Android only**. The iOS computation and its periodic
+    emission (`emitPositionSnapshot`, driven by `addPeriodicTimeObserver`'s block — also
+    called once from a seek's completion, issue #134, which is a one-off, not a stall
+    signal) stop when time stops progressing, so a hard stall freezes the value rather than
     growing it — the arithmetic would grow, but it is never sampled. Even a native fix that
     emitted through a stall would be partial: iOS's reference point
     (`seekableTimeRanges.last.end`) only advances as media-playlist refreshes succeed, so a

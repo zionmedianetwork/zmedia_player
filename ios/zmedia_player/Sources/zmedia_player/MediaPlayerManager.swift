@@ -612,6 +612,59 @@ class MediaPlayerInstance: NSObject {
         startBandwidthMonitoring()
     }
 
+    /// Builds and emits one `onPositionChanged` for `time` (the AVPlayerItem's
+    /// own absolute timeline). Shared by the periodic time observer and by
+    /// `seekTo` (issue #134): `addPeriodicTimeObserver` is documented to fire
+    /// on a time jump too, but nothing guarantees it while paused, and the
+    /// Android side deliberately mirrors this with an explicit one-off emit
+    /// from `onPositionDiscontinuity`. An explicit emit from the seek
+    /// completion makes the paused-seek behaviour symmetric and not dependent
+    /// on observer scheduling.
+    private func emitPositionSnapshot(at time: CMTime) {
+        // Wave E (DVR window duration): re-check the live DVR window's
+        // length on every tick -- AVFoundation has no KVO notification
+        // for `seekableTimeRanges` changing, so polling here (already
+        // running every 0.5s for position) is how a growing/sliding
+        // window's duration stays current. See checkLiveDvrWindowDuration.
+        self.checkLiveDvrWindowDuration()
+
+        // Issue #88: computed from the ABSOLUTE `time` below, before any
+        // window-relative translation -- the live edge and `time` are both
+        // expressed on the AVPlayerItem's own timeline, so subtracting a
+        // window-relative position from an absolute edge would be
+        // meaningless. See currentLiveEdgeOffsetMs(at:).
+        let liveEdgeOffsetMs = self.currentLiveEdgeOffsetMs(at: time)
+
+        if let window = self.currentLiveDvrWindow {
+            // `time` is on the AVPlayerItem's own absolute timeline, the
+            // same one `seekableTimeRanges` is expressed on -- NOT reset
+            // to 0 at the window start, unlike ExoPlayer's
+            // window-relative getCurrentPosition() on Android (see
+            // MediaPlayerManager.kt's notifyDurationChanged doc). Translate
+            // to window-relative here so `PlaybackState.position` and
+            // `PlaybackState.duration` share the same zero point on both
+            // platforms -- seekTo(position:) below applies the inverse
+            // translation, so this pairing is self-consistent even though
+            // it changes the "position" unit specifically for a live+DVR
+            // item.
+            let relativeSeconds = max(0, CMTimeGetSeconds(time) - CMTimeGetSeconds(window.start))
+            self.notifyPositionChanged(
+                position: Int64(relativeSeconds * 1000),
+                // This branch IS the window-relative translation, so it is
+                // exactly the condition under which position stops being
+                // measured from a fixed zero point.
+                positionBasis: "liveWindow",
+                liveEdgeOffsetMs: liveEdgeOffsetMs
+            )
+        } else {
+            self.notifyPositionChanged(
+                position: Int64(time.seconds * 1000),
+                positionBasis: "absolute",
+                liveEdgeOffsetMs: liveEdgeOffsetMs
+            )
+        }
+    }
+
     private func setupObservers() {
         guard let player = avPlayer else { return }
 
@@ -622,48 +675,7 @@ class MediaPlayerInstance: NSObject {
         ) { [weak self] time in
             guard let self = self else { return }
 
-            // Wave E (DVR window duration): re-check the live DVR window's
-            // length on every tick -- AVFoundation has no KVO notification
-            // for `seekableTimeRanges` changing, so polling here (already
-            // running every 0.5s for position) is how a growing/sliding
-            // window's duration stays current. See checkLiveDvrWindowDuration.
-            self.checkLiveDvrWindowDuration()
-
-            // Issue #88: computed from the ABSOLUTE `time` below, before any
-            // window-relative translation -- the live edge and `time` are both
-            // expressed on the AVPlayerItem's own timeline, so subtracting a
-            // window-relative position from an absolute edge would be
-            // meaningless. See currentLiveEdgeOffsetMs(at:).
-            let liveEdgeOffsetMs = self.currentLiveEdgeOffsetMs(at: time)
-
-            if let window = self.currentLiveDvrWindow {
-                // `time` is on the AVPlayerItem's own absolute timeline, the
-                // same one `seekableTimeRanges` is expressed on -- NOT reset
-                // to 0 at the window start, unlike ExoPlayer's
-                // window-relative getCurrentPosition() on Android (see
-                // MediaPlayerManager.kt's notifyDurationChanged doc). Translate
-                // to window-relative here so `PlaybackState.position` and
-                // `PlaybackState.duration` share the same zero point on both
-                // platforms -- seekTo(position:) below applies the inverse
-                // translation, so this pairing is self-consistent even though
-                // it changes the "position" unit specifically for a live+DVR
-                // item.
-                let relativeSeconds = max(0, CMTimeGetSeconds(time) - CMTimeGetSeconds(window.start))
-                self.notifyPositionChanged(
-                    position: Int64(relativeSeconds * 1000),
-                    // This branch IS the window-relative translation, so it is
-                    // exactly the condition under which position stops being
-                    // measured from a fixed zero point.
-                    positionBasis: "liveWindow",
-                    liveEdgeOffsetMs: liveEdgeOffsetMs
-                )
-            } else {
-                self.notifyPositionChanged(
-                    position: Int64(time.seconds * 1000),
-                    positionBasis: "absolute",
-                    liveEdgeOffsetMs: liveEdgeOffsetMs
-                )
-            }
+            self.emitPositionSnapshot(at: time)
         }
 
         // Status observer
@@ -1389,12 +1401,27 @@ class MediaPlayerInstance: NSObject {
                 CMTimeGetSeconds(window.end)
             )
             let time = CMTime(seconds: clampedSeconds, preferredTimescale: 1000)
-            avPlayer?.seek(to: time)
+            performSeek(to: time)
             return
         }
 
         let time = CMTime(value: position, timescale: 1000) // position in milliseconds
-        avPlayer?.seek(to: time)
+        performSeek(to: time)
+    }
+
+    /// Issue #134: seek, then report the resulting position exactly once
+    /// regardless of play state (mirrors Android's `onPositionDiscontinuity`
+    /// emit). A seek superseded by a newer one (`finished == false`) is
+    /// skipped -- the newer seek's own completion reports the final position.
+    private func performSeek(to time: CMTime) {
+        guard let player = avPlayer else { return }
+        player.seek(to: time) { [weak self] finished in
+            guard finished else { return }
+            DispatchQueue.main.async {
+                guard let self = self, let player = self.avPlayer else { return }
+                self.emitPositionSnapshot(at: player.currentTime())
+            }
+        }
     }
 
     func setVolume(volume: Float) {

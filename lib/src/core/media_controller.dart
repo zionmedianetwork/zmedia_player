@@ -402,6 +402,11 @@ class MediaController extends ChangeNotifier {
     // Clamp position to valid range
     final clampedPosition = clampDuration(position, Duration.zero, duration);
 
+    // Issue #134: a seek's single post-seek position report must not be
+    // dropped by the 500ms/1s throttle just because a periodic tick landed
+    // moments ago -- reopen the throttle window so the next update passes.
+    _lastPositionUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+
     try {
       await _executeOperation(() => _player.seekTo(clampedPosition));
       _showControlsTemporarily();

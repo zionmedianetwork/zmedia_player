@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`seekTo()` while paused now updates `PlaybackState.position`** (issue #134). Both natives
+  moved the player but emitted no position event, because Android's periodic tick is
+  deliberately silent unless playing (or stalled while intending to play) and iOS's
+  periodic observer is not guaranteed to fire on a paused seek — so a scrubber read `0:00`
+  after `load()` + `seekTo()` until playback resumed. Android now emits exactly one
+  `onPositionChanged` from `onPositionDiscontinuity` (`DISCONTINUITY_REASON_SEEK` and
+  `SEEK_ADJUSTMENT`), iOS from the `seek(to:completionHandler:)` completion (via the new
+  shared `emitPositionSnapshot`, which the periodic observer also uses), both with the same
+  payload as the tick (`positionBasis`/`liveEdgeOffset` included). The periodic tick stays
+  silent while paused. Dart: `MediaPlayer.seekTo` applies the requested position
+  optimistically for non-live items (covers an older cached native build; skipped when
+  native already reported one, and for live items whose position is window-relative), and
+  `MediaController.seekTo` reopens its position throttle so the report is not dropped.
+  Guarded by `test/native_contract/paused_seek_position_test.dart` and
+  `test/core/media_player_paused_seek_test.dart`. Needs on-device verification (no native
+  tests exist).
+
 ## [0.5.1] - 2026-09-10
 
 ### BREAKING

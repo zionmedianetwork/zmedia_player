@@ -243,7 +243,12 @@ same technique guards the `connectionType` vocabulary in
 `test/native_contract/android_http_headers_test.dart` (issue #127 — see the header note
 below), the notification-artwork header wiring in
 `test/native_contract/notification_artwork_headers_test.dart`, and the `pauseReason`
-vocabulary in `test/native_contract/pause_reason_vocabulary_test.dart`.
+vocabulary in `test/native_contract/pause_reason_vocabulary_test.dart`, and the one-off
+post-seek `onPositionChanged` in `test/native_contract/paused_seek_position_test.dart`
+(issue #134: both natives emit exactly one position event after a seek regardless of play
+state — Android from `onPositionDiscontinuity`, iOS from the seek completion; the periodic
+tick stays silent while paused; `MediaPlayer.seekTo` also updates optimistically for non-live
+items).
 
 **`load()` completing != loaded (issue #125).** `MediaPlayer.load()`/`MediaController.load()`
 resolving means the item was *handed to the platform*. ExoPlayer and AVPlayer accept a media item

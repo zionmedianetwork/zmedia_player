@@ -30,6 +30,7 @@ tests close that gap by parsing the native sources as *text*:
 | `test/exceptions/error_category_vocabulary_test.dart` | `onError`'s `category` (`MediaErrorCategory`) |
 | `test/models/network_status_vocabulary_test.dart` | `onNetworkStatusChanged`'s `connectionType` |
 | `test/native_contract/pause_reason_vocabulary_test.dart` | `onStateChanged`'s `pauseReason` (`PlayerPauseReason`) |
+| `test/native_contract/paused_seek_position_test.dart` | both natives emit one `onPositionChanged` after a seek while paused (issue #134); Dart behavior in `test/core/media_player_paused_seek_test.dart` |
 
 Each fails in **both** directions: a native literal with no Dart counterpart, *and* a Dart
 member no native code can produce. The second direction is the one that matters most — it is

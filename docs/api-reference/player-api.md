@@ -51,7 +51,7 @@ Contract:
 | `Future<void> setPlaylist(Playlist playlist, {int? startIndex})` | Load (or extend/re-issue) a playlist. Does **not** restart the item at `startIndex` if it is already the loaded, in-progress item — see [Extending a playlist in place](#extending-a-playlist-in-place) |
 | `Future<void> play()` / `pause()` / `stop()` | Playback control |
 | `Future<void> togglePlayPause()` | Toggle play/pause |
-| `Future<void> seekTo(Duration position)` | Seek to a position. Throws `InvalidStateException` for a live item that is not seekable (`isLive && !dvrEnabled` — see [Live Streaming](live-streaming.md)) |
+| `Future<void> seekTo(Duration position)` | Seek to a position. Throws `InvalidStateException` for a live item that is not seekable (`isLive && !dvrEnabled` — see [Live Streaming](live-streaming.md)). `position` updates after the seek **even while paused** (issue #134): natives emit one `onPositionChanged` per seek, and for non-live items the requested position (clamped to a known duration) is also applied optimistically once the call returns. For a live DVR item `position` is window-relative and only native's event updates it |
 | `Future<void> seekForward([Duration duration])` / `seekBackward([Duration duration])` | Relative seek (default 10s) |
 | `Future<void> setVolume(double volume)` | 0.0–1.0 |
 | `Future<void> increaseVolume([double amount])` / `decreaseVolume([double amount])` | Step volume |
