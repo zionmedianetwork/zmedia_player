@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **On-device integration suite** (`example/integration_test/`) for the #132-#137 native fixes:
+  natural end stays `completed` (A), paused-seek position and state (B, and C on a live DVR
+  stream), unknown-player commands throw (D), error overlay shows no raw native text (F), and an
+  opt-in 21-minute paused idle (E, `--dart-define=ZMP_LONG_IDLE=true`). It asserts on raw native
+  events (`raw_channel_spy.dart`) so Dart-side latches cannot mask a native regression. Manual,
+  needs a physical device and network, not run in CI; adds `integration_test` to the example's
+  dev dependencies. See `example/README.md`.
+
 ### Fixed
 - **Android: a `seekTo()` (or any rebuffer) while paused now returns to `PlayerState.paused`,
   not `ready`** (issue #137). `onPlaybackStateChanged` mapped `STATE_READY` with

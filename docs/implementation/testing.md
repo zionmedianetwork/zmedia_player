@@ -167,6 +167,36 @@ testWidgets('DRM demo page shows license status', (tester) async {
 
 ### 3. Integration Tests
 
+#### On-device native suite (`example/integration_test/`)
+
+The only automated coverage that runs the **real** Kotlin/Swift code; every other test mocks
+the `MethodChannel`. It targets the #132-#137 native fixes and asserts on **raw native events**
+captured by `raw_channel_spy.dart` (wrapping `PlatformDispatcher.onPlatformMessage`, falling
+back to `ui.channelBuffers`; a binding subclass is impossible because `flutter test` creates
+the binding before `main()`), so `MediaPlayer`'s error latch and optimistic updates cannot mask
+a native regression.
+
+- `checks_abcd_test.dart`: A (#132 natural end stays `completed`), B (#134/#137 paused seek
+  position and state, platform-aware), C (#134 live DVR paused seek; skips if the live demo is
+  unreachable), D (#133 unknown-player commands throw).
+- `check_f_test.dart`: F (#135 error overlay shows no raw native text; 404 and DNS failure).
+- `check_e_long_idle_test.dart`: E (#133 paused 21-minute idle survives the reaper). Opt-in,
+  skipped unless `--dart-define=ZMP_LONG_IDLE=true`.
+
+```bash
+cd example
+flutter test integration_test -d <device-id>          # A-D, F; E skipped
+flutter test integration_test/check_e_long_idle_test.dart -d <device-id> \
+  --dart-define=ZMP_LONG_IDLE=true
+```
+
+Needs a physical, unlocked, awake device and network access (public sample URLs). It is
+**not run in CI** and is not part of the Dart test counts; run it manually when touching native
+playback state, seek, lifecycle or error paths. Verified on a Galaxy Note 9P (Android 11) and an
+iPhone 11 Pro Max (iOS 26). See `example/README.md`.
+
+#### Other integration coverage (planned)
+
 Test complete workflows end-to-end.
 
 **Coverage Areas:**
@@ -343,6 +373,10 @@ flutter drive --target=test_driver/fairplay_test.dart
 - AirPlay with DRM
 
 ### Known gaps: native unit tests
+
+(Native *behavior* is now partly covered by the manual, on-device
+[`example/integration_test/`](#3-integration-tests) suite; it is not in CI, and native
+*unit* tests remain absent, as described below.)
 
 Neither native layer currently has runnable unit tests. This is the reason the iOS
 "speed change starts playback" bug (fixed in `[Unreleased]`, see `CHANGELOG.md`) shipped:

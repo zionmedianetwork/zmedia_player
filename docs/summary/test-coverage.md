@@ -13,6 +13,12 @@
 > --coverage`, `test/performance/`, `test/memory/` on every push/PR) — both now exist.
 > See the [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md).
 >
+> **On-device native suite (not counted here, not in CI).** `example/integration_test/` runs
+> the real Kotlin/Swift code on a physical device and asserts on raw native events for the
+> #132-#137 fixes (checks A-F; run manually with `cd example && flutter test integration_test
+> -d <device-id>`). It is the only automated coverage of native code, but it is neither part of
+> the Dart test count nor run by CI. See [`docs/implementation/testing.md`](../implementation/testing.md).
+>
 > **The `example/` app has its own, separate suite** — 24 tests passing, run via
 > `cd example && flutter test` — covering per-page layout regressions and
 > wired-behavior end-to-end checks that the package's own mocked-channel suite

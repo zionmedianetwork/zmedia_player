@@ -627,7 +627,7 @@ each taking the header map directly.
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested** (1175 tests as of this writing — run `flutter test`for the live count); **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested** (1175 tests as of this writing — run `flutter test`for the live count); **native Kotlin/Swift has no automated unit tests and nothing in CI** (only the manual on-device suite in `example/integration_test/`, see `example/README.md`),
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Media notifications —

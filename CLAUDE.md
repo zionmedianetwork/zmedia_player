@@ -443,6 +443,13 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - **Example app tests:** `example/test/` — its own automated suite (widget/layout
   regressions and wired-behavior end-to-end checks against real page composition), run via
   `cd example && flutter test`; also used for manual testing (`cd example && flutter run`)
+- **On-device integration suite:** `example/integration_test/` — runs the real native code on
+  a physical device (`cd example && flutter test integration_test -d <device-id>`) and asserts
+  on *raw* native events via `raw_channel_spy.dart`, so Dart-side latches/optimistic updates
+  cannot mask a native regression (the mocked-channel suites cannot see that class of defect).
+  Checks A-D, F for #132-#137; check E (21-minute idle, #133) is opt-in via
+  `--dart-define=ZMP_LONG_IDLE=true`. Needs a device + network; **not run in CI** and excluded
+  from `example/test/`. Update it when changing native state/seek/lifecycle/error behavior
 
 ### Mock Strategy
 - Use mocks for native platform communication in unit tests
@@ -455,9 +462,10 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - Coverage is strongest in the Dart layer: state management, playlist logic, DRM/
   config models, MethodChannel event routing, subtitle parsing, retry/backoff, and
   value-model equality
-- **Gaps:** native Android/Kotlin and iOS/Swift code has no automated tests; several
-  native features (DRM decryption, certificate pinning, casting, bandwidth metering)
-  are implemented but still require on-device verification
+- **Gaps:** native Android/Kotlin and iOS/Swift code has no automated *unit* tests, and the
+  only native-behavior coverage is the manual on-device `example/integration_test/` suite
+  (not in CI); several native features (DRM decryption, certificate pinning, casting,
+  bandwidth metering) are implemented but still require on-device verification
 - Performance benchmarks included for critical paths
 
 ## Important Implementation Details

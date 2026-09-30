@@ -104,6 +104,46 @@ external reading (Android Studio's Network Profiler, `adb shell dumpsys media.re
 
 ---
 
+## On-device integration suite (`integration_test/`)
+
+The only automated coverage that exercises the **real native** code (Kotlin/Swift): the
+package's own tests mock the `MethodChannel`, so a native regression is invisible to them.
+These checks run the real plugin on a physical device and assert on **raw native events**
+captured by `integration_test/raw_channel_spy.dart` (a wrapper on
+`PlatformDispatcher.onPlatformMessage`), before `MediaPlayer`'s error latch or optimistic
+state updates can mask the result. They are **not** run by CI and are **not** picked up by
+`cd example && flutter test` (that only runs `example/test/`).
+
+| Check | Issue | Proves |
+|---|---|---|
+| A | #132 | a natural end stays `completed` (no trailing `paused`/`idle`); `play()` restarts |
+| B | #134/#137 | a paused seek reports the new position and returns to `paused` (Android) / no `ready` (iOS); a never-played load reports `ready` |
+| C | #134 | the same paused seek on a live DVR stream |
+| D | #133 | commands for an unknown `playerId` throw `PlatformException` |
+| E | #133 | a paused player survives 21 minutes idle (past the 15-minute reaper) and resumes |
+| F | #135 | the error overlay shows no raw native error text (404 and unresolvable host) |
+
+Run (the device must be unlocked, awake and foregrounded; a sleeping screen stalls rendering):
+
+```bash
+cd example
+flutter test integration_test/checks_abcd_test.dart -d <device-id>   # A-D
+flutter test integration_test/check_f_test.dart -d <device-id>       # F
+flutter test integration_test -d <device-id>                         # everything; E is skipped
+
+# E takes over 21 minutes, so it is opt-in:
+flutter test integration_test/check_e_long_idle_test.dart -d <device-id> \
+  --dart-define=ZMP_LONG_IDLE=true
+```
+
+The suite needs network access and depends on public URLs it does not control (the Flutter
+sample `bee.mp4`, the ExoPlayer `BigBuckBunny_320x180.mp4`, `raw.githubusercontent.com` for the
+404 case, and the Unified Streaming live demo). Check C **skips** (logs `C SKIP ...`, does not
+fail) if the live stream is unreachable or never plays. The human-readable output is the
+`EVID:` lines; grep the run log for them.
+
+---
+
 ## Sample media
 
 All sample sources are defined in `lib/data/sample_media.dart`. They were chosen to
@@ -216,6 +256,7 @@ example/
       feature_card.dart             # Card used on the home screen
       player_scaffold.dart          # Shared scaffold: AppBar + 16:9 player + scrollable body
       measurement_log_panel.dart    # Shared on-screen event log for the measurement/ harnesses
+  integration_test/                 # On-device native-behavior suite (see above; not run in CI)
   android/                          # Runner (PiP relay + permissions)
   ios/                              # Runner (background-audio mode, signing)
 ```

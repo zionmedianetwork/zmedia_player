@@ -912,7 +912,8 @@ storage without plaintext fallback, `bufferedPosition`, leaked-subscription fixe
   `cd example && flutter test`).
 - **Coverage:** strong in the Dart layer (state, models, MethodChannel routing, subtitle
   parsing, retry/backoff, value-model equality). **Native (Kotlin/Swift) code has no automated
-  tests yet**; several native paths (DRM decryption, certificate pinning, casting, bandwidth
+  unit tests and nothing in CI**; a manual on-device suite (`example/integration_test/`, see
+  `example/README.md`) covers the #132-#137 native fixes; several native paths (DRM decryption, certificate pinning, casting, bandwidth
   metering) warrant **on-device verification**.
 - **Verified on-device — iPhone (iOS):** playback, fullscreen, custom controls,
   quality/subtitles, background audio, and media notifications — display, transport/seek

@@ -12,7 +12,7 @@
 > silently downgrades to plaintext; and `PlaybackState` carries `bufferedPosition`.
 > The remaining gate is **native on-device verification** (DRM decryption, casting,
 > bandwidth metering, on-device cert pinning) plus the fact that **native
-> Kotlin/Swift code has no automated tests yet** — so the package is **not yet
+> Kotlin/Swift code has no automated unit tests or CI coverage yet** (only a manual on-device suite, `example/integration_test/`) — so the package is **not yet
 > validated production-ready end-to-end**. Treat this as a historical snapshot; see
 > the [Codebase Audit & Remediation Roadmap](../implementation/codebase-audit.md)
 > for current status.
