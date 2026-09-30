@@ -5,6 +5,7 @@
 /// from the MediaPlayerException hierarchy.
 library;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../../core/exceptions.dart';
 import '../../core/media_controller.dart';
@@ -26,14 +27,15 @@ enum ErrorCategory {
 /// - Error type-specific messages and icons
 /// - User-friendly explanations
 /// - Actionable recovery buttons (retry, check network, report)
-/// - Error codes for debugging/support
+/// - Optional error codes for debugging/support ([showErrorCode], off by
+///   default — it is a developer diagnostic, not viewer copy)
 /// - Animated error states
 ///
 /// Example usage:
 /// ```dart
 /// if (controller.hasError) {
 ///   ErrorOverlay(
-///     error: controller.error,
+///     error: controller.error, // the typed MediaPlayerException
 ///     onRetry: () {
 ///       final item = controller.currentItem;
 ///       if (item != null) controller.load(item);
@@ -42,8 +44,26 @@ enum ErrorCategory {
 ///   )
 /// }
 /// ```
+///
+/// **Raw platform or exception text is never shown.** An error that maps to
+/// no known category (an unmatched `String`, or an unrecognized exception)
+/// renders [genericMessage]; the raw text is written to the debug log only
+/// (`debugPrint`, debug builds). Pass the typed exception
+/// (`MediaController.error`) rather than `PlaybackState.errorMessage` to get
+/// category-specific wording.
 class ErrorOverlay extends StatefulWidget {
-  /// The error to display
+  /// Message shown when the error cannot be mapped to a specific category.
+  static const String genericMessage =
+      'Something went wrong playing this video. Please try again.';
+
+  /// Message for an HTTP 403 / "unauthorized" failure. On signed CDN URLs a
+  /// 403 is nearly always an expired credential that a retry fixes, so it is
+  /// worded as retryable rather than as a permanent permission problem.
+  static const String retryableAccessMessage =
+      'We couldn\'t load this video right now. Please try again.';
+
+  /// The error to display: a [MediaPlayerException] (preferred — category
+  /// mapping runs) or a `String`. Never rendered verbatim.
   final Object? error;
 
   /// Media controller for retry operations
@@ -67,7 +87,9 @@ class ErrorOverlay extends StatefulWidget {
   /// Support website URL
   final String? supportUrl;
 
-  /// Whether to show error code for debugging
+  /// Whether to show a developer-facing "Error Code:" chip (DRM/playback
+  /// error code or `HTTP <status>`). Defaults to `false`: the chip is a
+  /// diagnostic, not viewer copy. Hosts may opt in (e.g. in debug builds).
   final bool showErrorCode;
 
   /// Whether to show support contact info
@@ -89,7 +111,7 @@ class ErrorOverlay extends StatefulWidget {
     this.onReportIssue,
     this.supportEmail,
     this.supportUrl,
-    this.showErrorCode = true,
+    this.showErrorCode = false,
     this.showSupportInfo = false,
     this.backgroundColor,
     this.animated = true,
@@ -110,6 +132,21 @@ class _ErrorOverlayState extends State<ErrorOverlay>
   void initState() {
     super.initState();
     _initializeAnimations();
+    _logRawError();
+  }
+
+  @override
+  void didUpdateWidget(ErrorOverlay oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.error != widget.error) _logRawError();
+  }
+
+  /// Raw platform/exception text is diagnostics: debug log only, never UI.
+  void _logRawError() {
+    final error = widget.error;
+    if (kDebugMode && error != null) {
+      debugPrint('ErrorOverlay: $error');
+    }
   }
 
   void _initializeAnimations() {
@@ -222,8 +259,9 @@ class _ErrorOverlayState extends State<ErrorOverlay>
       if (error.toLowerCase().contains('not found')) {
         return 'Media Not Found';
       }
-      if (error.toLowerCase().contains('unauthorized')) {
-        return 'Access Denied';
+      if (error.toLowerCase().contains('unauthorized') ||
+          error.toLowerCase().contains('403')) {
+        return 'Failed to Load Media';
       }
       return 'Playback Error';
     }
@@ -267,10 +305,10 @@ class _ErrorOverlayState extends State<ErrorOverlay>
       }
       if (error.toLowerCase().contains('unauthorized') ||
           error.toLowerCase().contains('403')) {
-        return 'You don\'t have permission to access this content.';
+        return ErrorOverlay.retryableAccessMessage;
       }
-      // Return the string message as-is if no pattern matched
-      return error;
+      // Unmatched: never echo raw platform text (issue #135).
+      return ErrorOverlay.genericMessage;
     }
 
     if (error is NetworkException) {
@@ -302,7 +340,7 @@ class _ErrorOverlayState extends State<ErrorOverlay>
         return 'The requested media could not be found. It may have been moved or deleted.';
       }
       if (error.statusCode == 403) {
-        return 'You don\'t have permission to access this content.';
+        return ErrorOverlay.retryableAccessMessage;
       }
       if (error.statusCode == 500 || error.statusCode == 503) {
         return 'The server is experiencing issues. Please try again later.';
@@ -326,17 +364,8 @@ class _ErrorOverlayState extends State<ErrorOverlay>
       return 'A platform-specific error occurred. This may be due to device limitations or system issues.';
     }
 
-    // Fallback for unknown errors
-    if (error is MediaPlayerException) {
-      return error.message;
-    }
-
-    // Final fallback
-    if (error != null) {
-      return error.toString();
-    }
-
-    return 'An unexpected error occurred. Please try again.';
+    // Unrecognized exception or arbitrary object: never echo raw text.
+    return ErrorOverlay.genericMessage;
   }
 
   String? _getErrorCode() {
