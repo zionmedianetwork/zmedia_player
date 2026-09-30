@@ -93,6 +93,13 @@ arriving right after `onError` — overwrote it, so a failed load was reported i
 viewer pause. `errorStream` was always correct; only `PlaybackState.state` lied. Buffer
 telemetry (`isBuffering`, `bufferPercentage`) still flows while the error is held.
 
+**`PlayerState.completed` persists** (issue #132). After a natural end the state stays
+`completed` (it is no longer overwritten by the `paused` each platform emits as the rate drops
+to 0), so `currentState.state == PlayerState.completed` is a reliable Replay signal. It is
+released by the next host command (`load`, `play`, `stop`, `seekTo`, `setPlaylist`,
+`skipToIndex`) or another native state; `play()` on a completed player seeks to zero and
+restarts. Playlist auto-advance and `looping` still work, since both are host commands.
+
 #### Distinguishing a viewer pause from a dead stream
 
 ```dart

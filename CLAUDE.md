@@ -402,7 +402,9 @@ A separate exported module — not to be confused with `CrashReporter` in core:
 - `onStateChanged`: State transitions. Payload `{playerId, state, isBuffering,
   bufferPercentage, pauseReason?}`. **Both natives suppress this event entirely while the
   player sits in a reported error** (issue #125 — `playerError != null` on Android,
-  `currentItem?.status == .failed` on iOS); see gotcha 16
+  `currentItem?.status == .failed` on iOS); see gotcha 16. **Both also suppress the plain
+  `paused` that follows a natural end** (issue #132 — `playbackState == STATE_ENDED` on
+  Android, `currentItemPlayedToEnd` on iOS) so `completed` persists; see gotcha 20
 - `onPositionChanged`: Playback position updates (plus `liveEdgeOffset`/`positionBasis`)
 - `onDurationChanged`: Media duration
 - `onQualityTracksChanged` / `onSubtitleTracksChanged` / `onAudioTracksChanged`: track lists
@@ -713,6 +715,21 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    of documented asymmetry as gotcha 15. `pauseReasonStream` is now chatty (it fires on every
    attributed pause, not only audio-focus loss) — a **breaking** change, along with the two
    new enum members. Guarded by `test/native_contract/pause_reason_vocabulary_test.dart`
+
+20. **`PlayerState.completed` persists after a natural end** (issue #132) - both platforms
+   used to emit a quiescent event right after `completed` (Android `onIsPlayingChanged(false)`,
+   ~8ms after `STATE_ENDED`; iOS `timeControlStatus` -> `.paused`), overwriting it with
+   `paused`, so a Replay control keyed on `PlayerState.completed` never appeared and
+   `MediaPlayer.play()`'s restart-if-completed guard never fired. Three layers, mirroring
+   gotcha 18: Android's `onIsPlayingChanged` returns early on `!isPlaying` while
+   `STATE_ENDED`; iOS's `handleTimeControlStatusChange` `.paused` branch returns early while
+   `currentItemPlayedToEnd` (set in `playerDidFinishPlaying`, reset on load/play/seekTo/stop —
+   deliberately separate from `currentItemIsSpent`, which `stop()` also sets); and
+   `MediaPlayer._completedLatched` holds `completed` against a trailing `paused`/`idle` in
+   Dart until a host command or another native state. Playlist auto-advance/`looping` are host
+   commands (`skipToIndex`/`seekTo`) so they clear the latch. Guarded by
+   `test/native_contract/completed_persists_test.dart` and
+   `test/core/media_player_completed_latch_test.dart`; on-device confirmation still needed
 
 ## UI/UX Design Specifications
 

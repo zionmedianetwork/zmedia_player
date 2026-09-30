@@ -262,6 +262,13 @@ now suppress that trailing event at the source (`playerError != null` in `MediaP
 new Dart against an older cached native build still behaves. Buffer telemetry (`isBuffering`,
 `bufferPercentage`) is deliberately still passed through while latched.
 
+`PlayerState.completed` likewise **persists** after a natural end (issue #132). The `paused`
+each platform used to emit right after `completed` (Android `onIsPlayingChanged(false)`, iOS
+`timeControlStatus` -> `.paused`) is suppressed natively (`STATE_ENDED` guard in
+`MediaPlayerManager.kt`; `currentItemPlayedToEnd` in `MediaPlayerManager.swift`), and
+`MediaPlayer._completedLatched` holds it in Dart until a host command or another native state.
+Pinned by `test/native_contract/completed_persists_test.dart`.
+
 A load that produces *no* outcome at all is caught by `MediaConfig.loadTimeout` (default 30s,
 `null` disables): it reports a `NetworkException` with `isTimeout: true` on `errorStream`. The
 timer is **Dart-only** — it never crosses the channel and no native code reads it — and refuses to

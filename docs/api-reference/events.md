@@ -814,6 +814,13 @@ the outcome on the streams instead:
 | Failure | `errorStream` emitting, with `currentState.state == PlayerState.error` |
 | Neither (accepted, then silence) | `MediaConfig.loadTimeout` watchdog |
 
+`PlayerState.completed` **persists** after a natural end (issue #132): the quiescent event each
+platform emits as a consequence of reaching the end (Android `onIsPlayingChanged(false)`, iOS
+`timeControlStatus` -> `.paused`) is not reported, and Dart additionally holds `completed`
+against a trailing `paused`/`idle`. It is released by the next host command
+(`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or any other native state
+(`playing`, `ready`, `buffering`, `error`). `play()` after completion seeks to 0 first.
+
 `PlayerState.error` is **terminal**: held until the next explicit host command
 (`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or until native
 reports real forward progress (`playing`/`completed`).

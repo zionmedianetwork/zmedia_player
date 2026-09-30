@@ -450,6 +450,20 @@ class MediaPlayerInstance(
                 return
             }
 
+            // Issue #132: reaching STATE_ENDED drives isPlaying to false a few
+            // milliseconds after onPlaybackStateChanged reported "completed".
+            // Reporting that as "paused" overwrote the terminal state, so
+            // PlayerState.completed never persisted. While the player sits in
+            // STATE_ENDED a plain pause is not a fact worth reporting; the
+            // state stays "completed" until seek/play/load moves it on.
+            if (!isPlaying && exoPlayer?.playbackState == Player.STATE_ENDED) {
+                android.util.Log.d(
+                    "MediaPlayerInstance",
+                    "Suppressing post-completion isPlaying=false (STATE_ENDED already reported)"
+                )
+                return
+            }
+
             val state = if (isPlaying) "playing" else "paused"
 
             // Issue #126: attribute the pause using ExoPlayer's own

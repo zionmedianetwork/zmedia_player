@@ -369,6 +369,14 @@ class MediaPlayer {
   /// rationale.
   bool _errorLatched = false;
 
+  /// Issue #132: set once native reports `completed`. While set, a trailing
+  /// quiescent `paused`/`idle` event is a direct consequence of reaching the
+  /// end (Android: `onIsPlayingChanged(false)` ~8ms after `STATE_ENDED`; iOS:
+  /// `timeControlStatus` -> `.paused`) and must not overwrite `completed`.
+  /// Cleared by [_clearErrorLatch] (every explicit host command) and by any
+  /// other native state (`playing`, `ready`, `buffering`, `error`).
+  bool _completedLatched = false;
+
   /// Issue #125: watchdog armed by [load] and disarmed by the first
   /// definitive outcome, per [MediaConfig.loadTimeout]. `null` whenever no
   /// load is outstanding, or when the timeout is disabled.
@@ -2768,6 +2776,8 @@ class MediaPlayer {
   /// ignore. Cheap and idempotent, so call sites do not need to test first.
   void _clearErrorLatch() {
     _errorLatched = false;
+    // Issue #132: the same host commands also end the completed latch.
+    _completedLatched = false;
   }
 
   /// Issue #125: arms the load watchdog for the load just issued.
@@ -2992,7 +3002,23 @@ class MediaPlayer {
         reportedState == PlayerState.completed) {
       _errorLatched = false;
     }
-    final state = _errorLatched ? PlayerState.error : reportedState;
+    var state = _errorLatched ? PlayerState.error : reportedState;
+
+    // Issue #132: `completed` persists against the quiescent event that
+    // natively follows it. Defense in depth, exactly like the error latch:
+    // both natives now suppress it at the source, this protects new Dart
+    // against an older cached native build.
+    if (!_errorLatched) {
+      if (reportedState == PlayerState.completed) {
+        _completedLatched = true;
+      } else if (_completedLatched &&
+          (reportedState == PlayerState.paused ||
+              reportedState == PlayerState.idle)) {
+        state = PlayerState.completed;
+      } else {
+        _completedLatched = false;
+      }
+    }
 
     // Issue #125: the first definitive outcome for the load disarms the
     // watchdog. `error` counts — the failure has been reported by the
