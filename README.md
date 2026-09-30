@@ -333,7 +333,9 @@ the beginning) — safe to key a Replay control on. A `seekTo()` while paused up
 
 **Player lifetime.** A player lives from `initialize()` until `dispose()`; there is no idle
 timeout, so a player paused for hours still resumes. The flip side: a player you never
-dispose is never cleaned up for you.
+dispose is never cleaned up for you. `dispose()` is synchronous and safe even while the player is
+still loading; to *wait* until the native player is gone (e.g. before replacing a still-loading
+controller with one on the same `playerId`), `await controller.release()`.
 
 **The built-in error overlay is viewer-safe.** `MediaPlayerWidget`'s default `ErrorOverlay`
 shows friendly copy mapped from the typed error and never the raw platform text; the

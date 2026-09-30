@@ -37,6 +37,8 @@ Contract:
 | Head-of-line blocking | Bounded: each operation runs under a 10 s timeout, so a wedged native call fails with `TimeoutException` and the queue advances rather than stalling forever. |
 | Lifetime | A `MediaPlayer` lives from `initialize()` until you call `dispose()` (issue #133). There is no idle timeout: a paused player is never reaped, however long it sits (earlier versions disposed non-playing instances after 15 min, after which `play()` did nothing). Conversely an undisposed player is a leak. `attach()`/`detach()` are deprecated no-ops. A command sent to a player native no longer holds throws a `PlaybackException` (`errorCode` e.g. `PLAY_ERROR`) on both platforms. |
 | `dispose()` | An operation still *queued* when `dispose()` runs is dropped: its `Future` completes normally as a no-op and the disposed player is never touched — same as calling a method after `dispose()`. An operation already *running* is not cancelled. |
+| `release()` | `Future<void> release({Duration timeout = const Duration(seconds: 10)})` — the awaitable `dispose()` (issue #139). Stops first (queued behind any running `load()`, best effort, bounded to half of `timeout`), tears down exactly like `dispose()`, then awaits the native `dispose` for the rest of `timeout`. Use it when you must know the native player is gone — e.g. replacing a still-loading controller with one on the same `playerId` in a recovery loop. Completes normally on success; throws `TimeoutException` if native teardown overran (local teardown is done regardless). Idempotent; `dispose()` after `release()` is a no-op and `release()` after `dispose()` awaits that dispose's native teardown. |
+| Dispose while loading | `dispose()`/`release()` while `initialize()` is still awaiting native (or a `load()` is waiting on it) still tears the native player down: it waits up to 5 s for `initialize`, then sends the native `dispose`, and no `load`/`play` is sent after disposal — a command that loses that race throws `PlayerDisposedException`. `dispose()` itself stays synchronous (its async native teardown failures are logged, never unhandled). |
 | Not a rate limiter | The queue is unbounded and never drops or collapses work (including repeated `seekTo`s). If you need debouncing — e.g. while dragging a scrub bar — do it in your UI before calling. |
 
 > Before this behaviour existed, a busy controller rejected calls: non-critical ones threw
@@ -264,7 +266,7 @@ direction-aware double-tap seek example.
 
 ### Configuration & lifecycle
 
-`Future<void> updateConfig(MediaConfig config)`, `String formatDuration(Duration)`, `void dispose()`.
+`Future<void> updateConfig(MediaConfig config)`, `String formatDuration(Duration)`, `void dispose()`, `Future<void> release({Duration timeout})` (awaitable dispose; see the lifetime contract above).
 
 ### Security
 
@@ -339,7 +341,8 @@ is sent.
 PiP: `checkPipAvailability`, `enterPictureInPicture`, `exitPictureInPicture`. Cast:
 `startCastDiscovery`, `stopCastDiscovery`, `connectToCastDevice`, `loadMediaOnCastDevice`,
 `disconnectFromCastDevice`. Security: `setSecureSurface`. Config/lifecycle: `updateConfig`,
-`dispose`.
+`dispose` (waits for an in-flight `initialize`, then sends the native `dispose`; every other
+command throws `PlayerDisposedException` once disposed — issue #139).
 
 #### Config snapshot on the load paths
 

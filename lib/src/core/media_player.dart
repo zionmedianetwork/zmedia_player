@@ -984,6 +984,16 @@ class MediaPlayer {
   /// particular [PlatformException], which each call site's own catch
   /// block maps to a specific typed exception — passes through unchanged.
   Future<T?> _invokeMethod<T>(String method, [dynamic arguments]) async {
+    // Issue #139: the single choke point every native command passes
+    // through. A command that was queued behind an await (a `load()` waiting
+    // on initialize, `setSpeed(1.0)` before a load, `seekTo` before `play`)
+    // and only reaches this line after `dispose()` ran would otherwise start
+    // playback on a native player that no Dart object owns any more. Only
+    // `dispose` itself is allowed through once disposed. Checked here rather
+    // than at each call site so a newly added multi-await path cannot forget.
+    if (_isDisposed && method != 'dispose') {
+      throw const PlayerDisposedException();
+    }
     try {
       return await _channel.invokeMethod<T>(method, arguments);
     } on MissingPluginException {
@@ -1056,6 +1066,17 @@ class MediaPlayer {
         );
       }
 
+      if (_isDisposed) {
+        // Issue #139: dispose() ran while native was answering. Native DID
+        // create the player, so complete the completer successfully -- that
+        // is how a pending dispose() learns it must now send the native
+        // `dispose`. Deliberately leave `_isInitialized` false (dispose owns
+        // teardown) and skip every post-init step; the direct caller gets the
+        // disposed exception rather than a player it must not use.
+        _initializationCompleter!.complete();
+        throw const PlayerDisposedException();
+      }
+
       _isInitialized = true;
       _initializationCompleter!.complete();
 
@@ -1077,6 +1098,10 @@ class MediaPlayer {
               'MediaPlayer: failed to apply initial secureSurface=true: $e');
         }
       }
+    } on PlayerDisposedException {
+      // Thrown above after the completer already completed; must not reach
+      // the generic catch (which would complete it a second time).
+      rethrow;
     } on ProtocolMismatchException catch (exception, stack) {
       crashReporter?.reportError(exception, stack,
           context: {
@@ -1228,6 +1253,12 @@ class MediaPlayer {
         }
       }
 
+      // Issue #139: setSpeed(1.0) above swallows its own errors, including
+      // the disposed exception. Re-check so a dispose that landed during it
+      // cannot be followed by a native `load` (the `_invokeMethod` guard
+      // would also stop it; this keeps the intent explicit and skips work).
+      _throwIfDisposed();
+
       await _invokeMethod('load', {
         'playerId': playerId,
         'mediaItem': item.toMap(),
@@ -1288,6 +1319,11 @@ class MediaPlayer {
         'duration': item.duration?.inSeconds,
         'mediaType': item.mediaType.name,
       });
+    } on PlayerDisposedException {
+      // Issue #139: a dispose is not a load failure -- no error state, no
+      // crash report. The caller awaited a player it (or its controller)
+      // already released.
+      rethrow;
     } on PlatformException catch (e, stack) {
       crashReporter?.reportError(e, stack, context: {
         'operation': 'load',
@@ -1473,6 +1509,7 @@ class MediaPlayer {
         }
       }
 
+      _throwIfDisposed(); // Issue #139: see load().
       await _invokeMethod('setPlaylist', {
         'playerId': playerId,
         'playlist': _playlistToMap(_currentPlaylist!),
@@ -1500,6 +1537,8 @@ class MediaPlayer {
       if (!reloadSkipped) {
         _updateState(_currentState.copyWith(state: PlayerState.buffering));
       }
+    } on PlayerDisposedException {
+      rethrow; // Issue #139: a dispose is not a load failure.
     } on PlatformException catch (e) {
       _handleLoadError('Failed to set playlist: ${e.message ?? e.code}');
       throw MediaLoadException(
@@ -2403,7 +2442,29 @@ class MediaPlayer {
     }
   }
 
-  /// Dispose the player and release resources
+  /// How long [dispose] waits for an in-flight native `initialize` to answer
+  /// before sending the native `dispose` anyway (issue #139).
+  static const Duration _disposeInitWait = Duration(seconds: 5);
+
+  /// Dispose the player and release resources.
+  ///
+  /// [isDisposed] flips and the instance leaves the registry synchronously,
+  /// before the first `await` -- callers rely on that ordering.
+  ///
+  /// If `initialize()` is still awaiting native when this is called (issue
+  /// #139), the native player does not exist *yet* but is about to, so
+  /// sending `dispose` now would race it. Instead this waits (bounded by
+  /// [_disposeInitWait]) for initialize to answer and then sends the native
+  /// `dispose`: before this fix the disposal was skipped entirely
+  /// (`_isInitialized` was still false), leaving a native player that loaded
+  /// and played with no Dart owner. Commands queued behind that initialize
+  /// are cut off by the `_isDisposed` checks, so nothing loads in between.
+  ///
+  /// When initialize FAILED, native holds no player and no `dispose` is sent.
+  /// When the wait times out the outcome is unknown, so `dispose` is sent
+  /// best-effort: the channel is ordered, it lands after the pending
+  /// `initialize`, and a missing player only produces a harmless, swallowed
+  /// `playerNotFound`.
   Future<void> dispose() async {
     if (_isDisposed) return;
 
@@ -2415,8 +2476,33 @@ class MediaPlayer {
     // player (and never keeps the instance alive past disposal).
     _cancelLoadWatchdog();
 
+    var sendNativeDispose = _isInitialized;
+    final pendingInit = _initializationCompleter;
+    if (!_isInitialized && pendingInit != null && !pendingInit.isCompleted) {
+      try {
+        await pendingInit.future.timeout(_disposeInitWait);
+        sendNativeDispose = true;
+      } on TimeoutException {
+        sendNativeDispose = true;
+      } catch (_) {
+        // Native initialize failed: there is no native player to dispose.
+      }
+    }
+
+    // A replacement that reuses this playerId and has already started its own
+    // initialize owns the native slot now. Native `initializePlayer` disposes
+    // whatever it replaces, so this instance's native player is already gone,
+    // and a `dispose` keyed by the shared playerId would kill the replacement.
+    final replacement = _instances[playerId];
+    if (replacement != null &&
+        !identical(replacement, this) &&
+        (replacement._isInitialized ||
+            replacement._initializationCompleter != null)) {
+      sendNativeDispose = false;
+    }
+
     // Close platform channel
-    if (_isInitialized) {
+    if (sendNativeDispose) {
       try {
         await _invokeMethod('dispose', {'playerId': playerId});
       } catch (e) {
@@ -3441,6 +3527,9 @@ class MediaPlayer {
 
     if (!_isInitialized) {
       await initialize();
+      // Issue #139: a dispose() that landed while initialize() was awaiting
+      // native must stop the calling command here, before it sends anything.
+      _throwIfDisposed();
     }
   }
 

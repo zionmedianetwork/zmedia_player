@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`MediaController.release({Duration timeout = const Duration(seconds: 10)})`** (issue #139): an
+  awaitable, idempotent teardown for when the caller must know the native player is gone, chiefly
+  a live-recovery loop that disposes a still-loading controller and builds a replacement on the
+  same `playerId`. It stops playback first (best effort, queued behind any in-flight `load()`, so
+  that load's playback is cut off rather than orphaned; bounded to half of `timeout`), then runs
+  the same synchronous teardown as `dispose()` and awaits `MediaPlayer.dispose()` for the rest of
+  `timeout`. Completes normally once native `dispose` has been sent and answered; throws
+  `TimeoutException` if that did not finish in time (local teardown is done regardless).
+  Repeat/concurrent calls share one result; `dispose()` after `release()` is a no-op, and
+  `release()` after `dispose()` awaits that dispose's native teardown. `dispose()` is unchanged
+  (synchronous, `ChangeNotifier`), except its native teardown's failures are now logged instead of
+  left as an unhandled async error. On-device check G added to `example/integration_test/`
+  (`check_g_test.dart`).
 - **On-device integration suite** (`example/integration_test/`) for the #132-#137 native fixes:
   natural end stays `completed` (A), paused-seek position and state (B, and C on a live DVR
   stream), unknown-player commands throw (D), error overlay shows no raw native text (F), and an
@@ -17,6 +30,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dev dependencies. See `example/README.md`.
 
 ### Fixed
+- **Disposing a player while it is still initializing no longer leaks a native player** (issue
+  #139). `MediaPlayer.dispose()` only sent the native `dispose` `if (_isInitialized)`, which is
+  false while `initialize()` is awaiting native, yet it removed the instance from the registry;
+  `initialize()` then marked itself initialized and the queued `load()` went on to load and play
+  a native player no Dart object owned (seen as stacked audio on iOS, one leaked player per
+  recovery in a live-recovery loop). Now `dispose()` waits (up to 5s) for an in-flight
+  `initialize()`, then sends the native `dispose` (skipped when initialize failed, and when a
+  replacement with the same `playerId` has already started initializing, since a `dispose` keyed by
+  the shared id would kill it). Every native command is refused once the player is disposed
+  (`_invokeMethod` throws `PlayerDisposedException`; `load()`/`setPlaylist()` rethrow it rather than
+  reporting a load failure), so commands queued behind an await, including `load()`'s
+  `setSpeed(1.0)` reset, cannot reach native after disposal. `_ensureInitialized()` re-checks
+  disposal after initializing. A command that used to slip through a racing `dispose()` now throws
+  `PlayerDisposedException`. Guarded by `test/core/media_player_dispose_during_initialize_test.dart`.
+- **Android: `disposePlayer`/`dispose()` no longer run late relative to `initializePlayer`** (issue
+  #139). Channel handlers already run on the main looper, where `initializePlayer` is synchronous,
+  but `disposePlayer` always posted, so Dart's `dispose(id)` then `initialize(id)` (a reused-id
+  replacement) ran as initialize -> posted dispose and the late dispose killed the NEW player. Both
+  now run synchronously on the main looper; off it, the posted `disposePlayer` captures the
+  instance at call time and only disposes it if it is still the registered one. iOS was already
+  synchronous. Plugin-level per-player handlers (notification/PiP/cast) are removed synchronously
+  in `handleDispose`, so they have no such hazard. Guarded by
+  `test/native_contract/initialize_disposes_existing_test.dart`.
+- **Native `initializePlayer` disposes an existing instance for the same `playerId` before replacing
+  it** (issue #139), on both platforms (Android in both the main-looper and posted branches). It
+  used to overwrite `players[playerId]`, orphaning the old ExoPlayer/AVPlayer where not even
+  `shutdown()` could reach it. Guarded by `test/native_contract/initialize_disposes_existing_test.dart`.
 - **iOS: a failing load no longer reports `PlayerState.ready` before its `onError`** (issue #138).
   `handleStatusChange(status: AVPlayer.Status)` emitted `ready` on the player-level
   `AVPlayer.status == .readyToPlay`, which only says the `AVPlayer` object is usable; for a 404 or

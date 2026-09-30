@@ -34,6 +34,7 @@ tests close that gap by parsing the native sources as *text*:
 | `test/native_contract/ready_after_start_paused_test.dart` | Android maps `STATE_READY` + `playWhenReady == false` to `paused` once the item has started, `ready` only before (issue #137); Dart backstop in `test/core/media_player_paused_seek_state_test.dart` |
 | `test/native_contract/ready_only_from_item_status_test.dart` | iOS emits `ready` only from the item-level `AVPlayerItem.status` handler, never the player-level `AVPlayer.status` one (issue #138); on-device check F asserts no `ready`/`playing` precedes `onError` |
 | `test/native_contract/paused_seek_position_test.dart` | both natives emit one `onPositionChanged` after a seek while paused (issue #134); Dart behavior in `test/core/media_player_paused_seek_test.dart` |
+| `test/native_contract/initialize_disposes_existing_test.dart` | both natives' `initializePlayer` dispose an existing instance for the same `playerId` before replacing it (Android in both the main-looper and posted branches; issue #139); Dart behavior in `test/core/media_player_dispose_during_initialize_test.dart` |
 
 Each fails in **both** directions: a native literal with no Dart counterpart, *and* a Dart
 member no native code can produce. The second direction is the one that matters most — it is
@@ -181,12 +182,13 @@ a native regression.
   position and state, platform-aware), C (#134 live DVR paused seek; skips if the live demo is
   unreachable), D (#133 unknown-player commands throw).
 - `check_f_test.dart`: F (#135 error overlay shows no raw native text; #138 no raw `ready`/`playing` `onStateChanged` before the raw `onError`, both platforms; 404 and DNS failure). B also asserts a raw `ready` after a successful load (#138 regression guard).
+- `check_g_test.dart`: G (#139 dispose a controller while its live load is in flight, then no raw `playing`/position events; `release()` a still-loading controller and reuse its `playerId`, then raw VOD positions never step backwards).
 - `check_e_long_idle_test.dart`: E (#133 paused 21-minute idle survives the reaper). Opt-in,
   skipped unless `--dart-define=ZMP_LONG_IDLE=true`.
 
 ```bash
 cd example
-flutter test integration_test -d <device-id>          # A-D, F; E skipped
+flutter test integration_test -d <device-id>          # A-D, F, G; E skipped
 flutter test integration_test/check_e_long_idle_test.dart -d <device-id> \
   --dart-define=ZMP_LONG_IDLE=true
 ```

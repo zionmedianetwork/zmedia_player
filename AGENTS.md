@@ -540,7 +540,7 @@ and [Stall watchdog for live streams](docs/api-reference/live-streaming.md#stall
 ## Conventions & gotchas
 
 - **One barrel.** Add a new public type? Export it from `lib/zmedia_player.dart` or it's internal.
-- **Always `dispose()`** controllers/services in `State.dispose()` — they hold native resources + timers.
+- **Always `dispose()`** controllers/services in `State.dispose()` — they hold native resources + timers. `dispose()` is synchronous and safe mid-`initialize`/`load` (issue #139: it waits for the in-flight initialize, then sends native `dispose`; later commands throw `PlayerDisposedException`). When you must *wait* for the native player to be gone — replacing a still-loading controller on the same `playerId` — `await controller.release({timeout})` instead (stop, then dispose; `TimeoutException` if native overran; idempotent).
 - **`MediaRepeatMode`**, not `RepeatMode` (renamed; breaking).
 - **DRM requires HTTPS** for both license and media URLs (`InputValidator` enforces it).
 - **Streaming format is resolved per item, never cross-applied.** `MediaItem.streamingFormat`

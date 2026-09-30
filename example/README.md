@@ -122,6 +122,7 @@ state updates can mask the result. They are **not** run by CI and are **not** pi
 | D | #133 | commands for an unknown `playerId` throw `PlatformException` |
 | E | #133 | a paused player survives 21 minutes idle (past the 15-minute reaper) and resumes |
 | F | #135, #138 | the error overlay shows no raw native error text (404 and unresolvable host), and no raw `ready`/`playing` state event precedes the `onError` on either platform |
+| G | #139 | disposing a controller while its load is in flight leaves no native player (no `playing`/position events afterwards); replacing a still-loading controller via `release()` on the same `playerId` leaves one player (raw VOD position never steps backwards) |
 
 Run (the device must be unlocked, awake and foregrounded; a sleeping screen stalls rendering):
 
@@ -129,6 +130,7 @@ Run (the device must be unlocked, awake and foregrounded; a sleeping screen stal
 cd example
 flutter test integration_test/checks_abcd_test.dart -d <device-id>   # A-D
 flutter test integration_test/check_f_test.dart -d <device-id>       # F
+flutter test integration_test/check_g_test.dart -d <device-id>       # G
 flutter test integration_test -d <device-id>                         # everything; E is skipped
 
 # E takes over 21 minutes, so it is opt-in:

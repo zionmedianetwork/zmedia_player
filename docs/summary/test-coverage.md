@@ -15,7 +15,7 @@
 >
 > **On-device native suite (not counted here, not in CI).** `example/integration_test/` runs
 > the real Kotlin/Swift code on a physical device and asserts on raw native events for the
-> #132-#137 fixes (checks A-F; run manually with `cd example && flutter test integration_test
+> #132-#137 fixes (checks A-D, F, G; run manually with `cd example && flutter test integration_test
 > -d <device-id>`). It is the only automated coverage of native code, but it is neither part of
 > the Dart test count nor run by CI. See [`docs/implementation/testing.md`](../implementation/testing.md).
 >
@@ -46,6 +46,18 @@
 > `test/native_contract/paused_seek_position_test.dart` and
 > `test/native_contract/no_stale_reaper_test.dart` — which prove the guards are present in
 > the Kotlin/Swift source, not that they behave correctly on a device.
+>
+> **Dispose-during-initialize regression coverage (issue #139):**
+> `test/core/media_player_dispose_during_initialize_test.dart` (17 tests) drives `dispose()` and
+> `MediaController.release()` against a gated mock channel: native `dispose` is sent after an
+> in-flight `initialize` answers and no `load`/`play` follows, the bounded wait, a failed
+> initialize sends none, a same-`playerId` replacement is not killed, `release()` ordering
+> (stop then dispose, behind a running `load`), its timeout, idempotency and
+> release/dispose in either order, and a failing `dispose()` raising no unhandled error.
+> `test/native_contract/initialize_disposes_existing_test.dart` (3 source-text guards) pins the
+> native `initializePlayer` replace-disposes fix. Three tests in
+> `test/exceptions/exceptions_test.dart` now `await` the un-awaited `expect(() => player.load(...))`
+> they raced against `dispose()`.
 >
 > **Android HTTP-header regression coverage (issue #127):**
 > `test/native_contract/android_http_headers_test.dart` (3 tests) parses
@@ -239,6 +251,7 @@ test/models/
 ```
 test/native_contract/
 ├── android_http_headers_test.dart (3 source-text guards — issue #127)
+├── initialize_disposes_existing_test.dart (3 source-text guards — issue #139)
 └── notification_artwork_headers_test.dart (6 source-text guards — artwork fetch headers)
 ```
 

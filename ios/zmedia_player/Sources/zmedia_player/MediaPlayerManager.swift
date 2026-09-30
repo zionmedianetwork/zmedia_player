@@ -181,6 +181,15 @@ class MediaPlayerManager {
     }
 
     func initializePlayer(playerId: String, config: [String: Any]?) throws {
+        // Issue #139: never overwrite a live instance without disposing it.
+        // A reused playerId (a recovery loop that replaces a controller)
+        // would otherwise orphan the old AVPlayer -- still loaded, still
+        // playing, unreachable by Dart, `disposePlayer` and `shutdown()`
+        // alike, because `players` no longer references it.
+        if let existing = players[playerId] {
+            existing.dispose()
+            players.removeValue(forKey: playerId)
+        }
         let playerInstance = MediaPlayerInstance(playerId: playerId, methodChannel: methodChannel, config: config)
         players[playerId] = playerInstance
     }

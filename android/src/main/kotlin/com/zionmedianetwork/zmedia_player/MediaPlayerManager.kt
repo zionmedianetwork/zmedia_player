@@ -73,11 +73,24 @@ class MediaPlayerManager(
             "Player not found: $playerId (it was never initialized or has been disposed)"
         )
 
+    /**
+     * Issue #139: never overwrite a live instance without disposing it. A
+     * reused playerId (a recovery loop that replaces a controller) would
+     * otherwise orphan the old ExoPlayer -- still loaded, still playing,
+     * unreachable by Dart, `disposePlayer` and `shutdown()` alike, because
+     * `players` no longer references it. Must run on the main thread, like
+     * every other access to `players`.
+     */
+    private fun disposeExistingPlayer(playerId: String) {
+        players.remove(playerId)?.dispose()
+    }
+
     fun initializePlayer(playerId: String, config: Map<String, Any>?) {
         android.util.Log.d("MediaPlayerManager", "initializePlayer called for playerId: $playerId")
 
         // Initialize synchronously on main thread to avoid timing issues with platform view creation
         if (Looper.myLooper() == Looper.getMainLooper()) {
+            disposeExistingPlayer(playerId)
             val playerInstance = MediaPlayerInstance(
                 context, playerId, methodChannel, config, this::acquireSharedAdaptiveCache
             )
@@ -85,6 +98,7 @@ class MediaPlayerManager(
             android.util.Log.d("MediaPlayerManager", "Player instance created synchronously")
         } else {
             mainHandler.post {
+                disposeExistingPlayer(playerId)
                 val playerInstance = MediaPlayerInstance(
                     context, playerId, methodChannel, config, this::acquireSharedAdaptiveCache
                 )
@@ -244,18 +258,42 @@ class MediaPlayerManager(
         )
     }
 
+    /**
+     * Issue #139: symmetric with [initializePlayer]. Method-channel handlers
+     * already run on the main looper, where `initializePlayer` takes its
+     * synchronous branch; if this always posted, Dart's `dispose(id)` followed
+     * by `initialize(id)` (a reused-playerId replacement) would run as
+     * initialize -> posted dispose, and the late dispose would kill the NEW
+     * player. So on the main looper this runs synchronously, in call order.
+     * Off the main looper the post captures the instance at call time and only
+     * disposes/removes it if it is still the registered one, so a late post can
+     * never dispose a replacement.
+     */
     fun disposePlayer(playerId: String) {
-        mainHandler.post {
-            players[playerId]?.dispose()
-            players.remove(playerId)
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            players.remove(playerId)?.dispose()
+        } else {
+            val captured = players[playerId]
+            mainHandler.post {
+                if (captured != null && players[playerId] === captured) {
+                    players.remove(playerId)
+                    captured.dispose()
+                }
+            }
         }
     }
 
     fun dispose() {
-        mainHandler.post {
-            players.values.forEach { it.dispose() }
-            players.clear()
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            disposeAllPlayers()
+        } else {
+            mainHandler.post { disposeAllPlayers() }
         }
+    }
+
+    private fun disposeAllPlayers() {
+        players.values.forEach { it.dispose() }
+        players.clear()
     }
 
     fun shutdown() {
