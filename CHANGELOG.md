@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-30
+
 ### Added
 - **`MediaController.release({Duration timeout = const Duration(seconds: 10)})`** (issue #139): an
   awaitable, idempotent teardown for when the caller must know the native player is gone, chiefly
