@@ -746,7 +746,7 @@ Backs `stateStream`/`PlaybackState.state`, and `pauseReasonStream`.
 | Key | Type | Required | Meaning |
 |-----|------|----------|---------|
 | `playerId` | String | yes | Routes the event to a `MediaPlayer` instance |
-| `state` | String | yes | One of `idle`/`buffering`/`ready`/`playing`/`paused`/`completed`/`error`; parsed into `PlayerState`. `ready` means only "loaded, not yet started": once an item has played (native `playing` or `completed`; the raw `paused` iOS emits during load does not count), a seek or rebuffer while paused returns to `paused` (**without** a `pauseReason` -- it re-reports an existing pause), on both platforms (issue #137) |
+| `state` | String | yes | One of `idle`/`buffering`/`ready`/`playing`/`paused`/`completed`/`error`; parsed into `PlayerState`. `ready` means only "loaded, not yet started": once an item has played (native `playing` or `completed`; the raw `paused` iOS emits during load does not count), a seek or rebuffer while paused returns to `paused` (**without** a `pauseReason` -- it re-reports an existing pause), on both platforms (issue #137). `ready` and `playing` are a reliable success signal on both platforms: a failing load goes `buffering` -> `error` with no `ready` in between (issue #138) |
 | `isBuffering` | bool | no (defaults `false`) | Whether the player is actively buffering |
 | `bufferPercentage` | num | no (defaults `0.0`) | Percentage of the full duration buffered. Android: `Player.getBufferedPercentage()`. iOS: computed from the furthest end of any loaded time range; `0` for live/unknown-duration content |
 | `pauseReason` | String | no | Why a `paused` transition happened — `"user"`/`"audioFocusLoss"`/`"audioBecomingNoisy"`/`"remote"`. **Omitted entirely** (never sent as `null`) when native cannot attribute the pause. See [Pause Reason Stream](#10-pause-reason-stream-pausereasonstream) for the per-platform availability table |
@@ -755,7 +755,7 @@ Native sources:
 
 | | Android (ExoPlayer / Media3) | iOS (AVFoundation) |
 |---|---|---|
-| `state` | `Player.Listener.onPlaybackStateChanged` (`STATE_IDLE`/`BUFFERING`/`READY`/`ENDED`, with `READY` split on `playWhenReady` and, when not playing, on whether the item has already started: `ready` before, `paused` after) and `onIsPlayingChanged` | `AVPlayer.timeControlStatus` KVO, with `AVPlayerItem.status` KVO for `buffering`/`ready`, and `AVPlayerItemDidPlayToEndTime` for `completed` |
+| `state` | `Player.Listener.onPlaybackStateChanged` (`STATE_IDLE`/`BUFFERING`/`READY`/`ENDED`, with `READY` split on `playWhenReady` and, when not playing, on whether the item has already started: `ready` before, `paused` after) and `onIsPlayingChanged` | `AVPlayer.timeControlStatus` KVO, with `AVPlayerItem.status` KVO for `buffering`/`ready` (`ready` comes **only** from the item-level status, never the player-level `AVPlayer.status`, so a failing load never reports `ready` before `onError`; issue #138), and `AVPlayerItemDidPlayToEndTime` for `completed` |
 | `pauseReason` | `Player.PlayWhenReadyChangeReason`, captured by `onPlayWhenReadyChanged` and read in `onIsPlayingChanged`. `END_OF_MEDIA_ITEM` and `SUPPRESSED_TOO_LONG` are deliberately unmapped (the first is not a pause; the second has no consumer-meaningful cause) | `consumePauseReason()` — the `AVAudioSession` interruption flag first, then the host-`pause()` flag. Never produces `audioBecomingNoisy` or `remote` |
 
 #### Post-failure suppression (issue #125)

@@ -75,7 +75,7 @@ Observe the real outcome on the streams:
 
 | Outcome | Signal |
 |---|---|
-| Success | `stateStream` reaching `PlayerState.ready` or `PlayerState.playing` |
+| Success | `stateStream` reaching `PlayerState.ready` or `PlayerState.playing` (reliable on both platforms: since #138 iOS no longer reports `ready` for a load that then fails) |
 | Failure | `errorStream` emitting, with `currentState.state == PlayerState.error` |
 | Neither (accepted, then silence) | The `MediaConfig.loadTimeout` watchdog, below |
 

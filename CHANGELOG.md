@@ -17,6 +17,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   dev dependencies. See `example/README.md`.
 
 ### Fixed
+- **iOS: a failing load no longer reports `PlayerState.ready` before its `onError`** (issue #138).
+  `handleStatusChange(status: AVPlayer.Status)` emitted `ready` on the player-level
+  `AVPlayer.status == .readyToPlay`, which only says the `AVPlayer` object is usable; for a 404 or
+  unresolvable host it fired anyway, so the raw timeline was `buffering, paused, buffering, ready,
+  onError`. `ready` now comes only from the item-level `AVPlayerItem.status == .readyToPlay`
+  (which also owns the duration report, the DVR-window check and the topmost-view re-bind that
+  the player-level handler used to trigger), so a failing load goes `buffering` -> `error`,
+  matching Android. `ready`/`playing` are now a reliable success signal on both platforms.
+  Android was not affected (it emits `ready` only from `STATE_READY`). Guarded by
+  `test/native_contract/ready_only_from_item_status_test.dart` and on-device check F.
 - **Android: a `seekTo()` (or any rebuffer) while paused now returns to `PlayerState.paused`,
   not `ready`** (issue #137). `onPlaybackStateChanged` mapped `STATE_READY` with
   `playWhenReady == false` to `ready`, so a paused seek went `paused` -> `buffering` -> `ready`

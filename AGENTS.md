@@ -254,7 +254,7 @@ items).
 resolving means the item was *handed to the platform*. ExoPlayer and AVPlayer accept a media item
 synchronously and only then fetch the manifest, negotiate DRM and decode — a 404, dead CDN,
 expired licence or unsupported codec surfaces **after** the future has already completed
-successfully. Observe the outcome instead: `PlayerState.ready`/`.playing` for success,
+successfully. Observe the outcome instead: `PlayerState.ready`/`.playing` for success (reliable on both platforms since #138: iOS emits `ready` only from `AVPlayerItem.status`),
 `errorStream` + `PlayerState.error` for failure.
 
 `PlayerState.error` is now **terminal**: it is held until the next explicit host command

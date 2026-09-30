@@ -413,7 +413,10 @@ A separate exported module — not to be confused with `CrashReporter` in core:
   Android, `currentItemPlayedToEnd` on iOS) so `completed` persists; see gotcha 20. **`ready`
   means only "loaded, not yet started"**: Android reports `paused` (no `pauseReason`) for a
   `STATE_READY` with `playWhenReady == false` once the item has started (issue #137); see
-  gotcha 22
+  gotcha 22. **`ready`/`playing` are a reliable success signal on both platforms** (issue
+  #138): iOS emits `ready` only from `AVPlayerItem.status == .readyToPlay`, never from the
+  player-level `AVPlayer.status`, so a failing load goes `buffering` -> `onError` with no
+  `ready` in between; see gotcha 23
 - `onPositionChanged`: Playback position updates (plus `liveEdgeOffset`/`positionBasis`).
   Periodic while playing (Android: also while stalled-but-intending-to-play; silent while
   paused), **plus exactly one one-off emit after every seek regardless of play state**
@@ -773,12 +776,23 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    now keeps `hasStartedPlayback` (set when `isPlaying` first becomes true or on `STATE_ENDED`;
    reset in `loadMediaItem` and `stop()`) and `readyStateName()` returns `paused` once it is set.
    That re-reported `paused` carries **no** `pauseReason` (it is not a new pause), so
-   `pauseReasonStream` stays silent. iOS never emits `ready` after a seek (its two `"ready"`
-   emissions are the one-time player/item `readyToPlay` status KVOs at load). `MediaPlayer` has
+   `pauseReasonStream` stays silent. iOS never emits `ready` after a seek (its only `"ready"`
+   emission is the one-time item `readyToPlay` status KVO at load; see gotcha 23). `MediaPlayer` has
    the same rule (`_itemStarted`, set only by native `playing`/`completed` -- never by `paused`,
    because iOS emits a raw `paused` during every load before anything has played; reset by
    load/stop/skipToIndex/reloading setPlaylist) as defense in depth. Guarded by `test/native_contract/ready_after_start_paused_test.dart` and
    `test/core/media_player_paused_seek_state_test.dart`
+23. **iOS `ready` comes only from the item, never the player** (issue #138) - `AVPlayer.status`
+   turns `.readyToPlay` once the `AVPlayer` object is usable, whatever the current item will do,
+   so emitting `ready` from it reported a 404/unresolvable-host load as ready right before its
+   `onError` (`buffering, paused, buffering, ready, onError`); Android never did (it emits
+   `ready` only from `STATE_READY`). `handleStatusChange(status: AVPlayer.Status)` now emits no
+   state on `.readyToPlay` (it still reports `.failed`); `handlePlayerItemStatusChange` is the
+   single `"ready"` source and also owns the duration report, DVR-window check and topmost-view
+   re-bind. Consequently `ready`/`playing` mean the media is loadable on both platforms, and the
+   `loadTimeout` watchdog (requires `buffering`) is no longer defeated by a spurious `ready`.
+   No Dart backstop: Dart cannot tell a spurious `ready` from a real one. Guarded by
+   `test/native_contract/ready_only_from_item_status_test.dart` and on-device check F
 
 ## UI/UX Design Specifications
 

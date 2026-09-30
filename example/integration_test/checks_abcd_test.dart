@@ -84,6 +84,13 @@ void main() {
         () => c.state.state == PlayerState.ready, const Duration(seconds: 20));
     ev('B #137 raw states after load: ${rawFor(pid, 'onStateChanged', after: tl).map((e) => e.map['state']).toList()}');
     expect(gotReady, isTrue, reason: 'first ready after load must stay ready');
+    // #138 regression guard: moving iOS `ready` to the item-level status must
+    // not lose it on a SUCCESSFUL load -- native itself must emit it.
+    expect(
+        rawFor(pid, 'onStateChanged', after: tl)
+            .any((e) => e.map['state'] == 'ready'),
+        isTrue,
+        reason: 'no raw onStateChanged ready after a successful load (#138)');
     await c.play();
     expect(
         await waitFor(

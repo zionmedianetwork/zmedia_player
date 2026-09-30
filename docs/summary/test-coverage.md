@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1210 tests passing** as of this writing (run `flutter test` for the live count, since it grows with every
+> the original release. The suite has since grown to **1214 tests passing** as of this writing (run `flutter test` for the live count, since it grows with every
 > change) as audit-remediation work added regression coverage. **Important caveat
 > the original summary omitted:** these are all **Dart** unit tests. There are
 > **no automated native (Kotlin/Swift) tests**, and several native features (DRM
@@ -42,6 +42,7 @@
 > Their native halves are pinned by source-parsing tests —
 > `test/native_contract/completed_persists_test.dart`,
 > `test/native_contract/ready_after_start_paused_test.dart`,
+> `test/native_contract/ready_only_from_item_status_test.dart` (iOS `ready` only from the item status, issue #138),
 > `test/native_contract/paused_seek_position_test.dart` and
 > `test/native_contract/no_stale_reaper_test.dart` — which prove the guards are present in
 > the Kotlin/Swift source, not that they behave correctly on a device.

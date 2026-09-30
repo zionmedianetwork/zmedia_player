@@ -1,6 +1,9 @@
-/// On-device check F (#135): when a load fails (HTTP 404, unresolvable host)
+/// On-device check F (#135, #138): when a load fails (HTTP 404, unresolvable host)
 /// the real `MediaPlayerWidget` error overlay must not show raw native error
 /// text (exception names, error domains, HTTP codes, the raw errorMessage).
+/// Also (#138), on both platforms: no raw `onStateChanged` with state `ready`
+/// or `playing` may arrive before the raw `onError` of a failing load (iOS used
+/// to report `ready` from the player-level `AVPlayer.status`).
 /// Needs a physical device and network access (the 404 case hits
 /// raw.githubusercontent.com):
 ///
@@ -26,6 +29,7 @@ void main() {
   for (final entry in cases.entries) {
     testWidgets('F #135 error overlay ${entry.key}', (tester) async {
       final pid = 'chk_f_${entry.key}';
+      final tStart = DateTime.now();
       final c = await makeController(pid);
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -59,6 +63,19 @@ void main() {
       for (final e in rawFor(pid, 'onError')) {
         ev('F ${entry.key} RAW $e');
       }
+      // #138: a failing load must never look successful before its error.
+      final states = rawFor(pid, 'onStateChanged', after: tStart);
+      final errs = rawFor(pid, 'onError', after: tStart);
+      ev('F ${entry.key} raw states: ${states.map((e) => e.map['state']).toList()}');
+      expect(errs, isNotEmpty, reason: 'no raw onError received');
+      final firstErr = errs.first.t;
+      final early = states
+          .where((e) =>
+              !e.t.isAfter(firstErr) &&
+              (e.map['state'] == 'ready' || e.map['state'] == 'playing'))
+          .toList();
+      expect(early, isEmpty,
+          reason: 'ready/playing reported before onError (#138): $early');
       final texts = tester
           .widgetList<Text>(find.byType(Text))
           .map((t) => t.data ?? t.textSpan?.toPlainText() ?? '')

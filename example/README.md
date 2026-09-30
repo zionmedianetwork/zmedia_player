@@ -117,11 +117,11 @@ state updates can mask the result. They are **not** run by CI and are **not** pi
 | Check | Issue | Proves |
 |---|---|---|
 | A | #132 | a natural end stays `completed` (no trailing `paused`/`idle`); `play()` restarts |
-| B | #134/#137 | a paused seek reports the new position and returns to `paused` (Android) / no `ready` (iOS); a never-played load reports `ready` |
+| B | #134/#137 | a paused seek reports the new position and returns to `paused` (Android) / no `ready` (iOS); a never-played load reports `ready` (raw, on both platforms; #138 guard) |
 | C | #134 | the same paused seek on a live DVR stream |
 | D | #133 | commands for an unknown `playerId` throw `PlatformException` |
 | E | #133 | a paused player survives 21 minutes idle (past the 15-minute reaper) and resumes |
-| F | #135 | the error overlay shows no raw native error text (404 and unresolvable host) |
+| F | #135, #138 | the error overlay shows no raw native error text (404 and unresolvable host), and no raw `ready`/`playing` state event precedes the `onError` on either platform |
 
 Run (the device must be unlocked, awake and foregrounded; a sleeping screen stalls rendering):
 

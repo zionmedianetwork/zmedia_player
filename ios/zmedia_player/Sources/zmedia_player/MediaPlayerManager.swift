@@ -1775,18 +1775,15 @@ class MediaPlayerInstance: NSObject {
         case .unknown:
             notifyStateChanged(state: "idle", isBuffering: false)
         case .readyToPlay:
-            zlog("MediaPlayerInstance: Player status changed to readyToPlay")
-            notifyStateChanged(state: "ready", isBuffering: false)
-            notifyDurationChanged()
-            checkLiveDvrWindowDuration()
-
-            // Re-bind only the topmost live view when ready (others stay
-            // unbound to avoid multiple layers on one AVPlayer → grey).
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                zlog("MediaPlayerInstance: Re-activating topmost live view on ready state")
-                self.activateTopmostView()
-            }
+            // Issue #138: AVPlayer.status is PLAYER-level -- it turns
+            // .readyToPlay once the AVPlayer object is usable, independent of
+            // whether the current item will ever load, so it fires for a 404
+            // or unresolvable host too. Emitting "ready" (or duration / DVR
+            // window) from here reported a failing load as ready before its
+            // onError. All of that now comes from the item-level
+            // handlePlayerItemStatusChange (AVPlayerItem.status), the only
+            // source that means the media is actually playable.
+            zlog("MediaPlayerInstance: Player status changed to readyToPlay (no state emitted; item status drives ready)")
         case .failed:
             let nsError = avPlayer?.error as NSError?
             zlog("MediaPlayerInstance: Player failed with error: \(nsError?.localizedDescription ?? "Unknown")")
@@ -2067,6 +2064,13 @@ class MediaPlayerInstance: NSObject {
             }
             notifyDurationChanged()
             checkLiveDvrWindowDuration()
+
+            // Re-bind only the topmost live view once the item is ready
+            // (others stay unbound to avoid multiple layers on one AVPlayer
+            // -> grey). Moved here from the player-level status handler (#138).
+            DispatchQueue.main.async { [weak self] in
+                self?.activateTopmostView()
+            }
 
             // Extract and notify all tracks immediately
             extractAndNotifyQualityTracks()
