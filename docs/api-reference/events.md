@@ -64,8 +64,10 @@ enum PositionBasis {
 >
 > `liveEdgeOffset` is the right signal **on Android**, where it grows without
 > bound against a genuinely frozen playhead. It is **not sufficient on iOS**:
-> both `notifyPositionChanged` call sites and the offset computation itself
-> live inside `AVPlayer.addPeriodicTimeObserver`'s block, which stops firing
+> the periodic emission and the offset computation (`emitPositionSnapshot`,
+> called from `AVPlayer.addPeriodicTimeObserver`'s block; since issue #134 also
+> from a seek's completion, which is a one-off and not a stall signal) are
+> driven by that observer, which stops firing
 > when time stops progressing — so during an iOS hard stall the offset is
 > never sampled and freezes at its last value instead of growing. A correct
 > watchdog therefore also treats **no `onPositionChanged` arriving at all,
@@ -731,6 +733,12 @@ above. Host apps never construct these; they are documented because a payload
 key is invisible to `flutter analyze` and to the (channel-mocking) test suite,
 so this table is the only place the contract is recorded.
 
+> **No `onPlayerDisposed` event exists.** Since #133 native never disposes a player on its own
+> (the 15-min stale-instance reaper was removed on Android and iOS), so there is nothing to
+> report. A command against an id native does not hold fails synchronously with a
+> `FlutterError` (`PLAY_ERROR`, `PAUSE_ERROR`, ... "Player not found") that Dart rethrows as a
+> `PlaybackException`.
+
 ### `onStateChanged`
 
 Backs `stateStream`/`PlaybackState.state`, and `pauseReasonStream`.
@@ -738,7 +746,7 @@ Backs `stateStream`/`PlaybackState.state`, and `pauseReasonStream`.
 | Key | Type | Required | Meaning |
 |-----|------|----------|---------|
 | `playerId` | String | yes | Routes the event to a `MediaPlayer` instance |
-| `state` | String | yes | One of `idle`/`buffering`/`ready`/`playing`/`paused`/`completed`/`error`; parsed into `PlayerState` |
+| `state` | String | yes | One of `idle`/`buffering`/`ready`/`playing`/`paused`/`completed`/`error`; parsed into `PlayerState`. `ready` means only "loaded, not yet started": once an item has played (native `playing` or `completed`; the raw `paused` iOS emits during load does not count), a seek or rebuffer while paused returns to `paused` (**without** a `pauseReason` -- it re-reports an existing pause), on both platforms (issue #137). `ready` and `playing` are a reliable success signal on both platforms: a failing load goes `buffering` -> `error` with no `ready` in between (issue #138) |
 | `isBuffering` | bool | no (defaults `false`) | Whether the player is actively buffering |
 | `bufferPercentage` | num | no (defaults `0.0`) | Percentage of the full duration buffered. Android: `Player.getBufferedPercentage()`. iOS: computed from the furthest end of any loaded time range; `0` for live/unknown-duration content |
 | `pauseReason` | String | no | Why a `paused` transition happened — `"user"`/`"audioFocusLoss"`/`"audioBecomingNoisy"`/`"remote"`. **Omitted entirely** (never sent as `null`) when native cannot attribute the pause. See [Pause Reason Stream](#10-pause-reason-stream-pausereasonstream) for the per-platform availability table |
@@ -747,7 +755,7 @@ Native sources:
 
 | | Android (ExoPlayer / Media3) | iOS (AVFoundation) |
 |---|---|---|
-| `state` | `Player.Listener.onPlaybackStateChanged` (`STATE_IDLE`/`BUFFERING`/`READY`/`ENDED`, with `READY` split on `playWhenReady`) and `onIsPlayingChanged` | `AVPlayer.timeControlStatus` KVO, with `AVPlayerItem.status` KVO for `buffering`/`ready`, and `AVPlayerItemDidPlayToEndTime` for `completed` |
+| `state` | `Player.Listener.onPlaybackStateChanged` (`STATE_IDLE`/`BUFFERING`/`READY`/`ENDED`, with `READY` split on `playWhenReady` and, when not playing, on whether the item has already started: `ready` before, `paused` after) and `onIsPlayingChanged` | `AVPlayer.timeControlStatus` KVO, with `AVPlayerItem.status` KVO for `buffering`/`ready` (`ready` comes **only** from the item-level status, never the player-level `AVPlayer.status`, so a failing load never reports `ready` before `onError`; issue #138), and `AVPlayerItemDidPlayToEndTime` for `completed` |
 | `pauseReason` | `Player.PlayWhenReadyChangeReason`, captured by `onPlayWhenReadyChanged` and read in `onIsPlayingChanged`. `END_OF_MEDIA_ITEM` and `SUPPRESSED_TOO_LONG` are deliberately unmapped (the first is not a pause; the second has no consumer-meaningful cause) | `consumePauseReason()` — the `AVAudioSession` interruption flag first, then the host-`pause()` flag. Never produces `audioBecomingNoisy` or `remote` |
 
 #### Post-failure suppression (issue #125)
@@ -813,6 +821,13 @@ the outcome on the streams instead:
 | Success | `stateStream` reaching `PlayerState.ready` or `PlayerState.playing` |
 | Failure | `errorStream` emitting, with `currentState.state == PlayerState.error` |
 | Neither (accepted, then silence) | `MediaConfig.loadTimeout` watchdog |
+
+`PlayerState.completed` **persists** after a natural end (issue #132): the quiescent event each
+platform emits as a consequence of reaching the end (Android `onIsPlayingChanged(false)`, iOS
+`timeControlStatus` -> `.paused`) is not reported, and Dart additionally holds `completed`
+against a trailing `paused`/`idle`. It is released by the next host command
+(`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or any other native state
+(`playing`, `ready`, `buffering`, `error`). `play()` after completion seeks to 0 first.
 
 `PlayerState.error` is **terminal**: held until the next explicit host command
 (`load`/`play`/`stop`/`seekTo`/`setPlaylist`/`skipToIndex`) or until native
@@ -880,6 +895,26 @@ for the full explanation, including what still works identically on both
 were considered and rejected as the iOS source: both are *target* offsets (what
 the app asked for / what the server recommends), so they are constant by
 construction and useless as a liveness signal.
+
+**One-off emit after a seek (issue #134).** Besides the periodic tick, both
+natives emit exactly one `onPositionChanged` after every seek, **regardless of
+play state** — with the same payload builder, so `positionBasis` and
+`liveEdgeOffset` ride along. Before this, a `seekTo` while paused moved the
+native player but `PlaybackState.position` stayed at its old value until
+playback resumed (a scrubber read `0:00` after `load()` + `seekTo`). Android
+emits from `Player.Listener.onPositionDiscontinuity` for
+`DISCONTINUITY_REASON_SEEK` and `DISCONTINUITY_REASON_SEEK_ADJUSTMENT` (the
+latter reports the sync-point-snapped final position, so a seek can produce two
+events); iOS emits from the `seek(to:completionHandler:)` completion when
+`finished` is `true` (a seek superseded by a newer one is skipped). The
+periodic tick stays silent while paused on Android — this is a one-off, not a
+heartbeat, so it must not be read as playback progress (the stall watchdog
+below only judges `playing`/`buffering` states, so it is unaffected).
+`MediaPlayer.seekTo` additionally applies the requested position optimistically
+for non-live items (clamped to a known duration, and skipped if native already
+reported a position during the call) so an older cached native build still
+updates; live items rely on native alone because their position is
+window-relative and native may clamp it.
 
 **When this event stops arriving.** Android keeps emitting it while
 `playWhenReady && STATE_BUFFERING`, so it continues through a rebuffer. iOS

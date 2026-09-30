@@ -18,7 +18,7 @@ of a single callback bus.
   (`ChangeNotifier` facade) over a lower-level `MediaPlayer`.
 - **Remaining gaps vs better_player:** playlist persistence and thumbnail/preview generation are
   not built in (both are easy to do in app code); iOS DASH is not supported (Android only);
-  native Kotlin/Swift code has no automated tests yet.
+  native Kotlin/Swift code has no automated unit tests yet (only a manual on-device suite, `example/integration_test/`).
 
 ## Package overview
 

@@ -167,63 +167,25 @@ class MediaPlayerManager {
     private let methodChannel: FlutterMethodChannel
     private let crashHandler: CrashHandler
 
-    // Activity tracking for memory leak prevention
-    private var lastActivity: [String: Date] = [:]
-    private var cleanupTimer: Timer?
-
-    // Cleanup configuration
-    private static let cleanupInterval: TimeInterval = 5 * 60 // 5 minutes
-    private static let staleThreshold: TimeInterval = 15 * 60 // 15 minutes
+    // Issue #133: there is deliberately NO time-based "stale instance" reaper
+    // here. It used to dispose any player idle for 15 minutes that was not
+    // playing -- which includes a paused player still on screen -- and told
+    // Dart nothing, so the next play() threw playerNotFound with no state or
+    // error event. Dart owns the lifecycle: an instance lives from
+    // "initialize" until Dart sends "dispose" (MediaPlayer.dispose /
+    // MediaController.dispose) or the plugin detaches (shutdown()).
 
     init(methodChannel: FlutterMethodChannel) {
         self.methodChannel = methodChannel
         self.crashHandler = CrashHandler(methodChannel: methodChannel)
-        startCleanupTimer()
-    }
-
-    // MARK: - Activity Tracking
-
-    private func markActivity(playerId: String) {
-        lastActivity[playerId] = Date()
-    }
-
-    private func startCleanupTimer() {
-        cleanupTimer = Timer.scheduledTimer(
-            withTimeInterval: MediaPlayerManager.cleanupInterval,
-            repeats: true
-        ) { [weak self] _ in
-            self?.cleanupStaleInstances()
-        }
-    }
-
-    private func cleanupStaleInstances() {
-        let now = Date()
-        var stalePlayers: [String] = []
-
-        for (playerId, lastUsed) in lastActivity {
-            if now.timeIntervalSince(lastUsed) > MediaPlayerManager.staleThreshold {
-                if let instance = players[playerId], !instance.isPlaying() {
-                    stalePlayers.append(playerId)
-                }
-            }
-        }
-
-        for playerId in stalePlayers {
-            zlog("MediaPlayerManager: Auto-cleaning stale instance: \(playerId)")
-            players[playerId]?.dispose()
-            players.removeValue(forKey: playerId)
-            lastActivity.removeValue(forKey: playerId)
-        }
     }
 
     func initializePlayer(playerId: String, config: [String: Any]?) throws {
-        markActivity(playerId: playerId)
         let playerInstance = MediaPlayerInstance(playerId: playerId, methodChannel: methodChannel, config: config)
         players[playerId] = playerInstance
     }
 
     func loadMediaItem(playerId: String, mediaItem: [String: Any], config: [String: Any]? = nil) throws {
-        markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
             operation: "loadMediaItem",
             playerId: playerId,
@@ -242,7 +204,6 @@ class MediaPlayerManager {
         startIndex: Int,
         config: [String: Any]? = nil
     ) throws {
-        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -250,7 +211,6 @@ class MediaPlayerManager {
     }
 
     func play(playerId: String) throws {
-        markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
             operation: "play",
             playerId: playerId
@@ -263,7 +223,6 @@ class MediaPlayerManager {
     }
 
     func pause(playerId: String) throws {
-        markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
             operation: "pause",
             playerId: playerId
@@ -276,7 +235,6 @@ class MediaPlayerManager {
     }
 
     func stop(playerId: String) throws {
-        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -284,7 +242,6 @@ class MediaPlayerManager {
     }
 
     func seekTo(playerId: String, position: Int64) throws {
-        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -409,7 +366,6 @@ class MediaPlayerManager {
     }
 
     func getBufferHealth(playerId: String) -> [String: Any] {
-        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             return [
                 "bufferedDurationMs": 0,
@@ -427,18 +383,14 @@ class MediaPlayerManager {
         }
         playerInstance.dispose()
         players.removeValue(forKey: playerId)
-        lastActivity.removeValue(forKey: playerId)
     }
 
     func dispose() {
         players.values.forEach { $0.dispose() }
         players.removeAll()
-        lastActivity.removeAll()
     }
 
     func shutdown() {
-        cleanupTimer?.invalidate()
-        cleanupTimer = nil
         dispose()
     }
 
@@ -586,6 +538,11 @@ class MediaPlayerInstance: NSObject {
     /// attached and `.readyToPlay`, so neither is visible from `AVPlayer`
     /// state alone and has to be tracked explicitly.
     private var currentItemIsSpent = false
+    /// Issue #132: true from `AVPlayerItemDidPlayToEndTime` until the next
+    /// load/play/seek/stop. Unlike `currentItemIsSpent` it is NOT set by
+    /// `stop()`. While set, the `.paused` transition AVPlayer makes when the
+    /// rate drops to 0 at the end is not reported, so "completed" persists.
+    private var currentItemPlayedToEnd = false
     private var previousAccessLogEventCount = 0
     // DRM handler — non-nil only when the current media item carries a drmConfig.
     private var drmHandler: DrmHandler?
@@ -612,6 +569,59 @@ class MediaPlayerInstance: NSObject {
         startBandwidthMonitoring()
     }
 
+    /// Builds and emits one `onPositionChanged` for `time` (the AVPlayerItem's
+    /// own absolute timeline). Shared by the periodic time observer and by
+    /// `seekTo` (issue #134): `addPeriodicTimeObserver` is documented to fire
+    /// on a time jump too, but nothing guarantees it while paused, and the
+    /// Android side deliberately mirrors this with an explicit one-off emit
+    /// from `onPositionDiscontinuity`. An explicit emit from the seek
+    /// completion makes the paused-seek behaviour symmetric and not dependent
+    /// on observer scheduling.
+    private func emitPositionSnapshot(at time: CMTime) {
+        // Wave E (DVR window duration): re-check the live DVR window's
+        // length on every tick -- AVFoundation has no KVO notification
+        // for `seekableTimeRanges` changing, so polling here (already
+        // running every 0.5s for position) is how a growing/sliding
+        // window's duration stays current. See checkLiveDvrWindowDuration.
+        self.checkLiveDvrWindowDuration()
+
+        // Issue #88: computed from the ABSOLUTE `time` below, before any
+        // window-relative translation -- the live edge and `time` are both
+        // expressed on the AVPlayerItem's own timeline, so subtracting a
+        // window-relative position from an absolute edge would be
+        // meaningless. See currentLiveEdgeOffsetMs(at:).
+        let liveEdgeOffsetMs = self.currentLiveEdgeOffsetMs(at: time)
+
+        if let window = self.currentLiveDvrWindow {
+            // `time` is on the AVPlayerItem's own absolute timeline, the
+            // same one `seekableTimeRanges` is expressed on -- NOT reset
+            // to 0 at the window start, unlike ExoPlayer's
+            // window-relative getCurrentPosition() on Android (see
+            // MediaPlayerManager.kt's notifyDurationChanged doc). Translate
+            // to window-relative here so `PlaybackState.position` and
+            // `PlaybackState.duration` share the same zero point on both
+            // platforms -- seekTo(position:) below applies the inverse
+            // translation, so this pairing is self-consistent even though
+            // it changes the "position" unit specifically for a live+DVR
+            // item.
+            let relativeSeconds = max(0, CMTimeGetSeconds(time) - CMTimeGetSeconds(window.start))
+            self.notifyPositionChanged(
+                position: Int64(relativeSeconds * 1000),
+                // This branch IS the window-relative translation, so it is
+                // exactly the condition under which position stops being
+                // measured from a fixed zero point.
+                positionBasis: "liveWindow",
+                liveEdgeOffsetMs: liveEdgeOffsetMs
+            )
+        } else {
+            self.notifyPositionChanged(
+                position: Int64(time.seconds * 1000),
+                positionBasis: "absolute",
+                liveEdgeOffsetMs: liveEdgeOffsetMs
+            )
+        }
+    }
+
     private func setupObservers() {
         guard let player = avPlayer else { return }
 
@@ -622,48 +632,7 @@ class MediaPlayerInstance: NSObject {
         ) { [weak self] time in
             guard let self = self else { return }
 
-            // Wave E (DVR window duration): re-check the live DVR window's
-            // length on every tick -- AVFoundation has no KVO notification
-            // for `seekableTimeRanges` changing, so polling here (already
-            // running every 0.5s for position) is how a growing/sliding
-            // window's duration stays current. See checkLiveDvrWindowDuration.
-            self.checkLiveDvrWindowDuration()
-
-            // Issue #88: computed from the ABSOLUTE `time` below, before any
-            // window-relative translation -- the live edge and `time` are both
-            // expressed on the AVPlayerItem's own timeline, so subtracting a
-            // window-relative position from an absolute edge would be
-            // meaningless. See currentLiveEdgeOffsetMs(at:).
-            let liveEdgeOffsetMs = self.currentLiveEdgeOffsetMs(at: time)
-
-            if let window = self.currentLiveDvrWindow {
-                // `time` is on the AVPlayerItem's own absolute timeline, the
-                // same one `seekableTimeRanges` is expressed on -- NOT reset
-                // to 0 at the window start, unlike ExoPlayer's
-                // window-relative getCurrentPosition() on Android (see
-                // MediaPlayerManager.kt's notifyDurationChanged doc). Translate
-                // to window-relative here so `PlaybackState.position` and
-                // `PlaybackState.duration` share the same zero point on both
-                // platforms -- seekTo(position:) below applies the inverse
-                // translation, so this pairing is self-consistent even though
-                // it changes the "position" unit specifically for a live+DVR
-                // item.
-                let relativeSeconds = max(0, CMTimeGetSeconds(time) - CMTimeGetSeconds(window.start))
-                self.notifyPositionChanged(
-                    position: Int64(relativeSeconds * 1000),
-                    // This branch IS the window-relative translation, so it is
-                    // exactly the condition under which position stops being
-                    // measured from a fixed zero point.
-                    positionBasis: "liveWindow",
-                    liveEdgeOffsetMs: liveEdgeOffsetMs
-                )
-            } else {
-                self.notifyPositionChanged(
-                    position: Int64(time.seconds * 1000),
-                    positionBasis: "absolute",
-                    liveEdgeOffsetMs: liveEdgeOffsetMs
-                )
-            }
+            self.emitPositionSnapshot(at: time)
         }
 
         // Status observer
@@ -955,6 +924,7 @@ class MediaPlayerInstance: NSObject {
         // Fresh item: nothing has been played to the end or stopped yet
         // (issue #79 -- see currentItemIsSpent).
         currentItemIsSpent = false
+        currentItemPlayedToEnd = false
         // Issue #126: a new item invalidates any pending pause attribution
         // from the previous one.
         pauseWasHostInitiated = false
@@ -1317,6 +1287,7 @@ class MediaPlayerInstance: NSObject {
         // Playback is being (re)started -- the item is in progress again
         // (issue #79 -- see currentItemIsSpent).
         currentItemIsSpent = false
+        currentItemPlayedToEnd = false
         // Issue #126: whatever caused the previous pause is now history --
         // never let a stale host-initiated flag label a future, unrelated
         // pause as "user".
@@ -1362,6 +1333,7 @@ class MediaPlayerInstance: NSObject {
         // playback for setPlaylist's issue-#79 guard to protect, so a
         // subsequent setPlaylist naming this same item must reload it.
         currentItemIsSpent = true
+        currentItemPlayedToEnd = false
         audioSessionRequested = false
         AudioSessionCoordinator.shared.release(for: self)
     }
@@ -1371,6 +1343,7 @@ class MediaPlayerInstance: NSObject {
         // finished/stopped item is in progress again (issue #79 -- see
         // currentItemIsSpent).
         currentItemIsSpent = false
+        currentItemPlayedToEnd = false
 
         // Wave E (DVR window duration): for a live item with DVR enabled,
         // `position` (from Dart) is window-relative -- see the periodic
@@ -1389,12 +1362,27 @@ class MediaPlayerInstance: NSObject {
                 CMTimeGetSeconds(window.end)
             )
             let time = CMTime(seconds: clampedSeconds, preferredTimescale: 1000)
-            avPlayer?.seek(to: time)
+            performSeek(to: time)
             return
         }
 
         let time = CMTime(value: position, timescale: 1000) // position in milliseconds
-        avPlayer?.seek(to: time)
+        performSeek(to: time)
+    }
+
+    /// Issue #134: seek, then report the resulting position exactly once
+    /// regardless of play state (mirrors Android's `onPositionDiscontinuity`
+    /// emit). A seek superseded by a newer one (`finished == false`) is
+    /// skipped -- the newer seek's own completion reports the final position.
+    private func performSeek(to time: CMTime) {
+        guard let player = avPlayer else { return }
+        player.seek(to: time) { [weak self] finished in
+            guard finished else { return }
+            DispatchQueue.main.async {
+                guard let self = self, let player = self.avPlayer else { return }
+                self.emitPositionSnapshot(at: player.currentTime())
+            }
+        }
     }
 
     func setVolume(volume: Float) {
@@ -1787,18 +1775,15 @@ class MediaPlayerInstance: NSObject {
         case .unknown:
             notifyStateChanged(state: "idle", isBuffering: false)
         case .readyToPlay:
-            zlog("MediaPlayerInstance: Player status changed to readyToPlay")
-            notifyStateChanged(state: "ready", isBuffering: false)
-            notifyDurationChanged()
-            checkLiveDvrWindowDuration()
-
-            // Re-bind only the topmost live view when ready (others stay
-            // unbound to avoid multiple layers on one AVPlayer → grey).
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                zlog("MediaPlayerInstance: Re-activating topmost live view on ready state")
-                self.activateTopmostView()
-            }
+            // Issue #138: AVPlayer.status is PLAYER-level -- it turns
+            // .readyToPlay once the AVPlayer object is usable, independent of
+            // whether the current item will ever load, so it fires for a 404
+            // or unresolvable host too. Emitting "ready" (or duration / DVR
+            // window) from here reported a failing load as ready before its
+            // onError. All of that now comes from the item-level
+            // handlePlayerItemStatusChange (AVPlayerItem.status), the only
+            // source that means the media is actually playable.
+            zlog("MediaPlayerInstance: Player status changed to readyToPlay (no state emitted; item status drives ready)")
         case .failed:
             let nsError = avPlayer?.error as NSError?
             zlog("MediaPlayerInstance: Player failed with error: \(nsError?.localizedDescription ?? "Unknown")")
@@ -1855,6 +1840,16 @@ class MediaPlayerInstance: NSObject {
             notifyStateChanged(state: "playing", isBuffering: false)
 
         case .paused:
+            // Issue #132: AVPlayer drops the rate to 0 when the item plays to
+            // its end, which lands here as .paused. If it arrives after
+            // playerDidFinishPlaying it must not overwrite "completed"
+            // (arriving before it is harmless: "completed" wins last). Cleared
+            // by load/play/seek/stop. Any stale pause attribution is dropped.
+            if currentItemPlayedToEnd {
+                _ = consumePauseReason()
+                zlog("MediaPlayerInstance: Suppressing post-completion paused (item played to end)")
+                return
+            }
             notifyStateChanged(
                 state: "paused",
                 isBuffering: false,
@@ -2020,6 +2015,7 @@ class MediaPlayerInstance: NSObject {
         // a finished item is not "in progress", so re-issuing a playlist
         // that names it still restarts it.
         currentItemIsSpent = true
+        currentItemPlayedToEnd = true
         notifyStateChanged(state: "completed", isBuffering: false)
     }
 
@@ -2068,6 +2064,13 @@ class MediaPlayerInstance: NSObject {
             }
             notifyDurationChanged()
             checkLiveDvrWindowDuration()
+
+            // Re-bind only the topmost live view once the item is ready
+            // (others stay unbound to avoid multiple layers on one AVPlayer
+            // -> grey). Moved here from the player-level status handler (#138).
+            DispatchQueue.main.async { [weak self] in
+                self?.activateTopmostView()
+            }
 
             // Extract and notify all tracks immediately
             extractAndNotifyQualityTracks()
@@ -2895,8 +2898,19 @@ class MediaPlayerInstance: NSObject {
     }
 }
 
-enum MediaPlayerError: Error {
+enum MediaPlayerError: Error, LocalizedError {
     case playerNotFound
     case invalidConfiguration
     case loadFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .playerNotFound:
+            return "Player not found (it was never initialized or has been disposed)"
+        case .invalidConfiguration:
+            return "Invalid configuration"
+        case .loadFailed(let message):
+            return message
+        }
+    }
 }

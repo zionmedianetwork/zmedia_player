@@ -7,6 +7,101 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **On-device integration suite** (`example/integration_test/`) for the #132-#137 native fixes:
+  natural end stays `completed` (A), paused-seek position and state (B, and C on a live DVR
+  stream), unknown-player commands throw (D), error overlay shows no raw native text (F), and an
+  opt-in 21-minute paused idle (E, `--dart-define=ZMP_LONG_IDLE=true`). It asserts on raw native
+  events (`raw_channel_spy.dart`) so Dart-side latches cannot mask a native regression. Manual,
+  needs a physical device and network, not run in CI; adds `integration_test` to the example's
+  dev dependencies. See `example/README.md`.
+
+### Fixed
+- **iOS: a failing load no longer reports `PlayerState.ready` before its `onError`** (issue #138).
+  `handleStatusChange(status: AVPlayer.Status)` emitted `ready` on the player-level
+  `AVPlayer.status == .readyToPlay`, which only says the `AVPlayer` object is usable; for a 404 or
+  unresolvable host it fired anyway, so the raw timeline was `buffering, paused, buffering, ready,
+  onError`. `ready` now comes only from the item-level `AVPlayerItem.status == .readyToPlay`
+  (which also owns the duration report, the DVR-window check and the topmost-view re-bind that
+  the player-level handler used to trigger), so a failing load goes `buffering` -> `error`,
+  matching Android. `ready`/`playing` are now a reliable success signal on both platforms.
+  Android was not affected (it emits `ready` only from `STATE_READY`). Guarded by
+  `test/native_contract/ready_only_from_item_status_test.dart` and on-device check F.
+- **Android: a `seekTo()` (or any rebuffer) while paused now returns to `PlayerState.paused`,
+  not `ready`** (issue #137). `onPlaybackStateChanged` mapped `STATE_READY` with
+  `playWhenReady == false` to `ready`, so a paused seek went `paused` -> `buffering` -> `ready`
+  and hosts rendering a play/pause control from `PlayerState.paused` showed the wrong one. iOS
+  never had the problem (no state event on a paused seek). `ready` now means only "loaded, not
+  yet started": Android tracks a per-item `hasStartedPlayback` flag (set when `isPlaying` first
+  becomes true or the item ends; reset by load and `stop()`), and a `STATE_READY` after that
+  reports `paused` with no `pauseReason`, so `pauseReasonStream` does not fire again. `MediaPlayer`
+  carries the same rule as defense in depth for an older cached native build; it counts only
+  native `playing`/`completed` as "started" (iOS emits a raw `paused` during every load, which must
+  not turn that load's `ready` into `paused`). Guarded by
+  `test/native_contract/ready_after_start_paused_test.dart` and
+  `test/core/media_player_paused_seek_state_test.dart`.
+- **`PlayerState.completed` now persists after a natural end of playback** (issue #132). Both
+  platforms emitted a quiescent event right after `completed` that overwrote it with `paused`:
+  Android's `onIsPlayingChanged(false)` (about 8ms after `STATE_ENDED`) and iOS's
+  `timeControlStatus` -> `.paused`. As a result `PlaybackState.state == PlayerState.completed`
+  was never observable, apps could not show a Replay control, and `MediaPlayer.play()`'s
+  restart-if-completed guard could not fire. Both natives now suppress the plain pause while the
+  item has ended (Android: `playbackState == STATE_ENDED`; iOS: new `currentItemPlayedToEnd`
+  flag, reset on load/play/seek/stop), and `MediaPlayer` latches `completed` against a trailing
+  `paused`/`idle` until a host command (`load`/`play`/`stop`/`seekTo`/`setPlaylist`/
+  `skipToIndex`) or another native state, so new Dart against an older cached native build
+  behaves too. Playlist auto-advance and `looping` are unaffected (they issue host commands).
+  Needs on-device confirmation on both platforms.
+- **`seekTo()` while paused now updates `PlaybackState.position`** (issue #134). Both natives
+  moved the player but emitted no position event, because Android's periodic tick is
+  deliberately silent unless playing (or stalled while intending to play) and iOS's
+  periodic observer is not guaranteed to fire on a paused seek — so a scrubber read `0:00`
+  after `load()` + `seekTo()` until playback resumed. Android now emits exactly one
+  `onPositionChanged` from `onPositionDiscontinuity` (`DISCONTINUITY_REASON_SEEK` and
+  `SEEK_ADJUSTMENT`), iOS from the `seek(to:completionHandler:)` completion (via the new
+  shared `emitPositionSnapshot`, which the periodic observer also uses), both with the same
+  payload as the tick (`positionBasis`/`liveEdgeOffset` included). The periodic tick stays
+  silent while paused. Dart: `MediaPlayer.seekTo` applies the requested position
+  optimistically for non-live items (covers an older cached native build; skipped when
+  native already reported one, and for live items whose position is window-relative), and
+  `MediaController.seekTo` reopens its position throttle so the report is not dropped.
+  Guarded by `test/native_contract/paused_seek_position_test.dart` and
+  `test/core/media_player_paused_seek_test.dart`. Needs on-device verification (no native
+  tests exist).
+- **A paused player that the app still held was disposed after ~15-19 minutes, after which Play
+  did nothing** (issue #133). Android, iOS and Dart each ran a stale-instance reaper (sweep every
+  5 min, dispose any non-playing instance idle >15 min) that never checked for an attached
+  platform view/session/notification and told Dart nothing; the next command was a silent no-op
+  on Android and a `playerNotFound` `FlutterError` with no state/error event on iOS. The reapers
+  are removed on all three layers: Dart owns the lifecycle, and an instance lives until
+  `dispose()` is called (or the plugin detaches from the engine). No new event was needed since
+  nothing is reaped natively any more. **Apps must dispose players they create** - a leaked
+  player is no longer cleaned up after 15 minutes.
+- Android commands (`load`, `setPlaylist`, `play`, `pause`, `stop`, `seekTo`, `setVolume`,
+  `setSpeed`, `setMuted`, `setBoxFit`, `set*Track`, `enableAutoQuality`, `skipToIndex`,
+  `updateConfig`) against a player native does not hold now return their `*_ERROR`
+  `FlutterError` ("Player not found") instead of silently doing nothing, matching iOS. iOS's
+  `MediaPlayerError` is now a `LocalizedError` so that message is readable.
+
+### Deprecated
+- `MediaPlayer.attach()` / `MediaPlayer.detach()` are now no-ops (their only purpose was to shield
+  an instance from the removed Dart sweep).
+### Changed
+- **`ErrorOverlay` no longer shows raw platform/exception text, and `showErrorCode` now defaults
+  to `false`** (issue #135). Previously an unmatched `String` error was rendered verbatim (and
+  `MediaPlayerException.message` / `toString()` for unrecognized exceptions), so viewers saw
+  strings like "The operation couldn't be completed. (CoreMediaErrorDomain error -12643.)".
+  `MediaPlayerWidget` also passed `PlaybackState.errorMessage` (a `String`), so the typed
+  category mapping never ran, and forced `showErrorCode: true`, exposing a developer "Error
+  Code:" chip to viewers. Now: unmatched errors render the new `ErrorOverlay.genericMessage`
+  and the raw text goes to `debugPrint` (debug builds) only; `MediaPlayerWidget` passes
+  `MediaController.error` (the typed exception) so network/DRM/playback/HTTP wording applies;
+  and an HTTP 403 is worded as retryable (`ErrorOverlay.retryableAccessMessage`) since on
+  signed CDN URLs it is nearly always an expired credential. **Potentially breaking:** hosts
+  that relied on the "Error Code:" chip appearing by default (in `ErrorOverlay` or through
+  `MediaPlayerWidget`) must pass `showErrorCode: true` to their own `ErrorOverlay`. New public
+  constants: `ErrorOverlay.genericMessage`, `ErrorOverlay.retryableAccessMessage`.
+
 ## [0.5.1] - 2026-09-10
 
 ### BREAKING

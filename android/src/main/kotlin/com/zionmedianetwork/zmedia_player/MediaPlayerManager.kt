@@ -52,53 +52,29 @@ class MediaPlayerManager(
         return created
     }
 
-    // Activity tracking for memory leak prevention
-    private val lastActivity = ConcurrentHashMap<String, Long>()
-    private val cleanupRunnable = object : Runnable {
-        override fun run() {
-            cleanupStaleInstances()
-            mainHandler.postDelayed(this, CLEANUP_INTERVAL_MS)
-        }
-    }
+    // Issue #133: there is deliberately NO time-based "stale instance" reaper
+    // here. It used to dispose any player idle for 15 minutes that was not
+    // playing -- which includes a paused player still on screen -- and told
+    // Dart nothing, so the next play() was a silent no-op. Dart owns the
+    // lifecycle: an instance lives from "initialize" until Dart sends "dispose"
+    // (MediaPlayer.dispose / MediaController.dispose) or the engine detaches
+    // (ZMediaPlayerPlugin.onDetachedFromEngine -> shutdown()).
 
-    companion object {
-        private const val CLEANUP_INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
-        private const val STALE_THRESHOLD_MS = 15 * 60 * 1000L // 15 minutes
-    }
-
-    init {
-        mainHandler.postDelayed(cleanupRunnable, CLEANUP_INTERVAL_MS)
-    }
-
-    private fun markActivity(playerId: String) {
-        lastActivity[playerId] = System.currentTimeMillis()
-    }
-
-    private fun cleanupStaleInstances() {
-        val now = System.currentTimeMillis()
-        val stalePlayers = mutableListOf<String>()
-
-        lastActivity.forEach { (playerId, lastUsed) ->
-            if (now - lastUsed > STALE_THRESHOLD_MS) {
-                players[playerId]?.let { instance ->
-                    if (!instance.isPlaying()) {
-                        stalePlayers.add(playerId)
-                    }
-                }
-            }
-        }
-
-        stalePlayers.forEach { playerId ->
-            android.util.Log.d("MediaPlayerManager", "Auto-cleaning stale instance: $playerId")
-            players[playerId]?.dispose()
-            players.remove(playerId)
-            lastActivity.remove(playerId)
-        }
-    }
+    /**
+     * Issue #133: fails loudly, on the calling (method-channel) thread, when a
+     * command targets an id native does not hold. Every handler in
+     * ZMediaPlayerPlugin catches the exception and returns it as its own
+     * `*_ERROR` FlutterError, which Dart surfaces as a typed exception --
+     * symmetric with iOS's `MediaPlayerError.playerNotFound`. Replaces the
+     * silent `players[playerId]?.x()` no-op.
+     */
+    private fun requirePlayer(playerId: String): MediaPlayerInstance =
+        players[playerId] ?: throw IllegalStateException(
+            "Player not found: $playerId (it was never initialized or has been disposed)"
+        )
 
     fun initializePlayer(playerId: String, config: Map<String, Any>?) {
         android.util.Log.d("MediaPlayerManager", "initializePlayer called for playerId: $playerId")
-        markActivity(playerId)
 
         // Initialize synchronously on main thread to avoid timing issues with platform view creation
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -119,7 +95,7 @@ class MediaPlayerManager(
     }
 
     fun loadMediaItem(playerId: String, mediaItem: Map<String, Any>, config: Map<String, Any>? = null) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             crashHandler.wrapOperation("loadMediaItem", playerId, mapOf("url" to (mediaItem["url"] ?: "unknown"))) {
                 players[playerId]?.loadMediaItem(mediaItem, config)
@@ -133,14 +109,14 @@ class MediaPlayerManager(
         startIndex: Int,
         config: Map<String, Any>? = null
     ) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setPlaylist(playlist, startIndex, config)
         }
     }
 
     fun play(playerId: String) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             crashHandler.wrapOperation("play", playerId) {
                 players[playerId]?.play()
@@ -149,7 +125,7 @@ class MediaPlayerManager(
     }
 
     fun pause(playerId: String) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             crashHandler.wrapOperation("pause", playerId) {
                 players[playerId]?.pause()
@@ -158,74 +134,84 @@ class MediaPlayerManager(
     }
 
     fun stop(playerId: String) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.stop()
         }
     }
 
     fun seekTo(playerId: String, position: Int) {
-        markActivity(playerId)
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.seekTo(position)
         }
     }
 
     fun setVolume(playerId: String, volume: Float) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setVolume(volume)
         }
     }
 
     fun setPlaybackSpeed(playerId: String, speed: Float) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setPlaybackSpeed(speed)
         }
     }
 
     fun setMuted(playerId: String, muted: Boolean) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setMuted(muted)
         }
     }
 
     fun setBoxFit(playerId: String, boxFit: String) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setBoxFit(boxFit)
         }
     }
 
     fun setSubtitleTrack(playerId: String, subtitleTrack: Map<String, Any>?) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setSubtitleTrack(subtitleTrack)
         }
     }
 
     fun setQualityTrack(playerId: String, qualityTrack: Map<String, Any>) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setQualityTrack(qualityTrack)
         }
     }
 
     fun setAudioTrack(playerId: String, audioTrack: Map<String, Any>) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.setAudioTrack(audioTrack)
         }
     }
 
     fun enableAutoQuality(playerId: String) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.enableAutoQuality()
         }
     }
 
     fun skipToIndex(playerId: String, index: Int, config: Map<String, Any>? = null) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.skipToIndex(index, config)
         }
     }
 
     fun updateConfig(playerId: String, config: Map<String, Any>) {
+        requirePlayer(playerId)
         mainHandler.post {
             players[playerId]?.updateConfig(config)
         }
@@ -250,7 +236,6 @@ class MediaPlayerManager(
     }
 
     fun getBufferHealth(playerId: String): Map<String, Any> {
-        markActivity(playerId)
         return players[playerId]?.getBufferHealth() ?: mapOf(
             "bufferedDurationMs" to 0,
             "currentPositionMs" to 0,
@@ -263,7 +248,6 @@ class MediaPlayerManager(
         mainHandler.post {
             players[playerId]?.dispose()
             players.remove(playerId)
-            lastActivity.remove(playerId)
         }
     }
 
@@ -271,12 +255,10 @@ class MediaPlayerManager(
         mainHandler.post {
             players.values.forEach { it.dispose() }
             players.clear()
-            lastActivity.clear()
         }
     }
 
     fun shutdown() {
-        mainHandler.removeCallbacks(cleanupRunnable)
         dispose()
         // C-03b: release this manager's reference (if any was ever acquired)
         // on the process-wide shared adaptive-stream cache. Pairs 1:1 with
@@ -368,6 +350,26 @@ class MediaPlayerInstance(
     private var lastPlayWhenReadyChangeReason: Int =
         Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST
 
+    // Issue #137: whether the item currently loaded has already started
+    // playback (isPlaying became true, or it reached STATE_ENDED) since the
+    // last [loadMediaItem]/[stop]. "ready" means loaded-but-not-yet-started;
+    // once this is true, STATE_READY with playWhenReady == false is a
+    // paused item coming back from a seek/rebuffer, and is reported "paused".
+    private var hasStartedPlayback: Boolean = false
+
+    /**
+     * Wire name for `STATE_READY` (issue #137): "playing" when
+     * playWhenReady, otherwise "paused" if the item has already started
+     * playback (a paused seek/rebuffer must return to the state the viewer
+     * left it in, matching iOS) and "ready" only for the first ready after
+     * load, before anything has played.
+     */
+    private fun readyStateName(playWhenReady: Boolean): String = when {
+        playWhenReady -> "playing"
+        hasStartedPlayback -> "paused"
+        else -> "ready"
+    }
+
     private val playerListener = object : Player.Listener {
         /**
          * Issue #125: whether ExoPlayer is currently sitting in a reported
@@ -418,11 +420,18 @@ class MediaPlayerInstance(
             val state = when (playbackState) {
                 Player.STATE_IDLE -> "idle"
                 Player.STATE_BUFFERING -> "buffering"
-                Player.STATE_READY -> if (exoPlayer?.playWhenReady == true) "playing" else "ready"
-                Player.STATE_ENDED -> "completed"
+                Player.STATE_READY -> readyStateName(exoPlayer?.playWhenReady == true)
+                Player.STATE_ENDED -> {
+                    hasStartedPlayback = true
+                    "completed"
+                }
                 else -> "idle"
             }
 
+            // Issue #137: a "paused" derived from STATE_READY is a re-report
+            // of an existing pause, never a new one, so it carries no
+            // pauseReason (Dart's fromWireValue(null) -> null emits nothing on
+            // pauseReasonStream).
             notifyStateChanged(state, playbackState == Player.STATE_BUFFERING)
 
             // Notify duration when player is ready
@@ -450,6 +459,21 @@ class MediaPlayerInstance(
                 return
             }
 
+            // Issue #132: reaching STATE_ENDED drives isPlaying to false a few
+            // milliseconds after onPlaybackStateChanged reported "completed".
+            // Reporting that as "paused" overwrote the terminal state, so
+            // PlayerState.completed never persisted. While the player sits in
+            // STATE_ENDED a plain pause is not a fact worth reporting; the
+            // state stays "completed" until seek/play/load moves it on.
+            if (!isPlaying && exoPlayer?.playbackState == Player.STATE_ENDED) {
+                android.util.Log.d(
+                    "MediaPlayerInstance",
+                    "Suppressing post-completion isPlaying=false (STATE_ENDED already reported)"
+                )
+                return
+            }
+
+            if (isPlaying) hasStartedPlayback = true
             val state = if (isPlaying) "playing" else "paused"
 
             // Issue #126: attribute the pause using ExoPlayer's own
@@ -514,6 +538,34 @@ class MediaPlayerInstance(
         override fun onMediaMetadataChanged(mediaMetadata: MediaMetadata) {
             android.util.Log.d("MediaPlayerInstance", "Media metadata changed")
             notifyDurationChanged()
+        }
+
+        /**
+         * Issue #134: a seek issued while paused (or otherwise not playing)
+         * moved the player but produced no position event at all, because the
+         * periodic tick in [startPositionUpdates] is deliberately silent
+         * unless `isPlaying` or a stalled-but-intending-to-play buffer. The
+         * Dart-side `PlaybackState.position` therefore stayed at its old
+         * value until playback resumed.
+         *
+         * Emit exactly one `onPositionChanged` (same payload builder as the
+         * tick, so `liveEdgeOffset`/`positionBasis` ride along) per seek,
+         * regardless of play state. `DISCONTINUITY_REASON_SEEK_ADJUSTMENT` is
+         * the follow-up when the renderer snaps to a sync point, so the final
+         * position is the one reported. The periodic tick stays silent while
+         * paused; this is a one-off, so it cannot look like a live "stall
+         * watchdog" heartbeat.
+         */
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK ||
+                reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
+            ) {
+                exoPlayer?.let { notifyPositionChanged(it.currentPosition) }
+            }
         }
 
         override fun onTimelineChanged(timeline: Timeline, reason: Int) {
@@ -623,6 +675,8 @@ class MediaPlayerInstance(
         // diagnostic (see currentLiveEdgeOffsetMs) — this item may or may not
         // share the previous one's defect.
         liveOffsetAnchorWarningLogged = false
+        // Issue #137: a new item has not started playback yet.
+        hasStartedPlayback = false
 
         android.util.Log.d("MediaPlayerInstance", "Loading media: $url")
 
@@ -900,7 +954,7 @@ class MediaPlayerInstance(
         val state = when (player.playbackState) {
             Player.STATE_IDLE -> "idle"
             Player.STATE_BUFFERING -> "buffering"
-            Player.STATE_READY -> if (player.playWhenReady) "playing" else "ready"
+            Player.STATE_READY -> readyStateName(player.playWhenReady)
             Player.STATE_ENDED -> "completed"
             else -> "idle"
         }
@@ -998,6 +1052,9 @@ class MediaPlayerInstance(
     }
 
     fun stop() {
+        // Issue #137: stop() unloads the item (STATE_IDLE, no media items);
+        // the next thing to be loaded has not started.
+        hasStartedPlayback = false
         exoPlayer?.apply {
             stop()
             clearMediaItems()

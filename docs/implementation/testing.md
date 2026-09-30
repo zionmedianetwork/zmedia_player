@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1175 tests passing** in the package's Dart layer as of this> writing — the count grows with every change, so run `flutter test` for the live
+> **Current status:** **1214 tests passing** in the package's Dart layer as of this writing — the count grows with every change, so run `flutter test` for the live
 > number rather than trusting this one. Native Kotlin/Swift code still has **no
 > automated tests** — those paths require on-device verification.
 >
@@ -30,6 +30,10 @@ tests close that gap by parsing the native sources as *text*:
 | `test/exceptions/error_category_vocabulary_test.dart` | `onError`'s `category` (`MediaErrorCategory`) |
 | `test/models/network_status_vocabulary_test.dart` | `onNetworkStatusChanged`'s `connectionType` |
 | `test/native_contract/pause_reason_vocabulary_test.dart` | `onStateChanged`'s `pauseReason` (`PlayerPauseReason`) |
+| `test/native_contract/completed_persists_test.dart` | Both natives guard the plain `paused` emission once the item has ended (issue #132) |
+| `test/native_contract/ready_after_start_paused_test.dart` | Android maps `STATE_READY` + `playWhenReady == false` to `paused` once the item has started, `ready` only before (issue #137); Dart backstop in `test/core/media_player_paused_seek_state_test.dart` |
+| `test/native_contract/ready_only_from_item_status_test.dart` | iOS emits `ready` only from the item-level `AVPlayerItem.status` handler, never the player-level `AVPlayer.status` one (issue #138); on-device check F asserts no `ready`/`playing` precedes `onError` |
+| `test/native_contract/paused_seek_position_test.dart` | both natives emit one `onPositionChanged` after a seek while paused (issue #134); Dart behavior in `test/core/media_player_paused_seek_test.dart` |
 
 Each fails in **both** directions: a native literal with no Dart counterpart, *and* a Dart
 member no native code can produce. The second direction is the one that matters most — it is
@@ -127,7 +131,7 @@ present transitively via `flutter_test`; declaring it explicitly is what makes i
 legal under `depend_on_referenced_packages`). It supplies the deterministic virtual clock the
 watchdog test drives its 2 s sampler and ~500 ms native tick with. `fakeAsync` is preferred
 over `testWidgets`/`tester.pump` for this: the widget binding asserts no timers are pending at
-teardown, which `MediaPlayer`'s static 5-minute instance-cleanup timer would trip.
+teardown, which a pending timer would trip (`MediaPlayer` no longer owns a static cleanup timer as of #133).
 
 **Example:**
 ```dart
@@ -163,6 +167,36 @@ testWidgets('DRM demo page shows license status', (tester) async {
 ```
 
 ### 3. Integration Tests
+
+#### On-device native suite (`example/integration_test/`)
+
+The only automated coverage that runs the **real** Kotlin/Swift code; every other test mocks
+the `MethodChannel`. It targets the #132-#137 native fixes and asserts on **raw native events**
+captured by `raw_channel_spy.dart` (wrapping `PlatformDispatcher.onPlatformMessage`, falling
+back to `ui.channelBuffers`; a binding subclass is impossible because `flutter test` creates
+the binding before `main()`), so `MediaPlayer`'s error latch and optimistic updates cannot mask
+a native regression.
+
+- `checks_abcd_test.dart`: A (#132 natural end stays `completed`), B (#134/#137 paused seek
+  position and state, platform-aware), C (#134 live DVR paused seek; skips if the live demo is
+  unreachable), D (#133 unknown-player commands throw).
+- `check_f_test.dart`: F (#135 error overlay shows no raw native text; #138 no raw `ready`/`playing` `onStateChanged` before the raw `onError`, both platforms; 404 and DNS failure). B also asserts a raw `ready` after a successful load (#138 regression guard).
+- `check_e_long_idle_test.dart`: E (#133 paused 21-minute idle survives the reaper). Opt-in,
+  skipped unless `--dart-define=ZMP_LONG_IDLE=true`.
+
+```bash
+cd example
+flutter test integration_test -d <device-id>          # A-D, F; E skipped
+flutter test integration_test/check_e_long_idle_test.dart -d <device-id> \
+  --dart-define=ZMP_LONG_IDLE=true
+```
+
+Needs a physical, unlocked, awake device and network access (public sample URLs). It is
+**not run in CI** and is not part of the Dart test counts; run it manually when touching native
+playback state, seek, lifecycle or error paths. Verified on a Galaxy Note 9P (Android 11) and an
+iPhone 11 Pro Max (iOS 26). See `example/README.md`.
+
+#### Other integration coverage (planned)
 
 Test complete workflows end-to-end.
 
@@ -340,6 +374,10 @@ flutter drive --target=test_driver/fairplay_test.dart
 - AirPlay with DRM
 
 ### Known gaps: native unit tests
+
+(Native *behavior* is now partly covered by the manual, on-device
+[`example/integration_test/`](#3-integration-tests) suite; it is not in CI, and native
+*unit* tests remain absent, as described below.)
 
 Neither native layer currently has runnable unit tests. This is the reason the iOS
 "speed change starts playback" bug (fixed in `[Unreleased]`, see `CHANGELOG.md`) shipped:
@@ -683,4 +721,4 @@ For questions about testing:
 **Test Coverage:** run `flutter test` for the current package count (1175 as of thiswriting) plus `cd example && flutter test` for the example app's own 24; **no automated
 native tests yet**
 **Status:** Active development — native layers need on-device verification
-**Last Updated:** September 5, 2026
+**Last Updated:** September 30, 2026

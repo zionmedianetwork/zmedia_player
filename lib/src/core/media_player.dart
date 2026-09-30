@@ -159,10 +159,6 @@ class MediaPlayer {
   /// Guard that ensures the static method call handler is registered only once.
   static bool _channelHandlerRegistered = false;
 
-  /// Activity tracking for memory leak prevention
-  static final Map<String, DateTime> _lastActivity = {};
-  static Timer? _cleanupTimer;
-
   /// Monotonically increasing counter used to generate collision-free
   /// player ids when no explicit [playerId] is supplied to the factory.
   ///
@@ -170,8 +166,8 @@ class MediaPlayer {
   /// players within the same event-loop tick (e.g. building a `ListView` of
   /// players in one frame) can produce identical timestamps, which would
   /// silently alias two independent players onto the same native instance.
-  /// The counter never resets — including after instances are disposed and
-  /// swept by [_cleanupStaleInstances] — so a recycled counter value can
+  /// The counter never resets — including after instances are disposed —
+  /// so a recycled counter value can
   /// never collide with, or resurrect, a previously-used id.
   static int _autoIdCounter = 0;
 
@@ -279,6 +275,10 @@ class MediaPlayer {
   /// Whether current media is live
   bool _isLive = false;
 
+  /// Count of native `onPositionChanged` events handled; lets [seekTo] tell
+  /// whether native already reported the post-seek position (issue #134).
+  int _positionEventCount = 0;
+
   /// Whether DVR is enabled for the current live media, allowing seeking on
   /// an otherwise non-seekable live stream.
   ///
@@ -369,6 +369,28 @@ class MediaPlayer {
   /// rationale.
   bool _errorLatched = false;
 
+  /// Issue #132: set once native reports `completed`. While set, a trailing
+  /// quiescent `paused`/`idle` event is a direct consequence of reaching the
+  /// end (Android: `onIsPlayingChanged(false)` ~8ms after `STATE_ENDED`; iOS:
+  /// `timeControlStatus` -> `.paused`) and must not overwrite `completed`.
+  /// Cleared by [_clearErrorLatch] (every explicit host command) and by any
+  /// other native state (`playing`, `ready`, `buffering`, `error`).
+  bool _completedLatched = false;
+
+  /// Issue #137: set once native has reported `playing` or `completed` for
+  /// the current item, i.e. the item has started playback. A raw `paused` does
+  /// NOT count: iOS emits one during every load, before anything has played
+  /// (`buffering, paused, buffering, ready`), and counting it would surface
+  /// that load's `ready` as `paused`.
+  /// `ready` means "loaded, not yet started", so a `ready` arriving after
+  /// this is set (Android reported one after a seek/rebuffer while paused,
+  /// with `playWhenReady == false`) is really the item returning to
+  /// `paused`, and is surfaced as such. Defense in depth exactly like the
+  /// error/completed latches: current natives already report `paused`, this
+  /// protects new Dart against an older cached native build. Reset by
+  /// [load], [stop], [skipToIndex] and a [setPlaylist] that reloads.
+  bool _itemStarted = false;
+
   /// Issue #125: watchdog armed by [load] and disarmed by the first
   /// definitive outcome, per [MediaConfig.loadTimeout]. `null` whenever no
   /// load is outstanding, or when the timeout is disabled.
@@ -382,72 +404,29 @@ class MediaPlayer {
   /// Completer for initialization
   Completer<void>? _initializationCompleter;
 
-  /// H-10: explicit reference count of external consumers holding this
-  /// instance across otherwise-idle periods. The periodic stale-instance
-  /// sweep ([_cleanupStaleInstances]) previously inferred "abandoned" purely
-  /// from `!isPlaying` + a 15-minute inactivity timeout, which disposes a
-  /// perfectly live, paused instance the app still holds (e.g. `pause()` a
-  /// player, leave the app idle 15 minutes, `play()` again -> throws
-  /// [PlayerDisposedException]).
+  /// Registers this caller as a consumer of this player instance.
   ///
-  /// Callers that keep a [MediaPlayer] reference around without necessarily
-  /// listening to any of its streams should call [attach] once they take
-  /// ownership and [detach] once they release it, so the sweep never
-  /// disposes an instance a caller still intends to use, regardless of its
-  /// current playback state. See [_isReferencedByLiveConsumer].
-  int _referenceCount = 0;
-
-  /// Registers this caller as an active consumer of this player instance,
-  /// protecting it from the stale-instance sweep regardless of its current
-  /// playback state (H-10). Each [attach] must be paired with exactly one
-  /// [detach]; safe to call multiple times for multiple independent owners.
+  /// **No effect (issue #133).** This used to protect the instance from a
+  /// periodic "stale instance" sweep that disposed any non-playing player idle
+  /// for 15 minutes. That sweep — on Dart, Android and iOS — has been removed
+  /// because it disposed live, paused players (a paused on-screen video was
+  /// reaped ~19 minutes after pause, after which Play did nothing). A
+  /// [MediaPlayer] now lives until [dispose] is called, so there is nothing to
+  /// protect it from. Kept only so existing callers keep compiling.
+  @Deprecated('No effect: the stale-instance sweep was removed (issue #133). '
+      'A player lives until dispose() is called.')
   void attach() {
     _throwIfDisposed();
-    _referenceCount++;
-    _markActivity();
   }
 
-  /// Releases a reference previously registered via [attach]. Once the
-  /// reference count returns to zero — and there is no other live consumer,
-  /// e.g. an active stream subscription (see [_isReferencedByLiveConsumer])
-  /// — this instance becomes eligible again for the stale-instance sweep
-  /// after the normal 15-minute inactivity threshold.
-  void detach() {
-    if (_referenceCount > 0) {
-      _referenceCount--;
-    }
-    // Give a fresh 15-minute inactivity grace period from the moment of
-    // release, rather than letting the sweep judge staleness against
-    // whatever [_lastActivity] happened to be when this instance was last
-    // (possibly long ago) protected by a live reference.
-    _markActivity();
-  }
-
-  /// H-10: whether some live consumer still holds/uses this instance, and so
-  /// it must survive the stale-instance sweep regardless of playback state
-  /// or elapsed inactivity.
-  ///
-  /// Two independent signals are honored:
-  ///  1. [_referenceCount] > 0 — an explicit [attach]/[detach] registration.
-  ///     This is the honest signal: it doesn't depend on *how* the consumer
-  ///     uses the player, only on whether it declared ownership.
-  ///  2. A live subscription on one of the "primary" broadcast streams a
-  ///     typical consumer listens to for the lifetime of its own object —
-  ///     e.g. `MediaController` subscribes to [stateStream] (and others) in
-  ///     its constructor and only cancels them in its own `dispose()`. This
-  ///     fallback protects existing consumers that hold a [MediaPlayer]
-  ///     reference and observe it reactively without calling [attach]
-  ///     explicitly.
-  bool get _isReferencedByLiveConsumer {
-    if (_referenceCount > 0) return true;
-    return _stateController.hasListener || _positionController.hasListener;
-  }
+  /// Counterpart of [attach]. **No effect** — see [attach].
+  @Deprecated('No effect: the stale-instance sweep was removed (issue #133). '
+      'A player lives until dispose() is called.')
+  void detach() {}
 
   /// Private constructor for factory pattern
   MediaPlayer._(this.playerId, this._config) {
     _instances[playerId] = this;
-    _markActivity();
-    _ensureCleanupTimer();
     _setupMethodCallHandler();
     _initializeBufferingService();
     _networkResilienceService = NetworkResilienceService();
@@ -516,85 +495,6 @@ class MediaPlayer {
   static void disableCrashReporting() {
     crashReporter?.log('MediaPlayer crash reporting disabled');
     crashReporter = null;
-  }
-
-  /// Track activity to prevent premature cleanup
-  void _markActivity() {
-    _lastActivity[playerId] = DateTime.now();
-  }
-
-  /// Ensure cleanup timer is running
-  static void _ensureCleanupTimer() {
-    _cleanupTimer ??= Timer.periodic(
-      const Duration(minutes: 5),
-      (_) => _cleanupStaleInstances(),
-    );
-  }
-
-  /// Clean up stale player instances (thread-safe)
-  static void _cleanupStaleInstances() {
-    final now = DateTime.now();
-    const staleThreshold = Duration(minutes: 15);
-
-    // Create defensive copy of entries to avoid concurrent modification
-    final activitySnapshot = Map<String, DateTime>.from(_lastActivity);
-    final staleKeys = <String>[];
-
-    for (final entry in activitySnapshot.entries) {
-      if (now.difference(entry.value) > staleThreshold) {
-        staleKeys.add(entry.key);
-      }
-    }
-
-    // Process stale instances
-    for (final key in staleKeys) {
-      // Check instance still exists before cleanup
-      final instance = _instances[key];
-      if (instance != null &&
-          !instance.isPlaying &&
-          !instance._isDisposed &&
-          !instance._isReferencedByLiveConsumer) {
-        debugPrint('MediaPlayer: Auto-cleaning stale instance: $key');
-
-        // Atomic removal pattern: remove from tracking first
-        _lastActivity.remove(key);
-        _instances.remove(key);
-
-        // Then dispose (this may take time)
-        instance.dispose().catchError((e) {
-          debugPrint('Error during auto-cleanup of $key: $e');
-          crashReporter?.reportError(
-            e,
-            StackTrace.current,
-            context: {'playerId': key, 'operation': 'auto_cleanup'},
-            fatal: false,
-          );
-        });
-      }
-    }
-
-    // Stop timer if no instances
-    if (_instances.isEmpty) {
-      _cleanupTimer?.cancel();
-      _cleanupTimer = null;
-    }
-  }
-
-  /// Test-only hook: immediately runs the stale-instance sweep that
-  /// normally only fires via [_cleanupTimer] every 5 minutes, so tests can
-  /// assert its behaviour (H-10) without waiting on real wall-clock time.
-  @visibleForTesting
-  static void debugRunStaleSweepForTest() => _cleanupStaleInstances();
-
-  /// Test-only hook: back-dates [playerId]'s last-activity timestamp so the
-  /// stale-instance sweep considers it eligible on the next run, without
-  /// requiring the test to wait out the real 15-minute inactivity threshold
-  /// (H-10). No-op if [playerId] has no tracked activity (e.g. unknown id).
-  @visibleForTesting
-  static void debugMarkStaleForTest(String playerId) {
-    if (!_lastActivity.containsKey(playerId)) return;
-    _lastActivity[playerId] =
-        DateTime.now().subtract(const Duration(minutes: 20));
   }
 
   /// Factory constructor to create a new media player instance
@@ -1274,11 +1174,11 @@ class MediaPlayer {
   /// [errorStream].
   Future<void> load(MediaItem item) async {
     await _ensureInitialized();
-    _markActivity();
 
     // Issue #125: a new load is the clearest possible statement that the
     // host has moved on from any previous failure.
     _clearErrorLatch();
+    _itemStarted = false;
 
     // Enforce HTTPS for DRM-protected media URLs before touching any state.
     InputValidator.validateMediaItemWithDrm(item);
@@ -1499,7 +1399,6 @@ class MediaPlayer {
   /// or [load] to apply it *and* reload.
   Future<void> setPlaylist(Playlist playlist, {int? startIndex}) async {
     await _ensureInitialized();
-    _markActivity();
 
     // Issue #125: setting a playlist is an explicit host command that moves
     // on from any previous failure.
@@ -1545,6 +1444,7 @@ class MediaPlayer {
       _currentPlaylist = playlist.copyWith(currentIndex: index);
 
       if (!reloadSkipped) {
+        _itemStarted = false;
         // Clear previous track data immediately to prevent stale UI
         _subtitleTracks = [];
         _audioTracks = [];
@@ -1688,7 +1588,6 @@ class MediaPlayer {
   /// Start or resume playback
   Future<void> play() async {
     await _ensureInitialized();
-    _markActivity();
 
     // Issue #125: an explicit play() is a retry attempt — end the terminal
     // error latch so native's next state event is reported as-is again.
@@ -1733,7 +1632,6 @@ class MediaPlayer {
   /// Pause playback
   Future<void> pause() async {
     await _ensureInitialized();
-    _markActivity();
 
     // Issue #125: a deliberate pause ends any outstanding load watchdog —
     // the host is no longer waiting for this load to start playing, so a
@@ -1769,13 +1667,13 @@ class MediaPlayer {
   /// Stop playback
   Future<void> stop() async {
     await _ensureInitialized();
-    _markActivity();
 
     // Issue #125: stopping abandons the current load outright — disarm the
     // watchdog, and clear the error latch so the `idle` state forced below
     // (and everything native reports afterwards) is honest again.
     _cancelLoadWatchdog();
     _clearErrorLatch();
+    _itemStarted = false;
 
     try {
       await _invokeMethod('stop', {'playerId': playerId});
@@ -1798,10 +1696,6 @@ class MediaPlayer {
   /// Seek to a specific position
   Future<void> seekTo(Duration position) async {
     await _ensureInitialized();
-    // H-10: scrubbing/seeking is ordinary interaction and must count as
-    // activity — otherwise a user actively seeking around a paused player
-    // could still have it swept as "stale" mid-interaction.
-    _markActivity();
 
     // Issue #125: seeking is an explicit attempt to resume from somewhere —
     // like play(), it ends the terminal error latch.
@@ -1830,11 +1724,36 @@ class MediaPlayer {
       );
     }
 
+    final positionEventsBeforeSeek = _positionEventCount;
     try {
       await _invokeMethod('seekTo', {
         'playerId': playerId,
         'position': position.inMilliseconds,
       });
+
+      // Issue #134: natives report the post-seek position with a one-off
+      // `onPositionChanged`, but a paused player's periodic tick is silent, so
+      // against an older cached native build nothing would ever update
+      // `position`. Apply the requested position optimistically -- only when
+      //  * the item is not live (a live position is window-relative and native
+      //    may clamp/translate it, so only native can say where it landed),
+      //  * native has not already reported a position while the call was in
+      //    flight (its value is authoritative, e.g. clamped), and
+      //  * the player has not been disposed meanwhile.
+      // Clamped to a known duration; native's own event then supersedes it.
+      if (!_isDisposed &&
+          !_isLive &&
+          _positionEventCount == positionEventsBeforeSeek) {
+        var optimistic = position;
+        final knownDuration = _currentState.duration;
+        if (knownDuration > Duration.zero && optimistic > knownDuration) {
+          optimistic = knownDuration;
+        }
+        _updateState(_currentState.copyWith(position: optimistic));
+        if (!_positionController.isClosed) {
+          _positionController.add(optimistic);
+        }
+      }
     } on PlatformException catch (e) {
       throw PlaybackException(
         'Failed to seek: ${e.message ?? e.code}',
@@ -1847,9 +1766,6 @@ class MediaPlayer {
   /// Set playbook volume (0.0 to 1.0)
   Future<void> setVolume(double volume) async {
     await _ensureInitialized();
-    // H-10: adjusting volume is ordinary interaction; count it as activity.
-    _markActivity();
-
     final clampedVolume = volume.clamp(0.0, 1.0);
 
     try {
@@ -1874,9 +1790,6 @@ class MediaPlayer {
   /// Set playback speed
   Future<void> setSpeed(double speed) async {
     await _ensureInitialized();
-    // H-10: changing speed is ordinary interaction; count it as activity.
-    _markActivity();
-
     final clampedSpeed = speed.clamp(0.25, 4.0);
 
     try {
@@ -1901,7 +1814,6 @@ class MediaPlayer {
   /// Mute or unmute the player
   Future<void> setMuted(bool muted) async {
     await _ensureInitialized();
-    _markActivity();
 
     try {
       await _invokeMethod('setMuted', {
@@ -1937,7 +1849,6 @@ class MediaPlayer {
   /// Safe to call before or after media is loaded.
   Future<void> setSecureSurface(bool enabled) async {
     await _ensureInitialized();
-    _markActivity();
 
     try {
       await _invokeMethod('setSecureSurface', {
@@ -1974,7 +1885,6 @@ class MediaPlayer {
   /// ExoPlayer reference re-attached after it was detached from the old host.
   Future<void> reclaimVideoSurface() async {
     if (!isInitialized) return;
-    _markActivity();
 
     try {
       await _invokeMethod('reclaimVideoSurface', {
@@ -1993,7 +1903,6 @@ class MediaPlayer {
   /// Set video BoxFit mode
   Future<void> setBoxFit(BoxFit boxFit) async {
     await _ensureInitialized();
-    _markActivity();
 
     try {
       await _invokeMethod('setBoxFit', {
@@ -2015,7 +1924,6 @@ class MediaPlayer {
   /// Set subtitle track
   Future<void> setSubtitleTrack(SubtitleTrack? track) async {
     await _ensureInitialized();
-    _markActivity();
 
     // Validate track exists in available tracks
     if (track != null && !_subtitleTracks.any((t) => t.id == track.id)) {
@@ -2048,7 +1956,6 @@ class MediaPlayer {
   /// Set quality track
   Future<void> setQualityTrack(QualityTrack track) async {
     await _ensureInitialized();
-    _markActivity();
 
     // Validate track exists in available tracks
     if (!_qualityTracks.any((t) => t.id == track.id)) {
@@ -2081,7 +1988,6 @@ class MediaPlayer {
   /// Set audio track
   Future<void> setAudioTrack(AudioTrack track) async {
     await _ensureInitialized();
-    _markActivity();
 
     // Validate track exists in available tracks
     if (!_audioTracks.any((t) => t.id == track.id)) {
@@ -2114,7 +2020,6 @@ class MediaPlayer {
   /// Enable automatic quality selection (adaptive bitrate)
   Future<void> enableAutoQuality() async {
     await _ensureInitialized();
-    _markActivity();
 
     try {
       await _invokeMethod('enableAutoQuality', {
@@ -2420,6 +2325,7 @@ class MediaPlayer {
     // Issue #125: skipping loads a (possibly different) item — end the
     // terminal error latch so the new item's own state is reported.
     _clearErrorLatch();
+    _itemStarted = false;
 
     if (index < 0 || index >= _currentPlaylist!.items.length) {
       throw ConfigurationException(
@@ -2503,7 +2409,6 @@ class MediaPlayer {
 
     _isDisposed = true;
     _instances.remove(playerId);
-    _lastActivity.remove(playerId);
 
     // Issue #125: a pending load watchdog holds a Timer referencing `this`;
     // cancel it before anything else so it can never fire against a disposed
@@ -2768,6 +2673,8 @@ class MediaPlayer {
   /// ignore. Cheap and idempotent, so call sites do not need to test first.
   void _clearErrorLatch() {
     _errorLatched = false;
+    // Issue #132: the same host commands also end the completed latch.
+    _completedLatched = false;
   }
 
   /// Issue #125: arms the load watchdog for the load just issued.
@@ -2992,7 +2899,35 @@ class MediaPlayer {
         reportedState == PlayerState.completed) {
       _errorLatched = false;
     }
-    final state = _errorLatched ? PlayerState.error : reportedState;
+    var state = _errorLatched ? PlayerState.error : reportedState;
+
+    // Issue #132: `completed` persists against the quiescent event that
+    // natively follows it. Defense in depth, exactly like the error latch:
+    // both natives now suppress it at the source, this protects new Dart
+    // against an older cached native build.
+    if (!_errorLatched) {
+      if (reportedState == PlayerState.completed) {
+        _completedLatched = true;
+      } else if (_completedLatched &&
+          (reportedState == PlayerState.paused ||
+              reportedState == PlayerState.idle)) {
+        state = PlayerState.completed;
+      } else {
+        _completedLatched = false;
+      }
+    }
+
+    // Issue #137: `ready` after the item has already started playback is a
+    // paused item returning from a seek/rebuffer, not a fresh load. See
+    // [_itemStarted].
+    if (!_errorLatched) {
+      if (reportedState == PlayerState.playing ||
+          reportedState == PlayerState.completed) {
+        _itemStarted = true;
+      } else if (reportedState == PlayerState.ready && _itemStarted) {
+        state = PlayerState.paused;
+      }
+    }
 
     // Issue #125: the first definitive outcome for the load disarms the
     // watchdog. `error` counts — the failure has been reported by the
@@ -3100,6 +3035,7 @@ class MediaPlayer {
   void _handlePositionChanged(Map<dynamic, dynamic> arguments) {
     if (_isDisposed) return;
 
+    _positionEventCount++;
     final positionMs = arguments['position'] as int;
     final position = Duration(milliseconds: positionMs);
 

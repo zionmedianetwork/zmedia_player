@@ -35,6 +35,7 @@ Contract:
 | Busy controller | Never an error. There is no "critical vs non-critical" distinction: `setVolume`, `toggleMute`, `setSpeed`, `setSubtitleTrack` and `setSecureSurface` queue like everything else. |
 | Failure isolation | A failing operation completes only *its own* `Future` with that error; the queue advances. |
 | Head-of-line blocking | Bounded: each operation runs under a 10 s timeout, so a wedged native call fails with `TimeoutException` and the queue advances rather than stalling forever. |
+| Lifetime | A `MediaPlayer` lives from `initialize()` until you call `dispose()` (issue #133). There is no idle timeout: a paused player is never reaped, however long it sits (earlier versions disposed non-playing instances after 15 min, after which `play()` did nothing). Conversely an undisposed player is a leak. `attach()`/`detach()` are deprecated no-ops. A command sent to a player native no longer holds throws a `PlaybackException` (`errorCode` e.g. `PLAY_ERROR`) on both platforms. |
 | `dispose()` | An operation still *queued* when `dispose()` runs is dropped: its `Future` completes normally as a no-op and the disposed player is never touched — same as calling a method after `dispose()`. An operation already *running* is not cancelled. |
 | Not a rate limiter | The queue is unbounded and never drops or collapses work (including repeated `seekTo`s). If you need debouncing — e.g. while dragging a scrub bar — do it in your UI before calling. |
 
@@ -51,7 +52,7 @@ Contract:
 | `Future<void> setPlaylist(Playlist playlist, {int? startIndex})` | Load (or extend/re-issue) a playlist. Does **not** restart the item at `startIndex` if it is already the loaded, in-progress item — see [Extending a playlist in place](#extending-a-playlist-in-place) |
 | `Future<void> play()` / `pause()` / `stop()` | Playback control |
 | `Future<void> togglePlayPause()` | Toggle play/pause |
-| `Future<void> seekTo(Duration position)` | Seek to a position. Throws `InvalidStateException` for a live item that is not seekable (`isLive && !dvrEnabled` — see [Live Streaming](live-streaming.md)) |
+| `Future<void> seekTo(Duration position)` | Seek to a position. Throws `InvalidStateException` for a live item that is not seekable (`isLive && !dvrEnabled` — see [Live Streaming](live-streaming.md)). `position` updates after the seek **even while paused** (issue #134): natives emit one `onPositionChanged` per seek, and for non-live items the requested position (clamped to a known duration) is also applied optimistically once the call returns. For a live DVR item `position` is window-relative and only native's event updates it |
 | `Future<void> seekForward([Duration duration])` / `seekBackward([Duration duration])` | Relative seek (default 10s) |
 | `Future<void> setVolume(double volume)` | 0.0–1.0 |
 | `Future<void> increaseVolume([double amount])` / `decreaseVolume([double amount])` | Step volume |
@@ -74,7 +75,7 @@ Observe the real outcome on the streams:
 
 | Outcome | Signal |
 |---|---|
-| Success | `stateStream` reaching `PlayerState.ready` or `PlayerState.playing` |
+| Success | `stateStream` reaching `PlayerState.ready` or `PlayerState.playing` (reliable on both platforms: since #138 iOS no longer reports `ready` for a load that then fails) |
 | Failure | `errorStream` emitting, with `currentState.state == PlayerState.error` |
 | Neither (accepted, then silence) | The `MediaConfig.loadTimeout` watchdog, below |
 
@@ -92,6 +93,13 @@ platform emits as a *consequence* of the failure — `idle` on Android, `paused`
 arriving right after `onError` — overwrote it, so a failed load was reported identically to a
 viewer pause. `errorStream` was always correct; only `PlaybackState.state` lied. Buffer
 telemetry (`isBuffering`, `bufferPercentage`) still flows while the error is held.
+
+**`PlayerState.completed` persists** (issue #132). After a natural end the state stays
+`completed` (it is no longer overwritten by the `paused` each platform emits as the rate drops
+to 0), so `currentState.state == PlayerState.completed` is a reliable Replay signal. It is
+released by the next host command (`load`, `play`, `stop`, `seekTo`, `setPlaylist`,
+`skipToIndex`) or another native state; `play()` on a completed player seeks to zero and
+restarts. Playlist auto-advance and `looping` still work, since both are host commands.
 
 #### Distinguishing a viewer pause from a dead stream
 
@@ -410,6 +418,20 @@ All player errors are subclasses of the sealed `MediaPlayerException`:
 `OperationBusyException`. Errors also surface via
 `PlaybackState.state == PlayerState.error` with `errorMessage`, and as typed exceptions on
 `errorStream`/`error` (above).
+
+**The default error UI never shows raw platform text** (issue #135). `MediaPlayerWidget`
+renders `ErrorOverlay` when the state is `error`, feeding it `MediaController.error` (the typed
+exception, so the network / DRM / playback / HTTP category wording actually applies) and only
+falling back to `errorMessage` if no typed error has arrived. Anything the overlay cannot map to
+a category — an unmatched `String`, an arbitrary object — renders
+`ErrorOverlay.genericMessage` ("Something went wrong playing this video. Please try again.");
+the raw text goes to `debugPrint` in debug builds only. An HTTP 403 (a string containing
+`403`/`unauthorized`, or `MediaLoadException.statusCode == 403`) renders
+`ErrorOverlay.retryableAccessMessage`, because on signed CDN URLs a 403 is nearly always an
+expired credential that a retry fixes. `ErrorOverlay.showErrorCode` (the developer-facing
+"Error Code:" chip: DRM/playback code or `HTTP <status>`) defaults to `false`, and
+`MediaPlayerWidget` no longer forces it on; hosts that want it build their own
+`ErrorOverlay(showErrorCode: true, ...)` via `errorWidget:`.
 
 **`errorStream` is the primary surface, not a supplement.** Most real playback failures are
 detected asynchronously, after the method call that triggered them has already returned

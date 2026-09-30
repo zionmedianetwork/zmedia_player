@@ -103,7 +103,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `SubtitleView` | Renders the active subtitle cue. |
 | `SettingsMenu`, `QualityMenu`, `AudioTrackMenu`, `SubtitleMenu`, `SubtitleStylingMenu`, `SpeedMenu` | Bottom-sheet settings + submenus. |
 | `QualityBadge`, `TimeDisplay`, `ControlButton`, `SeekBar`, `VolumeSlider`, `LiveBadge`, `BufferHealthBadge` | Reusable control components. |
-| `BufferingIndicator`, `NetworkQualityIndicator`, `ErrorOverlay`, `FeedbackOverlay`, `VolumeChangeOverlay`, `SeekFeedbackOverlay`, `PlaybackFeedbackOverlay`, `ToastNotification` | Status/feedback overlays. |
+| `BufferingIndicator`, `NetworkQualityIndicator`, `ErrorOverlay` (never renders raw platform/exception text — unmatched errors show `ErrorOverlay.genericMessage`; a 403 reads as retryable; the developer "Error Code:" chip is opt-in via `showErrorCode`, default `false`; `MediaPlayerWidget`'s default error UI is fed `MediaController.error`, the typed exception, issue #135), `FeedbackOverlay`, `VolumeChangeOverlay`, `SeekFeedbackOverlay`, `PlaybackFeedbackOverlay`, `ToastNotification` | Status/feedback overlays. |
 | `MediaListPlayer` | Visibility-aware player for `ListView` (auto play/pause). |
 | `MediaFeed` | Scroll feed of players (TikTok/Reels-style) backed by `MediaPlayerPool`: bounded concurrent decoder sessions, a configurable prewarm window for upcoming items, activation debounce during fast flings, releasing players once they leave the live window, and an optional `autoPlayPolicy` (e.g. `conservativeAutoPlayPolicy`) to withhold autoplay on metered/poor connections. |
 | `AirPlayButton` | Native iOS AirPlay route picker (iOS only). |
@@ -243,13 +243,18 @@ same technique guards the `connectionType` vocabulary in
 `test/native_contract/android_http_headers_test.dart` (issue #127 — see the header note
 below), the notification-artwork header wiring in
 `test/native_contract/notification_artwork_headers_test.dart`, and the `pauseReason`
-vocabulary in `test/native_contract/pause_reason_vocabulary_test.dart`.
+vocabulary in `test/native_contract/pause_reason_vocabulary_test.dart`, and the one-off
+post-seek `onPositionChanged` in `test/native_contract/paused_seek_position_test.dart`
+(issue #134: both natives emit exactly one position event after a seek regardless of play
+state — Android from `onPositionDiscontinuity`, iOS from the seek completion; the periodic
+tick stays silent while paused; `MediaPlayer.seekTo` also updates optimistically for non-live
+items).
 
 **`load()` completing != loaded (issue #125).** `MediaPlayer.load()`/`MediaController.load()`
 resolving means the item was *handed to the platform*. ExoPlayer and AVPlayer accept a media item
 synchronously and only then fetch the manifest, negotiate DRM and decode — a 404, dead CDN,
 expired licence or unsupported codec surfaces **after** the future has already completed
-successfully. Observe the outcome instead: `PlayerState.ready`/`.playing` for success,
+successfully. Observe the outcome instead: `PlayerState.ready`/`.playing` for success (reliable on both platforms since #138: iOS emits `ready` only from `AVPlayerItem.status`),
 `errorStream` + `PlayerState.error` for failure.
 
 `PlayerState.error` is now **terminal**: it is held until the next explicit host command
@@ -261,6 +266,13 @@ now suppress that trailing event at the source (`playerError != null` in `MediaP
 `currentItem?.status == .failed` in `MediaPlayerManager.swift`), and Dart latches it as well so
 new Dart against an older cached native build still behaves. Buffer telemetry (`isBuffering`,
 `bufferPercentage`) is deliberately still passed through while latched.
+
+`PlayerState.completed` likewise **persists** after a natural end (issue #132). The `paused`
+each platform used to emit right after `completed` (Android `onIsPlayingChanged(false)`, iOS
+`timeControlStatus` -> `.paused`) is suppressed natively (`STATE_ENDED` guard in
+`MediaPlayerManager.kt`; `currentItemPlayedToEnd` in `MediaPlayerManager.swift`), and
+`MediaPlayer._completedLatched` holds it in Dart until a host command or another native state.
+Pinned by `test/native_contract/completed_persists_test.dart`.
 
 A load that produces *no* outcome at all is caught by `MediaConfig.loadTimeout` (default 30s,
 `null` disables): it reports a `NetworkException` with `isTimeout: true` on `errorStream`. The
@@ -615,7 +627,7 @@ each taking the header map directly.
 Feature-complete across Dart and native layers; the audit-driven P0–P3 remediation has landed
 (DRM wiring, per-`playerId` MethodChannel routing, native certificate pinning, secure storage
 without plaintext fallback, `bufferedPosition`, leaked-subscription fixes, HTTPS-for-DRM).
-The **Dart layer is extensively tested** (1175 tests as of this writing — run `flutter test`for the live count); **native Kotlin/Swift has no automated tests yet**,
+The **Dart layer is extensively tested** (1175 tests as of this writing — run `flutter test`for the live count); **native Kotlin/Swift has no automated unit tests and nothing in CI** (only the manual on-device suite in `example/integration_test/`, see `example/README.md`),
 so DRM decryption, casting, and bandwidth metering still warrant **on-device verification** before
 production reliance. Core playback, fullscreen, custom controls, quality/subtitles, background audio,
 and lock-screen notifications have been verified on a physical iPhone. Media notifications —
