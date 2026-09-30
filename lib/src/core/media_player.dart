@@ -279,6 +279,10 @@ class MediaPlayer {
   /// Whether current media is live
   bool _isLive = false;
 
+  /// Count of native `onPositionChanged` events handled; lets [seekTo] tell
+  /// whether native already reported the post-seek position (issue #134).
+  int _positionEventCount = 0;
+
   /// Whether DVR is enabled for the current live media, allowing seeking on
   /// an otherwise non-seekable live stream.
   ///
@@ -1838,11 +1842,36 @@ class MediaPlayer {
       );
     }
 
+    final positionEventsBeforeSeek = _positionEventCount;
     try {
       await _invokeMethod('seekTo', {
         'playerId': playerId,
         'position': position.inMilliseconds,
       });
+
+      // Issue #134: natives report the post-seek position with a one-off
+      // `onPositionChanged`, but a paused player's periodic tick is silent, so
+      // against an older cached native build nothing would ever update
+      // `position`. Apply the requested position optimistically -- only when
+      //  * the item is not live (a live position is window-relative and native
+      //    may clamp/translate it, so only native can say where it landed),
+      //  * native has not already reported a position while the call was in
+      //    flight (its value is authoritative, e.g. clamped), and
+      //  * the player has not been disposed meanwhile.
+      // Clamped to a known duration; native's own event then supersedes it.
+      if (!_isDisposed &&
+          !_isLive &&
+          _positionEventCount == positionEventsBeforeSeek) {
+        var optimistic = position;
+        final knownDuration = _currentState.duration;
+        if (knownDuration > Duration.zero && optimistic > knownDuration) {
+          optimistic = knownDuration;
+        }
+        _updateState(_currentState.copyWith(position: optimistic));
+        if (!_positionController.isClosed) {
+          _positionController.add(optimistic);
+        }
+      }
     } on PlatformException catch (e) {
       throw PlaybackException(
         'Failed to seek: ${e.message ?? e.code}',
@@ -3126,6 +3155,7 @@ class MediaPlayer {
   void _handlePositionChanged(Map<dynamic, dynamic> arguments) {
     if (_isDisposed) return;
 
+    _positionEventCount++;
     final positionMs = arguments['position'] as int;
     final position = Duration(milliseconds: positionMs);
 

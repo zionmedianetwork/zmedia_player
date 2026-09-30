@@ -530,6 +530,34 @@ class MediaPlayerInstance(
             notifyDurationChanged()
         }
 
+        /**
+         * Issue #134: a seek issued while paused (or otherwise not playing)
+         * moved the player but produced no position event at all, because the
+         * periodic tick in [startPositionUpdates] is deliberately silent
+         * unless `isPlaying` or a stalled-but-intending-to-play buffer. The
+         * Dart-side `PlaybackState.position` therefore stayed at its old
+         * value until playback resumed.
+         *
+         * Emit exactly one `onPositionChanged` (same payload builder as the
+         * tick, so `liveEdgeOffset`/`positionBasis` ride along) per seek,
+         * regardless of play state. `DISCONTINUITY_REASON_SEEK_ADJUSTMENT` is
+         * the follow-up when the renderer snaps to a sync point, so the final
+         * position is the one reported. The periodic tick stays silent while
+         * paused; this is a one-off, so it cannot look like a live "stall
+         * watchdog" heartbeat.
+         */
+        override fun onPositionDiscontinuity(
+            oldPosition: Player.PositionInfo,
+            newPosition: Player.PositionInfo,
+            reason: Int
+        ) {
+            if (reason == Player.DISCONTINUITY_REASON_SEEK ||
+                reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT
+            ) {
+                exoPlayer?.let { notifyPositionChanged(it.currentPosition) }
+            }
+        }
+
         override fun onTimelineChanged(timeline: Timeline, reason: Int) {
             // Wave E (DVR window duration): a live window's durationUs can
             // grow (or, once known, change) independently of a

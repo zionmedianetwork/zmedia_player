@@ -474,9 +474,13 @@ alone did, and it does not (issue #124). A correct watchdog carries three:
 | 3 | **Event staleness** — no `onPositionChanged` arriving at all while the host still intends to play | An iOS hard stall — the case neither of the others sees | A stall where the platform keeps talking, which is Android's behavior by design |
 
 **Why signal 3 is not optional.** iOS drives position from
-`AVPlayer.addPeriodicTimeObserver`, and *both* `notifyPositionChanged` call
-sites in `MediaPlayerManager.swift` sit inside that observer's block — as does
-the `liveEdgeOffset` computation itself. The observer only fires while time is
+`AVPlayer.addPeriodicTimeObserver`; the periodic emission
+(`emitPositionSnapshot` in `MediaPlayerManager.swift`, which also computes
+`liveEdgeOffset`) is called from that observer's block. (It is additionally
+called once from a seek's completion — issue #134 — a one-off that follows a
+host command, not a heartbeat, and neither platform's periodic tick emits
+while paused, so a paused seek never looks like playback progress to a
+watchdog that only judges `playing`/`buffering`.) The observer only fires while time is
 progressing, so during a hard stall on iOS **nothing is emitted at all**:
 `position`, `positionBasis` and `liveEdgeOffset` all freeze at their last
 values. `liveEdgeOffset` does not grow there, because it is never sampled.
