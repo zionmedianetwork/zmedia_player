@@ -129,7 +129,7 @@ present transitively via `flutter_test`; declaring it explicitly is what makes i
 legal under `depend_on_referenced_packages`). It supplies the deterministic virtual clock the
 watchdog test drives its 2 s sampler and ~500 ms native tick with. `fakeAsync` is preferred
 over `testWidgets`/`tester.pump` for this: the widget binding asserts no timers are pending at
-teardown, which `MediaPlayer`'s static 5-minute instance-cleanup timer would trip.
+teardown, which a pending timer would trip (`MediaPlayer` no longer owns a static cleanup timer as of #133).
 
 **Example:**
 ```dart

@@ -167,63 +167,25 @@ class MediaPlayerManager {
     private let methodChannel: FlutterMethodChannel
     private let crashHandler: CrashHandler
 
-    // Activity tracking for memory leak prevention
-    private var lastActivity: [String: Date] = [:]
-    private var cleanupTimer: Timer?
-
-    // Cleanup configuration
-    private static let cleanupInterval: TimeInterval = 5 * 60 // 5 minutes
-    private static let staleThreshold: TimeInterval = 15 * 60 // 15 minutes
+    // Issue #133: there is deliberately NO time-based "stale instance" reaper
+    // here. It used to dispose any player idle for 15 minutes that was not
+    // playing -- which includes a paused player still on screen -- and told
+    // Dart nothing, so the next play() threw playerNotFound with no state or
+    // error event. Dart owns the lifecycle: an instance lives from
+    // "initialize" until Dart sends "dispose" (MediaPlayer.dispose /
+    // MediaController.dispose) or the plugin detaches (shutdown()).
 
     init(methodChannel: FlutterMethodChannel) {
         self.methodChannel = methodChannel
         self.crashHandler = CrashHandler(methodChannel: methodChannel)
-        startCleanupTimer()
-    }
-
-    // MARK: - Activity Tracking
-
-    private func markActivity(playerId: String) {
-        lastActivity[playerId] = Date()
-    }
-
-    private func startCleanupTimer() {
-        cleanupTimer = Timer.scheduledTimer(
-            withTimeInterval: MediaPlayerManager.cleanupInterval,
-            repeats: true
-        ) { [weak self] _ in
-            self?.cleanupStaleInstances()
-        }
-    }
-
-    private func cleanupStaleInstances() {
-        let now = Date()
-        var stalePlayers: [String] = []
-
-        for (playerId, lastUsed) in lastActivity {
-            if now.timeIntervalSince(lastUsed) > MediaPlayerManager.staleThreshold {
-                if let instance = players[playerId], !instance.isPlaying() {
-                    stalePlayers.append(playerId)
-                }
-            }
-        }
-
-        for playerId in stalePlayers {
-            zlog("MediaPlayerManager: Auto-cleaning stale instance: \(playerId)")
-            players[playerId]?.dispose()
-            players.removeValue(forKey: playerId)
-            lastActivity.removeValue(forKey: playerId)
-        }
     }
 
     func initializePlayer(playerId: String, config: [String: Any]?) throws {
-        markActivity(playerId: playerId)
         let playerInstance = MediaPlayerInstance(playerId: playerId, methodChannel: methodChannel, config: config)
         players[playerId] = playerInstance
     }
 
     func loadMediaItem(playerId: String, mediaItem: [String: Any], config: [String: Any]? = nil) throws {
-        markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
             operation: "loadMediaItem",
             playerId: playerId,
@@ -242,7 +204,6 @@ class MediaPlayerManager {
         startIndex: Int,
         config: [String: Any]? = nil
     ) throws {
-        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -250,7 +211,6 @@ class MediaPlayerManager {
     }
 
     func play(playerId: String) throws {
-        markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
             operation: "play",
             playerId: playerId
@@ -263,7 +223,6 @@ class MediaPlayerManager {
     }
 
     func pause(playerId: String) throws {
-        markActivity(playerId: playerId)
         try crashHandler.wrapOperation(
             operation: "pause",
             playerId: playerId
@@ -276,7 +235,6 @@ class MediaPlayerManager {
     }
 
     func stop(playerId: String) throws {
-        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -284,7 +242,6 @@ class MediaPlayerManager {
     }
 
     func seekTo(playerId: String, position: Int64) throws {
-        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             throw MediaPlayerError.playerNotFound
         }
@@ -409,7 +366,6 @@ class MediaPlayerManager {
     }
 
     func getBufferHealth(playerId: String) -> [String: Any] {
-        markActivity(playerId: playerId)
         guard let playerInstance = players[playerId] else {
             return [
                 "bufferedDurationMs": 0,
@@ -427,18 +383,14 @@ class MediaPlayerManager {
         }
         playerInstance.dispose()
         players.removeValue(forKey: playerId)
-        lastActivity.removeValue(forKey: playerId)
     }
 
     func dispose() {
         players.values.forEach { $0.dispose() }
         players.removeAll()
-        lastActivity.removeAll()
     }
 
     func shutdown() {
-        cleanupTimer?.invalidate()
-        cleanupTimer = nil
         dispose()
     }
 
@@ -2942,8 +2894,19 @@ class MediaPlayerInstance: NSObject {
     }
 }
 
-enum MediaPlayerError: Error {
+enum MediaPlayerError: Error, LocalizedError {
     case playerNotFound
     case invalidConfiguration
     case loadFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .playerNotFound:
+            return "Player not found (it was never initialized or has been disposed)"
+        case .invalidConfiguration:
+            return "Invalid configuration"
+        case .loadFailed(let message):
+            return message
+        }
+    }
 }

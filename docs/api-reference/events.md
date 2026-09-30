@@ -733,6 +733,12 @@ above. Host apps never construct these; they are documented because a payload
 key is invisible to `flutter analyze` and to the (channel-mocking) test suite,
 so this table is the only place the contract is recorded.
 
+> **No `onPlayerDisposed` event exists.** Since #133 native never disposes a player on its own
+> (the 15-min stale-instance reaper was removed on Android and iOS), so there is nothing to
+> report. A command against an id native does not hold fails synchronously with a
+> `FlutterError` (`PLAY_ERROR`, `PAUSE_ERROR`, ... "Player not found") that Dart rethrows as a
+> `PlaybackException`.
+
 ### `onStateChanged`
 
 Backs `stateStream`/`PlaybackState.state`, and `pauseReasonStream`.
