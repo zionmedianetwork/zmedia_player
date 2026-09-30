@@ -103,7 +103,7 @@ Source of truth: [`lib/zmedia_player.dart`](lib/zmedia_player.dart). Each export
 | `SubtitleView` | Renders the active subtitle cue. |
 | `SettingsMenu`, `QualityMenu`, `AudioTrackMenu`, `SubtitleMenu`, `SubtitleStylingMenu`, `SpeedMenu` | Bottom-sheet settings + submenus. |
 | `QualityBadge`, `TimeDisplay`, `ControlButton`, `SeekBar`, `VolumeSlider`, `LiveBadge`, `BufferHealthBadge` | Reusable control components. |
-| `BufferingIndicator`, `NetworkQualityIndicator`, `ErrorOverlay`, `FeedbackOverlay`, `VolumeChangeOverlay`, `SeekFeedbackOverlay`, `PlaybackFeedbackOverlay`, `ToastNotification` | Status/feedback overlays. |
+| `BufferingIndicator`, `NetworkQualityIndicator`, `ErrorOverlay` (never renders raw platform/exception text — unmatched errors show `ErrorOverlay.genericMessage`; a 403 reads as retryable; the developer "Error Code:" chip is opt-in via `showErrorCode`, default `false`; `MediaPlayerWidget`'s default error UI is fed `MediaController.error`, the typed exception, issue #135), `FeedbackOverlay`, `VolumeChangeOverlay`, `SeekFeedbackOverlay`, `PlaybackFeedbackOverlay`, `ToastNotification` | Status/feedback overlays. |
 | `MediaListPlayer` | Visibility-aware player for `ListView` (auto play/pause). |
 | `MediaFeed` | Scroll feed of players (TikTok/Reels-style) backed by `MediaPlayerPool`: bounded concurrent decoder sessions, a configurable prewarm window for upcoming items, activation debounce during fast flings, releasing players once they leave the live window, and an optional `autoPlayPolicy` (e.g. `conservativeAutoPlayPolicy`) to withhold autoplay on metered/poor connections. |
 | `AirPlayButton` | Native iOS AirPlay route picker (iOS only). |

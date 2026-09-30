@@ -1321,13 +1321,14 @@ class _MediaPlayerWidgetState extends State<MediaPlayerWidget>
     }
 
     // Use comprehensive ErrorOverlay by default
-    // Note: We pass the error message as a string since the full exception
-    // object is not currently stored in PlaybackState
+    // Prefer the typed exception (MediaController.error) so category mapping
+    // runs; fall back to the raw message, which the overlay maps to generic
+    // copy and never displays. The developer error-code chip is off by
+    // default (issue #135) — hosts opt in via their own ErrorOverlay.
     return ErrorOverlay(
-      error: widget.controller.state.errorMessage,
+      error: widget.controller.error ?? widget.controller.state.errorMessage,
       controller: widget.controller,
       onRetry: _handleRetry,
-      showErrorCode: true,
       animated: true,
     );
   }

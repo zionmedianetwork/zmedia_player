@@ -419,6 +419,20 @@ All player errors are subclasses of the sealed `MediaPlayerException`:
 `PlaybackState.state == PlayerState.error` with `errorMessage`, and as typed exceptions on
 `errorStream`/`error` (above).
 
+**The default error UI never shows raw platform text** (issue #135). `MediaPlayerWidget`
+renders `ErrorOverlay` when the state is `error`, feeding it `MediaController.error` (the typed
+exception, so the network / DRM / playback / HTTP category wording actually applies) and only
+falling back to `errorMessage` if no typed error has arrived. Anything the overlay cannot map to
+a category — an unmatched `String`, an arbitrary object — renders
+`ErrorOverlay.genericMessage` ("Something went wrong playing this video. Please try again.");
+the raw text goes to `debugPrint` in debug builds only. An HTTP 403 (a string containing
+`403`/`unauthorized`, or `MediaLoadException.statusCode == 403`) renders
+`ErrorOverlay.retryableAccessMessage`, because on signed CDN URLs a 403 is nearly always an
+expired credential that a retry fixes. `ErrorOverlay.showErrorCode` (the developer-facing
+"Error Code:" chip: DRM/playback code or `HTTP <status>`) defaults to `false`, and
+`MediaPlayerWidget` no longer forces it on; hosts that want it build their own
+`ErrorOverlay(showErrorCode: true, ...)` via `errorWidget:`.
+
 **`errorStream` is the primary surface, not a supplement.** Most real playback failures are
 detected asynchronously, after the method call that triggered them has already returned
 successfully — see [`load()` completing is not "loaded"](#load-completing-is-not-loaded).

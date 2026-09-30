@@ -54,6 +54,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Deprecated
 - `MediaPlayer.attach()` / `MediaPlayer.detach()` are now no-ops (their only purpose was to shield
   an instance from the removed Dart sweep).
+### Changed
+- **`ErrorOverlay` no longer shows raw platform/exception text, and `showErrorCode` now defaults
+  to `false`** (issue #135). Previously an unmatched `String` error was rendered verbatim (and
+  `MediaPlayerException.message` / `toString()` for unrecognized exceptions), so viewers saw
+  strings like "The operation couldn't be completed. (CoreMediaErrorDomain error -12643.)".
+  `MediaPlayerWidget` also passed `PlaybackState.errorMessage` (a `String`), so the typed
+  category mapping never ran, and forced `showErrorCode: true`, exposing a developer "Error
+  Code:" chip to viewers. Now: unmatched errors render the new `ErrorOverlay.genericMessage`
+  and the raw text goes to `debugPrint` (debug builds) only; `MediaPlayerWidget` passes
+  `MediaController.error` (the typed exception) so network/DRM/playback/HTTP wording applies;
+  and an HTTP 403 is worded as retryable (`ErrorOverlay.retryableAccessMessage`) since on
+  signed CDN URLs it is nearly always an expired credential. **Potentially breaking:** hosts
+  that relied on the "Error Code:" chip appearing by default (in `ErrorOverlay` or through
+  `MediaPlayerWidget`) must pass `showErrorCode: true` to their own `ErrorOverlay`. New public
+  constants: `ErrorOverlay.genericMessage`, `ErrorOverlay.retryableAccessMessage`.
 
 ## [0.5.1] - 2026-09-10
 
