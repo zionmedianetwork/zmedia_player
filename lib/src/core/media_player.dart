@@ -377,8 +377,11 @@ class MediaPlayer {
   /// other native state (`playing`, `ready`, `buffering`, `error`).
   bool _completedLatched = false;
 
-  /// Issue #137: set once native has reported `playing`, `paused` or
-  /// `completed` for the current item, i.e. the item has started playback.
+  /// Issue #137: set once native has reported `playing` or `completed` for
+  /// the current item, i.e. the item has started playback. A raw `paused` does
+  /// NOT count: iOS emits one during every load, before anything has played
+  /// (`buffering, paused, buffering, ready`), and counting it would surface
+  /// that load's `ready` as `paused`.
   /// `ready` means "loaded, not yet started", so a `ready` arriving after
   /// this is set (Android reported one after a seek/rebuffer while paused,
   /// with `playWhenReady == false`) is really the item returning to
@@ -2919,7 +2922,6 @@ class MediaPlayer {
     // [_itemStarted].
     if (!_errorLatched) {
       if (reportedState == PlayerState.playing ||
-          reportedState == PlayerState.paused ||
           reportedState == PlayerState.completed) {
         _itemStarted = true;
       } else if (reportedState == PlayerState.ready && _itemStarted) {

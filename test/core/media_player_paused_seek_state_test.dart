@@ -45,6 +45,19 @@ void main() {
     await p.dispose();
   });
 
+  test(
+      'iOS load sequence (buffering, paused w/o reason, buffering, ready) '
+      'ends ready', () async {
+    final p = MediaPlayer(playerId: 'r137-ios-load');
+    await p.initialize();
+    await state('r137-ios-load', 'buffering');
+    await state('r137-ios-load', 'paused');
+    await state('r137-ios-load', 'buffering');
+    await state('r137-ios-load', 'ready');
+    expect(p.currentState.state, PlayerState.ready);
+    await p.dispose();
+  });
+
   test('paused -> buffering -> ready (older native) surfaces paused', () async {
     final p = MediaPlayer(playerId: 'r137-paused-seek');
     await p.initialize();

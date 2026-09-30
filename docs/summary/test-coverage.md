@@ -1,7 +1,7 @@
 # Test Coverage Summary - ZMedia Player
 
 > **Historical snapshot (v0.1.0, Oct 2025).** The "113/113" figures below reflect
-> the original release. The suite has since grown to **1209 tests passing** as of this writing (run `flutter test` for the live count, since it grows with every
+> the original release. The suite has since grown to **1210 tests passing** as of this writing (run `flutter test` for the live count, since it grows with every
 > change) as audit-remediation work added regression coverage. **Important caveat
 > the original summary omitted:** these are all **Dart** unit tests. There are
 > **no automated native (Kotlin/Swift) tests**, and several native features (DRM

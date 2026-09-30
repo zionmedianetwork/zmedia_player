@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   yet started": Android tracks a per-item `hasStartedPlayback` flag (set when `isPlaying` first
   becomes true or the item ends; reset by load and `stop()`), and a `STATE_READY` after that
   reports `paused` with no `pauseReason`, so `pauseReasonStream` does not fire again. `MediaPlayer`
-  carries the same rule as defense in depth for an older cached native build. Guarded by
+  carries the same rule as defense in depth for an older cached native build; it counts only
+  native `playing`/`completed` as "started" (iOS emits a raw `paused` during every load, which must
+  not turn that load's `ready` into `paused`). Guarded by
   `test/native_contract/ready_after_start_paused_test.dart` and
   `test/core/media_player_paused_seek_state_test.dart`.
 - **`PlayerState.completed` now persists after a natural end of playback** (issue #132). Both

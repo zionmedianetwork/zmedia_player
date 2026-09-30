@@ -767,8 +767,9 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    That re-reported `paused` carries **no** `pauseReason` (it is not a new pause), so
    `pauseReasonStream` stays silent. iOS never emits `ready` after a seek (its two `"ready"`
    emissions are the one-time player/item `readyToPlay` status KVOs at load). `MediaPlayer` has
-   the same rule (`_itemStarted`, reset by load/stop/skipToIndex/reloading setPlaylist) as
-   defense in depth. Guarded by `test/native_contract/ready_after_start_paused_test.dart` and
+   the same rule (`_itemStarted`, set only by native `playing`/`completed` -- never by `paused`,
+   because iOS emits a raw `paused` during every load before anything has played; reset by
+   load/stop/skipToIndex/reloading setPlaylist) as defense in depth. Guarded by `test/native_contract/ready_after_start_paused_test.dart` and
    `test/core/media_player_paused_seek_state_test.dart`
 
 ## UI/UX Design Specifications

@@ -4,7 +4,7 @@
 
 This guide covers testing strategies, test execution, and quality assurance for the ZMedia Player package.
 
-> **Current status:** **1209 tests passing** in the package's Dart layer as of this writing — the count grows with every change, so run `flutter test` for the live
+> **Current status:** **1210 tests passing** in the package's Dart layer as of this writing — the count grows with every change, so run `flutter test` for the live
 > number rather than trusting this one. Native Kotlin/Swift code still has **no
 > automated tests** — those paths require on-device verification.
 >

@@ -746,7 +746,7 @@ Backs `stateStream`/`PlaybackState.state`, and `pauseReasonStream`.
 | Key | Type | Required | Meaning |
 |-----|------|----------|---------|
 | `playerId` | String | yes | Routes the event to a `MediaPlayer` instance |
-| `state` | String | yes | One of `idle`/`buffering`/`ready`/`playing`/`paused`/`completed`/`error`; parsed into `PlayerState`. `ready` means only "loaded, not yet started": once an item has played, a seek or rebuffer while paused returns to `paused` (**without** a `pauseReason` -- it re-reports an existing pause), on both platforms (issue #137) |
+| `state` | String | yes | One of `idle`/`buffering`/`ready`/`playing`/`paused`/`completed`/`error`; parsed into `PlayerState`. `ready` means only "loaded, not yet started": once an item has played (native `playing` or `completed`; the raw `paused` iOS emits during load does not count), a seek or rebuffer while paused returns to `paused` (**without** a `pauseReason` -- it re-reports an existing pause), on both platforms (issue #137) |
 | `isBuffering` | bool | no (defaults `false`) | Whether the player is actively buffering |
 | `bufferPercentage` | num | no (defaults `0.0`) | Percentage of the full duration buffered. Android: `Player.getBufferedPercentage()`. iOS: computed from the furthest end of any loaded time range; `0` for live/unknown-duration content |
 | `pauseReason` | String | no | Why a `paused` transition happened — `"user"`/`"audioFocusLoss"`/`"audioBecomingNoisy"`/`"remote"`. **Omitted entirely** (never sent as `null`) when native cannot attribute the pause. See [Pause Reason Stream](#10-pause-reason-stream-pausereasonstream) for the per-platform availability table |
