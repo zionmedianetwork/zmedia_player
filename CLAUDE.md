@@ -821,6 +821,9 @@ A separate exported module — not to be confused with `CrashReporter` in core:
    identity. Deliberately no `activePlayerIds`/`disposeAll()`. Guarded by
    `test/core/media_player_dispose_during_initialize_test.dart`,
    `test/native_contract/initialize_disposes_existing_test.dart` and on-device check G
+   (`example/integration_test/check_g_test.dart`, which disposes at 0-20ms offsets so `dispose()`
+   lands after `initialize` is sent but before native answers; disposing synchronously after
+   `MediaController.load()` never enters that window, since the queued op drops first)
 
 ## UI/UX Design Specifications
 

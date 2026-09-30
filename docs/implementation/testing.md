@@ -182,7 +182,7 @@ a native regression.
   position and state, platform-aware), C (#134 live DVR paused seek; skips if the live demo is
   unreachable), D (#133 unknown-player commands throw).
 - `check_f_test.dart`: F (#135 error overlay shows no raw native text; #138 no raw `ready`/`playing` `onStateChanged` before the raw `onError`, both platforms; 404 and DNS failure). B also asserts a raw `ready` after a successful load (#138 regression guard).
-- `check_g_test.dart`: G (#139 dispose a controller while its live load is in flight, then no raw `playing`/position events; `release()` a still-loading controller and reuse its `playerId`, then raw VOD positions never step backwards).
+- `check_g_test.dart`: G (#139). G1/G1b dispose a `MediaPlayer`/`MediaController` at 0-20 ms offsets after starting a live `load()`, so `dispose()` lands after native `initialize` was sent but before it answered (disposing synchronously never enters that window), then assert no raw `playing`/position event for any disposed id. G2 disposes a still-initializing `MediaPlayer`, reuses its `playerId`, and asserts raw VOD positions never step backwards. Fails on the pre-fix code (G1/G1b), passes with it.
 - `check_e_long_idle_test.dart`: E (#133 paused 21-minute idle survives the reaper). Opt-in,
   skipped unless `--dart-define=ZMP_LONG_IDLE=true`.
 

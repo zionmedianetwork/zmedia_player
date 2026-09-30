@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `release()` after `dispose()` awaits that dispose's native teardown. `dispose()` is unchanged
   (synchronous, `ChangeNotifier`), except its native teardown's failures are now logged instead of
   left as an unhandled async error. On-device check G added to `example/integration_test/`
-  (`check_g_test.dart`).
+  (`check_g_test.dart`; disposes at 0-20 ms offsets to land inside the initialize window, and fails on the unfixed code).
 - **On-device integration suite** (`example/integration_test/`) for the #132-#137 native fixes:
   natural end stays `completed` (A), paused-seek position and state (B, and C on a live DVR
   stream), unknown-player commands throw (D), error overlay shows no raw native text (F), and an
