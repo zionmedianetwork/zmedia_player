@@ -586,6 +586,11 @@ class MediaPlayerInstance: NSObject {
     /// attached and `.readyToPlay`, so neither is visible from `AVPlayer`
     /// state alone and has to be tracked explicitly.
     private var currentItemIsSpent = false
+    /// Issue #132: true from `AVPlayerItemDidPlayToEndTime` until the next
+    /// load/play/seek/stop. Unlike `currentItemIsSpent` it is NOT set by
+    /// `stop()`. While set, the `.paused` transition AVPlayer makes when the
+    /// rate drops to 0 at the end is not reported, so "completed" persists.
+    private var currentItemPlayedToEnd = false
     private var previousAccessLogEventCount = 0
     // DRM handler — non-nil only when the current media item carries a drmConfig.
     private var drmHandler: DrmHandler?
@@ -955,6 +960,7 @@ class MediaPlayerInstance: NSObject {
         // Fresh item: nothing has been played to the end or stopped yet
         // (issue #79 -- see currentItemIsSpent).
         currentItemIsSpent = false
+        currentItemPlayedToEnd = false
         // Issue #126: a new item invalidates any pending pause attribution
         // from the previous one.
         pauseWasHostInitiated = false
@@ -1317,6 +1323,7 @@ class MediaPlayerInstance: NSObject {
         // Playback is being (re)started -- the item is in progress again
         // (issue #79 -- see currentItemIsSpent).
         currentItemIsSpent = false
+        currentItemPlayedToEnd = false
         // Issue #126: whatever caused the previous pause is now history --
         // never let a stale host-initiated flag label a future, unrelated
         // pause as "user".
@@ -1362,6 +1369,7 @@ class MediaPlayerInstance: NSObject {
         // playback for setPlaylist's issue-#79 guard to protect, so a
         // subsequent setPlaylist naming this same item must reload it.
         currentItemIsSpent = true
+        currentItemPlayedToEnd = false
         audioSessionRequested = false
         AudioSessionCoordinator.shared.release(for: self)
     }
@@ -1371,6 +1379,7 @@ class MediaPlayerInstance: NSObject {
         // finished/stopped item is in progress again (issue #79 -- see
         // currentItemIsSpent).
         currentItemIsSpent = false
+        currentItemPlayedToEnd = false
 
         // Wave E (DVR window duration): for a live item with DVR enabled,
         // `position` (from Dart) is window-relative -- see the periodic
@@ -1855,6 +1864,16 @@ class MediaPlayerInstance: NSObject {
             notifyStateChanged(state: "playing", isBuffering: false)
 
         case .paused:
+            // Issue #132: AVPlayer drops the rate to 0 when the item plays to
+            // its end, which lands here as .paused. If it arrives after
+            // playerDidFinishPlaying it must not overwrite "completed"
+            // (arriving before it is harmless: "completed" wins last). Cleared
+            // by load/play/seek/stop. Any stale pause attribution is dropped.
+            if currentItemPlayedToEnd {
+                _ = consumePauseReason()
+                zlog("MediaPlayerInstance: Suppressing post-completion paused (item played to end)")
+                return
+            }
             notifyStateChanged(
                 state: "paused",
                 isBuffering: false,
@@ -2020,6 +2039,7 @@ class MediaPlayerInstance: NSObject {
         // a finished item is not "in progress", so re-issuing a playlist
         // that names it still restarts it.
         currentItemIsSpent = true
+        currentItemPlayedToEnd = true
         notifyStateChanged(state: "completed", isBuffering: false)
     }
 

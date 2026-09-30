@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`PlayerState.completed` now persists after a natural end of playback** (issue #132). Both
+  platforms emitted a quiescent event right after `completed` that overwrote it with `paused`:
+  Android's `onIsPlayingChanged(false)` (about 8ms after `STATE_ENDED`) and iOS's
+  `timeControlStatus` -> `.paused`. As a result `PlaybackState.state == PlayerState.completed`
+  was never observable, apps could not show a Replay control, and `MediaPlayer.play()`'s
+  restart-if-completed guard could not fire. Both natives now suppress the plain pause while the
+  item has ended (Android: `playbackState == STATE_ENDED`; iOS: new `currentItemPlayedToEnd`
+  flag, reset on load/play/seek/stop), and `MediaPlayer` latches `completed` against a trailing
+  `paused`/`idle` until a host command (`load`/`play`/`stop`/`seekTo`/`setPlaylist`/
+  `skipToIndex`) or another native state, so new Dart against an older cached native build
+  behaves too. Playlist auto-advance and `looping` are unaffected (they issue host commands).
+  Needs on-device confirmation on both platforms.
+
 ## [0.5.1] - 2026-09-10
 
 ### BREAKING
