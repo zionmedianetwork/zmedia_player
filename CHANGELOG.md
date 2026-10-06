@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`MediaPlayer.showAirPlayPicker()` / `MediaController.showAirPlayPicker()`** (issue #144): open
+  the system AirPlay route picker programmatically. iOS lazily creates a hidden
+  `AVRoutePickerView` in the key window and triggers its button; returns `false` on Android.
+  `AirPlayHandler.connect()` now uses the same path, so it no longer depends on an `AirPlayButton`
+  having been created first.
+- **`AirPlayButton` `width`, `height` and `invisible`** (issue #144): optional sizing, and an
+  invisible mode that keeps the tap target but hides the glyph. The default 32x32 button is unchanged.
+
+### Fixed
+- **Android: the media notification is no longer rebuilt and reposted on every 500 ms position
+  tick** (issue #150). `NotificationService` forwarded every `stateStream` event to native, and
+  `NotificationHandler.updateState` rebuilt the MediaSession metadata (artwork bitmap included) and
+  reposted the notification each time: ~150 ms of main-thread work twice per tick, which froze
+  live video on low-end devices (Note 9P: 94.5% janky frames, ~7 fps presented). Dart now forwards
+  only meaningful changes (state, duration, speed, live/DVR, position drift over 2 s, or a 15 s
+  resync), and native skips the republish unless a render key changed. Same device: 6.3% janky.
+- **Live streams show a LIVE indicator** (issue #149). iOS sets
+  `MPNowPlayingInfoPropertyIsLiveStream` and omits elapsed time and duration for live without DVR;
+  Android shows "LIVE" as the notification subText and in `METADATA_KEY_DISPLAY_DESCRIPTION`.
+- **Android: `MediaItem.album` is published** as `METADATA_KEY_ALBUM` and as the notification
+  subText for non-live items (issue #148).
+- **`NotificationService` no longer lets a not-yet-loaded player's `isLive == false` hide
+  `MediaItem.isLive`.**
+- **`play()` no longer restarts a live stream from 0 when the state is `completed`** (issue #142).
+  On live, `completed` means the feed dropped; the restart-seek now applies to non-live items only
+  and recovery is left to the host.
+- **A seek away from the end of a finished item now leaves `PlayerState.completed`** (issue #143).
+  iOS emitted nothing after such a seek, so Replay stayed and `play()` restarted from 0. iOS now
+  reports `paused` when the seek completes (matching Android), and `MediaPlayer.seekTo` moves
+  `completed` to `paused` after a successful seek. The #132 latch is otherwise unchanged.
+- **Android Cast: live media is sent as `STREAM_TYPE_LIVE`** with an unknown duration (issue
+  #145). `loadMediaOnCastDevice` now forwards `isLive` and `dvrEnabled` (`customData.dvrEnabled`
+  on live items).
+- **iOS: an AirPlay route that is already active is detected** (issue #146). `AirPlayHandler`
+  seeds its state from `AVPlayer.isExternalPlaybackActive` on initialize and emits it once.
+- **iOS: the `AirPlayButton` platform view fills its bounds** (issue #144), so the whole area is
+  tappable instead of a centred 32x32 picker.
+- **Android: Picture-in-Picture auto-enter works before Android 12, and PiP exit is reported**
+  (issue #147). The plugin registers the user-leave hint through
+  `ActivityPluginBinding.addOnUserLeaveHintListener` (`FlutterFragmentActivity.onUserLeaveHint()`
+  never calls `super`, so androidx `ComponentActivity` listeners never fire) and observes PiP mode
+  changes via `ComponentActivity`, clearing the `isInPipMode` latch on exit. No host relay code is
+  needed. `PictureInPictureParams` (video aspect ratio, and auto-enter plus seamless resize on 12+)
+  are applied when PiP is configured and when the video size or playing state changes, not only
+  on explicit entry. The decoded video's aspect ratio now overrides `PipConfig.aspectRatio`, and on
+  12+ auto-enter is armed only while playing. Adds an explicit `androidx.activity:activity:1.8.2`
+  dependency.
+
 ## [0.6.0] - 2026-09-30
 
 ### Added
