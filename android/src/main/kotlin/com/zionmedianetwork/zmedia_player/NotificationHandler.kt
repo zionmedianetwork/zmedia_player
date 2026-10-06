@@ -624,12 +624,43 @@ class NotificationHandler(
         // promoteToOwner() runs, so it only ever gets whichever duration
         // was last written to the session's metadata -- which, without
         // this call, would not necessarily be the latest one.
-        updateMediaSessionMetadata()
+        // PERF: updateState() is driven by MediaPlayer.stateStream, i.e. it can
+        // arrive on every position tick. Re-publishing the MediaSession
+        // metadata (which carries the artwork Bitmap across Binder) and
+        // re-posting the notification (large icon, same bitmap) cost ~150 ms
+        // of Android MAIN-thread time per call on a low-end device and churned
+        // the heap with native allocations -- enough to freeze video presented
+        // by Flutter. Neither depends on the playback position (the session's
+        // PlaybackState carries position + speed and the system extrapolates),
+        // so republish them only when something they render actually changed.
+        val key = renderKey()
+        if (key != publishedMetadataKey) {
+            updateMediaSessionMetadata()
+        }
         updateMediaSessionPlaybackState()
-        if (isOwner) {
+        if (isOwner && key != publishedNotificationKey) {
             buildAndShowNotification()
         }
     }
+
+    /**
+     * Everything the session metadata and the posted notification render that
+     * can change between [updateState] calls. Excludes position.
+     */
+    private fun renderKey(): List<Any?> = listOf(
+        currentTitle,
+        currentArtist,
+        duration,
+        isPlaying,
+        isSeekable,
+        currentArtworkBitmap?.let { System.identityHashCode(it) },
+    )
+
+    /** [renderKey] as of the last [updateMediaSessionMetadata]. */
+    private var publishedMetadataKey: List<Any?>? = null
+
+    /** [renderKey] as of the last [buildAndShowNotification]. */
+    private var publishedNotificationKey: List<Any?>? = null
 
     /**
      * Update notification position
@@ -769,6 +800,7 @@ class NotificationHandler(
     // Private helper methods
 
     private fun buildAndShowNotification() {
+        publishedNotificationKey = renderKey()
         val notification = buildNotification()
         this.notification = notification
         notificationManager?.notify(notificationId, notification)
@@ -1143,6 +1175,7 @@ class NotificationHandler(
     }
 
     private fun updateMediaSessionMetadata() {
+        publishedMetadataKey = renderKey()
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
