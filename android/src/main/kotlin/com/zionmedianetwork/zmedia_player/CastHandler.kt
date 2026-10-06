@@ -461,7 +461,16 @@ class CastHandler(
         val contentId = mediaItem["url"] as? String ?: ""
         val title = mediaItem["title"] as? String ?: "Unknown Title"
         val artworkUrl = mediaItem["artworkUrl"] as? String
-        val duration = (mediaItem["duration"] as? Number)?.toLong() ?: MediaInfo.UNKNOWN_DURATION
+        val isLive = mediaItem["isLive"] as? Boolean ?: false
+        val dvrEnabled = isLive && (mediaItem["dvrEnabled"] as? Boolean ?: false)
+        // Issue #145: a live stream must be described as STREAM_TYPE_LIVE with
+        // an unknown duration, otherwise the receiver treats the sliding
+        // playlist as a finite on-demand asset (seek bar, idles at window end).
+        val duration = if (isLive) {
+            MediaInfo.UNKNOWN_DURATION
+        } else {
+            (mediaItem["duration"] as? Number)?.toLong() ?: MediaInfo.UNKNOWN_DURATION
+        }
 
         // Content type. Issue #87: an explicit `streamingFormat` hint from
         // `MediaItem.streamingFormat` wins over URL sniffing for the two
@@ -491,12 +500,17 @@ class CastHandler(
             }
         }
 
-        return MediaInfo.Builder(contentId)
-            .setStreamType(MediaInfo.STREAM_TYPE_BUFFERED)
+        val builder = MediaInfo.Builder(contentId)
+            .setStreamType(if (isLive) MediaInfo.STREAM_TYPE_LIVE else MediaInfo.STREAM_TYPE_BUFFERED)
             .setContentType(contentType)
             .setMetadata(metadata)
             .setStreamDuration(duration)
-            .build()
+        if (isLive) {
+            // The Default Media Receiver ignores this; custom receivers can
+            // use it to decide whether to expose a DVR seek window.
+            builder.setCustomData(org.json.JSONObject().put("dvrEnabled", dvrEnabled))
+        }
+        return builder.build()
     }
 
     private fun setupRemoteMediaClientListeners() {

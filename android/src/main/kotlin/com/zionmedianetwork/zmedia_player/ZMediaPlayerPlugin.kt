@@ -165,6 +165,8 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
             "connectToCastDevice" -> handleConnectToCastDevice(call, result)
             "disconnectFromCastDevice" -> handleDisconnectFromCastDevice(call, result)
             "loadMediaOnCastDevice" -> handleLoadMediaOnCastDevice(call, result)
+            // iOS-only system AirPlay picker; Android has no equivalent.
+            "showAirPlayPicker" -> result.success(false)
             "castPlay" -> handleCastPlay(call, result)
             "castPause" -> handleCastPause(call, result)
             "castSeekTo" -> handleCastSeekTo(call, result)

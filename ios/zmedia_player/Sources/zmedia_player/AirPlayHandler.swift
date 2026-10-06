@@ -99,6 +99,15 @@ class AirPlayHandler: NSObject {
             }
         }
 
+        // Issue #146: seed from the player's CURRENT external-playback state.
+        // The KVO above has no `.initial`, so if AirPlay is already routed
+        // (started from Control Center, or this player was created mid-session)
+        // no change event would ever fire. checkAirPlayAvailability() below
+        // emits the seeded state exactly once.
+        if let player = player {
+            isAirPlayActive = player.isExternalPlaybackActive
+        }
+
         // Check initial AirPlay availability
         checkAirPlayAvailability()
 
@@ -378,18 +387,7 @@ class AirPlayHandler: NSObject {
         // We can't programmatically connect to a specific device
         // User must select device through the system AirPlay picker
 
-        // Show route picker if available
-        if let routePicker = routePickerView {
-            // Simulate button press to show picker
-            for view in routePicker.subviews {
-                if let button = view as? UIButton {
-                    button.sendActions(for: .touchUpInside)
-                    return true
-                }
-            }
-        }
-
-        return false
+        return showRoutePicker()
     }
 
     func disconnect() {
@@ -470,20 +468,63 @@ class AirPlayHandler: NSObject {
         return picker
     }
 
-    func showRoutePicker() {
-        guard let picker = routePickerView else {
-            zlog("AirPlayHandler: Route picker not available")
-            return
+    /// Opens the system AirPlay route picker. Lazily creates a picker and
+    /// parks it, near-invisible, in the key window if none exists (an
+    /// `AVRoutePickerView` only reacts when it is in a window). Must run on
+    /// the main thread (Flutter method calls do). Returns whether a button
+    /// was found and triggered.
+    @discardableResult
+    func showRoutePicker() -> Bool {
+        guard airPlayEnabled else {
+            zlog("AirPlayHandler: AirPlay disabled via CastConfig - not showing picker")
+            return false
         }
 
-        // Programmatically trigger the route picker
-        for view in picker.subviews {
-            if let button = view as? UIButton {
-                button.sendActions(for: .touchUpInside)
-                zlog("AirPlayHandler: Route picker shown")
-                break
-            }
+        let picker: AVRoutePickerView
+        if let existing = routePickerView {
+            picker = existing
+        } else {
+            picker = createRoutePickerView()
         }
+
+        if picker.window == nil {
+            guard let window = AirPlayHandler.keyWindow() else {
+                zlog("AirPlayHandler: No window available to host the route picker")
+                return false
+            }
+            picker.frame = CGRect(x: 0, y: 0, width: 44, height: 44)
+            // Fully transparent views are skipped by hit-testing/layout in some
+            // cases; a near-zero alpha keeps the control live but unseen.
+            picker.alpha = 0.011
+            picker.isUserInteractionEnabled = false
+            window.addSubview(picker)
+            picker.layoutIfNeeded()
+        }
+
+        guard let button = AirPlayHandler.findButton(in: picker) else {
+            zlog("AirPlayHandler: Route picker button not found")
+            return false
+        }
+        button.sendActions(for: .touchUpInside)
+        zlog("AirPlayHandler: Route picker shown")
+        return true
+    }
+
+    /// Depth-first search for the picker's inner UIButton (it is not
+    /// guaranteed to be a direct subview, and its depth changes across iOS
+    /// versions).
+    static func findButton(in view: UIView) -> UIButton? {
+        if let button = view as? UIButton { return button }
+        for sub in view.subviews {
+            if let found = findButton(in: sub) { return found }
+        }
+        return nil
+    }
+
+    private static func keyWindow() -> UIWindow? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let active = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        return active?.windows.first(where: { $0.isKeyWindow }) ?? active?.windows.first
     }
 
     // MARK: - Device Information
