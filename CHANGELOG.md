@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-06
+
 ### Fixed
 - **A seek away from the end of a finished item now emits `paused` together with the seek position
   in one update** (issue #143 follow-up). `MediaPlayer.seekTo` first left `completed` (state
