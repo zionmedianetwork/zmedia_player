@@ -68,6 +68,46 @@ class PipHandler(
     private var config: Map<String, Any>? = null
     private var isInPipMode = false
 
+    // Decoded video size (width, height) pushed by the plugin; drives the PiP
+    // aspect ratio in preference to PipConfig.aspectRatio (which is always
+    // sent, defaulting to 16:9, so it cannot tell "explicit" from "default").
+    private var videoSize: Pair<Int, Int>? = null
+
+    /** Whether PipConfig.autoEnterOnBackground was requested. */
+    val autoEnterRequested: Boolean
+        get() = config?.get("autoEnterOnBackground") as? Boolean ?: false
+
+    /** Whether a PiP config has been applied (PiP enabled for this player). */
+    val isConfigured: Boolean
+        get() = config != null
+
+    val isActive: Boolean
+        get() = isInPipMode
+
+    fun updateVideoSize(size: Pair<Int, Int>?) {
+        videoSize = size
+    }
+
+    /**
+     * Push PictureInPictureParams to the Activity now, without entering PiP.
+     * On Android 12+ this is what arms [PictureInPictureParams.Builder.setAutoEnterEnabled]
+     * (and keeps the source rect/aspect ratio current for the transition);
+     * before 12 it still makes a later enterPictureInPictureMode / user-leave
+     * entry use the right aspect ratio. [autoEnter] is the already-resolved
+     * value (configured AND playing). No-op below API 26, with no Activity,
+     * or with no PiP config applied.
+     */
+    fun applyPipParams(autoEnter: Boolean) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val currentActivity = activity ?: return
+        val cfg = config ?: return
+        try {
+            currentActivity.setPictureInPictureParams(buildPipParams(cfg, currentActivity, autoEnter))
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "setPictureInPictureParams failed: ${e.message}")
+        }
+    }
+
     /**
      * Refresh the Activity reference held by this handler.
      *
@@ -90,6 +130,7 @@ class PipHandler(
         if (config != null) {
             this.config = config
         }
+        applyPipParams(false)
     }
 
     /**
@@ -170,7 +211,7 @@ class PipHandler(
         this.config = effectiveConfig
 
         return try {
-            val params = buildPipParams(effectiveConfig, currentActivity)
+            val params = buildPipParams(effectiveConfig, currentActivity, autoEnterRequested)
             android.util.Log.d(TAG, "Built PiP params, entering PiP mode...")
 
             val result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -253,14 +294,25 @@ class PipHandler(
      * Build PiP parameters
      */
     @RequiresApi(Build.VERSION_CODES.O)
-    private fun buildPipParams(config: Map<String, Any>?, context: Context): PictureInPictureParams {
+    private fun buildPipParams(
+        config: Map<String, Any>?,
+        context: Context,
+        autoEnter: Boolean
+    ): PictureInPictureParams {
         val builder = PictureInPictureParams.Builder()
 
-        // Set aspect ratio
-        val aspectRatio = config?.get("aspectRatio") as? Double ?: (16.0 / 9.0)
+        // Aspect ratio: the decoded video's own ratio when known, else
+        // PipConfig.aspectRatio. The framework throws IllegalArgumentException
+        // outside [1/2.39, 2.39], so clamp.
+        val size = videoSize
+        val aspectRatio = if (size != null) {
+            size.first.toDouble() / size.second.toDouble()
+        } else {
+            (config?.get("aspectRatio") as? Number)?.toDouble() ?: (16.0 / 9.0)
+        }.coerceIn(1.0 / 2.39, 2.39)
         val rational = Rational(
-            (aspectRatio * 100).toInt(),
-            100
+            (aspectRatio * 1000).toInt(),
+            1000
         )
         builder.setAspectRatio(rational)
 
@@ -285,8 +337,8 @@ class PipHandler(
 
         // For Android 12+, we can add additional features
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            // Set auto-enter enabled
-            val autoEnter = config?.get("autoEnterOnBackground") as? Boolean ?: false
+            // Auto-enter on leaving the app (Android 12+; before 12 the plugin
+            // enters from onUserLeaveHint instead).
             builder.setAutoEnterEnabled(autoEnter)
 
             // Set seamless resize enabled for smoother transitions

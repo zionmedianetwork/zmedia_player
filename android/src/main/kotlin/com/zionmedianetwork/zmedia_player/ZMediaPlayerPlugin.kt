@@ -2,6 +2,7 @@ package com.zionmedianetwork.zmedia_player
 
 import android.app.Activity
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import androidx.annotation.NonNull
@@ -89,6 +90,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
 
         // Initialize player manager
         playerManager = MediaPlayerManager(context, channel)
+        playerManager.pipStateListener = { playerId -> refreshPipParams(playerId) }
 
         // H-06: start device-wide connectivity monitoring for the lifetime of
         // the plugin (see the `networkMonitor` field doc for why this is one
@@ -726,7 +728,10 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
                 // Use the actual activity from ActivityAware
                 val handler = PipHandler(activity, playerId, channel)
                 pipHandlers[playerId] = handler
+                handler.updateVideoSize(playerManager.videoSize(playerId))
                 handler.applyConfig(pipConfig)
+                // Arm params now (aspect ratio / 12+ auto-enter), not only on explicit enter.
+                refreshPipParams(playerId)
                 val isAvailable = handler.checkAvailability()
                 android.util.Log.d("ZMediaPlayerPlugin", "PiP availability check: $isAvailable (activity: ${activity != null})")
                 result.success(isAvailable)
@@ -1056,12 +1061,14 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
     // ActivityAware implementation
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
+        registerPipActivityListeners(binding.activity)
         refreshPipHandlersActivity()
         secureSurfaceHandler.updateActivity(activity)
         android.util.Log.d("ZMediaPlayerPlugin", "Activity attached: ${activity != null}")
     }
 
     override fun onDetachedFromActivityForConfigChanges() {
+        unregisterPipActivityListeners()
         // Keep activity reference during config changes. The Activity being torn down
         // here is about to be destroyed and recreated; onReattachedToActivityForConfigChanges
         // will supply the new instance for both `activity` and every cached PipHandler.
@@ -1070,6 +1077,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
+        registerPipActivityListeners(binding.activity)
         // Refresh cached PipHandler instances so a handler created before rotation
         // doesn't keep operating against the now-destroyed pre-rotation Activity
         // (see PipHandler.updateActivity).
@@ -1082,6 +1090,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
     }
 
     override fun onDetachedFromActivity() {
+        unregisterPipActivityListeners()
         activity = null
         refreshPipHandlersActivity()
         secureSurfaceHandler.updateActivity(activity)
@@ -1097,5 +1106,95 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
      */
     private fun refreshPipHandlersActivity() {
         pipHandlers.values.forEach { it.updateActivity(activity) }
+    }
+
+    // ---- PiP: auto-enter + mode reporting (issue #147) ----------------------
+    //
+    // The host app should not have to relay onUserLeaveHint /
+    // onPictureInPictureModeChanged, so we hook ComponentActivity's listener
+    // registries (FlutterFragmentActivity is a ComponentActivity). A plain
+    // FlutterActivity is not: there we cannot observe either callback, so
+    // pre-12 auto-enter and exit reporting are unavailable (the host can still
+    // relay via the `onPipModeChanged` method, and Android 12+ auto-enter
+    // works through setAutoEnterEnabled regardless of the host class).
+
+    private var pipListenerActivity: androidx.activity.ComponentActivity? = null
+
+    private val userLeaveHintListener = Runnable { onUserLeaveHint() }
+
+    private val pipModeChangedListener =
+        androidx.core.util.Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { info ->
+            onPipActivityModeChanged(info.isInPictureInPictureMode)
+        }
+
+    private fun registerPipActivityListeners(host: Activity) {
+        unregisterPipActivityListeners()
+        if (host !is androidx.activity.ComponentActivity) {
+            android.util.Log.w(
+                "ZMediaPlayerPlugin",
+                "Host activity ${host.javaClass.name} is not a ComponentActivity " +
+                    "(use FlutterFragmentActivity): PiP auto-enter before Android 12 and " +
+                    "PiP exit reporting are unavailable unless the host relays them."
+            )
+            return
+        }
+        host.addOnUserLeaveHintListener(userLeaveHintListener)
+        host.addOnPictureInPictureModeChangedListener(pipModeChangedListener)
+        pipListenerActivity = host
+    }
+
+    private fun unregisterPipActivityListeners() {
+        pipListenerActivity?.let {
+            it.removeOnUserLeaveHintListener(userLeaveHintListener)
+            it.removeOnPictureInPictureModeChangedListener(pipModeChangedListener)
+        }
+        pipListenerActivity = null
+    }
+
+    /** First PiP-configured, auto-enter-requesting handler whose player is playing. */
+    private fun autoEnterCandidate(): Map.Entry<String, PipHandler>? =
+        pipHandlers.entries.firstOrNull { (id, h) ->
+            h.isConfigured && h.autoEnterRequested && playerManager.isPlaying(id)
+        }
+
+    private fun onUserLeaveHint() {
+        // Android 12+ is handled by setAutoEnterEnabled (armed in
+        // refreshPipParams); entering here as well would double-enter.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val candidate = autoEnterCandidate() ?: return
+        android.util.Log.d("ZMediaPlayerPlugin", "User leave hint: auto-entering PiP for ${candidate.key}")
+        candidate.value.enterPip(null)
+    }
+
+    private fun onPipActivityModeChanged(inPip: Boolean) {
+        if (inPip) {
+            // Auto-enter on 12+ never went through enterPip(), so no handler
+            // knows yet: attribute the window to the playing one(s).
+            val playing = pipHandlers.entries.filter { (id, h) -> h.isConfigured && playerManager.isPlaying(id) }
+            val targets = if (playing.isNotEmpty()) playing.map { it.value }
+            else pipHandlers.values.filter { it.isConfigured }
+            targets.forEach { it.onPictureInPictureModeChanged(true) }
+        } else {
+            pipHandlers.values.filter { it.isActive }.forEach { it.onPictureInPictureModeChanged(false) }
+        }
+    }
+
+    /**
+     * Re-push PictureInPictureParams after a video-size or isPlaying change so
+     * the aspect ratio is right and (12+) auto-enter is armed only while
+     * something is actually playing.
+     */
+    private fun refreshPipParams(playerId: String) {
+        val trigger = pipHandlers[playerId] ?: return
+        if (!trigger.isConfigured) return
+        trigger.updateVideoSize(playerManager.videoSize(playerId))
+        val active = autoEnterCandidate()
+        if (active != null) {
+            if (active.key != playerId) active.value.updateVideoSize(playerManager.videoSize(active.key))
+            active.value.applyPipParams(true)
+        } else {
+            trigger.applyPipParams(false)
+        }
     }
 }
