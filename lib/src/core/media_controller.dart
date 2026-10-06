@@ -1215,6 +1215,10 @@ class MediaController extends ChangeNotifier {
     await _player.disconnectFromCastDevice();
   }
 
+  /// Opens the system AirPlay route picker (iOS). See
+  /// [MediaPlayer.showAirPlayPicker]. Returns `false` where unsupported.
+  Future<bool> showAirPlayPicker() => _player.showAirPlayPicker();
+
   /// Clean up all subscriptions with error handling
   void _cleanupSubscriptions() {
     final errors = <int, dynamic>{};

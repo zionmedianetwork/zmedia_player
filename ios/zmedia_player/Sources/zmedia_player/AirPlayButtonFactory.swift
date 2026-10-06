@@ -59,11 +59,16 @@ class AirPlayButtonView: NSObject, FlutterPlatformView {
         routePickerView.translatesAutoresizingMaskIntoConstraints = false
         _view.addSubview(routePickerView)
 
+        // Issue #144: pin to all four edges so the picker (and its inner
+        // button, which fills the picker) follows the platform view's size.
+        // The whole area is tappable; the glyph is drawn centred by
+        // AVRoutePickerView itself. The Dart `AirPlayButton` sizes the platform
+        // view to `size`, so the default 32x32 look is unchanged.
         NSLayoutConstraint.activate([
-            routePickerView.centerXAnchor.constraint(equalTo: _view.centerXAnchor),
-            routePickerView.centerYAnchor.constraint(equalTo: _view.centerYAnchor),
-            routePickerView.widthAnchor.constraint(equalToConstant: 32),
-            routePickerView.heightAnchor.constraint(equalToConstant: 32)
+            routePickerView.leadingAnchor.constraint(equalTo: _view.leadingAnchor),
+            routePickerView.trailingAnchor.constraint(equalTo: _view.trailingAnchor),
+            routePickerView.topAnchor.constraint(equalTo: _view.topAnchor),
+            routePickerView.bottomAnchor.constraint(equalTo: _view.bottomAnchor)
         ])
 
         zlog("AirPlayButtonView: Created with frame: \(frame)")
@@ -93,6 +98,13 @@ class AirPlayButtonView: NSObject, FlutterPlatformView {
             routePickerView.prioritizesVideoDevices = prioritizesVideo
         } else {
             routePickerView.prioritizesVideoDevices = true
+        }
+
+        // `invisible`: keep the full-size tap target but hide the glyph, so a
+        // host can draw its own row/icon underneath and still open the picker.
+        if (arguments["invisible"] as? Bool) == true {
+            routePickerView.tintColor = .clear
+            routePickerView.activeTintColor = .clear
         }
 
         zlog("AirPlayButtonView: Configured with arguments: \(arguments)")

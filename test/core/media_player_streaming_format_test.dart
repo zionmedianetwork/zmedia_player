@@ -327,6 +327,104 @@ void main() {
     });
   });
 
+  group('loadMediaOnCastDevice live flags (#145)', () {
+    test('forwards isLive=true and dvrEnabled=false for live without DVR',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'cast-live');
+      await player.initialize();
+      calls.clear();
+
+      await player.loadMediaOnCastDevice(const MediaItem(
+        id: 'live',
+        title: 'Live',
+        url: 'https://cdn.example.com/_cast/live/index.m3u8',
+        isLive: true,
+        streamingFormat: StreamingFormat.hls,
+      ));
+
+      final call = calls.firstWhere((c) => c.method == 'loadMediaOnCastDevice');
+      final mediaItem =
+          Map<String, dynamic>.from(call.arguments['mediaItem'] as Map);
+      expect(mediaItem['isLive'], true);
+      expect(mediaItem['dvrEnabled'], false);
+      player.dispose();
+    });
+
+    test('forwards dvrEnabled=true when the loaded live item has DVR on',
+        () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(
+        playerId: 'cast-live-dvr',
+        config: const MediaConfig(hlsConfig: HlsConfig(enableDvr: true)),
+      );
+      await player.initialize();
+      const item = MediaItem(
+        id: 'live',
+        title: 'Live',
+        url: 'https://cdn.example.com/_cast/live/index.m3u8',
+        isLive: true,
+        streamingFormat: StreamingFormat.hls,
+      );
+      await player.load(item);
+      calls.clear();
+
+      await player.loadMediaOnCastDevice(item);
+
+      final call = calls.firstWhere((c) => c.method == 'loadMediaOnCastDevice');
+      final mediaItem =
+          Map<String, dynamic>.from(call.arguments['mediaItem'] as Map);
+      expect(mediaItem['isLive'], true);
+      expect(mediaItem['dvrEnabled'], true);
+      player.dispose();
+    });
+
+    test('VOD item sends isLive=false and dvrEnabled=false', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'cast-vod');
+      await player.initialize();
+      calls.clear();
+
+      await player.loadMediaOnCastDevice(const MediaItem(
+        id: 'vod',
+        title: 'VOD',
+        url: 'https://cdn.example.com/vod/index.m3u8',
+      ));
+
+      final call = calls.firstWhere((c) => c.method == 'loadMediaOnCastDevice');
+      final mediaItem =
+          Map<String, dynamic>.from(call.arguments['mediaItem'] as Map);
+      expect(mediaItem['isLive'], false);
+      expect(mediaItem['dvrEnabled'], false);
+      player.dispose();
+    });
+  });
+
+  group('showAirPlayPicker (#144)', () {
+    test('invokes native showAirPlayPicker and returns its result', () async {
+      final calls = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(_channel, (MethodCall call) async {
+        calls.add(call);
+        return call.method == 'showAirPlayPicker' ? true : null;
+      });
+      final player = MediaPlayer(playerId: 'picker');
+      await player.initialize();
+
+      expect(await player.showAirPlayPicker(), true);
+      expect(calls.where((c) => c.method == 'showAirPlayPicker'), hasLength(1));
+      player.dispose();
+    });
+
+    test('returns false when native returns null', () async {
+      _installCapture();
+      final player = MediaPlayer(playerId: 'picker-null');
+      await player.initialize();
+      expect(await player.showAirPlayPicker(), false);
+      player.dispose();
+    });
+  });
+
   group('missing-config diagnostic', () {
     test(
         'a live item whose format has no config still loads, with DVR off '

@@ -221,6 +221,8 @@ class CastService {
           'url': mediaItem.url,
           'artworkUrl': mediaItem.artworkUrl,
           'duration': mediaItem.duration?.inMilliseconds,
+          'streamingFormat': mediaItem.streamingFormat?.name,
+          'isLive': mediaItem.isLive,
         },
       });
 

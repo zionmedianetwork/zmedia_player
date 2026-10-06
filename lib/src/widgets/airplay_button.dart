@@ -28,9 +28,24 @@ class AirPlayButton extends StatelessWidget {
   /// Whether to prioritize video devices over audio
   final bool prioritizesVideoDevices;
 
+  /// Optional explicit width. When set (or [height] is), the platform view is
+  /// sized to `width x height` and the whole area is tappable, e.g. a full
+  /// list row. Defaults to [size].
+  final double? width;
+
+  /// Optional explicit height. Defaults to [size].
+  final double? height;
+
+  /// Hide the AirPlay glyph but keep the tap target, so the host can draw its
+  /// own icon/row behind it. Defaults to `false`.
+  final bool invisible;
+
   const AirPlayButton({
     super.key,
     this.size = 32.0,
+    this.width,
+    this.height,
+    this.invisible = false,
     this.tintColor,
     this.activeTintColor,
     this.prioritizesVideoDevices = true,
@@ -44,14 +59,15 @@ class AirPlayButton extends StatelessWidget {
     }
 
     return SizedBox(
-      width: size,
-      height: size,
+      width: width ?? size,
+      height: height ?? size,
       child: UiKitView(
         viewType: 'zmedia_player/airplay_button',
         creationParams: {
           'tintColor': _colorToHex(tintColor),
           'activeTintColor': _colorToHex(activeTintColor),
           'prioritizesVideoDevices': prioritizesVideoDevices,
+          'invisible': invisible,
         },
         creationParamsCodec: const StandardMessageCodec(),
       ),

@@ -2236,6 +2236,31 @@ class MediaPlayer {
     }
   }
 
+  /// Opens the system AirPlay route picker programmatically (iOS only).
+  ///
+  /// Lets a host make an arbitrary widget (for example a full list row) open
+  /// the picker without embedding an `AirPlayButton` platform view. Returns
+  /// `true` if the picker was triggered, `false` if it could not be (AirPlay
+  /// disabled via `CastConfig`, no active window yet, or Android, where there
+  /// is no system route picker — use the cast device APIs there).
+  Future<bool> showAirPlayPicker() async {
+    await _ensureInitialized();
+    await _ensureCastInitialized();
+
+    try {
+      final result = await _invokeMethod('showAirPlayPicker', {
+        'playerId': playerId,
+      });
+      return result == true;
+    } on PlatformException catch (e) {
+      throw PlatformOperationException(
+        'Failed to show AirPlay picker: ${e.message ?? e.code}',
+        code: e.code,
+        details: e.details as Map<String, dynamic>?,
+      );
+    }
+  }
+
   /// Load media on cast device
   Future<void> loadMediaOnCastDevice(MediaItem mediaItem) async {
     await _ensureInitialized();
@@ -2292,6 +2317,12 @@ class MediaPlayer {
           // cast MediaInfo's contentType. Null => native falls back to its
           // own URL sniffing, as before.
           'streamingFormat': mediaItem.streamingFormat?.name,
+          // Issue #145: lets Android describe a live stream to the receiver
+          // as STREAM_TYPE_LIVE instead of BUFFERED. `dvrEnabled` is only
+          // meaningful for live media and reflects this player's current
+          // streaming config (HlsConfig/DashConfig.enableDvr).
+          'isLive': mediaItem.isLive,
+          'dvrEnabled': mediaItem.isLive && _dvrEnabled,
         },
       });
     } on PlatformException catch (e) {

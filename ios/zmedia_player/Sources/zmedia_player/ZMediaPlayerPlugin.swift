@@ -185,6 +185,8 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
             handleConnectToCastDevice(call, result: result)
         case "disconnectFromCastDevice":
             handleDisconnectFromCastDevice(call, result: result)
+        case "showAirPlayPicker":
+            handleShowAirPlayPicker(call, result: result)
         case "loadMediaOnCastDevice":
             handleLoadMediaOnCastDevice(call, result: result)
         case "castPlay":
@@ -871,6 +873,21 @@ public class ZMediaPlayerPlugin: NSObject, FlutterPlugin {
 
         handler.disconnect()
         result(nil)
+    }
+
+    private func handleShowAirPlayPicker(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+        guard let args = call.arguments as? [String: Any],
+              let playerId = args["playerId"] as? String else {
+            result(FlutterError(code: "INVALID_ARGUMENT", message: "Player ID is required", details: nil))
+            return
+        }
+
+        guard let handler = airPlayHandlers[playerId] else {
+            result(FlutterError(code: "NOT_INITIALIZED", message: "AirPlay handler not initialized", details: nil))
+            return
+        }
+
+        result(handler.showRoutePicker())
     }
 
     private func handleLoadMediaOnCastDevice(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
