@@ -1781,11 +1781,9 @@ class MediaPlayer {
       // rate was already 0, so without this the state stays `completed` and
       // play() would restart from 0, discarding the seek. Only when native
       // has not already moved the state on while the call was in flight.
-      if (!_isDisposed &&
+      final leavesCompleted = !_isDisposed &&
           wasCompletedBeforeSeek &&
-          _currentState.state == PlayerState.completed) {
-        _updateState(_currentState.copyWith(state: PlayerState.paused));
-      }
+          _currentState.state == PlayerState.completed;
 
       // Issue #134: natives report the post-seek position with a one-off
       // `onPositionChanged`, but a paused player's periodic tick is silent, so
@@ -1797,18 +1795,29 @@ class MediaPlayer {
       //    flight (its value is authoritative, e.g. clamped), and
       //  * the player has not been disposed meanwhile.
       // Clamped to a known duration; native's own event then supersedes it.
+      Duration? optimistic;
       if (!_isDisposed &&
           !_isLive &&
           _positionEventCount == positionEventsBeforeSeek) {
-        var optimistic = position;
+        optimistic = position;
         final knownDuration = _currentState.duration;
         if (knownDuration > Duration.zero && optimistic > knownDuration) {
           optimistic = knownDuration;
         }
-        _updateState(_currentState.copyWith(position: optimistic));
-        if (!_positionController.isClosed) {
-          _positionController.add(optimistic);
-        }
+      }
+
+      // One update carries both changes: a position-only push is silent, so
+      // leaving `completed` first (still positioned at the end) and moving the
+      // position second would tell listeners the item left `completed` at
+      // position == duration and never announce the seek position.
+      if (leavesCompleted || optimistic != null) {
+        _updateState(_currentState.copyWith(
+          state: leavesCompleted ? PlayerState.paused : null,
+          position: optimistic,
+        ));
+      }
+      if (optimistic != null && !_positionController.isClosed) {
+        _positionController.add(optimistic);
       }
     } on PlatformException catch (e) {
       throw PlaybackException(

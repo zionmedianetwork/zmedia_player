@@ -129,6 +129,25 @@ void main() {
     await player.dispose();
   });
 
+  test('seekTo() away from the end emits paused WITH the seek position',
+      () async {
+    final player = MediaPlayer(playerId: 'completed-seek-first-emit');
+    await player.initialize();
+    await state('completed-seek-first-emit', 'completed');
+    final emitted = <PlaybackState>[];
+    final sub = player.stateStream.listen(emitted.add);
+    const target = Duration(seconds: 30);
+    await player.seekTo(target);
+    await Future<void>.delayed(Duration.zero);
+    // Position-only pushes are silent, so the first emission must already
+    // carry both the left-completed state and the seek position.
+    expect(emitted, isNotEmpty);
+    expect(emitted.first.state, PlayerState.paused);
+    expect(emitted.first.position, target);
+    await sub.cancel();
+    await player.dispose();
+  });
+
   test('play() after a seek away from the end does not restart (issue #143)',
       () async {
     final player = MediaPlayer(playerId: 'completed-seek-play');

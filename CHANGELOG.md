@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A seek away from the end of a finished item now emits `paused` together with the seek position
+  in one update** (issue #143 follow-up). `MediaPlayer.seekTo` first left `completed` (state
+  `paused`) while `position` still held the end position, then applied the optimistic seek position
+  as a position-only update, which is silent. Listeners therefore saw the item leave `completed` at
+  position == duration and never heard about the seek position. In alelouya_mobile this meant
+  `WatchProgressTracker._detectRestart` (which needs `!completed` and position/duration < 0.9) did
+  not detect a restart on a scrub back from the end while paused.
+
 ## [0.6.1] - 2026-10-06
 
 ### Added
