@@ -1636,7 +1636,12 @@ class MediaPlayer {
       // If playback has finished, restart from the beginning so that calling
       // play() (e.g. from a lock-screen control or the play button) resumes
       // instead of no-opping at the end of the media.
-      if (_currentState.state == PlayerState.completed) {
+      //
+      // Issue #142: never for a live stream. There `completed` means the feed
+      // dropped, not that content ended, and a seek to 0 would jump to the
+      // oldest point of the DVR window (or hit a non-seekable stream). A live
+      // play() just plays; recovering a dropped feed is the host's reload.
+      if (_currentState.state == PlayerState.completed && !_isLive) {
         await _invokeMethod('seekTo', {
           'playerId': playerId,
           'position': 0,
@@ -1764,11 +1769,24 @@ class MediaPlayer {
     }
 
     final positionEventsBeforeSeek = _positionEventCount;
+    final wasCompletedBeforeSeek =
+        _currentState.state == PlayerState.completed;
     try {
       await _invokeMethod('seekTo', {
         'playerId': playerId,
         'position': position.inMilliseconds,
       });
+
+      // Issue #143: a seek ends `completed` (the latch was cleared above).
+      // Android reports buffering -> paused, but iOS emits nothing when the
+      // rate was already 0, so without this the state stays `completed` and
+      // play() would restart from 0, discarding the seek. Only when native
+      // has not already moved the state on while the call was in flight.
+      if (!_isDisposed &&
+          wasCompletedBeforeSeek &&
+          _currentState.state == PlayerState.completed) {
+        _updateState(_currentState.copyWith(state: PlayerState.paused));
+      }
 
       // Issue #134: natives report the post-seek position with a one-off
       // `onPositionChanged`, but a paused player's periodic tick is silent, so
