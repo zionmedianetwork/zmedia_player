@@ -630,10 +630,17 @@ class NotificationHandler: NSObject {
         // live stream without DVR (isSeekable == false) so Control Center / the lock
         // screen renders no scrubber for it -- a duration is what makes the system
         // draw one at all. Elapsed time is always included regardless.
+        // For a live item MPNowPlayingInfoPropertyIsLiveStream = true makes the
+        // system render LIVE. Without DVR (!isSeekable) elapsed time and duration
+        // are omitted entirely (a stale elapsed time would draw a normal timeline);
+        // with DVR the scrubbable window is kept.
+        if isLive {
+            nowPlayingInfo[MPNowPlayingInfoPropertyIsLiveStream] = true
+        }
         if isSeekable {
             nowPlayingInfo[MPMediaItemPropertyPlaybackDuration] = duration
+            nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = position
         }
-        nowPlayingInfo[MPNowPlayingInfoPropertyElapsedPlaybackTime] = position
         nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate] = playbackRate
 
         // Default playback queue index (can be customized)

@@ -1554,4 +1554,34 @@ void main() {
       await player.dispose();
     });
   });
+
+  group('NotificationService - album and live payload (#148/#149)', () {
+    test('show() sends album and isLive', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'notif-live-album');
+      await player.initialize();
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-live-album', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: const MediaItem(
+          id: 'live-1',
+          title: 'Live',
+          url: 'https://example.com/live.m3u8',
+          album: 'My Show',
+          isLive: true,
+        ),
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-live-album',
+      );
+
+      final show = calls.firstWhere((c) => c.method == 'showNotification');
+      final item = show.arguments['mediaItem'] as Map<dynamic, dynamic>;
+      expect(item['album'], 'My Show');
+      expect(item['isLive'], isTrue);
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
 }

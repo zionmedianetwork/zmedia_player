@@ -331,7 +331,8 @@ class NotificationService {
   /// time on a low-end device), twice a second, for the life of the stream.
   bool _shouldForwardState(PlaybackState state) {
     final previous = _lastForwardedState;
-    final live = _mediaPlayer?.isLive ?? _currentMedia?.isLive ?? false;
+    final live =
+        (_mediaPlayer?.isLive ?? false) || (_currentMedia?.isLive ?? false);
     final dvr = _mediaPlayer?.dvrEnabled ?? false;
     final now = DateTime.now();
 
@@ -350,8 +351,8 @@ class NotificationService {
           ? previous.position + elapsed * previous.speed
           : previous.position;
       final drift = (state.position - expected).abs();
-      forward = drift > _positionDriftTolerance ||
-          elapsed >= _positionResyncInterval;
+      forward =
+          drift > _positionDriftTolerance || elapsed >= _positionResyncInterval;
     }
 
     if (forward) {
@@ -438,7 +439,7 @@ class NotificationService {
           // Both are re-sent on every [updateState] call too (see below) —
           // this initial value is only what native has until the first state
           // update arrives.
-          'isLive': _mediaPlayer?.isLive ?? mediaItem.isLive,
+          'isLive': (_mediaPlayer?.isLive ?? false) || mediaItem.isLive,
           'dvrEnabled': _mediaPlayer?.dvrEnabled ?? false,
         },
         'state': {
@@ -496,7 +497,8 @@ class NotificationService {
           'position': state.position.inMilliseconds,
           'duration': effectiveDuration.inMilliseconds,
           'isPlaying': state.state == PlayerState.playing,
-          'isLive': _mediaPlayer?.isLive ?? _currentMedia?.isLive ?? false,
+          'isLive': (_mediaPlayer?.isLive ?? false) ||
+              (_currentMedia?.isLive ?? false),
           'dvrEnabled': _mediaPlayer?.dvrEnabled ?? false,
         },
       });

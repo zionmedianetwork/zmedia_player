@@ -259,6 +259,9 @@ class NotificationHandler(
     // Current media info
     private var currentTitle: String? = null
     private var currentArtist: String? = null
+    // MediaItem.album ("album" key of the mediaItem map). Published as
+    // METADATA_KEY_ALBUM and, for non-live items, as the notification subText.
+    private var currentAlbum: String? = null
     private var currentArtworkUrl: String? = null
     private var currentMediaUrl: String? = null
     // The current item's MediaItem.httpHeaders, sent on the "mediaItem" map by
@@ -507,6 +510,7 @@ class NotificationHandler(
         // Update media info
         currentTitle = mediaItem["title"] as? String ?: "Unknown Title"
         currentArtist = mediaItem["artist"] as? String ?: "Unknown Artist"
+        currentAlbum = (mediaItem["album"] as? String)?.takeIf { it.isNotBlank() }
         currentArtworkUrl = newArtworkUrl
         currentMediaUrl = newMediaUrl
         // Deliberately NOT part of the mediaChanged comparison above: a
@@ -650,6 +654,12 @@ class NotificationHandler(
     private fun renderKey(): List<Any?> = listOf(
         currentTitle,
         currentArtist,
+        currentAlbum,
+        // isLive/dvrEnabled change the LIVE subText and the session metadata
+        // (isSeekable alone cannot tell live+DVR from VOD), so they must be
+        // part of the key or the LIVE badge would never (re)appear.
+        isLive,
+        dvrEnabled,
         duration,
         isPlaying,
         isSeekable,
@@ -823,6 +833,9 @@ class NotificationHandler(
         val builder = NotificationCompat.Builder(context, channelId)
             .setContentTitle(currentTitle)
             .setContentText(currentArtist)
+            // Live items get a "LIVE" subText (Android has no live flag on
+            // MediaSession); otherwise the album, when there is one.
+            .setSubText(if (isLive) "LIVE" else currentAlbum)
             .setSmallIcon(smallIconResId)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(compatPriority)
@@ -1179,6 +1192,13 @@ class NotificationHandler(
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
+            // Surfaced by SystemUI/Auto/Wear as the third description line:
+            // "LIVE" for live items, else the album.
+            .putString(
+                MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION,
+                if (isLive) "LIVE" else currentAlbum,
+            )
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
 
         currentArtworkBitmap?.let {
