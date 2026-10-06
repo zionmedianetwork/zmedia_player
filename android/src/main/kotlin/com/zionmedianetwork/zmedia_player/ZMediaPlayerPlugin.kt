@@ -1061,7 +1061,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
     // ActivityAware implementation
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {
         activity = binding.activity
-        registerPipActivityListeners(binding.activity)
+        registerPipActivityListeners(binding)
         refreshPipHandlersActivity()
         secureSurfaceHandler.updateActivity(activity)
         android.util.Log.d("ZMediaPlayerPlugin", "Activity attached: ${activity != null}")
@@ -1077,7 +1077,7 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
 
     override fun onReattachedToActivityForConfigChanges(binding: ActivityPluginBinding) {
         activity = binding.activity
-        registerPipActivityListeners(binding.activity)
+        registerPipActivityListeners(binding)
         // Refresh cached PipHandler instances so a handler created before rotation
         // doesn't keep operating against the now-destroyed pre-rotation Activity
         // (see PipHandler.updateActivity).
@@ -1111,43 +1111,53 @@ class ZMediaPlayerPlugin: FlutterPlugin, MethodCallHandler, ActivityAware, Netwo
     // ---- PiP: auto-enter + mode reporting (issue #147) ----------------------
     //
     // The host app should not have to relay onUserLeaveHint /
-    // onPictureInPictureModeChanged, so we hook ComponentActivity's listener
-    // registries (FlutterFragmentActivity is a ComponentActivity). A plain
-    // FlutterActivity is not: there we cannot observe either callback, so
-    // pre-12 auto-enter and exit reporting are unavailable (the host can still
-    // relay via the `onPipModeChanged` method, and Android 12+ auto-enter
-    // works through setAutoEnterEnabled regardless of the host class).
+    // onPictureInPictureModeChanged.
+    //
+    // User-leave-hint goes through the ActivityPluginBinding, NOT
+    // ComponentActivity.addOnUserLeaveHintListener: FlutterFragmentActivity
+    // overrides onUserLeaveHint() without calling super, so ComponentActivity
+    // listeners are never dispatched. The embedding dispatches to binding
+    // listeners for both FlutterActivity and FlutterFragmentActivity.
+    //
+    // PiP-mode-changed uses ComponentActivity's registry (FlutterFragmentActivity
+    // does not override it). A plain FlutterActivity is not a ComponentActivity:
+    // exit reporting is unavailable there unless the host relays it through the
+    // `onPipModeChanged` method.
 
+    private var pipBinding: ActivityPluginBinding? = null
     private var pipListenerActivity: androidx.activity.ComponentActivity? = null
 
-    private val userLeaveHintListener = Runnable { onUserLeaveHint() }
+    private val userLeaveHintListener = io.flutter.plugin.common.PluginRegistry.UserLeaveHintListener {
+        onUserLeaveHint()
+    }
 
     private val pipModeChangedListener =
         androidx.core.util.Consumer<androidx.core.app.PictureInPictureModeChangedInfo> { info ->
             onPipActivityModeChanged(info.isInPictureInPictureMode)
         }
 
-    private fun registerPipActivityListeners(host: Activity) {
+    private fun registerPipActivityListeners(binding: ActivityPluginBinding) {
         unregisterPipActivityListeners()
-        if (host !is androidx.activity.ComponentActivity) {
+        binding.addOnUserLeaveHintListener(userLeaveHintListener)
+        pipBinding = binding
+        val host = binding.activity
+        if (host is androidx.activity.ComponentActivity) {
+            host.addOnPictureInPictureModeChangedListener(pipModeChangedListener)
+            pipListenerActivity = host
+        } else {
             android.util.Log.w(
                 "ZMediaPlayerPlugin",
                 "Host activity ${host.javaClass.name} is not a ComponentActivity " +
-                    "(use FlutterFragmentActivity): PiP auto-enter before Android 12 and " +
-                    "PiP exit reporting are unavailable unless the host relays them."
+                    "(use FlutterFragmentActivity): PiP exit reporting is unavailable " +
+                    "unless the host relays onPictureInPictureModeChanged."
             )
-            return
         }
-        host.addOnUserLeaveHintListener(userLeaveHintListener)
-        host.addOnPictureInPictureModeChangedListener(pipModeChangedListener)
-        pipListenerActivity = host
     }
 
     private fun unregisterPipActivityListeners() {
-        pipListenerActivity?.let {
-            it.removeOnUserLeaveHintListener(userLeaveHintListener)
-            it.removeOnPictureInPictureModeChangedListener(pipModeChangedListener)
-        }
+        pipBinding?.removeOnUserLeaveHintListener(userLeaveHintListener)
+        pipBinding = null
+        pipListenerActivity?.removeOnPictureInPictureModeChangedListener(pipModeChangedListener)
         pipListenerActivity = null
     }
 

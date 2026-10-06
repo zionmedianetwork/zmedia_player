@@ -25,9 +25,13 @@ void main() {
   final manager = read('MediaPlayerManager.kt');
 
   test('plugin registers and removes both ComponentActivity PiP listeners', () {
-    expect(plugin, contains('addOnUserLeaveHintListener'));
-    expect(plugin, contains('addOnPictureInPictureModeChangedListener'));
+    // Leave hint must go via the ActivityPluginBinding: FlutterFragmentActivity
+    // never calls super.onUserLeaveHint(), so ComponentActivity listeners
+    // would never fire.
+    expect(plugin, contains('binding.addOnUserLeaveHintListener'));
+    expect(plugin, isNot(contains('host.addOnUserLeaveHintListener')));
     expect(plugin, contains('removeOnUserLeaveHintListener'));
+    expect(plugin, contains('addOnPictureInPictureModeChangedListener'));
     expect(plugin, contains('removeOnPictureInPictureModeChangedListener'));
     // Detach paths unregister.
     expect(
