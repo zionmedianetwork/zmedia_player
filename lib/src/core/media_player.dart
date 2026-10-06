@@ -1769,8 +1769,7 @@ class MediaPlayer {
     }
 
     final positionEventsBeforeSeek = _positionEventCount;
-    final wasCompletedBeforeSeek =
-        _currentState.state == PlayerState.completed;
+    final wasCompletedBeforeSeek = _currentState.state == PlayerState.completed;
     try {
       await _invokeMethod('seekTo', {
         'playerId': playerId,
