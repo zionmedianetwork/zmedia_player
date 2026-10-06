@@ -259,6 +259,9 @@ class NotificationHandler(
     // Current media info
     private var currentTitle: String? = null
     private var currentArtist: String? = null
+    // MediaItem.album ("album" key of the mediaItem map). Published as
+    // METADATA_KEY_ALBUM and, for non-live items, as the notification subText.
+    private var currentAlbum: String? = null
     private var currentArtworkUrl: String? = null
     private var currentMediaUrl: String? = null
     // The current item's MediaItem.httpHeaders, sent on the "mediaItem" map by
@@ -507,6 +510,7 @@ class NotificationHandler(
         // Update media info
         currentTitle = mediaItem["title"] as? String ?: "Unknown Title"
         currentArtist = mediaItem["artist"] as? String ?: "Unknown Artist"
+        currentAlbum = (mediaItem["album"] as? String)?.takeIf { it.isNotBlank() }
         currentArtworkUrl = newArtworkUrl
         currentMediaUrl = newMediaUrl
         // Deliberately NOT part of the mediaChanged comparison above: a
@@ -624,12 +628,49 @@ class NotificationHandler(
         // promoteToOwner() runs, so it only ever gets whichever duration
         // was last written to the session's metadata -- which, without
         // this call, would not necessarily be the latest one.
-        updateMediaSessionMetadata()
+        // PERF: updateState() is driven by MediaPlayer.stateStream, i.e. it can
+        // arrive on every position tick. Re-publishing the MediaSession
+        // metadata (which carries the artwork Bitmap across Binder) and
+        // re-posting the notification (large icon, same bitmap) cost ~150 ms
+        // of Android MAIN-thread time per call on a low-end device and churned
+        // the heap with native allocations -- enough to freeze video presented
+        // by Flutter. Neither depends on the playback position (the session's
+        // PlaybackState carries position + speed and the system extrapolates),
+        // so republish them only when something they render actually changed.
+        val key = renderKey()
+        if (key != publishedMetadataKey) {
+            updateMediaSessionMetadata()
+        }
         updateMediaSessionPlaybackState()
-        if (isOwner) {
+        if (isOwner && key != publishedNotificationKey) {
             buildAndShowNotification()
         }
     }
+
+    /**
+     * Everything the session metadata and the posted notification render that
+     * can change between [updateState] calls. Excludes position.
+     */
+    private fun renderKey(): List<Any?> = listOf(
+        currentTitle,
+        currentArtist,
+        currentAlbum,
+        // isLive/dvrEnabled change the LIVE subText and the session metadata
+        // (isSeekable alone cannot tell live+DVR from VOD), so they must be
+        // part of the key or the LIVE badge would never (re)appear.
+        isLive,
+        dvrEnabled,
+        duration,
+        isPlaying,
+        isSeekable,
+        currentArtworkBitmap?.let { System.identityHashCode(it) },
+    )
+
+    /** [renderKey] as of the last [updateMediaSessionMetadata]. */
+    private var publishedMetadataKey: List<Any?>? = null
+
+    /** [renderKey] as of the last [buildAndShowNotification]. */
+    private var publishedNotificationKey: List<Any?>? = null
 
     /**
      * Update notification position
@@ -769,6 +810,7 @@ class NotificationHandler(
     // Private helper methods
 
     private fun buildAndShowNotification() {
+        publishedNotificationKey = renderKey()
         val notification = buildNotification()
         this.notification = notification
         notificationManager?.notify(notificationId, notification)
@@ -791,6 +833,9 @@ class NotificationHandler(
         val builder = NotificationCompat.Builder(context, channelId)
             .setContentTitle(currentTitle)
             .setContentText(currentArtist)
+            // Live items get a "LIVE" subText (Android has no live flag on
+            // MediaSession); otherwise the album, when there is one.
+            .setSubText(if (isLive) "LIVE" else currentAlbum)
             .setSmallIcon(smallIconResId)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setPriority(compatPriority)
@@ -1143,9 +1188,17 @@ class NotificationHandler(
     }
 
     private fun updateMediaSessionMetadata() {
+        publishedMetadataKey = renderKey()
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, currentTitle)
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, currentArtist)
+            .putString(MediaMetadataCompat.METADATA_KEY_ALBUM, currentAlbum)
+            // Surfaced by SystemUI/Auto/Wear as the third description line:
+            // "LIVE" for live items, else the album.
+            .putString(
+                MediaMetadataCompat.METADATA_KEY_DISPLAY_DESCRIPTION,
+                if (isLive) "LIVE" else currentAlbum,
+            )
             .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, duration)
 
         currentArtworkBitmap?.let {

@@ -301,8 +301,67 @@ class NotificationService {
     // play/pause button stays frozen at the state captured by show(), so
     // its controls appear dead. updateState is a no-op while not showing.
     _stateSubscription = mediaPlayer.stateStream.listen((state) {
+      if (!_shouldForwardState(state)) return;
       updateState(state: state, playerId: playerId);
     });
+  }
+
+  /// How far the player's position may drift from the position the native
+  /// media session is already extrapolating before a position-only change is
+  /// worth a platform call (a seek, a stall or a live-edge jump).
+  static const Duration _positionDriftTolerance = Duration(seconds: 2);
+
+  /// Upper bound on how long a position-only stream goes without refreshing
+  /// the native session.
+  static const Duration _positionResyncInterval = Duration(seconds: 15);
+
+  PlaybackState? _lastForwardedState;
+  DateTime? _lastForwardedAt;
+  bool? _lastForwardedLive;
+  bool? _lastForwardedDvr;
+
+  /// Whether [state] changes anything the notification / lock-screen session
+  /// renders, as opposed to being one more position tick.
+  ///
+  /// [MediaPlayer.stateStream] fires on every ~500 ms position tick. The
+  /// session's playback state carries position + speed and the OS extrapolates
+  /// from it, so a tick that merely advances the position by roughly the
+  /// elapsed time needs no platform call. Forwarding every tick cost an Android
+  /// MediaSession metadata + notification republish (~150 ms of main-thread
+  /// time on a low-end device), twice a second, for the life of the stream.
+  bool _shouldForwardState(PlaybackState state) {
+    final previous = _lastForwardedState;
+    final live =
+        (_mediaPlayer?.isLive ?? false) || (_currentMedia?.isLive ?? false);
+    final dvr = _mediaPlayer?.dvrEnabled ?? false;
+    final now = DateTime.now();
+
+    bool forward;
+    if (previous == null || _lastForwardedAt == null) {
+      forward = true;
+    } else if (state.state != previous.state ||
+        state.duration != previous.duration ||
+        state.speed != previous.speed ||
+        live != _lastForwardedLive ||
+        dvr != _lastForwardedDvr) {
+      forward = true;
+    } else {
+      final elapsed = now.difference(_lastForwardedAt!);
+      final expected = previous.state == PlayerState.playing
+          ? previous.position + elapsed * previous.speed
+          : previous.position;
+      final drift = (state.position - expected).abs();
+      forward =
+          drift > _positionDriftTolerance || elapsed >= _positionResyncInterval;
+    }
+
+    if (forward) {
+      _lastForwardedState = state;
+      _lastForwardedAt = now;
+      _lastForwardedLive = live;
+      _lastForwardedDvr = dvr;
+    }
+    return forward;
   }
 
   /// Show or update notification
@@ -313,6 +372,9 @@ class NotificationService {
   }) async {
     if (!_config.enabled) return;
 
+    // A (re)show re-publishes everything natively; let the next state event
+    // establish a fresh baseline for _shouldForwardState.
+    _lastForwardedState = null;
     _currentMedia = mediaItem;
     // Kept for updateConfig, which re-renders from the stored item + state.
     _lastState = state;
@@ -377,7 +439,7 @@ class NotificationService {
           // Both are re-sent on every [updateState] call too (see below) —
           // this initial value is only what native has until the first state
           // update arrives.
-          'isLive': _mediaPlayer?.isLive ?? mediaItem.isLive,
+          'isLive': (_mediaPlayer?.isLive ?? false) || mediaItem.isLive,
           'dvrEnabled': _mediaPlayer?.dvrEnabled ?? false,
         },
         'state': {
@@ -435,7 +497,8 @@ class NotificationService {
           'position': state.position.inMilliseconds,
           'duration': effectiveDuration.inMilliseconds,
           'isPlaying': state.state == PlayerState.playing,
-          'isLive': _mediaPlayer?.isLive ?? _currentMedia?.isLive ?? false,
+          'isLive': (_mediaPlayer?.isLive ?? false) ||
+              (_currentMedia?.isLive ?? false),
           'dvrEnabled': _mediaPlayer?.dvrEnabled ?? false,
         },
       });
@@ -472,6 +535,7 @@ class NotificationService {
       });
 
       _isShowing = false;
+      _lastForwardedState = null;
       debugPrint('NotificationService: Notification dismissed');
     } catch (e) {
       debugPrint('NotificationService: Failed to dismiss notification: $e');

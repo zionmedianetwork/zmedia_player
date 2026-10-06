@@ -1505,4 +1505,83 @@ void main() {
       await player.dispose();
     });
   });
+
+  // =========================================================================
+  group('NotificationService — position ticks are not forwarded', () {
+    Future<void> tick(String id, int positionMs) => _injectEvent(
+          'onPositionChanged',
+          {'playerId': id, 'position': positionMs, 'positionBasis': 'absolute'},
+        );
+
+    test(
+        'in-step position ticks make no platform call; a seek (drift) and a '
+        'state change do', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'notif-tick');
+      await player.initialize();
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-tick', mediaPlayer: player);
+      await service.show(
+        mediaItem: _dummyItem,
+        state: const PlaybackState(state: PlayerState.paused),
+        playerId: 'notif-tick',
+      );
+      List<MethodCall> updates() =>
+          calls.where((c) => c.method == 'updateNotificationState').toList();
+
+      await _injectState('notif-tick', 'playing');
+      await Future<void>.delayed(Duration.zero);
+      expect(updates(), hasLength(1), reason: 'playing transition forwarded');
+
+      // Ticks that advance in step with the (zero) elapsed test time.
+      for (var i = 0; i < 10; i++) {
+        await tick('notif-tick', 0);
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(updates(), hasLength(1),
+          reason: 'position-only ticks must not cost a native republish');
+
+      // A seek: position far from what the session is extrapolating.
+      await tick('notif-tick', 60000);
+      await Future<void>.delayed(Duration.zero);
+      expect(updates(), hasLength(2), reason: 'a seek must be forwarded');
+
+      await _injectState('notif-tick', 'paused');
+      await Future<void>.delayed(Duration.zero);
+      expect(updates(), hasLength(3), reason: 'pause must be forwarded');
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
+
+  group('NotificationService - album and live payload (#148/#149)', () {
+    test('show() sends album and isLive', () async {
+      final calls = _installCapture();
+      final player = MediaPlayer(playerId: 'notif-live-album');
+      await player.initialize();
+      final service = NotificationService(const NotificationConfig());
+      await service.initialize('notif-live-album', mediaPlayer: player);
+
+      await service.show(
+        mediaItem: const MediaItem(
+          id: 'live-1',
+          title: 'Live',
+          url: 'https://example.com/live.m3u8',
+          album: 'My Show',
+          isLive: true,
+        ),
+        state: const PlaybackState(state: PlayerState.playing),
+        playerId: 'notif-live-album',
+      );
+
+      final show = calls.firstWhere((c) => c.method == 'showNotification');
+      final item = show.arguments['mediaItem'] as Map<dynamic, dynamic>;
+      expect(item['album'], 'My Show');
+      expect(item['isLive'], isTrue);
+
+      service.dispose();
+      await player.dispose();
+    });
+  });
 }
