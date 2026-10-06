@@ -29,6 +29,25 @@ class MediaPlayerManager(
     private val mainHandler = Handler(Looper.getMainLooper())
     private val crashHandler = CrashHandler(methodChannel)
 
+    /**
+     * Invoked (on the main thread) with the playerId whenever something the
+     * PiP window depends on changes for that player: its video size or its
+     * isPlaying flag. The plugin uses it to keep PictureInPictureParams
+     * (aspect ratio, auto-enter) current without an explicit enter call.
+     */
+    @Volatile
+    var pipStateListener: ((String) -> Unit)? = null
+
+    /** Whether [playerId] is currently playing. Main thread only. */
+    fun isPlaying(playerId: String): Boolean = players[playerId]?.isPlaying() ?: false
+
+    /** Decoded video size of [playerId] as (width, height), or null if unknown. Main thread only. */
+    fun videoSize(playerId: String): Pair<Int, Int>? = players[playerId]?.videoSize()
+
+    private fun wirePipListener(playerId: String, instance: MediaPlayerInstance) {
+        instance.onPipRelevantChange = { pipStateListener?.invoke(playerId) }
+    }
+
     // C-03b: this MediaPlayerManager's own handle onto the process-wide
     // shared adaptive-stream SimpleCache (see AdaptiveCacheHolder). Null
     // until the first player lazily enables adaptive caching; non-null
@@ -94,6 +113,7 @@ class MediaPlayerManager(
             val playerInstance = MediaPlayerInstance(
                 context, playerId, methodChannel, config, this::acquireSharedAdaptiveCache
             )
+            wirePipListener(playerId, playerInstance)
             players[playerId] = playerInstance
             android.util.Log.d("MediaPlayerManager", "Player instance created synchronously")
         } else {
@@ -102,6 +122,7 @@ class MediaPlayerManager(
                 val playerInstance = MediaPlayerInstance(
                     context, playerId, methodChannel, config, this::acquireSharedAdaptiveCache
                 )
+                wirePipListener(playerId, playerInstance)
                 players[playerId] = playerInstance
                 android.util.Log.d("MediaPlayerManager", "Player instance created via handler post")
             }
@@ -338,6 +359,10 @@ class MediaPlayerInstance(
     }
 
     private var exoPlayer: ExoPlayer? = null
+
+    /** Set by [MediaPlayerManager]; fired when video size or isPlaying changes. */
+    internal var onPipRelevantChange: (() -> Unit)? = null
+
     private var playerView: MediaPlayerView? = null
     // Shared bandwidth meter — passed to ExoPlayer.Builder so that ExoPlayer
     // uses it for adaptive track selection AND we can read its bitrateEstimate
@@ -482,8 +507,13 @@ class MediaPlayerInstance(
             lastPlayWhenReadyChangeReason = reason
         }
 
+        override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+            onPipRelevantChange?.invoke()
+        }
+
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             android.util.Log.d("MediaPlayerInstance", "IsPlaying changed: $isPlaying")
+            onPipRelevantChange?.invoke()
 
             // Issue #125 — see isInReportedError(). A failure that interrupts
             // real playback drives isPlaying to false; reporting that as a
@@ -1381,6 +1411,13 @@ class MediaPlayerInstance(
 
     fun isPlaying(): Boolean {
         return exoPlayer?.isPlaying ?: false
+    }
+
+    /** Decoded video size as (width, height) with pixel aspect applied to width; null until known. */
+    fun videoSize(): Pair<Int, Int>? {
+        val size = exoPlayer?.videoSize ?: return null
+        if (size.width <= 0 || size.height <= 0) return null
+        return Pair((size.width * size.pixelWidthHeightRatio).toInt().coerceAtLeast(1), size.height)
     }
 
     /// Re-attach the ExoPlayer to the most recently created PlayerView.

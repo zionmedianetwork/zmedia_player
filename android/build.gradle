@@ -87,6 +87,8 @@ android {
 
         // AndroidX dependencies
         implementation 'androidx.core:core-ktx:1.9.0'
+        // ComponentActivity listener registries (OnUserLeaveHint / PiP mode changed) for PiP; addOnPictureInPictureModeChangedListener.
+        implementation 'androidx.activity:activity:1.8.2'
         implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.6.2'
 
         // Phase 1: Security - Encrypted storage. 1.1.0 is now stable (was
