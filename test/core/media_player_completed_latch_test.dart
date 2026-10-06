@@ -116,4 +116,48 @@ void main() {
     expect(player.currentState.state, PlayerState.idle);
     await player.dispose();
   });
+
+  test('seekTo() away from the end leaves completed (issue #143)', () async {
+    final player = MediaPlayer(playerId: 'completed-seek-away');
+    await player.initialize();
+    await state('completed-seek-away', 'completed');
+    await player.seekTo(const Duration(seconds: 30));
+    expect(player.currentState.state, PlayerState.paused);
+    // A trailing native paused changes nothing; the latch is gone.
+    await state('completed-seek-away', 'paused');
+    expect(player.currentState.state, PlayerState.paused);
+    await player.dispose();
+  });
+
+  test('play() after a seek away from the end does not restart (issue #143)',
+      () async {
+    final player = MediaPlayer(playerId: 'completed-seek-play');
+    await player.initialize();
+    await state('completed-seek-play', 'completed');
+    await player.seekTo(const Duration(seconds: 30));
+    calls.clear();
+    await player.play();
+    expect(calls.where((c) => c.method == 'seekTo'), isEmpty);
+    expect(calls.map((c) => c.method), contains('play'));
+    await player.dispose();
+  });
+
+  test('play() on a completed live stream does not seek (issue #142)',
+      () async {
+    final player = MediaPlayer(playerId: 'completed-live-play');
+    await player.initialize();
+    await player.load(const MediaItem(
+      id: 'live',
+      url: 'https://example.com/live.m3u8',
+      title: 'Live',
+      isLive: true,
+    ));
+    await state('completed-live-play', 'completed');
+    expect(player.currentState.state, PlayerState.completed);
+    calls.clear();
+    await player.play();
+    expect(calls.where((c) => c.method == 'seekTo'), isEmpty);
+    expect(calls.map((c) => c.method), contains('play'));
+    await player.dispose();
+  });
 }

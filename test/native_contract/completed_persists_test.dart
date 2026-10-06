@@ -50,4 +50,18 @@ void main() {
         greaterThanOrEqualTo(5),
         reason: 'declaration + load, play, seekTo, stop must all reset it');
   });
+
+  test('iOS seekTo away from an ended item reports paused (issue #143)', () {
+    final src = read(
+        'ios/zmedia_player/Sources/zmedia_player/MediaPlayerManager.swift');
+    final seek = src.indexOf('func seekTo(position: Int64)');
+    final perform = src.indexOf('private func performSeek');
+    expect(seek, greaterThanOrEqualTo(0));
+    expect(src.substring(seek, perform),
+        contains('let seekingAwayFromEnd = currentItemPlayedToEnd'));
+    final end = src.indexOf('func setVolume', perform);
+    final body = src.substring(perform, end);
+    expect(body, contains('leavingEnded'));
+    expect(body, contains('state: "paused"'));
+  });
 }

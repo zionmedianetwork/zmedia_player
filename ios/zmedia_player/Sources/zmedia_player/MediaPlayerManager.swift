@@ -1352,6 +1352,11 @@ class MediaPlayerInstance: NSObject {
         // finished/stopped item is in progress again (issue #79 -- see
         // currentItemIsSpent).
         currentItemIsSpent = false
+        // Issue #143: remember whether this seek leaves an ended item. The
+        // rate is already 0 so no timeControlStatus change follows, and Dart
+        // would otherwise keep reporting "completed" (Android goes
+        // buffering -> paused here).
+        let seekingAwayFromEnd = currentItemPlayedToEnd
         currentItemPlayedToEnd = false
 
         // Wave E (DVR window duration): for a live item with DVR enabled,
@@ -1371,25 +1376,33 @@ class MediaPlayerInstance: NSObject {
                 CMTimeGetSeconds(window.end)
             )
             let time = CMTime(seconds: clampedSeconds, preferredTimescale: 1000)
-            performSeek(to: time)
+            performSeek(to: time, leavingEnded: seekingAwayFromEnd)
             return
         }
 
         let time = CMTime(value: position, timescale: 1000) // position in milliseconds
-        performSeek(to: time)
+        performSeek(to: time, leavingEnded: seekingAwayFromEnd)
     }
 
     /// Issue #134: seek, then report the resulting position exactly once
     /// regardless of play state (mirrors Android's `onPositionDiscontinuity`
     /// emit). A seek superseded by a newer one (`finished == false`) is
     /// skipped -- the newer seek's own completion reports the final position.
-    private func performSeek(to time: CMTime) {
+    private func performSeek(to time: CMTime, leavingEnded: Bool = false) {
         guard let player = avPlayer else { return }
         player.seek(to: time) { [weak self] finished in
             guard finished else { return }
             DispatchQueue.main.async {
                 guard let self = self, let player = self.avPlayer else { return }
                 self.emitPositionSnapshot(at: player.currentTime())
+                // Issue #143: the seek left the ended item; report the
+                // resting state once, unless playback already resumed or the
+                // item ended again in the meantime.
+                if leavingEnded,
+                   !self.currentItemPlayedToEnd,
+                   player.timeControlStatus == .paused {
+                    self.notifyStateChanged(state: "paused", isBuffering: false)
+                }
             }
         }
     }
